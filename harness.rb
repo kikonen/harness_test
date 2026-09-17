@@ -91,14 +91,15 @@ parser = OptionParser.new do |o|
 end
 parser.parse!
 
+options[:base_url] ||= ENV['HARNESS_BASE_URL']
+options[:model] ||= ENV['HARNESS_MODEL']
+options[:system]   ||= SYSTEM_PROMPT
+options[:token]    ||= ENV['HARNESS_TOKEN']
+
 instruction = ARGV.join(' ')
 abort 'error: instruction required'           if instruction.empty?
 abort 'error: -m / --model is required'       unless options[:model]
 abort 'error: at least one -f / --file needed' unless options[:files].any?
-
-options[:base_url] ||= 'http://localhost:11434/v1'
-options[:system]   ||= SYSTEM_PROMPT
-options[:token]    ||= ENV['HARNESS_TOKEN']
 
 #debugger
 

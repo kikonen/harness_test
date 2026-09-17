@@ -1,1 +1,3 @@
-export HARNESS_TOKEN=<token>
+export HARNESS_BASE_URL=http://localhost:11434/v1
+export HARNESS_MODEL=qwen3.8:27b
+export HARNESS_TOKEN=
