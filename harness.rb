@@ -30,6 +30,10 @@ SYSTEM_PROMPT = <<~'TEXT'
   - Each file must be complete (not a diff, not a snippet).
   - No commentary before or after the blocks.
   - Preserve original formatting, indentation, and style.
+
+  Exceptions:
+  - if instructions are clearly query and not editing of file then
+    return raw response
 TEXT
 
 def build_user_prompt(files, instruction)
@@ -70,7 +74,18 @@ def call_llm(base_url, model, system, user, auth_token: nil, timeout: 300)
   resp = http.request(req)
   abort "LLM error (HTTP #{resp.code}):\n#{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
 
-  JSON.parse(resp.body)['choices'][0]['message']['content']
+  if false
+    puts "=" * 50
+    puts resp.body
+    puts "=" * 50
+  end
+
+  data = JSON.parse(resp.body, symbolize_names: true)
+  message = data[:choices][0][:message]
+  {
+    reasoning: message[:reasoning],
+    content: message[:content],
+  }
 end
 
 # ── CLI ──────────────────────────────────────────────────────────────────
@@ -119,19 +134,20 @@ if options[:verbose]
   puts "─── #{options[:model]} @ #{options[:base_url]} ───\n"
 end
 
-text = call_llm(
+response = call_llm(
   options[:base_url], options[:model], options[:system], user_prompt,
   auth_token: options[:token]
 )
 
 if options[:verbose]
-  puts "─── response ───\n#{text}\n"
+  puts "─── reasoning ───\n#{response[:reasoning]}\n"
+  puts "─── response ───\n#{response[:text]}\n"
 end
 
-parsed = parse_response(text)
+parsed = parse_response(response[:content])
 if parsed.empty?
   warn 'no file blocks detected — raw response:'
-  warn text
+  warn response[:content]
   exit 1
 end
 
