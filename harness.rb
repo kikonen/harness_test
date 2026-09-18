@@ -167,8 +167,9 @@ class CLI
   attr_reader :options, :harness
 
   def initialize
-    @options = parse_options
-    @harness = Harness.new(@options)
+    @options   = parse_options
+    @harness   = Harness.new(@options)
+    @file_list = []
   end
 
   def parse_options
@@ -203,18 +204,17 @@ class CLI
       exit 0
     end
 
-    puts "Harness ready. Type 'exit' to quit, Ctrl+C to interrupt."
+    puts "Harness ready. Type /help for commands, /exit to quit."
     puts
 
     loop do
-      file_list = collect_files
-      break if file_list.nil?
+      show_file_list
+      input = get_command
+      break if input.nil?
 
-      instruction = collect_instruction
-      break if instruction.nil?
+      handle_command(input)
+      break if @exiting
 
-      puts
-      harness.run_once(file_list, instruction)
       puts
       puts "─" * 40
       puts
@@ -225,38 +225,106 @@ class CLI
 
   private
 
-  def collect_files
-    puts "Enter file(s) (one per line, blank line to finish):"
-    files = []
-    loop do
-      line = $stdin.gets&.chomp
-      break if line.nil?
-      break if line.strip.empty?
-      if line.strip.downcase == 'exit'
-        return nil
+  def show_file_list
+    if @file_list.empty?
+      puts "(no files loaded)"
+    else
+      puts "Files (#{@file_list.size}):"
+      @file_list.each_with_index do |f, i|
+        puts "  #{i + 1}. #{f}"
       end
-      files << line.strip
     end
-
-    if files.empty?
-      puts "No files entered."
-      return []
-    end
-
-    files
   end
 
-  def collect_instruction
-    puts "Enter instruction:"
-    instruction = $stdin.gets&.chomp
-    if instruction.nil? || instruction.strip.empty?
+  def get_command
+    print "harness> "
+    $stdout.flush
+    line = $stdin.gets
+    return nil if line.nil?
+    line.chomp
+  end
+
+  def handle_command(input)
+    input = input.strip
+    return if input.empty?
+
+    case input
+    when /\A\/file\s+(.+)\z/
+      path = $1.strip
+      if @file_list.include?(path)
+        puts "Already in list: #{path}"
+      else
+        @file_list << path
+        puts "Added: #{path}"
+      end
+
+    when /\A\/clear\z/
+      @file_list = []
+      puts "File list cleared."
+
+    when /\A\/help\z/
+      show_help
+
+    when /\A\/exit\z/
+      @exiting = true
+
+    when /\A\/run\z/
+      run_edit
+
+    else
+      puts "Unknown command: #{input}. Type /help for available commands."
+    end
+  end
+
+  def show_help
+    puts <<~HELP
+      Available commands:
+        /file <path>   Add a file to the working set
+        /clear         Remove all files from the working set
+        /run           Enter instruction and execute the edit
+        /help          Show this help
+        /exit          Exit the harness
+    HELP
+  end
+
+  def run_edit
+    if @file_list.empty?
+      puts "No files in list. Use /file <path> to add files first."
+      return
+    end
+
+    instruction = collect_instruction_multiline
+    return if instruction.nil?
+
+    puts
+    harness.run_once(@file_list, instruction)
+    puts
+  end
+
+  def collect_instruction_multiline
+    puts "Enter instruction (end line with \\ to continue):"
+    lines = []
+    loop do
+      print "  "
+      $stdout.flush
+      line = $stdin.gets
+      break if line.nil?
+      line = line.chomp
+
+      if line.end_with?('\\')
+        lines << line[0..-2]
+      else
+        lines << line
+        break
+      end
+    end
+
+    instruction = lines.join("\n")
+    if instruction.strip.empty?
       puts "No instruction entered."
       return nil
     end
-    if instruction.strip.downcase == 'exit'
-      return nil
-    end
-    instruction.strip
+    instruction
   end
 end
 
