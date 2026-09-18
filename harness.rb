@@ -19,6 +19,12 @@ require 'time'
 
 LOG_FILE = ENV['HARNESS_LOG_FILE'] || 'harness.log'
 
+# ── Custom exceptions ────────────────────────────────────────────────────
+
+class HarnessError < StandardError; end
+class LLMError < HarnessError; end
+class ToolLoopError < HarnessError; end
+
 # ── Tool system ──────────────────────────────────────────────────────────
 
 class Tool
@@ -163,7 +169,11 @@ class Harness
     Do NOT use the "echo" tool for user communication — it is test-only.
   TEXT
 
-  MAX_TOOL_ITERATIONS = 10
+  MAX_TOOL_ITERATIONS = 100
+  # After this many consecutive tool-call iterations, inject a "stop looping" message
+  TOOL_LOOP_WARN_THRESHOLD = 3
+  # After this many consecutive tool-call iterations, force-break and return whatever we have
+  TOOL_LOOP_HARD_LIMIT = 5
 
   attr_reader :options, :logger, :tool_registry
 
@@ -225,13 +235,21 @@ class Harness
     req.body = JSON.generate(body)
 
     resp = http.request(req)
-    abort "LLM error (HTTP #{resp.code}):\n#{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
+    raise LLMError, "LLM error (HTTP #{resp.code}):\n#{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
 
     logger.info("=" * 50)
     logger.info(resp.body)
     logger.info("=" * 50)
 
     JSON.parse(resp.body, symbolize_names: true)
+  rescue Net::OpenTimeout => e
+    raise LLMError, "LLM request timed out (open): #{e.message}"
+  rescue Net::ReadTimeout => e
+    raise LLMError, "LLM request timed out (read): #{e.message}"
+  rescue SocketError => e
+    raise LLMError, "LLM connection failed: #{e.message}"
+  rescue JSON::ParserError => e
+    raise LLMError, "LLM returned invalid JSON: #{e.message}"
   end
 
   def execute_tool_call(tool_call)
@@ -263,15 +281,37 @@ class Harness
     tools = tool_registry.empty? ? nil : tool_registry.to_openai
 
     iteration = 0
+    consecutive_tool_calls = 0
+    last_tool_name = nil
+    loop_warning_injected = false
+    loop_hard_break = false
+
     loop do
       iteration += 1
-      abort "error: exceeded max tool iterations (#{MAX_TOOL_ITERATIONS})" if iteration > MAX_TOOL_ITERATIONS
+      raise ToolLoopError, "exceeded max tool iterations (#{MAX_TOOL_ITERATIONS})" if iteration > MAX_TOOL_ITERATIONS
 
       data    = make_request(base_url, model, messages, auth_token: auth_token, timeout: timeout, tools: tools)
       message = data[:choices][0][:message]
 
       if message[:tool_calls]
-        logger.info("─── tool_calls (iteration #{iteration}) ───")
+        # ── Tool-loop detection ──
+        current_tool_name = message[:tool_calls].first[:function][:name]
+        if current_tool_name == last_tool_name
+          consecutive_tool_calls += 1
+        else
+          consecutive_tool_calls = 1
+          last_tool_name = current_tool_name
+        end
+
+        if consecutive_tool_calls >= TOOL_LOOP_HARD_LIMIT
+          logger.warn("tool-loop hard limit reached (#{consecutive_tool_calls} consecutive calls to '#{current_tool_name}') — forcing final response")
+          loop_hard_break = true
+        elsif consecutive_tool_calls >= TOOL_LOOP_WARN_THRESHOLD && !loop_warning_injected
+          logger.warn("tool-loop warning: #{consecutive_tool_calls} consecutive calls to '#{current_tool_name}' — injecting stop message")
+          loop_warning_injected = true
+        end
+
+        logger.info("─── tool_calls (iteration #{iteration}, consecutive: #{consecutive_tool_calls}) ───")
         message[:tool_calls].each do |tc|
           logger.info("  calling #{tc[:function][:name]}(#{tc[:function][:arguments]})")
         end
@@ -290,6 +330,29 @@ class Harness
             content: result
           }
         end
+
+        # If we hit the hard limit, inject a strong "stop" message and force the model to respond
+        if loop_hard_break
+          messages << {
+            role: 'user',
+            content: 'STOP. You are stuck in a tool loop. Do NOT call any more tools. ' \
+                     'Respond NOW with your final answer. If you were editing files, output the complete file blocks. ' \
+                     'If this was a query, answer it directly in plain text.'
+          }
+          # On the next iteration, if the model still calls tools, we will break out
+          # by returning whatever content we have
+          next
+        end
+
+        # If we hit the warning threshold, inject a gentle reminder
+        if loop_warning_injected && consecutive_tool_calls == TOOL_LOOP_WARN_THRESHOLD
+          messages << {
+            role: 'user',
+            content: 'Reminder: You have called the same tool multiple times in a row. ' \
+                     'If you have enough information, stop calling tools and provide your final answer now.'
+          }
+        end
+
         next
       end
 
@@ -304,7 +367,7 @@ class Harness
   def read_files(file_list)
     files = {}
     file_list.each do |f|
-      abort "error: not found: #{f}" unless File.file?(f)
+      raise HarnessError, "file not found: #{f}" unless File.file?(f)
       files[f] = File.read(f)
     end
     files
@@ -411,7 +474,7 @@ class CLI
     opts[:system]   ||= Harness::SYSTEM_PROMPT
     opts[:token]    ||= ENV['HARNESS_TOKEN']
 
-    abort 'error: -m / --model is required' unless opts[:model]
+    raise HarnessError, '-m / --model is required' unless opts[:model]
 
     opts
   end
@@ -431,7 +494,19 @@ class CLI
       input = get_command
       break if input.nil?
 
-      handle_command(input)
+      begin
+        handle_command(input)
+      rescue HarnessError => e
+        puts "  [error] #{e.message}"
+      rescue LLMError => e
+        puts "  [LLM error] #{e.message}"
+      rescue ToolLoopError => e
+        puts "  [tool loop] #{e.message}"
+      rescue StandardError => e
+        puts "  [unexpected error] #{e.class}: #{e.message}"
+        puts "  (harness continues — type /exit to quit)"
+      end
+
       break if @exiting
 
       puts
@@ -572,4 +647,12 @@ end
 
 # ── Entry point ──────────────────────────────────────────────────────────
 
-CLI.new.run
+begin
+  CLI.new.run
+rescue HarnessError => e
+  puts "Error: #{e.message}"
+  exit 1
+rescue Interrupt
+  puts "\nGoodbye."
+  exit 0
+end
