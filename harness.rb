@@ -20,13 +20,13 @@ require 'thread'
 
 LOG_FILE = ENV['HARNESS_LOG_FILE'] || 'harness.log'
 
-# ── Custom exceptions ────────────────────────────────────────────────────
+# -- Custom exceptions ----------------------------------------------------
 
 class HarnessError < StandardError; end
 class LLMError < HarnessError; end
 class ToolLoopError < HarnessError; end
 
-# ── Spinner ──────────────────────────────────────────────────────────────
+# -- Spinner --------------------------------------------------------------
 
 class Spinner
   FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
@@ -59,7 +59,7 @@ class Spinner
   end
 end
 
-# ── Tool system ──────────────────────────────────────────────────────────
+# -- Tool system ----------------------------------------------------------
 
 class Tool
   attr_reader :name, :description, :parameters
@@ -176,7 +176,7 @@ class ToolRegistry
   end
 end
 
-# ── Harness ──────────────────────────────────────────────────────────────
+# -- Harness --------------------------------------------------------------
 
 class Harness
   SYSTEM_PROMPT = <<~'TEXT'
@@ -337,7 +337,7 @@ class Harness
       end
 
       if message[:tool_calls]
-        # ── Tool-loop detection ──
+        # -- Tool-loop detection --
         current_tool_name = message[:tool_calls].first[:function][:name]
         if current_tool_name == last_tool_name
           consecutive_tool_calls += 1
@@ -354,7 +354,7 @@ class Harness
           loop_warning_injected = true
         end
 
-        logger.info("─── tool_calls (iteration #{iteration}, consecutive: #{consecutive_tool_calls}) ───")
+        logger.info("--- tool_calls (iteration #{iteration}, consecutive: #{consecutive_tool_calls}) ---")
         message[:tool_calls].each do |tc|
           logger.info("  calling #{tc[:function][:name]}(#{tc[:function][:arguments]})")
         end
@@ -423,7 +423,7 @@ class Harness
   def write_results(parsed)
     parsed.each do |path, content|
       if options[:dry_run]
-        logger.info("─── DRY RUN: #{path} (#{content.length} chars) ───")
+        logger.info("--- DRY RUN: #{path} (#{content.length} chars) ---")
         logger.info(content)
       else
         dir = File.dirname(path)
@@ -454,9 +454,9 @@ class Harness
     user_prompt = build_user_prompt(files, instruction)
 
     if options[:verbose]
-      logger.info("─── system ───\n#{options[:system]}")
-      logger.info("─── user ───\n#{user_prompt}")
-      logger.info("─── #{options[:model]} @ #{options[:base_url]} ───")
+      logger.info("--- system ---\n#{options[:system]}")
+      logger.info("--- user ---\n#{user_prompt}")
+      logger.info("--- #{options[:model]} @ #{options[:base_url]} ---")
     end
 
     spinner = Spinner.new("Sending to #{options[:model]}")
@@ -473,8 +473,8 @@ class Harness
     end
 
     if options[:verbose]
-      logger.info("─── reasoning ───\n#{response[:reasoning]}")
-      logger.info("─── response ───\n#{response[:content]}")
+      logger.info("--- reasoning ---\n#{response[:reasoning]}")
+      logger.info("--- response ---\n#{response[:content]}")
     end
 
     parsed = parse_response(response[:content])
@@ -495,9 +495,9 @@ class Harness
     user_prompt = instruction
 
     if options[:verbose]
-      logger.info("─── system ───\n#{options[:system]}")
-      logger.info("─── user ───\n#{user_prompt}")
-      logger.info("─── #{options[:model]} @ #{options[:base_url]} ───")
+      logger.info("--- system ---\n#{options[:system]}")
+      logger.info("--- user ---\n#{user_prompt}")
+      logger.info("--- #{options[:model]} @ #{options[:base_url]} ---")
     end
 
     spinner = Spinner.new("Sending to #{options[:model]}")
@@ -514,8 +514,8 @@ class Harness
     end
 
     if options[:verbose]
-      logger.info("─── reasoning ───\n#{response[:reasoning]}")
-      logger.info("─── response ───\n#{response[:content]}")
+      logger.info("--- reasoning ---\n#{response[:reasoning]}")
+      logger.info("--- response ---\n#{response[:content]}")
     end
 
     puts response[:content]
@@ -523,7 +523,7 @@ class Harness
   end
 end
 
-# ── CLI ──────────────────────────────────────────────────────────────────
+# -- CLI ------------------------------------------------------------------
 
 class CLI
   attr_reader :options, :harness
@@ -591,7 +591,7 @@ class CLI
       break if @exiting
 
       puts
-      puts "─" * 40
+      puts "-" * 40
       puts
     end
 
@@ -726,7 +726,7 @@ class CLI
   end
 end
 
-# ── Entry point ──────────────────────────────────────────────────────────
+# -- Entry point ----------------------------------------------------------
 
 begin
   CLI.new.run
