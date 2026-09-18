@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 #
 # harness.rb — interactive AI edit harness. Any OpenAI-compatible server.
-# No agent loop, no tool calling. Prompt in, edited files out.
+# Supports tool calling (iterative), file editing, and direct prompts.
 #
 # Usage:
 #   ruby harness.rb -m qwen2.5-coder:32b
@@ -15,36 +15,137 @@ require 'json'
 require 'fileutils'
 require 'optparse'
 require 'logger'
-require 'debug'
+require 'time'
 
 LOG_FILE = ENV['HARNESS_LOG_FILE'] || 'harness.log'
 
+# ── Tool system ──────────────────────────────────────────────────────────
+
+class Tool
+  attr_reader :name, :description, :parameters
+
+  def initialize(name:, description:, parameters:)
+    @name        = name
+    @description = description
+    @parameters  = parameters
+  end
+
+  def execute(args_hash)
+    raise NotImplementedError, "#{self.class}#execute not implemented"
+  end
+
+  def to_openai
+    {
+      type: 'function',
+      function: {
+        name: @name,
+        description: @description,
+        parameters: @parameters
+      }
+    }
+  end
+end
+
+class EchoTool < Tool
+  def initialize
+    super(
+      name: 'echo',
+      description: 'Echoes back the provided text. Useful for testing tool calling.',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'Text to echo back' }
+        },
+        required: ['text']
+      }
+    )
+  end
+
+  def execute(args)
+    args['text'] || ''
+  end
+end
+
+class GetTimeTool < Tool
+  def initialize
+    super(
+      name: 'get_current_time',
+      description: 'Returns the current date and time in ISO 8601 format.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: []
+      }
+    )
+  end
+
+  def execute(_args)
+    Time.now.iso8601
+  end
+end
+
+class ToolRegistry
+  attr_reader :tools
+
+  def initialize
+    @tools = {}
+  end
+
+  def register(tool)
+    @tools[tool.name] = tool
+    self
+  end
+
+  def get(name)
+    @tools[name]
+  end
+
+  def to_openai
+    @tools.values.map(&:to_openai)
+  end
+
+  def empty?
+    @tools.empty?
+  end
+
+  def list
+    @tools.values.map { |t| "  #{t.name} — #{t.description}" }.join("\n")
+  end
+end
+
+# ── Harness ──────────────────────────────────────────────────────────────
+
 class Harness
   SYSTEM_PROMPT = <<~'TEXT'
-    You are a precise code editor. You receive file contents and an instruction.
-    Return ONLY the modified files in this exact format:
+    You are a precise code editor and assistant. You receive file contents (if any) and an instruction.
+
+    When the task involves editing files, return ONLY the modified files in this exact format:
 
     === FILE[X]: <relative/path> ===
     <complete file content>
     === END[X] ===
 
-    Rules:
-    - Replae [X] in FILE[X] and END[X] with numeric index of file
+    Rules for file edits:
+    - Replace [X] in FILE[X] and END[X] with numeric index of file
     - Only return files that changed.
     - Each file must be complete (not a diff, not a snippet).
     - No commentary before or after the blocks.
     - Preserve original formatting, indentation, and style.
 
-    Exceptions:
-    - if instructions are clearly query and not editing of file then
-      return raw response
+    When the instruction is a query, conversation, or does not involve file editing,
+    respond with plain text.
+
+    You have access to tools. Use them when they help you complete the task.
   TEXT
 
-  attr_reader :options, :logger
+  MAX_TOOL_ITERATIONS = 10
+
+  attr_reader :options, :logger, :tool_registry
 
   def initialize(options)
-    @options = options
-    @logger  = build_logger
+    @options       = options
+    @logger        = build_logger
+    @tool_registry = build_tool_registry
   end
 
   def build_logger
@@ -53,6 +154,13 @@ class Harness
       "#{datetime.strftime('%Y-%m-%d %H:%M:%S')} [#{severity}] #{msg}\n"
     }
     logger
+  end
+
+  def build_tool_registry
+    registry = ToolRegistry.new
+    registry.register(EchoTool.new)
+    registry.register(GetTimeTool.new)
+    registry
   end
 
   def build_user_prompt(files, instruction)
@@ -70,25 +178,25 @@ class Harness
     files
   end
 
-  def call_llm(base_url, model, system, user, auth_token: nil, timeout: 300)
+  def make_request(base_url, model, messages, auth_token: nil, timeout: 300, tools: nil)
     uri  = URI("#{base_url}/chat/completions")
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl      = (uri.scheme == 'https')
     http.open_timeout = 30
     http.read_timeout = timeout
 
+    body = {
+      model: model,
+      messages: messages,
+      temperature: 0.1,
+      max_tokens: 8192
+    }
+    body[:tools] = tools if tools && !tools.empty?
+
     req = Net::HTTP::Post.new(uri.request_uri)
     req['Content-Type'] = 'application/json'
     req['Authorization'] = "Bearer #{auth_token}" if auth_token
-    req.body = JSON.generate(
-      model: model,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user',   content: user   }
-      ],
-      temperature: 0.1,
-      max_tokens: 8192
-    )
+    req.body = JSON.generate(body)
 
     resp = http.request(req)
     abort "LLM error (HTTP #{resp.code}):\n#{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
@@ -97,12 +205,74 @@ class Harness
     logger.info(resp.body)
     logger.info("=" * 50)
 
-    data    = JSON.parse(resp.body, symbolize_names: true)
-    message = data[:choices][0][:message]
-    {
-      reasoning: message[:reasoning],
-      content:   message[:content],
-    }
+    JSON.parse(resp.body, symbolize_names: true)
+  end
+
+  def execute_tool_call(tool_call)
+    func_name = tool_call[:function][:name]
+    args_json = tool_call[:function][:arguments]
+    args      = args_json ? JSON.parse(args_json) : {}
+
+    tool = tool_registry.get(func_name)
+    unless tool
+      return "error: unknown tool '#{func_name}'"
+    end
+
+    begin
+      result = tool.execute(args)
+      logger.info("tool #{func_name} → #{result}")
+      result.to_s
+    rescue => e
+      logger.error("tool #{func_name} failed: #{e.message}")
+      "error: #{e.message}"
+    end
+  end
+
+  def call_llm(base_url, model, system, user, auth_token: nil, timeout: 300)
+    messages = [
+      { role: 'system', content: system },
+      { role: 'user',   content: user   }
+    ]
+
+    tools = tool_registry.empty? ? nil : tool_registry.to_openai
+
+    iteration = 0
+    loop do
+      iteration += 1
+      abort "error: exceeded max tool iterations (#{MAX_TOOL_ITERATIONS})" if iteration > MAX_TOOL_ITERATIONS
+
+      data    = make_request(base_url, model, messages, auth_token: auth_token, timeout: timeout, tools: tools)
+      message = data[:choices][0][:message]
+
+      if message[:tool_calls]
+        logger.info("─── tool_calls (iteration #{iteration}) ───")
+        message[:tool_calls].each do |tc|
+          logger.info("  calling #{tc[:function][:name]}(#{tc[:function][:arguments]})")
+        end
+
+        # Append assistant message with tool_calls
+        assistant_msg = { role: 'assistant', content: message[:content] }
+        assistant_msg[:tool_calls] = message[:tool_calls]
+        messages << assistant_msg
+
+        # Execute each tool call and append results
+        message[:tool_calls].each do |tc|
+          result = execute_tool_call(tc)
+          messages << {
+            role: 'tool',
+            tool_call_id: tc[:id],
+            content: result
+          }
+        end
+        next
+      end
+
+      # No tool calls — final response
+      return {
+        reasoning: message[:reasoning],
+        content:   message[:content]
+      }
+    end
   end
 
   def read_files(file_list)
@@ -159,6 +329,28 @@ class Harness
     write_results(parsed)
     logger.info("→ git diff") unless options[:dry_run]
   end
+
+  def run_prompt(instruction)
+    user_prompt = instruction
+
+    if options[:verbose]
+      logger.info("─── system ───\n#{options[:system]}")
+      logger.info("─── user ───\n#{user_prompt}")
+      logger.info("─── #{options[:model]} @ #{options[:base_url]} ───")
+    end
+
+    response = call_llm(
+      options[:base_url], options[:model], options[:system], user_prompt,
+      auth_token: options[:token]
+    )
+
+    if options[:verbose]
+      logger.info("─── reasoning ───\n#{response[:reasoning]}")
+      logger.info("─── response ───\n#{response[:content]}")
+    end
+
+    puts response[:content]
+  end
 end
 
 # ── CLI ──────────────────────────────────────────────────────────────────
@@ -205,6 +397,7 @@ class CLI
     end
 
     puts "Harness ready. Type /help for commands, /exit to quit."
+    puts "Tip: type a plain message (no /) to send it directly to the model."
     puts
 
     loop do
@@ -271,8 +464,12 @@ class CLI
     when /\A\/run\z/
       run_edit
 
+    when /\A\/tools\z/
+      show_tools
+
     else
-      puts "Unknown command: #{input}. Type /help for available commands."
+      # Non-slash input: direct prompt to the model
+      run_direct_prompt(input)
     end
   end
 
@@ -281,10 +478,20 @@ class CLI
       Available commands:
         /file <path>   Add a file to the working set
         /clear         Remove all files from the working set
-        /run           Enter instruction and execute the edit
+        /run           Enter instruction and execute the file edit
+        /tools         List available tools
         /help          Show this help
         /exit          Exit the harness
+
+      Direct prompt:
+        Type any text (not starting with /) to send it directly to the model
+        as a conversation/query (no file context).
     HELP
+  end
+
+  def show_tools
+    puts "Available tools:"
+    puts harness.tool_registry.list
   end
 
   def run_edit
@@ -298,6 +505,12 @@ class CLI
 
     puts
     harness.run_once(@file_list, instruction)
+    puts
+  end
+
+  def run_direct_prompt(text)
+    puts
+    harness.run_prompt(text)
     puts
   end
 
