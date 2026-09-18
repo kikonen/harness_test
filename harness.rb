@@ -163,78 +163,103 @@ end
 
 # ── CLI ──────────────────────────────────────────────────────────────────
 
-options = {}
+class CLI
+  attr_reader :options, :harness
 
-parser = OptionParser.new do |o|
-  o.banner  = 'Usage: harness.rb [options]'
-  o.separator ''
-  o.on('-m MODEL', '--model MODEL', 'Model name (required)')                 { |v| options[:model]    = v }
-  o.on('--base-url URL', 'API base URL [default: http://localhost:11434/v1]') { |v| options[:base_url] = v }
-  o.on('--token TOKEN',  'Bearer auth token [or $HARNESS_TOKEN]')            { |v| options[:token]    = v }
-  o.on('--system TEXT',  'Override system prompt')                           { |v| options[:system]   = v }
-  o.on('--dry-run',      'Print edits, do not write files')                  { options[:dry_run]  = true }
-  o.on('-v', '--verbose', 'Show full prompt and raw response')               { options[:verbose]  = true }
-  o.on('-h', '--help')                                                        { puts o; exit }
-end
-parser.parse!
+  def initialize
+    @options = parse_options
+    @harness = Harness.new(@options)
+  end
 
-options[:base_url] ||= ENV['HARNESS_BASE_URL']
-options[:model]    ||= ENV['HARNESS_MODEL']
-options[:system]   ||= Harness::SYSTEM_PROMPT
-options[:token]    ||= ENV['HARNESS_TOKEN']
+  def parse_options
+    opts = {}
 
-abort 'error: -m / --model is required' unless options[:model]
-
-harness = Harness.new(options)
-
-# ── Interactive loop ─────────────────────────────────────────────────────
-
-trap('INT') do
-  puts "\nGoodbye."
-  exit 0
-end
-
-puts "Harness ready. Type 'exit' to quit, Ctrl+C to interrupt."
-puts
-
-loop do
-  # Collect files
-  puts "Enter file(s) (one per line, blank line to finish):"
-  file_list = []
-  exit_requested = false
-  loop do
-    line = $stdin.gets&.chomp
-    break if line.nil?
-    break if line.strip.empty?
-    if line.strip.downcase == 'exit'
-      exit_requested = true
-      break
+    parser = OptionParser.new do |o|
+      o.banner  = 'Usage: harness.rb [options]'
+      o.separator ''
+      o.on('-m MODEL', '--model MODEL', 'Model name (required)')                 { |v| opts[:model]    = v }
+      o.on('--base-url URL', 'API base URL [default: http://localhost:11434/v1]') { |v| opts[:base_url] = v }
+      o.on('--token TOKEN',  'Bearer auth token [or $HARNESS_TOKEN]')            { |v| opts[:token]    = v }
+      o.on('--system TEXT',  'Override system prompt')                           { |v| opts[:system]   = v }
+      o.on('--dry-run',      'Print edits, do not write files')                  { opts[:dry_run]  = true }
+      o.on('-v', '--verbose', 'Show full prompt and raw response')               { opts[:verbose]  = true }
+      o.on('-h', '--help')                                                        { puts o; exit }
     end
-    file_list << line.strip
-  end
-  break if exit_requested
+    parser.parse!
 
-  if file_list.empty?
-    puts "No files entered."
-    next
-  end
+    opts[:base_url] ||= ENV['HARNESS_BASE_URL']
+    opts[:model]    ||= ENV['HARNESS_MODEL']
+    opts[:system]   ||= Harness::SYSTEM_PROMPT
+    opts[:token]    ||= ENV['HARNESS_TOKEN']
 
-  # Collect instruction
-  puts "Enter instruction:"
-  instruction = $stdin.gets&.chomp
-  if instruction.nil? || instruction.strip.empty?
-    puts "No instruction entered."
-    next
-  end
-  if instruction.strip.downcase == 'exit'
-    break
+    abort 'error: -m / --model is required' unless opts[:model]
+
+    opts
   end
 
-  puts
-  harness.run_once(file_list, instruction.strip)
-  puts
-  puts "─" * 40
-  puts
+  def run
+    trap('INT') do
+      puts "\nGoodbye."
+      exit 0
+    end
+
+    puts "Harness ready. Type 'exit' to quit, Ctrl+C to interrupt."
+    puts
+
+    loop do
+      file_list = collect_files
+      break if file_list.nil?
+
+      instruction = collect_instruction
+      break if instruction.nil?
+
+      puts
+      harness.run_once(file_list, instruction)
+      puts
+      puts "─" * 40
+      puts
+    end
+
+    puts "Goodbye."
+  end
+
+  private
+
+  def collect_files
+    puts "Enter file(s) (one per line, blank line to finish):"
+    files = []
+    loop do
+      line = $stdin.gets&.chomp
+      break if line.nil?
+      break if line.strip.empty?
+      if line.strip.downcase == 'exit'
+        return nil
+      end
+      files << line.strip
+    end
+
+    if files.empty?
+      puts "No files entered."
+      return []
+    end
+
+    files
+  end
+
+  def collect_instruction
+    puts "Enter instruction:"
+    instruction = $stdin.gets&.chomp
+    if instruction.nil? || instruction.strip.empty?
+      puts "No instruction entered."
+      return nil
+    end
+    if instruction.strip.downcase == 'exit'
+      return nil
+    end
+    instruction.strip
+  end
 end
 
-puts "Goodbye."
+# ── Entry point ──────────────────────────────────────────────────────────
+
+CLI.new.run
