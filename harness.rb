@@ -16,6 +16,7 @@ require 'fileutils'
 require 'optparse'
 require 'logger'
 require 'time'
+require 'thread'
 
 LOG_FILE = ENV['HARNESS_LOG_FILE'] || 'harness.log'
 
@@ -24,6 +25,39 @@ LOG_FILE = ENV['HARNESS_LOG_FILE'] || 'harness.log'
 class HarnessError < StandardError; end
 class LLMError < HarnessError; end
 class ToolLoopError < HarnessError; end
+
+# ── Spinner ──────────────────────────────────────────────────────────────
+
+class Spinner
+  FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+  def initialize(message = 'Working')
+    @message = message
+    @running = false
+    @thread  = nil
+  end
+
+  def start
+    @running = true
+    @thread = Thread.new do
+      i = 0
+      while @running
+        frame = FRAMES[i % FRAMES.size]
+        print "\r#{frame} #{@message}..."
+        $stdout.flush
+        i += 1
+        sleep 0.1
+      end
+    end
+  end
+
+  def stop
+    @running = false
+    @thread&.join
+    print "\r" + ' ' * (@message.length + 5) + "\r"
+    $stdout.flush
+  end
+end
 
 # ── Tool system ──────────────────────────────────────────────────────────
 
@@ -285,6 +319,8 @@ class Harness
     last_tool_name = nil
     loop_warning_injected = false
     loop_hard_break = false
+    total_usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+    start_time = Time.now
 
     loop do
       iteration += 1
@@ -292,6 +328,13 @@ class Harness
 
       data    = make_request(base_url, model, messages, auth_token: auth_token, timeout: timeout, tools: tools)
       message = data[:choices][0][:message]
+
+      # Accumulate usage stats
+      if data[:usage]
+        total_usage[:prompt_tokens]     += data[:usage][:prompt_tokens]     || 0
+        total_usage[:completion_tokens] += data[:usage][:completion_tokens] || 0
+        total_usage[:total_tokens]      += data[:usage][:total_tokens]      || 0
+      end
 
       if message[:tool_calls]
         # ── Tool-loop detection ──
@@ -339,8 +382,6 @@ class Harness
                      'Respond NOW with your final answer. If you were editing files, output the complete file blocks. ' \
                      'If this was a query, answer it directly in plain text.'
           }
-          # On the next iteration, if the model still calls tools, we will break out
-          # by returning whatever content we have
           next
         end
 
@@ -357,9 +398,15 @@ class Harness
       end
 
       # No tool calls — final response
+      elapsed = (Time.now - start_time).round(2)
       return {
         reasoning: message[:reasoning],
-        content:   message[:content]
+        content:   message[:content],
+        stats: {
+          elapsed_seconds: elapsed,
+          iterations:      iteration,
+          usage:           total_usage
+        }
       }
     end
   end
@@ -387,6 +434,21 @@ class Harness
     end
   end
 
+  def print_stats(stats)
+    return unless stats
+
+    elapsed = stats[:elapsed_seconds]
+    iters   = stats[:iterations]
+    usage   = stats[:usage]
+
+    parts = ["⏱ #{elapsed}s"]
+    parts << "🔄 #{iters} iteration#{'s' if iters > 1}"
+    if usage && usage[:total_tokens] > 0
+      parts << "📊 #{usage[:prompt_tokens]}→#{usage[:completion_tokens]} tokens (#{usage[:total_tokens]} total)"
+    end
+    puts "  [#{parts.join(' | ')}]"
+  end
+
   def run_once(file_list, instruction)
     files = read_files(file_list)
     user_prompt = build_user_prompt(files, instruction)
@@ -397,10 +459,18 @@ class Harness
       logger.info("─── #{options[:model]} @ #{options[:base_url]} ───")
     end
 
-    response = call_llm(
-      options[:base_url], options[:model], options[:system], user_prompt,
-      auth_token: options[:token]
-    )
+    spinner = Spinner.new("Sending to #{options[:model]}")
+    spinner.start
+
+    response = nil
+    begin
+      response = call_llm(
+        options[:base_url], options[:model], options[:system], user_prompt,
+        auth_token: options[:token]
+      )
+    ensure
+      spinner.stop
+    end
 
     if options[:verbose]
       logger.info("─── reasoning ───\n#{response[:reasoning]}")
@@ -412,10 +482,12 @@ class Harness
       logger.warn 'no file blocks detected — raw response:'
       logger.warn response[:content]
       puts response[:content]
+      print_stats(response[:stats])
       return
     end
 
     write_results(parsed)
+    print_stats(response[:stats])
     logger.info("→ git diff") unless options[:dry_run]
   end
 
@@ -428,10 +500,18 @@ class Harness
       logger.info("─── #{options[:model]} @ #{options[:base_url]} ───")
     end
 
-    response = call_llm(
-      options[:base_url], options[:model], options[:system], user_prompt,
-      auth_token: options[:token]
-    )
+    spinner = Spinner.new("Sending to #{options[:model]}")
+    spinner.start
+
+    response = nil
+    begin
+      response = call_llm(
+        options[:base_url], options[:model], options[:system], user_prompt,
+        auth_token: options[:token]
+      )
+    ensure
+      spinner.stop
+    end
 
     if options[:verbose]
       logger.info("─── reasoning ───\n#{response[:reasoning]}")
@@ -439,6 +519,7 @@ class Harness
     end
 
     puts response[:content]
+    print_stats(response[:stats])
   end
 end
 
