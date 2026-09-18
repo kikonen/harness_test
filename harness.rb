@@ -1,14 +1,13 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 #
-# harness.rb — one-shot AI edit harness. Any OpenAI-compatible server.
+# harness.rb — interactive AI edit harness. Any OpenAI-compatible server.
 # No agent loop, no tool calling. Prompt in, edited files out.
 #
 # Usage:
-#   ruby harness.rb -m qwen2.5-coder:32b -f src/app.py -f src/utils.py "add input validation"
-#   ruby harness.rb -m my-model --base-url http://192.168.1.10:8000/v1 \
-#                    --token sk-abc123 -f main.py "refactor"
-#   HARNESS_TOKEN=sk-abc123 ruby harness.rb -m gpt-4o -f config.rb "use env vars"
+#   ruby harness.rb -m qwen2.5-coder:32b
+#   ruby harness.rb -m my-model --base-url http://192.168.1.10:8000/v1 --token sk-abc123
+#   HARNESS_TOKEN=sk-abc123 ruby harness.rb -m gpt-4o
 
 require 'net/http'
 require 'uri'
@@ -106,9 +105,9 @@ class Harness
     }
   end
 
-  def read_files
+  def read_files(file_list)
     files = {}
-    options[:files].each do |f|
+    file_list.each do |f|
       abort "error: not found: #{f}" unless File.file?(f)
       files[f] = File.read(f)
     end
@@ -129,8 +128,8 @@ class Harness
     end
   end
 
-  def run(instruction)
-    files = read_files
+  def run_once(file_list, instruction)
+    files = read_files(file_list)
     user_prompt = build_user_prompt(files, instruction)
 
     if options[:verbose]
@@ -153,7 +152,8 @@ class Harness
     if parsed.empty?
       logger.warn 'no file blocks detected — raw response:'
       logger.warn response[:content]
-      exit 1
+      puts response[:content]
+      return
     end
 
     write_results(parsed)
@@ -163,13 +163,12 @@ end
 
 # ── CLI ──────────────────────────────────────────────────────────────────
 
-options = { files: [] }
+options = {}
 
 parser = OptionParser.new do |o|
-  o.banner  = 'Usage: harness.rb [options] <instruction>'
+  o.banner  = 'Usage: harness.rb [options]'
   o.separator ''
   o.on('-m MODEL', '--model MODEL', 'Model name (required)')                 { |v| options[:model]    = v }
-  o.on('-f FILE',  '--file FILE',  'Context file, repeatable')               { |v| options[:files]  << v }
   o.on('--base-url URL', 'API base URL [default: http://localhost:11434/v1]') { |v| options[:base_url] = v }
   o.on('--token TOKEN',  'Bearer auth token [or $HARNESS_TOKEN]')            { |v| options[:token]    = v }
   o.on('--system TEXT',  'Override system prompt')                           { |v| options[:system]   = v }
@@ -184,12 +183,58 @@ options[:model]    ||= ENV['HARNESS_MODEL']
 options[:system]   ||= Harness::SYSTEM_PROMPT
 options[:token]    ||= ENV['HARNESS_TOKEN']
 
-instruction = ARGV.join(' ')
-abort 'error: instruction required'            if instruction.empty?
-abort 'error: -m / --model is required'        unless options[:model]
-abort 'error: at least one -f / --file needed' unless options[:files].any?
-
-#debugger
+abort 'error: -m / --model is required' unless options[:model]
 
 harness = Harness.new(options)
-harness.run(instruction)
+
+# ── Interactive loop ─────────────────────────────────────────────────────
+
+trap('INT') do
+  puts "\nGoodbye."
+  exit 0
+end
+
+puts "Harness ready. Type 'exit' to quit, Ctrl+C to interrupt."
+puts
+
+loop do
+  # Collect files
+  puts "Enter file(s) (one per line, blank line to finish):"
+  file_list = []
+  exit_requested = false
+  loop do
+    line = $stdin.gets&.chomp
+    break if line.nil?
+    break if line.strip.empty?
+    if line.strip.downcase == 'exit'
+      exit_requested = true
+      break
+    end
+    file_list << line.strip
+  end
+  break if exit_requested
+
+  if file_list.empty?
+    puts "No files entered."
+    next
+  end
+
+  # Collect instruction
+  puts "Enter instruction:"
+  instruction = $stdin.gets&.chomp
+  if instruction.nil? || instruction.strip.empty?
+    puts "No instruction entered."
+    next
+  end
+  if instruction.strip.downcase == 'exit'
+    break
+  end
+
+  puts
+  harness.run_once(file_list, instruction.strip)
+  puts
+  puts "─" * 40
+  puts
+end
+
+puts "Goodbye."
