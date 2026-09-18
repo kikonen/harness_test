@@ -50,7 +50,7 @@ class EchoTool < Tool
   def initialize
     super(
       name: 'echo',
-      description: 'Echoes back the provided text. Useful for testing tool calling.',
+      description: 'TEST-ONLY tool: returns the input text as-is. Do NOT use this to communicate with the user or send progress messages. Use the "notify" tool instead for any user-facing output.',
       parameters: {
         type: 'object',
         properties: {
@@ -63,6 +63,29 @@ class EchoTool < Tool
 
   def execute(args)
     args['text'] || ''
+  end
+end
+
+class NotifyTool < Tool
+  def initialize
+    super(
+      name: 'notify',
+      description: 'Sends a progress or status message directly to the user\'s console. Use this to inform the user about what you are doing (e.g., "Analyzing file...", "Applying changes..."). This is the ONLY tool for communicating with the user.',
+      parameters: {
+        type: 'object',
+        properties: {
+          message: { type: 'string', description: 'The message to display to the user' }
+        },
+        required: ['message']
+      }
+    )
+  end
+
+  def execute(args)
+    msg = args['message'] || ''
+    puts "  [notify] #{msg}"
+    $stdout.flush
+    'ok'
   end
 end
 
@@ -136,6 +159,8 @@ class Harness
     respond with plain text.
 
     You have access to tools. Use them when they help you complete the task.
+    Use the "notify" tool to send progress or status messages to the user.
+    Do NOT use the "echo" tool for user communication — it is test-only.
   TEXT
 
   MAX_TOOL_ITERATIONS = 10
@@ -159,6 +184,7 @@ class Harness
   def build_tool_registry
     registry = ToolRegistry.new
     registry.register(EchoTool.new)
+    registry.register(NotifyTool.new)
     registry.register(GetTimeTool.new)
     registry
   end
