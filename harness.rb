@@ -557,6 +557,7 @@ class CLI
 
     puts "Harness ready. Type /help for commands, /exit to quit."
     puts "Tip: type a plain message (no /) to send it directly to the model."
+    puts "Tip: end a line with a trailing backslash (\\) to continue on the next line."
     puts
 
     loop do
@@ -605,7 +606,19 @@ class CLI
     $stdout.flush
     line = $stdin.gets
     return nil if line.nil?
-    line.chomp
+
+    buffer = line.chomp
+    # Trailing backslash allows multiline input: strip the backslash,
+    # keep the newline, and continue reading the next line.
+    while buffer.end_with?('\\')
+      buffer = buffer[0..-2] + "\n"
+      print "... "
+      $stdout.flush
+      cont = $stdin.gets
+      return nil if cont.nil?
+      buffer += cont.chomp
+    end
+    buffer
   end
 
   def handle_command(input)
@@ -657,12 +670,12 @@ class CLI
         Type any text (not starting with /) to send it directly to the model.
         The model will see the list of allowed files and can use file_read /
         file_write tools to access them.
-    HELP
-  end
 
-  def show_tools
-    puts "Available tools:"
-    puts harness.tool_registry.list
+      Multiline input:
+        End a line with a trailing backslash (\\) to continue the prompt
+        on the next line. A continuation prompt ("... ") is shown until
+        the line no longer ends with a backslash.
+    HELP
   end
 
   def run_direct_prompt(text)
