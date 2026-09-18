@@ -21,11 +21,12 @@ SYSTEM_PROMPT = <<~'TEXT'
   You are a precise code editor. You receive file contents and an instruction.
   Return ONLY the modified files in this exact format:
 
-  === FILE: <relative/path> ===
+  === FILE[X]: <relative/path> ===
   <complete file content>
-  === END ===
+  === END[X] ===
 
   Rules:
+  - Replae [X] in FILE[X] and END[X] with numeric index of file
   - Only return files that changed.
   - Each file must be complete (not a diff, not a snippet).
   - No commentary before or after the blocks.
@@ -45,7 +46,7 @@ end
 
 def parse_response(text)
   files = {}
-  text.scan(/=== FILE: (.+?) ===\n(.*?)\n?=== END ===/m) do |path, content|
+  text.scan(/=== FILE\[\d+\]: (.+?) ===\n(.*?)\n?=== END\[\d+\] ===/m) do |path, content|
     files[path.strip] = content.rstrip
   end
   files
@@ -74,7 +75,7 @@ def call_llm(base_url, model, system, user, auth_token: nil, timeout: 300)
   resp = http.request(req)
   abort "LLM error (HTTP #{resp.code}):\n#{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
 
-  if false
+  if true
     puts "=" * 50
     puts resp.body
     puts "=" * 50
