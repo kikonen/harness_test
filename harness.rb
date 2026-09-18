@@ -15,78 +15,150 @@ require 'uri'
 require 'json'
 require 'fileutils'
 require 'optparse'
+require 'logger'
 require 'debug'
 
-SYSTEM_PROMPT = <<~'TEXT'
-  You are a precise code editor. You receive file contents and an instruction.
-  Return ONLY the modified files in this exact format:
+LOG_FILE = ENV['HARNESS_LOG_FILE'] || 'harness.log'
 
-  === FILE[X]: <relative/path> ===
-  <complete file content>
-  === END[X] ===
+class Harness
+  SYSTEM_PROMPT = <<~'TEXT'
+    You are a precise code editor. You receive file contents and an instruction.
+    Return ONLY the modified files in this exact format:
 
-  Rules:
-  - Replae [X] in FILE[X] and END[X] with numeric index of file
-  - Only return files that changed.
-  - Each file must be complete (not a diff, not a snippet).
-  - No commentary before or after the blocks.
-  - Preserve original formatting, indentation, and style.
+    === FILE[X]: <relative/path> ===
+    <complete file content>
+    === END[X] ===
 
-  Exceptions:
-  - if instructions are clearly query and not editing of file then
-    return raw response
-TEXT
+    Rules:
+    - Replae [X] in FILE[X] and END[X] with numeric index of file
+    - Only return files that changed.
+    - Each file must be complete (not a diff, not a snippet).
+    - No commentary before or after the blocks.
+    - Preserve original formatting, indentation, and style.
 
-def build_user_prompt(files, instruction)
-  sections = files.map do |path, content|
-    "--- FILE: #{path} ---\n#{content}--- END ---\n"
-  end
-  "## Files\n\n#{sections.join("\n")}\n## Instruction\n\n#{instruction}\n"
-end
+    Exceptions:
+    - if instructions are clearly query and not editing of file then
+      return raw response
+  TEXT
 
-def parse_response(text)
-  files = {}
-  text.scan(/=== FILE\[\d+\]: (.+?) ===\n(.*?)\n?=== END\[\d+\] ===/m) do |path, content|
-    files[path.strip] = content.rstrip
-  end
-  files
-end
+  attr_reader :options, :logger
 
-def call_llm(base_url, model, system, user, auth_token: nil, timeout: 300)
-  uri  = URI("#{base_url}/chat/completions")
-  http = Net::HTTP.new(uri.host, uri.port)
-  http.use_ssl     = (uri.scheme == 'https')
-  http.open_timeout = 30
-  http.read_timeout = timeout
-
-  req = Net::HTTP::Post.new(uri.request_uri)
-  req['Content-Type'] = 'application/json'
-  req['Authorization'] = "Bearer #{auth_token}" if auth_token
-  req.body = JSON.generate(
-    model: model,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user',   content: user   }
-    ],
-    temperature: 0.1,
-    max_tokens: 8192
-  )
-
-  resp = http.request(req)
-  abort "LLM error (HTTP #{resp.code}):\n#{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
-
-  if true
-    puts "=" * 50
-    puts resp.body
-    puts "=" * 50
+  def initialize(options)
+    @options = options
+    @logger  = build_logger
   end
 
-  data = JSON.parse(resp.body, symbolize_names: true)
-  message = data[:choices][0][:message]
-  {
-    reasoning: message[:reasoning],
-    content: message[:content],
-  }
+  def build_logger
+    logger = Logger.new(LOG_FILE)
+    logger.formatter = proc { |severity, datetime, _progname, msg|
+      "#{datetime.strftime('%Y-%m-%d %H:%M:%S')} [#{severity}] #{msg}\n"
+    }
+    logger
+  end
+
+  def build_user_prompt(files, instruction)
+    sections = files.map do |path, content|
+      "--- FILE: #{path} ---\n#{content}--- END ---\n"
+    end
+    "## Files\n\n#{sections.join("\n")}\n## Instruction\n\n#{instruction}\n"
+  end
+
+  def parse_response(text)
+    files = {}
+    text.scan(/=== FILE\[\d+\]: (.+?) ===\n(.*?)\n?=== END\[\d+\] ===/m) do |path, content|
+      files[path.strip] = content.rstrip
+    end
+    files
+  end
+
+  def call_llm(base_url, model, system, user, auth_token: nil, timeout: 300)
+    uri  = URI("#{base_url}/chat/completions")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl      = (uri.scheme == 'https')
+    http.open_timeout = 30
+    http.read_timeout = timeout
+
+    req = Net::HTTP::Post.new(uri.request_uri)
+    req['Content-Type'] = 'application/json'
+    req['Authorization'] = "Bearer #{auth_token}" if auth_token
+    req.body = JSON.generate(
+      model: model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user',   content: user   }
+      ],
+      temperature: 0.1,
+      max_tokens: 8192
+    )
+
+    resp = http.request(req)
+    abort "LLM error (HTTP #{resp.code}):\n#{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
+
+    logger.info("=" * 50)
+    logger.info(resp.body)
+    logger.info("=" * 50)
+
+    data    = JSON.parse(resp.body, symbolize_names: true)
+    message = data[:choices][0][:message]
+    {
+      reasoning: message[:reasoning],
+      content:   message[:content],
+    }
+  end
+
+  def read_files
+    files = {}
+    options[:files].each do |f|
+      abort "error: not found: #{f}" unless File.file?(f)
+      files[f] = File.read(f)
+    end
+    files
+  end
+
+  def write_results(parsed)
+    parsed.each do |path, content|
+      if options[:dry_run]
+        logger.info("─── DRY RUN: #{path} (#{content.length} chars) ───")
+        logger.info(content)
+      else
+        dir = File.dirname(path)
+        FileUtils.mkdir_p(dir) unless dir == '.'
+        File.write(path, content + "\n")
+        logger.info("wrote #{path}")
+      end
+    end
+  end
+
+  def run(instruction)
+    files = read_files
+    user_prompt = build_user_prompt(files, instruction)
+
+    if options[:verbose]
+      logger.info("─── system ───\n#{options[:system]}")
+      logger.info("─── user ───\n#{user_prompt}")
+      logger.info("─── #{options[:model]} @ #{options[:base_url]} ───")
+    end
+
+    response = call_llm(
+      options[:base_url], options[:model], options[:system], user_prompt,
+      auth_token: options[:token]
+    )
+
+    if options[:verbose]
+      logger.info("─── reasoning ───\n#{response[:reasoning]}")
+      logger.info("─── response ───\n#{response[:content]}")
+    end
+
+    parsed = parse_response(response[:content])
+    if parsed.empty?
+      logger.warn 'no file blocks detected — raw response:'
+      logger.warn response[:content]
+      exit 1
+    end
+
+    write_results(parsed)
+    logger.info("→ git diff") unless options[:dry_run]
+  end
 end
 
 # ── CLI ──────────────────────────────────────────────────────────────────
@@ -108,60 +180,16 @@ end
 parser.parse!
 
 options[:base_url] ||= ENV['HARNESS_BASE_URL']
-options[:model] ||= ENV['HARNESS_MODEL']
-options[:system]   ||= SYSTEM_PROMPT
+options[:model]    ||= ENV['HARNESS_MODEL']
+options[:system]   ||= Harness::SYSTEM_PROMPT
 options[:token]    ||= ENV['HARNESS_TOKEN']
 
 instruction = ARGV.join(' ')
-abort 'error: instruction required'           if instruction.empty?
-abort 'error: -m / --model is required'       unless options[:model]
+abort 'error: instruction required'            if instruction.empty?
+abort 'error: -m / --model is required'        unless options[:model]
 abort 'error: at least one -f / --file needed' unless options[:files].any?
 
 #debugger
 
-# ── Run ──────────────────────────────────────────────────────────────────
-
-files = {}
-options[:files].each do |f|
-  abort "error: not found: #{f}" unless File.file?(f)
-  files[f] = File.read(f)
-end
-
-user_prompt = build_user_prompt(files, instruction)
-
-if options[:verbose]
-  puts "─── system ───\n#{options[:system]}"
-  puts "─── user ───\n#{user_prompt}"
-  puts "─── #{options[:model]} @ #{options[:base_url]} ───\n"
-end
-
-response = call_llm(
-  options[:base_url], options[:model], options[:system], user_prompt,
-  auth_token: options[:token]
-)
-
-if options[:verbose]
-  puts "─── reasoning ───\n#{response[:reasoning]}\n"
-  puts "─── response ───\n#{response[:text]}\n"
-end
-
-parsed = parse_response(response[:content])
-if parsed.empty?
-  warn 'no file blocks detected — raw response:'
-  warn response[:content]
-  exit 1
-end
-
-parsed.each do |path, content|
-  if options[:dry_run]
-    puts "─── DRY RUN: #{path} (#{content.length} chars) ───"
-    puts content
-  else
-    dir = File.dirname(path)
-    FileUtils.mkdir_p(dir) unless dir == '.'
-    File.write(path, content + "\n")
-    puts "wrote #{path}"
-  end
-end
-
-puts "\n→ git diff" unless options[:dry_run]
+harness = Harness.new(options)
+harness.run(instruction)
