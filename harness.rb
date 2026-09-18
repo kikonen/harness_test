@@ -467,6 +467,9 @@ class CLI
     when /\A\/tools\z/
       show_tools
 
+    when /\A\/\S*\z/
+      puts "Unknown command: #{input}. Type /help for available commands."
+
     else
       # Non-slash input: direct prompt to the model
       run_direct_prompt(input)
