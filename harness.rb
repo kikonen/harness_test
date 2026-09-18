@@ -7,6 +7,7 @@
 # Usage:
 #   ruby harness.rb -m qwen2.5-coder:32b
 #   ruby harness.rb -m my-model --base-url http://192.168.1.10:8000/v1 --token sk-abc123
+#   ruby harness.rb -m my-model -f src/app.rb -f lib/util.rb
 #   HARNESS_TOKEN=sk-abc123 ruby harness.rb -m gpt-4o
 
 require 'net/http'
@@ -531,7 +532,7 @@ class CLI
 
   def initialize
     @options   = parse_options
-    @file_list = []
+    @file_list = (@options[:files] || []).dup
     @harness   = Harness.new(@options, @file_list)
   end
 
@@ -545,6 +546,7 @@ class CLI
       o.on('--base-url URL', 'API base URL [default: http://localhost:11434/v1]') { |v| opts[:base_url] = v }
       o.on('--token TOKEN',  'Bearer auth token [or $HARNESS_TOKEN]')            { |v| opts[:token]    = v }
       o.on('--system TEXT',  'Override system prompt')                           { |v| opts[:system]   = v }
+      o.on('-f FILE', '--file FILE', 'Add a file to the allowed file list (repeatable)') { |v| (opts[:files] ||= []) << v }
       o.on('--dry-run',      'Print edits, do not write files')                  { opts[:dry_run]  = true }
       o.on('-v', '--verbose', 'Show full prompt and raw response')               { opts[:verbose]  = true }
       o.on('-h', '--help')                                                        { puts o; exit }
