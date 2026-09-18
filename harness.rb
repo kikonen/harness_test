@@ -166,11 +166,17 @@ class FileReadTool < Tool
   def execute(args)
     path = args['path']
     unless @allowed_files.include?(path)
+      puts "  [file_read] ✗ #{path} (not in allowed list)"
+      $stdout.flush
       return "error: file '#{path}' is not in the allowed file list"
     end
     unless File.file?(path)
+      puts "  [file_read] ✗ #{path} (not found)"
+      $stdout.flush
       return "error: file not found: #{path}"
     end
+    puts "  [file_read] ✓ #{path}"
+    $stdout.flush
     File.read(path)
   end
 end
@@ -198,16 +204,22 @@ class FileWriteTool < Tool
     content = args['content']
 
     unless @allowed_files.include?(path)
+      puts "  [file_write] ✗ #{path} (not in allowed list)"
+      $stdout.flush
       return "error: file '#{path}' is not in the allowed file list"
     end
 
     if @options[:dry_run]
+      puts "  [file_write] ~ #{path} (dry run, #{content.length} chars)"
+      $stdout.flush
       return "DRY RUN: would write #{content.length} chars to #{path}"
     end
 
     dir = File.dirname(path)
     FileUtils.mkdir_p(dir) unless dir == '.'
     File.write(path, content)
+    puts "  [file_write] ✓ #{path} (#{content.length} chars)"
+    $stdout.flush
     "ok: wrote #{content.length} chars to #{path}"
   end
 end
