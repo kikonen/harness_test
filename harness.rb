@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 #
 # harness.rb — interactive AI edit harness. Any OpenAI-compatible server.
-# Supports tool calling (iterative), file editing, and direct prompts.
+# Supports tool calling (iterative), file editing via tools, and direct prompts.
 #
 # Usage:
 #   ruby harness.rb -m qwen2.5-coder:32b
@@ -147,6 +147,71 @@ class GetTimeTool < Tool
   end
 end
 
+class FileReadTool < Tool
+  def initialize(allowed_files)
+    @allowed_files = allowed_files
+    super(
+      name: 'file_read',
+      description: 'Reads the contents of a file. Only files in the allowed list can be read.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Path to the file to read' }
+        },
+        required: ['path']
+      }
+    )
+  end
+
+  def execute(args)
+    path = args['path']
+    unless @allowed_files.include?(path)
+      return "error: file '#{path}' is not in the allowed file list"
+    end
+    unless File.file?(path)
+      return "error: file not found: #{path}"
+    end
+    File.read(path)
+  end
+end
+
+class FileWriteTool < Tool
+  def initialize(allowed_files, options)
+    @allowed_files = allowed_files
+    @options       = options
+    super(
+      name: 'file_write',
+      description: 'Writes content to a file. Only files in the allowed list can be written. The content must be the COMPLETE file content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path:    { type: 'string', description: 'Path to the file to write' },
+          content: { type: 'string', description: 'Complete content to write to the file' }
+        },
+        required: ['path', 'content']
+      }
+    )
+  end
+
+  def execute(args)
+    path    = args['path']
+    content = args['content']
+
+    unless @allowed_files.include?(path)
+      return "error: file '#{path}' is not in the allowed file list"
+    end
+
+    if @options[:dry_run]
+      return "DRY RUN: would write #{content.length} chars to #{path}"
+    end
+
+    dir = File.dirname(path)
+    FileUtils.mkdir_p(dir) unless dir == '.'
+    File.write(path, content)
+    "ok: wrote #{content.length} chars to #{path}"
+  end
+end
+
 class ToolRegistry
   attr_reader :tools
 
@@ -180,25 +245,18 @@ end
 
 class Harness
   SYSTEM_PROMPT = <<~'TEXT'
-    You are a precise code editor and assistant. You receive file contents (if any) and an instruction.
+    You are a precise code editor and assistant. You have access to tools for reading and writing files.
 
-    When the task involves editing files, return ONLY the modified files in this exact format:
+    When the task involves editing files:
+    1. Use the "file_read" tool to read the current contents of files you need to modify.
+    2. Make the requested changes.
+    3. Use the "file_write" tool to write the complete modified file content back.
+    4. Only modify files that are in the provided list of available files.
+    5. Each file write must contain the COMPLETE file content (not a diff or snippet).
+    6. Preserve original formatting, indentation, and style unless the instruction says otherwise.
 
-    === FILE[X]: <relative/path> ===
-    <complete file content>
-    === END[X] ===
+    When the instruction is a query, conversation, or does not involve file editing, respond with plain text.
 
-    Rules for file edits:
-    - Replace [X] in FILE[X] and END[X] with numeric index of file
-    - Only return files that changed.
-    - Each file must be complete (not a diff, not a snippet).
-    - No commentary before or after the blocks.
-    - Preserve original formatting, indentation, and style.
-
-    When the instruction is a query, conversation, or does not involve file editing,
-    respond with plain text.
-
-    You have access to tools. Use them when they help you complete the task.
     Use the "notify" tool to send progress or status messages to the user.
     Do NOT use the "echo" tool for user communication — it is test-only.
   TEXT
@@ -209,10 +267,11 @@ class Harness
   # After this many consecutive tool-call iterations, force-break and return whatever we have
   TOOL_LOOP_HARD_LIMIT = 5
 
-  attr_reader :options, :logger, :tool_registry
+  attr_reader :options, :logger, :tool_registry, :file_list
 
-  def initialize(options)
+  def initialize(options, file_list)
     @options       = options
+    @file_list     = file_list
     @logger        = build_logger
     @tool_registry = build_tool_registry
   end
@@ -230,22 +289,17 @@ class Harness
     registry.register(EchoTool.new)
     registry.register(NotifyTool.new)
     registry.register(GetTimeTool.new)
+    registry.register(FileReadTool.new(@file_list))
+    registry.register(FileWriteTool.new(@file_list, @options))
     registry
   end
 
-  def build_user_prompt(files, instruction)
-    sections = files.map do |path, content|
-      "--- FILE: #{path} ---\n#{content}--- END ---\n"
+  def build_user_prompt(file_list, instruction)
+    if file_list.empty?
+      "## Instruction\n\n#{instruction}\n"
+    else
+      "## Available Files\n\n#{file_list.map { |f| "- #{f}" }.join("\n")}\n\n## Instruction\n\n#{instruction}\n"
     end
-    "## Files\n\n#{sections.join("\n")}\n## Instruction\n\n#{instruction}\n"
-  end
-
-  def parse_response(text)
-    files = {}
-    text.scan(/=== FILE\[\d+\]: (.+?) ===\n(.*?)\n?=== END\[\d+\] ===/m) do |path, content|
-      files[path.strip] = content.rstrip
-    end
-    files
   end
 
   def make_request(base_url, model, messages, auth_token: nil, timeout: 300, tools: nil)
@@ -379,7 +433,7 @@ class Harness
           messages << {
             role: 'user',
             content: 'STOP. You are stuck in a tool loop. Do NOT call any more tools. ' \
-                     'Respond NOW with your final answer. If you were editing files, output the complete file blocks. ' \
+                     'Respond NOW with your final answer. If you were editing files, use the file_write tool to save them. ' \
                      'If this was a query, answer it directly in plain text.'
           }
           next
@@ -411,29 +465,6 @@ class Harness
     end
   end
 
-  def read_files(file_list)
-    files = {}
-    file_list.each do |f|
-      raise HarnessError, "file not found: #{f}" unless File.file?(f)
-      files[f] = File.read(f)
-    end
-    files
-  end
-
-  def write_results(parsed)
-    parsed.each do |path, content|
-      if options[:dry_run]
-        logger.info("--- DRY RUN: #{path} (#{content.length} chars) ---")
-        logger.info(content)
-      else
-        dir = File.dirname(path)
-        FileUtils.mkdir_p(dir) unless dir == '.'
-        File.write(path, content + "\n")
-        logger.info("wrote #{path}")
-      end
-    end
-  end
-
   def print_stats(stats)
     return unless stats
 
@@ -449,50 +480,8 @@ class Harness
     puts "  [#{parts.join(' | ')}]"
   end
 
-  def run_once(file_list, instruction)
-    files = read_files(file_list)
-    user_prompt = build_user_prompt(files, instruction)
-
-    if options[:verbose]
-      logger.info("--- system ---\n#{options[:system]}")
-      logger.info("--- user ---\n#{user_prompt}")
-      logger.info("--- #{options[:model]} @ #{options[:base_url]} ---")
-    end
-
-    spinner = Spinner.new("Sending to #{options[:model]}")
-    spinner.start
-
-    response = nil
-    begin
-      response = call_llm(
-        options[:base_url], options[:model], options[:system], user_prompt,
-        auth_token: options[:token]
-      )
-    ensure
-      spinner.stop
-    end
-
-    if options[:verbose]
-      logger.info("--- reasoning ---\n#{response[:reasoning]}")
-      logger.info("--- response ---\n#{response[:content]}")
-    end
-
-    parsed = parse_response(response[:content])
-    if parsed.empty?
-      logger.warn 'no file blocks detected — raw response:'
-      logger.warn response[:content]
-      puts response[:content]
-      print_stats(response[:stats])
-      return
-    end
-
-    write_results(parsed)
-    print_stats(response[:stats])
-    logger.info("→ git diff") unless options[:dry_run]
-  end
-
   def run_prompt(instruction)
-    user_prompt = instruction
+    user_prompt = build_user_prompt(@file_list, instruction)
 
     if options[:verbose]
       logger.info("--- system ---\n#{options[:system]}")
@@ -530,8 +519,8 @@ class CLI
 
   def initialize
     @options   = parse_options
-    @harness   = Harness.new(@options)
     @file_list = []
+    @harness   = Harness.new(@options, @file_list)
   end
 
   def parse_options
@@ -643,9 +632,6 @@ class CLI
     when /\A\/exit\z/
       @exiting = true
 
-    when /\A\/run\z/
-      run_edit
-
     when /\A\/tools\z/
       show_tools
 
@@ -661,16 +647,16 @@ class CLI
   def show_help
     puts <<~HELP
       Available commands:
-        /file <path>   Add a file to the working set
-        /clear         Remove all files from the working set
-        /run           Enter instruction and execute the file edit
+        /file <path>   Add a file to the allowed file list
+        /clear         Remove all files from the allowed list
         /tools         List available tools
         /help          Show this help
         /exit          Exit the harness
 
       Direct prompt:
-        Type any text (not starting with /) to send it directly to the model
-        as a conversation/query (no file context).
+        Type any text (not starting with /) to send it directly to the model.
+        The model will see the list of allowed files and can use file_read /
+        file_write tools to access them.
     HELP
   end
 
@@ -679,50 +665,10 @@ class CLI
     puts harness.tool_registry.list
   end
 
-  def run_edit
-    if @file_list.empty?
-      puts "No files in list. Use /file <path> to add files first."
-      return
-    end
-
-    instruction = collect_instruction_multiline
-    return if instruction.nil?
-
-    puts
-    harness.run_once(@file_list, instruction)
-    puts
-  end
-
   def run_direct_prompt(text)
     puts
     harness.run_prompt(text)
     puts
-  end
-
-  def collect_instruction_multiline
-    puts "Enter instruction (end line with \\ to continue):"
-    lines = []
-    loop do
-      print "  "
-      $stdout.flush
-      line = $stdin.gets
-      break if line.nil?
-      line = line.chomp
-
-      if line.end_with?('\\')
-        lines << line[0..-2]
-      else
-        lines << line
-        break
-      end
-    end
-
-    instruction = lines.join("\n")
-    if instruction.strip.empty?
-      puts "No instruction entered."
-      return nil
-    end
-    instruction
   end
 end
 
