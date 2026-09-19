@@ -113,8 +113,10 @@ class Harness
       messages: messages,
       temperature: 0.1,
       max_tokens: NUM_PREDICT,
-      num_predict: NUM_PREDICT,
-      num_ctx: num_ctx
+      options: {
+        num_predict: NUM_PREDICT,
+        num_ctx: num_ctx
+      }
     }
     body[:tools] = tools if tools && !tools.empty?
 
