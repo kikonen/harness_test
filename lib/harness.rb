@@ -95,6 +95,12 @@ class Harness
     end
   end
 
+  # Context window size: prefer the value from options (CLI flag or
+  # $HARNESS_NUM_CTX), falling back to the built-in default.
+  def num_ctx
+    options[:num_ctx] || NUM_CTX
+  end
+
   def make_request(base_url, model, messages, auth_token: nil, timeout: DEFAULT_READ_TIMEOUT, tools: nil)
     uri  = URI("#{base_url}/chat/completions")
     http = Net::HTTP.new(uri.host, uri.port)
@@ -108,7 +114,7 @@ class Harness
       temperature: 0.1,
       max_tokens: NUM_PREDICT,
       num_predict: NUM_PREDICT,
-      num_ctx: NUM_CTX
+      num_ctx: num_ctx
     }
     body[:tools] = tools if tools && !tools.empty?
 

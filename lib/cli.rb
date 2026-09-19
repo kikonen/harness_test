@@ -28,6 +28,7 @@ class CLI
       o.on('--base-url URL', 'API base URL [default: http://localhost:11434/v1]') { |v| opts[:base_url] = v }
       o.on('--token TOKEN',  'Bearer auth token [or $HARNESS_TOKEN]')            { |v| opts[:token]    = v }
       o.on('--system TEXT',  'Override system prompt')                           { |v| opts[:system]   = v }
+      o.on('--num-ctx N',    'Context window size in tokens [or $HARNESS_NUM_CTX]') { |v| opts[:num_ctx] = v.to_i }
       o.on('-f FILE', '--file FILE', 'Add a file to the allowed file list (repeatable)') { |v| (opts[:files] ||= []) << v }
       o.on('--dry-run',      'Print edits, do not write files')                  { opts[:dry_run]  = true }
       o.on('-v', '--verbose', 'Show full prompt and raw response')               { opts[:verbose]  = true }
@@ -45,6 +46,7 @@ class CLI
     opts[:model]    ||= ENV['HARNESS_MODEL']
     opts[:system]   ||= Harness::SYSTEM_PROMPT
     opts[:token]    ||= ENV['HARNESS_TOKEN']
+    opts[:num_ctx]  ||= ENV['HARNESS_NUM_CTX']&.to_i
 
     raise HarnessError, '-m / --model is required' unless opts[:model]
 
