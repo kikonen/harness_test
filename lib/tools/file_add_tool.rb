@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../tool'
+require_relative '../sensitive_files'
 
 class FileAddTool < Tool
   def initialize(allowed_files)
@@ -22,6 +23,13 @@ class FileAddTool < Tool
 
   def execute(args)
     path = args['path']
+
+    # Security: sensitive files (e.g. .env*) are never allowed, no prompt.
+    if SensitiveFiles.sensitive?(path)
+      puts "  [file_add] ✗ #{path} (blocked: sensitive file)"
+      $stdout.flush
+      return "error: file '#{path}' is blocked and can never be added to the allowed file list"
+    end
 
     if @allowed_files.include?(path)
       puts "  [file_add] = #{path} (already in allowed list)"

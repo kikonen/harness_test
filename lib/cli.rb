@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
 require 'optparse'
+require 'fileutils'
 
 require_relative 'harness_error'
 require_relative 'harness'
+require_relative 'sensitive_files'
 
 # -- CLI ------------------------------------------------------------------
 
@@ -45,6 +47,15 @@ class CLI
     opts[:token]    ||= ENV['HARNESS_TOKEN']
 
     raise HarnessError, '-m / --model is required' unless opts[:model]
+
+    # Security: never allow sensitive files (e.g. .env*) into the list.
+    (opts[:files] || []).each do |f|
+      if SensitiveFiles.sensitive?(f)
+        puts "  [security] ✗ #{f} (blocked: sensitive file)"
+        $stdout.flush
+      end
+    end
+    opts[:files] = (opts[:files] || []).reject { |f| SensitiveFiles.sensitive?(f) }
 
     opts
   end
@@ -127,12 +138,38 @@ class CLI
 
     case input
     when /\A\/file\s+(.+)\z/
-      path = $1.strip
-      if @file_list.include?(path)
-        puts "Already in list: #{path}"
+      pattern = $1.strip
+      # Support globs: expand the pattern against the filesystem.
+      if pattern =~ /[\\\*\?\[\]]/
+        matches = Dir.glob(pattern).sort
+        if matches.empty?
+          puts "No files match: #{pattern}"
+        else
+          added = 0
+          matches.each do |path|
+            if SensitiveFiles.sensitive?(path)
+              puts "  [security] ✗ #{path} (blocked: sensitive file)"
+              next
+            end
+            if @file_list.include?(path)
+              puts "Already in list: #{path}"
+              next
+            end
+            @file_list << path
+            added += 1
+            puts "Added: #{path}"
+          end
+          puts "Added #{added} file#{'s' if added != 1} matching #{pattern}."
+        end
       else
-        @file_list << path
-        puts "Added: #{path}"
+        if SensitiveFiles.sensitive?(pattern)
+          puts "  [security] ✗ #{pattern} (blocked: sensitive file)"
+        elsif @file_list.include?(pattern)
+          puts "Already in list: #{pattern}"
+        else
+          @file_list << pattern
+          puts "Added: #{pattern}"
+        end
       end
 
     when /\A\/clear\z/
@@ -160,7 +197,7 @@ class CLI
   def show_help
     puts <<~HELP
       Available commands:
-        /file <path>   Add a file to the allowed file list
+        /file <path>   Add a file to the allowed file list (globs like src/*.rb work)
         /clear         Remove all files from the allowed list
         /tools         List available tools
         /help          Show this help
