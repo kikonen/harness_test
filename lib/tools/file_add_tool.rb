@@ -37,10 +37,13 @@ class FileAddTool < Tool
       return "ok: file '#{path}' is already in the allowed file list"
     end
 
+    # Determine whether the file already exists on disk.
+    file_status = File.exist?(path) ? 'existing file' : 'new file (does not exist yet)'
+
     # Security: prompt the user for confirmation
     puts
     puts "  [file_add] ⚠  The model is requesting to add a file to the allowed list:"
-    puts "              #{path}"
+    puts "              #{path}  (#{file_status})"
     print  "              Allow? (y/n): "
     $stdout.flush
 
@@ -49,13 +52,13 @@ class FileAddTool < Tool
 
     if answer == 'y' || answer == 'yes'
       @file_list.add(path)
-      puts "  [file_add] ✓ #{path} (added to allowed list)"
+      puts "  [file_add] ✓ #{path} (#{file_status} — added to allowed list)"
       $stdout.flush
-      "ok: file '#{path}' has been added to the allowed file list"
+      "ok: file '#{path}' (#{file_status}) has been added to the allowed file list"
     else
-      puts "  [file_add] ✗ #{path} (denied by user)"
+      puts "  [file_add] ✗ #{path} (#{file_status} — denied by user)"
       $stdout.flush
-      "error: user denied adding file '#{path}' to the allowed file list"
+      "error: user denied adding file '#{path}' (#{file_status}) to the allowed file list"
     end
   end
 end
