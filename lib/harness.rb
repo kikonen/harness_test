@@ -59,6 +59,7 @@ class Harness
     @file_list     = file_list
     @logger        = build_logger
     @tool_registry = build_tool_registry
+    @spinner       = nil
   end
 
   def build_logger
@@ -137,6 +138,14 @@ class Harness
       return "error: unknown tool '#{func_name}'"
     end
 
+    # Pause (and clear) the spinner so tool output/input is not broken
+    # by the animation. Resume it afterwards if it was running.
+    spinner_paused = false
+    if @spinner
+      @spinner.pause
+      spinner_paused = true
+    end
+
     begin
       result = tool.execute(args)
       logger.info("tool #{func_name} → #{result}")
@@ -144,6 +153,8 @@ class Harness
     rescue => e
       logger.error("tool #{func_name} failed: #{e.message}")
       "error: #{e.message}"
+    ensure
+      @spinner&.resume if spinner_paused
     end
   end
 
@@ -277,6 +288,7 @@ class Harness
     end
 
     spinner = Spinner.new("Sending to #{options[:model]}")
+    @spinner = spinner
     spinner.start
 
     response = nil
@@ -287,6 +299,7 @@ class Harness
       )
     ensure
       spinner.stop
+      @spinner = nil
     end
 
     if options[:verbose]
