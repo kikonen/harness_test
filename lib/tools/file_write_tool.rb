@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
 require_relative '../tool'
+require_relative '../file_list'
 require 'fileutils'
 
 class FileWriteTool < Tool
-  def initialize(allowed_files, options)
-    @allowed_files = allowed_files
-    @options       = options
+  def initialize(file_list, options)
+    @file_list = file_list
+    @options   = options
     super(
       name: 'file_write',
       description: 'Writes content to a file. Only files in the allowed list can be written. The content must be the COMPLETE file content.',
@@ -25,7 +26,7 @@ class FileWriteTool < Tool
     path    = args['path']
     content = args['content']
 
-    unless @allowed_files.include?(path)
+    unless @file_list.include?(path)
       puts "  [file_write] ✗ #{path} (not in allowed list)"
       $stdout.flush
       return "error: file '#{path}' is not in the allowed file list"

@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require_relative '../tool'
-require_relative '../sensitive_files'
+require_relative '../file_list'
 
 class FileAddTool < Tool
-  def initialize(allowed_files)
-    @allowed_files = allowed_files
+  def initialize(file_list)
+    @file_list = file_list
     super(
       name: 'file_add',
       description: 'Adds a file path to the allowed file list so it can be read or written. ' \
@@ -25,13 +25,13 @@ class FileAddTool < Tool
     path = args['path']
 
     # Security: sensitive files (e.g. .env*) are never allowed, no prompt.
-    if SensitiveFiles.sensitive?(path)
+    if @file_list.sensitive?(path)
       puts "  [file_add] ✗ #{path} (blocked: sensitive file)"
       $stdout.flush
       return "error: file '#{path}' is blocked and can never be added to the allowed file list"
     end
 
-    if @allowed_files.include?(path)
+    if @file_list.include?(path)
       puts "  [file_add] = #{path} (already in allowed list)"
       $stdout.flush
       return "ok: file '#{path}' is already in the allowed file list"
@@ -48,7 +48,7 @@ class FileAddTool < Tool
     answer = answer&.chomp&.downcase
 
     if answer == 'y' || answer == 'yes'
-      @allowed_files << path
+      @file_list.add(path)
       puts "  [file_add] ✓ #{path} (added to allowed list)"
       $stdout.flush
       "ok: file '#{path}' has been added to the allowed file list"

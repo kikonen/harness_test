@@ -10,6 +10,7 @@ require 'thread'
 require_relative 'harness_error'
 require_relative 'spinner'
 require_relative 'tool'
+require_relative 'file_list'
 require_relative 'tools/echo_tool'
 require_relative 'tools/notify_tool'
 require_relative 'tools/get_time_tool'
@@ -74,10 +75,11 @@ class Harness
   end
 
   def build_user_prompt(file_list, instruction)
-    if file_list.empty?
+    files = file_list.to_a
+    if files.empty?
       "## Instruction\n\n#{instruction}\n"
     else
-      "## Available Files\n\n#{file_list.map { |f| "- #{f}" }.join("\n")}\n\n## Instruction\n\n#{instruction}\n"
+      "## Available Files\n\n#{files.map { |f| "- #{f}" }.join("\n")}\n\n## Instruction\n\n#{instruction}\n"
     end
   end
 

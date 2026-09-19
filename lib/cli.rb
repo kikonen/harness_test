@@ -5,16 +5,16 @@ require 'fileutils'
 
 require_relative 'harness_error'
 require_relative 'harness'
-require_relative 'sensitive_files'
+require_relative 'file_list'
 
 # -- CLI ------------------------------------------------------------------
 
 class CLI
-  attr_reader :options, :harness
+  attr_reader :options, :harness, :file_list
 
   def initialize
     @options   = parse_options
-    @file_list = (@options[:files] || []).dup
+    @file_list = FileList.new(@options[:files] || [])
     @harness   = Harness.new(@options, @file_list)
   end
 
@@ -50,12 +50,12 @@ class CLI
 
     # Security: never allow sensitive files (e.g. .env*) into the list.
     (opts[:files] || []).each do |f|
-      if SensitiveFiles.sensitive?(f)
+      if FileList.sensitive?(f)
         puts "  [security] ✗ #{f} (blocked: sensitive file)"
         $stdout.flush
       end
     end
-    opts[:files] = (opts[:files] || []).reject { |f| SensitiveFiles.sensitive?(f) }
+    opts[:files] = (opts[:files] || []).reject { |f| FileList.sensitive?(f) }
 
     opts
   end
@@ -147,33 +147,31 @@ class CLI
         else
           added = 0
           matches.each do |path|
-            if SensitiveFiles.sensitive?(path)
+            case @file_list.add(path)
+            when :blocked
               puts "  [security] ✗ #{path} (blocked: sensitive file)"
-              next
-            end
-            if @file_list.include?(path)
+            when :duplicate
               puts "Already in list: #{path}"
-              next
+            when :added
+              added += 1
+              puts "Added: #{path}"
             end
-            @file_list << path
-            added += 1
-            puts "Added: #{path}"
           end
           puts "Added #{added} file#{'s' if added != 1} matching #{pattern}."
         end
       else
-        if SensitiveFiles.sensitive?(pattern)
+        case @file_list.add(pattern)
+        when :blocked
           puts "  [security] ✗ #{pattern} (blocked: sensitive file)"
-        elsif @file_list.include?(pattern)
+        when :duplicate
           puts "Already in list: #{pattern}"
-        else
-          @file_list << pattern
+        when :added
           puts "Added: #{pattern}"
         end
       end
 
     when /\A\/clear\z/
-      @file_list = []
+      @file_list.clear
       puts "File list cleared."
 
     when /\A\/help\z/

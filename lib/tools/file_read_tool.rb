@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 
 require_relative '../tool'
+require_relative '../file_list'
 
 class FileReadTool < Tool
-  def initialize(allowed_files)
-    @allowed_files = allowed_files
+  def initialize(file_list)
+    @file_list = file_list
     super(
       name: 'file_read',
       description: 'Reads the contents of a file. Only files in the allowed list can be read.',
@@ -20,7 +21,7 @@ class FileReadTool < Tool
 
   def execute(args)
     path = args['path']
-    unless @allowed_files.include?(path)
+    unless @file_list.include?(path)
       puts "  [file_read] ✗ #{path} (not in allowed list)"
       $stdout.flush
       return "error: file '#{path}' is not in the allowed file list"
