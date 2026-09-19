@@ -46,6 +46,12 @@ class Harness
   # After this many consecutive tool-call iterations, force-break and return whatever we have
   TOOL_LOOP_HARD_LIMIT = 20
 
+  # Generous HTTP timeouts for local / slow model servers.
+  # open_timeout: how long to wait for the TCP connection to establish.
+  # read_timeout: how long to wait between bytes of the response (per read).
+  DEFAULT_OPEN_TIMEOUT = 60
+  DEFAULT_READ_TIMEOUT = 600
+
   attr_reader :options, :logger, :tool_registry, :file_list
 
   def initialize(options, file_list)
@@ -83,11 +89,11 @@ class Harness
     end
   end
 
-  def make_request(base_url, model, messages, auth_token: nil, timeout: 300, tools: nil)
+  def make_request(base_url, model, messages, auth_token: nil, timeout: DEFAULT_READ_TIMEOUT, tools: nil)
     uri  = URI("#{base_url}/chat/completions")
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl      = (uri.scheme == 'https')
-    http.open_timeout = 30
+    http.open_timeout = DEFAULT_OPEN_TIMEOUT
     http.read_timeout = timeout
 
     body = {
@@ -141,7 +147,7 @@ class Harness
     end
   end
 
-  def call_llm(base_url, model, system, user, auth_token: nil, timeout: 300)
+  def call_llm(base_url, model, system, user, auth_token: nil, timeout: DEFAULT_READ_TIMEOUT)
     messages = [
       { role: 'system', content: system },
       { role: 'user',   content: user   }
@@ -254,7 +260,7 @@ class Harness
     usage   = stats[:usage]
 
     parts = ["⏱ #{elapsed}s"]
-    parts << "🔄 #{iters} iteration#{'s' if iters > 1}"
+    parts << "🔄 #{iters} iteration#{'s' if iters != 1}"
     if usage && usage[:total_tokens] > 0
       parts << "📊 #{usage[:prompt_tokens]}→#{usage[:completion_tokens]} tokens (#{usage[:total_tokens]} total)"
     end
