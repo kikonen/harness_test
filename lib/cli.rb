@@ -20,7 +20,7 @@ class CLI
     opts = {}
 
     parser = OptionParser.new do |o|
-      o.banner  = 'Usage: harness.rb [options]'
+      o.banner  = 'Usage: harness.rb [options] [FILE...]'
       o.separator ''
       o.on('-m MODEL', '--model MODEL', 'Model name (required)')                 { |v| opts[:model]    = v }
       o.on('--base-url URL', 'API base URL [default: http://localhost:11434/v1]') { |v| opts[:base_url] = v }
@@ -32,6 +32,12 @@ class CLI
       o.on('-h', '--help')                                                        { puts o; exit }
     end
     parser.parse!
+
+    # Shell glob expansion: `harness.rb -f src/*.rb` expands to
+    # `-f src/a.rb src/b.rb ...` — OptionParser only consumes the first
+    # argument as the option value; the rest become positional args.
+    # Treat all remaining positional args as files so globs work.
+    ARGV.each { |a| (opts[:files] ||= []) << a }
 
     opts[:base_url] ||= ENV['HARNESS_BASE_URL']
     opts[:model]    ||= ENV['HARNESS_MODEL']
