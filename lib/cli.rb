@@ -12,6 +12,12 @@ require_relative 'file_list'
 class CLI
   attr_reader :options, :harness, :file_list
 
+  # How long (seconds) we wait for *more* input to arrive after reading a
+  # line. If data shows up within this window we treat it as a paste (the
+  # terminal delivers a pasted block as a burst of already-buffered lines);
+  # otherwise we assume the user is typing and stop.
+  PASTE_WINDOW = 0.05
+
   def initialize
     @options   = parse_options
     @file_list = FileList.new(@options[:files] || [])
@@ -70,7 +76,7 @@ class CLI
 
     puts "Harness ready. Type /help for commands, /exit to quit."
     puts "Tip: type a plain message (no /) to send it directly to the model."
-    puts "Tip: end a line with a trailing backslash (\\) to continue on the next line."
+    puts "Tip: paste multiline text directly, or end a line with a backslash (\\) to continue."
     puts
 
     loop do
@@ -114,24 +120,63 @@ class CLI
     end
   end
 
+  # Reads a full command from stdin, supporting both:
+  #   * manually typed multiline input (a line ending in `\` continues), and
+  #   * pasted multiline input (a burst of lines already buffered in stdin).
+  #
+  # Pasted text is not echoed back (the terminal already shows it); instead a
+  # short summary like "[pasted N lines, Y chars]" is printed.
+  #
+  # Returns the joined command string, or nil on EOF.
+  #
+  # NOTE: the input is kept as an array of lines in @last_lines so that future
+  # work (cursor movement between lines, editing existing lines, inserting new
+  # lines) can operate on the structured form rather than a flat string.
   def get_command
     print "harness> "
     $stdout.flush
-    line = $stdin.gets
-    return nil if line.nil?
+    first = $stdin.gets
+    return nil if first.nil?
 
-    buffer = line.chomp
-    # Trailing backslash allows multiline input: strip the backslash,
-    # keep the newline, and continue reading the next line.
-    while buffer.end_with?('\\')
-      buffer = buffer[0..-2] + "\n"
-      print "... "
-      $stdout.flush
-      cont = $stdin.gets
-      return nil if cont.nil?
-      buffer += cont.chomp
+    lines  = [first.chomp]
+    pasted = false
+
+    loop do
+      last = lines.last
+      if last.end_with?('\\')
+        # Explicit continuation: strip the backslash and read the next line.
+        lines[-1] = last[0..-2]
+        print "... "
+        $stdout.flush
+        cont = $stdin.gets
+        break if cont.nil?
+        lines << cont.chomp
+      elsif paste_available?
+        # More input is already buffered — this is a paste. Keep draining it.
+        cont = $stdin.gets
+        break if cont.nil?
+        lines << cont.chomp
+        pasted = true
+      else
+        break
+      end
     end
-    buffer
+
+    if pasted
+      n     = lines.size
+      chars = lines.sum { |l| l.length }
+      puts "[pasted #{n} line#{'s' if n != 1}, #{chars} char#{'s' if chars != 1}]"
+    end
+
+    @last_lines = lines
+    lines.join("\n")
+  end
+
+  # True if more input is already available on stdin within PASTE_WINDOW.
+  # A pasted block arrives as a burst of buffered lines, so this is a reliable
+  # way to distinguish a paste from slow, character-by-character typing.
+  def paste_available?
+    IO.select([$stdin], nil, nil, PASTE_WINDOW)
   end
 
   def handle_command(input)
@@ -210,9 +255,12 @@ class CLI
         new file (user confirmation required).
 
       Multiline input:
-        End a line with a trailing backslash (\\) to continue the prompt
-        on the next line. A continuation prompt ("... ") is shown until
-        the line no longer ends with a backslash.
+        * Paste: paste a multiline block directly at the prompt. It is captured
+          as a single prompt and summarized as "[pasted N lines, Y chars]"
+          (the pasted text itself is not re-printed).
+        * Type: end a line with a trailing backslash (\\) to continue the
+          prompt on the next line. A continuation prompt ("... ") is shown
+          until the line no longer ends with a backslash.
     HELP
   end
 
