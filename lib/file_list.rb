@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'digest'
+
 require_relative 'sensitive_files'
 
 # Single source of truth for the allowed file list and ALL access control
@@ -12,6 +14,14 @@ class FileList
   # Class-level guard so callers can check before constructing/adding.
   def self.sensitive?(path)
     SensitiveFiles.sensitive?(path)
+  end
+
+  # Compute the SHA-256 hex digest of a file's current contents.
+  # Returns nil if the file does not exist.
+  def self.sha256(path)
+    return nil unless File.file?(path)
+
+    Digest::SHA256.file(path).hexdigest
   end
 
   def initialize(initial = [])

@@ -8,7 +8,9 @@ class FileReadTool < Tool
     @file_list = file_list
     super(
       name: 'file_read',
-      description: 'Reads the contents of a file. Only files in the allowed list can be read.',
+      description: 'Reads the contents of a file. Only files in the allowed list can be read. ' \
+                   'Returns the SHA-256 digest of the file along with its full contents. ' \
+                   'Pass the returned sha back to file_write to prove the file has not changed since you read it.',
       parameters: {
         type: 'object',
         properties: {
@@ -31,8 +33,13 @@ class FileReadTool < Tool
       $stdout.flush
       return "error: file not found: #{path}"
     end
-    puts "  [file_read] ✓ #{path}"
+
+    content = File.read(path)
+    sha     = FileList.sha256(path)
+
+    puts "  [file_read] ✓ #{path} (sha256: #{sha})"
     $stdout.flush
-    File.read(path)
+
+    "sha256: #{sha}\n---\n#{content}"
   end
 end

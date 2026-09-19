@@ -1,0 +1,43 @@
+# frozen_string_literal: true
+
+require_relative '../tool'
+require_relative '../file_list'
+
+class FileShaTool < Tool
+  def initialize(file_list)
+    @file_list = file_list
+    super(
+      name: 'file_sha',
+      description: 'Returns the SHA-256 digest of a file without its contents. ' \
+                   'Use this to verify a file is up to date (i.e. unchanged since you last read it) ' \
+                   'before writing, or to obtain the sha required by file_write. ' \
+                   'Only files in the allowed list can be checked.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Path to the file to hash' }
+        },
+        required: ['path']
+      }
+    )
+  end
+
+  def execute(args)
+    path = args['path']
+    unless @file_list.include?(path)
+      puts "  [file_sha] ✗ #{path} (not in allowed list)"
+      $stdout.flush
+      return "error: file '#{path}' is not in the allowed file list"
+    end
+    unless File.file?(path)
+      puts "  [file_sha] ✗ #{path} (not found)"
+      $stdout.flush
+      return "error: file not found: #{path}"
+    end
+
+    sha = FileList.sha256(path)
+    puts "  [file_sha] ✓ #{path} (sha256: #{sha})"
+    $stdout.flush
+    "sha256: #{sha}"
+  end
+end

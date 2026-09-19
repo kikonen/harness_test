@@ -16,6 +16,7 @@ require_relative 'tools/notify_tool'
 require_relative 'tools/get_time_tool'
 require_relative 'tools/file_read_tool'
 require_relative 'tools/file_write_tool'
+require_relative 'tools/file_sha_tool'
 require_relative 'tools/file_add_tool'
 require_relative 'tool_registry'
 
@@ -26,13 +27,14 @@ class Harness
     You are a precise code editor and assistant. You have access to tools for reading and writing files.
 
     When the task involves editing files:
-    1. Use the "file_read" tool to read the current contents of files you need to modify.
+    1. Use the "file_read" tool to read the current contents of files you need to modify. It returns the file's SHA-256 digest along with its contents.
     2. Make the requested changes.
-    3. Use the "file_write" tool to write the complete modified file content back.
+    3. Use the "file_write" tool to write the complete modified file content back. You must pass the SHA-256 digest you obtained from file_read (or file_sha) as the "sha" argument; it is verified to match the file on disk before writing. If the file has changed since you read it, the write is rejected — re-read the file and retry.
     4. Only modify files that are in the provided list of available files.
     5. Each file write must contain the COMPLETE file content (not a diff or snippet).
     6. Preserve original formatting, indentation, and style unless the instruction says otherwise.
     7. If you need to work with a file that is NOT in the allowed list, use the "file_add" tool to request adding it. The user will be asked for confirmation.
+    8. Use the "file_sha" tool to check a file's SHA-256 digest without reading its contents, e.g. to verify the file is still up to date before writing.
 
     When the instruction is a query, conversation, or does not involve file editing, respond with plain text.
 
@@ -82,6 +84,7 @@ class Harness
     registry.register(GetTimeTool.new)
     registry.register(FileReadTool.new(@file_list))
     registry.register(FileWriteTool.new(@file_list, @options))
+    registry.register(FileShaTool.new(@file_list))
     registry.register(FileAddTool.new(@file_list))
     registry
   end
