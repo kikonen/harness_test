@@ -1,5 +1,5 @@
 #!/bin/env bash
 . .env
-ruby harness.rb \
+bundle exec ruby harness.rb \
      --verbose \
      "$@"
