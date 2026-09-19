@@ -52,6 +52,11 @@ class Harness
   DEFAULT_OPEN_TIMEOUT = 60
   DEFAULT_READ_TIMEOUT = 600
 
+  # Ollama generation limits. -1 means "no limit" (generate until the model
+  # stops on its own). num_ctx is the context window size (65K tokens).
+  NUM_PREDICT = -1
+  NUM_CTX     = 65536
+
   attr_reader :options, :logger, :tool_registry, :file_list
 
   def initialize(options, file_list)
@@ -101,7 +106,9 @@ class Harness
       model: model,
       messages: messages,
       temperature: 0.1,
-      max_tokens: 8192
+      max_tokens: NUM_PREDICT,
+      num_predict: NUM_PREDICT,
+      num_ctx: NUM_CTX
     }
     body[:tools] = tools if tools && !tools.empty?
 
