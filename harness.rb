@@ -225,6 +225,56 @@ class FileWriteTool < Tool
   end
 end
 
+class FileAddTool < Tool
+  def initialize(allowed_files)
+    @allowed_files = allowed_files
+    super(
+      name: 'file_add',
+      description: 'Adds a file path to the allowed file list so it can be read or written. ' \
+                   'The file does not need to exist yet (useful for creating new files). ' \
+                   'The user will be prompted for confirmation before the file is added.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Path of the file to add to the allowed list' }
+        },
+        required: ['path']
+      }
+    )
+  end
+
+  def execute(args)
+    path = args['path']
+
+    if @allowed_files.include?(path)
+      puts "  [file_add] = #{path} (already in allowed list)"
+      $stdout.flush
+      return "ok: file '#{path}' is already in the allowed file list"
+    end
+
+    # Security: prompt the user for confirmation
+    puts
+    puts "  [file_add] ⚠  The model is requesting to add a file to the allowed list:"
+    puts "              #{path}"
+    print  "              Allow? (y/n): "
+    $stdout.flush
+
+    answer = $stdin.gets
+    answer = answer&.chomp&.downcase
+
+    if answer == 'y' || answer == 'yes'
+      @allowed_files << path
+      puts "  [file_add] ✓ #{path} (added to allowed list)"
+      $stdout.flush
+      "ok: file '#{path}' has been added to the allowed file list"
+    else
+      puts "  [file_add] ✗ #{path} (denied by user)"
+      $stdout.flush
+      "error: user denied adding file '#{path}' to the allowed file list"
+    end
+  end
+end
+
 class ToolRegistry
   attr_reader :tools
 
@@ -267,6 +317,7 @@ class Harness
     4. Only modify files that are in the provided list of available files.
     5. Each file write must contain the COMPLETE file content (not a diff or snippet).
     6. Preserve original formatting, indentation, and style unless the instruction says otherwise.
+    7. If you need to work with a file that is NOT in the allowed list, use the "file_add" tool to request adding it. The user will be asked for confirmation.
 
     When the instruction is a query, conversation, or does not involve file editing, respond with plain text.
 
@@ -276,9 +327,9 @@ class Harness
 
   MAX_TOOL_ITERATIONS = 100
   # After this many consecutive tool-call iterations, inject a "stop looping" message
-  TOOL_LOOP_WARN_THRESHOLD = 3
+  TOOL_LOOP_WARN_THRESHOLD = 10
   # After this many consecutive tool-call iterations, force-break and return whatever we have
-  TOOL_LOOP_HARD_LIMIT = 5
+  TOOL_LOOP_HARD_LIMIT = 20
 
   attr_reader :options, :logger, :tool_registry, :file_list
 
@@ -304,6 +355,7 @@ class Harness
     registry.register(GetTimeTool.new)
     registry.register(FileReadTool.new(@file_list))
     registry.register(FileWriteTool.new(@file_list, @options))
+    registry.register(FileAddTool.new(@file_list))
     registry
   end
 
@@ -683,7 +735,8 @@ class CLI
       Direct prompt:
         Type any text (not starting with /) to send it directly to the model.
         The model will see the list of allowed files and can use file_read /
-        file_write tools to access them.
+        file_write tools to access them. Use file_add to request adding a
+        new file (user confirmation required).
 
       Multiline input:
         End a line with a trailing backslash (\\) to continue the prompt
