@@ -59,6 +59,9 @@ class Harness
   NUM_PREDICT = -1
   NUM_CTX     = 65536
 
+  # Default reasoning effort (NOTE KI default for qwen is xhigh)
+  REASONING_EFFORT = "medium"
+
   attr_reader :options, :logger, :tool_registry, :file_list
 
   def initialize(options, file_list)
@@ -104,6 +107,12 @@ class Harness
     options[:num_ctx] || NUM_CTX
   end
 
+  # Reasoning effort: prefer the value from options (CLI flag or
+  # $HARNESS_REASONING_EFFORT), falling back to the built-in default.
+  def reasoning_effort
+    options[:reasoning_effort] || REASONING_EFFORT
+  end
+
   def make_request(base_url, model, messages, auth_token: nil, timeout: DEFAULT_READ_TIMEOUT, tools: nil)
     uri  = URI("#{base_url}/chat/completions")
     http = Net::HTTP.new(uri.host, uri.port)
@@ -116,6 +125,7 @@ class Harness
       messages: messages,
       temperature: 0.1,
       max_tokens: NUM_PREDICT,
+      reasoning_effort: reasoning_effort,
       options: {
         num_predict: NUM_PREDICT,
         num_ctx: num_ctx

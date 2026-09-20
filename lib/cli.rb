@@ -46,6 +46,7 @@ class CLI
       o.on('--token TOKEN',  'Bearer auth token [or $HARNESS_TOKEN]')            { |v| opts[:token]    = v }
       o.on('--system TEXT',  'Override system prompt')                           { |v| opts[:system]   = v }
       o.on('--num-ctx N',    'Context window size in tokens [or $HARNESS_NUM_CTX]') { |v| opts[:num_ctx] = v.to_i }
+      o.on('--reasoning-effort LEVEL', 'Reasoning effort [or $HARNESS_REASONING_EFFORT]') { |v| opts[:reasoning_effort] = v }
       o.on('-f FILE', '--file FILE', 'Add a file to the allowed file list (repeatable)') { |v| (opts[:files] ||= []) << v }
       o.on('--dry-run',      'Print edits, do not write files')                  { opts[:dry_run]  = true }
       o.on('-v', '--verbose', 'Show full prompt and raw response')               { opts[:verbose]  = true }
@@ -64,6 +65,7 @@ class CLI
     opts[:system]   ||= Harness::SYSTEM_PROMPT
     opts[:token]    ||= ENV['HARNESS_TOKEN']
     opts[:num_ctx]  ||= ENV['HARNESS_NUM_CTX']&.to_i
+    opts[:reasoning_effort] ||= ENV['HARNESS_REASONING_EFFORT']
 
     raise HarnessError, '-m / --model is required' unless opts[:model]
 
