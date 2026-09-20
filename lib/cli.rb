@@ -12,17 +12,15 @@ require_relative 'file_list'
 class CLI
   attr_reader :options, :harness, :file_list
 
-  # How long (seconds) we wait for *more* input to arrive after reading a
-  # line. If data shows up within this window we treat it as a paste (the
-  # terminal delivers a pasted block as a burst of already-buffered chars);
-  # otherwise we assume the user is typing and stop.
+  # Threshold (seconds) for the gap between consecutive input characters.
+  # If a character arrives within this window of the previous one, we assume
+  # the input is a paste (the terminal delivers a pasted block as a burst of
+  # already-buffered chars). Human typing is always slower than this.
   #
-  # Kept deliberately a little generous: over ssh / docker / some terminals a
-  # pasted burst can arrive split across the network, so a very tight window
-  # would let us "finish" the prompt after the first line and send it
-  # prematurely. 0.1s is short enough to feel instant for typing but wide
-  # enough to catch a split paste.
-  PASTE_WINDOW = 0.1
+  # 50 ms is well below the fastest sustainable typing speed (~200 ms/char
+  # for very fast typists) yet comfortably above the inter-character latency
+  # of a paste burst (typically < 5 ms).
+  PASTE_CHAR_INTERVAL = 0.05
 
   def initialize
     @options   = parse_options
@@ -138,13 +136,20 @@ class CLI
   #   * A pasted block whose last char IS a linefeed used to be misread: the
   #     line-based loop would treat the trailing newline as "input complete"
   #     and send the prompt immediately. With getc we only treat a newline as
-  #     "done" when there is genuinely no more buffered input (see
-  #     paste_available?), so a trailing linefeed no longer triggers an
+  #     "done" when the inter-character gap indicates human typing (see
+  #     PASTE_CHAR_INTERVAL), so a trailing linefeed no longer triggers an
   #     early send.
   #
   # Bracketed paste (the terminal's 200~ / 201~ markers) is NOT relied upon:
   # it is delivered inconsistently across terminals, docker and ssh, so we
-  # fall back to the "is more data already buffered?" heuristic instead.
+  # fall back to the inter-character timing heuristic instead.
+  #
+  # Paste detection (cross-platform, no IO.select):
+  #   We measure the wall-clock gap between consecutive getc calls. A pasted
+  #   block arrives as a burst — the gap between characters is typically
+  #   < 5 ms. Human typing is always slower (≥ ~50 ms even for very fast
+  #   typists). If the gap is below PASTE_CHAR_INTERVAL we flag the input as
+  #   "pasted" and keep reading after a newline; otherwise we stop.
   #
   # Pasted text is not echoed back (the terminal already shows it); instead a
   # short summary like "[pasted N lines, Y chars]" is printed.
@@ -161,10 +166,20 @@ class CLI
     lines  = []
     pasted = false
     buf    = +""
+    last_char_time = nil
 
     loop do
       c = $stdin.getc
       break if c.nil?  # EOF
+
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+      # If this character arrived quickly after the previous one, the input
+      # is almost certainly a paste burst (human typing is always slower).
+      if last_char_time && (now - last_char_time) < PASTE_CHAR_INTERVAL
+        pasted = true
+      end
+      last_char_time = now
 
       if c == "\n" || c == "\r"
         line = buf
@@ -181,12 +196,11 @@ class CLI
 
         lines << line
 
-        # A newline ends the input UNLESS more data is already buffered (a
-        # paste burst). This is the key fix: a trailing linefeed no longer
-        # causes an immediate send, because we only stop when there is truly
-        # nothing more waiting on stdin.
-        break unless paste_available?
-        pasted = true
+        # A newline ends the input UNLESS we are in paste mode (characters
+        # are arriving in a burst). This is the key fix: a trailing linefeed
+        # no longer causes an immediate send, because we only stop when the
+        # inter-character gap indicates human typing.
+        break unless pasted
       elsif c == "\t"
         buf << "  "
       else
@@ -208,17 +222,6 @@ class CLI
 
     @last_lines = lines
     lines.join("\n")
-  end
-
-  # True if more input is already available on stdin within PASTE_WINDOW.
-  # A pasted block arrives as a burst of buffered chars, so this is a reliable
-  # way to distinguish a paste from slow, character-by-character typing.
-  #
-  # NOTE: IO.select returns nil (or an empty array) on timeout depending on
-  # the Ruby build, so we must not use its return value directly as a boolean.
-  def paste_available?
-    ready = IO.select([$stdin], nil, nil, PASTE_WINDOW)
-    !ready.nil? && ready.include?($stdin)
   end
 
   def handle_command(input)
