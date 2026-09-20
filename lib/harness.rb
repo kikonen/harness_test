@@ -51,8 +51,8 @@ class Harness
   # Generous HTTP timeouts for local / slow model servers.
   # open_timeout: how long to wait for the TCP connection to establish.
   # read_timeout: how long to wait between bytes of the response (per read).
-  DEFAULT_OPEN_TIMEOUT = 60
-  DEFAULT_READ_TIMEOUT = 600
+  DEFAULT_OPEN_TIMEOUT = 120
+  DEFAULT_READ_TIMEOUT = 1800
 
   # Ollama generation limits. -1 means "no limit" (generate until the model
   # stops on its own). num_ctx is the context window size (65K tokens).
