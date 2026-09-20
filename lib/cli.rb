@@ -2,6 +2,7 @@
 
 require 'optparse'
 require 'fileutils'
+require 'io/console'
 
 require_relative 'harness_error'
 require_relative 'harness'
@@ -20,6 +21,12 @@ class CLI
   # 50 ms is well below the fastest sustainable typing speed (~200 ms/char
   # for very fast typists) yet comfortably above the inter-character latency
   # of a paste burst (typically < 5 ms).
+  #
+  # NOTE: this heuristic only works if characters are delivered one at a
+  # time, which requires raw terminal mode (see get_command_raw). In the
+  # default buffered mode the kernel hands us the whole paste in a single
+  # read, so every character "arrives" at the same instant and everything
+  # looks like a paste.
   PASTE_CHAR_INTERVAL = 0.05
 
   def initialize
@@ -128,28 +135,25 @@ class CLI
   #   * manually typed multiline input (a line ending in `\` continues), and
   #   * pasted multiline input (a burst of chars already buffered in stdin).
   #
-  # We read character-by-character with getc rather than line-by-line with
-  # gets. This matters because:
-  #   * gets blocks until it sees a newline, so a paste that does NOT end in a
-  #     linefeed would hang the prompt; getc lets us finish on EOF / a final
-  #     char without a trailing newline.
-  #   * A pasted block whose last char IS a linefeed used to be misread: the
-  #     line-based loop would treat the trailing newline as "input complete"
-  #     and send the prompt immediately. With getc we only treat a newline as
-  #     "done" when the inter-character gap indicates human typing (see
-  #     PASTE_CHAR_INTERVAL), so a trailing linefeed no longer triggers an
-  #     early send.
+  # Paste detection relies on the wall-clock gap between consecutive
+  # characters: a pasted block arrives as a burst (typically < 5 ms between
+  # chars) while human typing is always slower (>= ~50 ms). This only works
+  # if characters are delivered one at a time, which requires raw terminal
+  # mode (IO/console): in the default buffered mode the kernel hands us the
+  # whole paste in one read, so every character "arrives" at the same
+  # instant and everything looks like a paste.
   #
-  # Bracketed paste (the terminal's 200~ / 201~ markers) is NOT relied upon:
-  # it is delivered inconsistently across terminals, docker and ssh, so we
-  # fall back to the inter-character timing heuristic instead.
+  # Raw mode disables the terminal's line discipline, so we must handle
+  # things the kernel used to do for us:
+  #   * ^C no longer raises SIGINT — we see it as \x03 and handle it
+  #     explicitly (clear the current input; quit if the input is empty),
+  #   * ^D no longer signals EOF — we see it as \x04 and treat it as EOF,
+  #   * echo is off — we echo each character ourselves,
+  #   * backspace is not processed — we handle \x7f / \x08 ourselves.
   #
-  # Paste detection (cross-platform, no IO.select):
-  #   We measure the wall-clock gap between consecutive getc calls. A pasted
-  #   block arrives as a burst — the gap between characters is typically
-  #   < 5 ms. Human typing is always slower (≥ ~50 ms even for very fast
-  #   typists). If the gap is below PASTE_CHAR_INTERVAL we flag the input as
-  #   "pasted" and keep reading after a newline; otherwise we stop.
+  # When stdin is not a tty (piped input) we fall back to plain getc; the
+  # timing heuristic is meaningless there, so a newline simply ends the
+  # input.
   #
   # Pasted text is not echoed back (the terminal already shows it); instead a
   # short summary like "[pasted N lines, Y chars]" is printed.
@@ -163,44 +167,111 @@ class CLI
     print "harness> "
     $stdout.flush
 
+    if $stdin.tty? && $stdin.respond_to?(:raw)
+      get_command_raw
+    else
+      get_command_fallback
+    end
+  end
+
+  # Interactive input in raw terminal mode: characters arrive one at a time
+  # (no kernel buffering), so the inter-character timing heuristic for paste
+  # detection works. We must emulate the line discipline ourselves (see
+  # get_command for the full list).
+  def get_command_raw
     lines  = []
     pasted = false
     buf    = +""
     last_char_time = nil
 
+    $stdin.raw do
+      loop do
+        c = $stdin.getc
+        break if c.nil?
+
+        case c
+        when "\x03" # ^C: raw mode suppresses SIGINT, so handle it here.
+          if buf.empty? && lines.empty?
+            puts
+            raise Interrupt  # empty input + ^C => quit
+          end
+          buf    = +""
+          lines  = []
+          pasted = false
+          last_char_time = nil
+          print "^C\nharness> "
+          $stdout.flush
+          next
+        when "\x04" # ^D: raw mode suppresses EOF, treat it as end of input.
+          break
+        when "\n", "\r"
+          line = buf
+          buf  = +""
+          print "\n"
+          $stdout.flush
+
+          # Explicit continuation: a trailing backslash means "keep going",
+          # regardless of whether more data is buffered.
+          if line.end_with?('\\')
+            lines << line[0..-2]
+            print "... "
+            $stdout.flush
+            next
+          end
+
+          lines << line
+
+          # A newline ends the input UNLESS we are in paste mode (characters
+          # are arriving in a burst). This is the key fix: a trailing
+          # linefeed no longer causes an immediate send, because we only
+          # stop when the inter-character gap indicates human typing.
+          break unless pasted
+        when "\x7f", "\x08" # backspace: raw mode does not erase for us.
+          next if buf.empty?
+          buf.chop
+          print "\b \b"
+          $stdout.flush
+          next
+        else
+          buf << (c == "\t" ? "  " : c)
+          print c
+          $stdout.flush
+        end
+
+        # If this character arrived quickly after the previous one, the input
+        # is almost certainly a paste burst (human typing is always slower).
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        if last_char_time && (now - last_char_time) < PASTE_CHAR_INTERVAL
+          pasted = true
+        end
+        last_char_time = now
+      end
+    end
+
+    finish_command(lines, buf, pasted)
+  end
+
+  # Non-interactive fallback (piped stdin, no tty): plain getc, a newline
+  # ends the input, no paste detection (meaningless without a tty).
+  def get_command_fallback
+    lines = []
+    buf   = +""
+
     loop do
       c = $stdin.getc
-      break if c.nil?  # EOF
-
-      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-
-      # If this character arrived quickly after the previous one, the input
-      # is almost certainly a paste burst (human typing is always slower).
-      if last_char_time && (now - last_char_time) < PASTE_CHAR_INTERVAL
-        pasted = true
-      end
-      last_char_time = now
+      break if c.nil?
 
       if c == "\n" || c == "\r"
         line = buf
         buf  = +""
 
-        # Explicit continuation: a trailing backslash means "keep going",
-        # regardless of whether more data is buffered.
         if line.end_with?('\\')
           lines << line[0..-2]
-          print "... "
-          $stdout.flush
           next
         end
 
         lines << line
-
-        # A newline ends the input UNLESS we are in paste mode (characters
-        # are arriving in a burst). This is the key fix: a trailing linefeed
-        # no longer causes an immediate send, because we only stop when the
-        # inter-character gap indicates human typing.
-        break unless pasted
+        break
       elsif c == "\t"
         buf << "  "
       else
@@ -208,10 +279,13 @@ class CLI
       end
     end
 
-    # Include a trailing line that had no final newline (a paste without a
-    # trailing linefeed, or EOF mid-line).
-    lines << buf unless buf.empty?
+    finish_command(lines, buf, false)
+  end
 
+  # Shared tail for both input modes: append a trailing line without a final
+  # newline, summarize pastes, and return the joined command (or nil on EOF).
+  def finish_command(lines, buf, pasted)
+    lines << buf unless buf.empty?
     return nil if lines.empty?
 
     if pasted
@@ -307,6 +381,10 @@ class CLI
         * Type: end a line with a trailing backslash (\\) to continue the
           prompt on the next line. A continuation prompt ("... ") is shown
           until the line no longer ends with a backslash.
+
+      Keys:
+        Ctrl+C   Clear the current input (quits if the input is empty)
+        Ctrl+D   Finish the input (sends it if non-empty, quits if empty)
     HELP
   end
 
