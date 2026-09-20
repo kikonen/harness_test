@@ -2,3 +2,4 @@
 .emacs*
 *.log
 *_copy.rb
+.harness_history
