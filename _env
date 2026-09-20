@@ -1,5 +1,6 @@
+export HARNESS_TOKEN=
 export HARNESS_BASE_URL=http://localhost:11434/v1
 export HARNESS_MODEL=qwen3.8-27b-ki-32k:latest
 export HARNESS_NUM_CTX=32768
 export HARNESS_REASONING_EFFORT=medium
-export HARNESS_TOKEN=
+export HARNESS_HISTORY_FILE=.harness_history

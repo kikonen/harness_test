@@ -2,7 +2,7 @@
 
 require 'optparse'
 require 'fileutils'
-require 'io/console'
+require 'reline'
 
 require_relative 'harness_error'
 require_relative 'harness'
@@ -13,21 +13,12 @@ require_relative 'file_list'
 class CLI
   attr_reader :options, :harness, :file_list
 
-  # Threshold (seconds) for the gap between consecutive input characters.
-  # If a character arrives within this window of the previous one, we assume
-  # the input is a paste (the terminal delivers a pasted block as a burst of
-  # already-buffered chars). Human typing is always slower than this.
-  #
-  # 50 ms is well below the fastest sustainable typing speed (~200 ms/char
-  # for very fast typists) yet comfortably above the inter-character latency
-  # of a paste burst (typically < 5 ms).
-  #
-  # NOTE: this heuristic only works if characters are delivered one at a
-  # time, which requires raw terminal mode (see get_command_raw). In the
-  # default buffered mode the kernel hands us the whole paste in a single
-  # read, so every character "arrives" at the same instant and everything
-  # looks like a paste.
-  PASTE_CHAR_INTERVAL = 0.005
+  # Where command history is persisted (best-effort).
+  # Kept in the current working directory so that different harness
+  # instances (i.e. different working directories) do not mix their history.
+  # NOTE: if you change the default or add new env vars read here, remember
+  # to update the corresponding exports in the _env file.
+  HISTORY_FILE = ENV['HARNESS_HISTORY_FILE'] || File.join(Dir.pwd, '.harness_history')
 
   def initialize
     @options   = parse_options
@@ -82,10 +73,7 @@ class CLI
   end
 
   def run
-    trap('INT') do
-      puts "\nGoodbye."
-      exit 0
-    end
+    setup_history
 
     puts "Harness ready. Type /help for commands, /exit to quit."
     puts "Tip: type a plain message (no /) to send it directly to the model."
@@ -99,6 +87,8 @@ class CLI
 
       begin
         handle_command(input)
+      rescue Interrupt
+        puts "\n  [interrupted]"
       rescue HarnessError => e
         puts "  [error] #{e.message}"
       rescue LLMError => e
@@ -117,6 +107,7 @@ class CLI
       puts
     end
 
+    save_history
     puts "Goodbye."
   end
 
@@ -133,165 +124,83 @@ class CLI
     end
   end
 
-  # Reads a full command from stdin, supporting both:
-  #   * manually typed multiline input (a line ending in `\` continues), and
-  #   * pasted multiline input (a burst of chars already buffered in stdin).
+  # Reads a full command from stdin using Reline (the same library IRB uses).
+  # Reline handles everything the old hand-rolled raw-mode code tried to do:
+  #   * multiline input (a line ending in `\` continues; unbalanced quotes
+  #     also continue),
+  #   * pasted multiline text (bracketed paste — newlines inside a paste are
+  #     inserted into the buffer instead of sending the input),
+  #   * line editing (arrows, kill, word movement),
+  #   * history (up/down arrows), persisted to HISTORY_FILE.
   #
-  # Paste detection relies on the wall-clock gap between consecutive
-  # characters: a pasted block arrives as a burst (typically < 5 ms between
-  # chars) while human typing is always slower (>= ~50 ms). This only works
-  # if characters are delivered one at a time, which requires raw terminal
-  # mode (IO/console): in the default buffered mode the kernel hands us the
-  # whole paste in one read, so every character "arrives" at the same
-  # instant and everything looks like a paste.
+  # Ctrl+C raises Interrupt (rescued in the run loop); Ctrl+D on an empty
+  # line returns nil (EOF => quit).
   #
-  # Raw mode disables the terminal's line discipline, so we must handle
-  # things the kernel used to do for us:
-  #   * ^C no longer raises SIGINT — we see it as \x03 and handle it
-  #     explicitly (clear the current input; quit if the input is empty),
-  #   * ^D no longer signals EOF — we see it as \x04 and treat it as EOF,
-  #   * echo is off — we echo each character ourselves,
-  #   * backspace is not processed — we handle \x7f / \x08 ourselves.
-  #
-  # When stdin is not a tty (piped input) we fall back to plain getc; the
-  # timing heuristic is meaningless there, so a newline simply ends the
-  # input.
-  #
-  # Pasted text is not echoed back (the terminal already shows it); instead a
-  # short summary like "[pasted N lines, Y chars]" is printed.
-  #
-  # Returns the joined command string, or nil on EOF.
-  #
-  # NOTE: the input is kept as an array of lines in @last_lines so that future
-  # work (cursor movement between lines, editing existing lines, inserting new
+  # The input is kept as an array of lines in @last_lines so that future work
+  # (cursor movement between lines, editing existing lines, inserting new
   # lines) can operate on the structured form rather than a flat string.
   def get_command
-    print "harness> "
+    puts "[... to EOF input]> "
     $stdout.flush
 
-    if $stdin.tty? && $stdin.respond_to?(:raw)
-      get_command_raw
-    else
-      get_command_fallback
+    text = Reline.readmultiline(
+      "",
+      add_history: true,
+      rprompt: "") do |multiline_input|
+      # HACK KI this is BAD, but qwen wrote itself into corner
+      multiline_input.split.last == "..."
     end
+
+    return nil if text.nil?
+
+    @last_lines = text.split("\n", -1)
+    text
   end
 
-  # Interactive input in raw terminal mode: characters arrive one at a time
-  # (no kernel buffering), so the inter-character timing heuristic for paste
-  # detection works. We must emulate the line discipline ourselves (see
-  # get_command for the full list).
-  def get_command_raw
-    lines  = []
-    pasted = false
-    buf    = +""
-    last_char_time = nil
+  # Load persisted history into Reline (best-effort).
+  #
+  # Reline has no built-in history persistence, so we implement it ourselves.
+  # The history file is line-based: one entry per line, with backslashes and
+  # newlines escaped (see escape_history_entry / unescape_history_entry), so
+  # multiline entries survive the round trip.
+  def setup_history
+    return unless File.exist?(HISTORY_FILE)
 
-    $stdin.raw do
-      loop do
-        c = $stdin.getc
-        break if c.nil?
+    Reline::HISTORY.clear
+    File.foreach(HISTORY_FILE) do |line|
+      entry = line.chomp
+      next if entry.empty?
 
-        case c
-        when "\x03" # ^C: raw mode suppresses SIGINT, so handle it here.
-          if buf.empty? && lines.empty?
-            puts
-            raise Interrupt  # empty input + ^C => quit
-          end
-          buf    = +""
-          lines  = []
-          pasted = false
-          last_char_time = nil
-          print "^C\nharness> "
-          $stdout.flush
-          next
-        when "\x04" # ^D: raw mode suppresses EOF, treat it as end of input.
-          break
-        when "\n", "\r"
-          line = buf
-          buf  = +""
-          print "\n"
-          $stdout.flush
+      Reline::HISTORY << unescape_history_entry(entry)
+    end
+  rescue StandardError => e
+    puts e.message
+    # Corrupt or unreadable history — start fresh.
+  end
 
-          # Explicit continuation: a trailing backslash means "keep going",
-          # regardless of whether more data is buffered.
-          if line.end_with?('\\')
-            lines << line[0..-2]
-            print "... "
-            $stdout.flush
-            next
-          end
-
-          lines << line
-
-          # A newline ends the input UNLESS we are in paste mode (characters
-          # are arriving in a burst). This is the key fix: a trailing
-          # linefeed no longer causes an immediate send, because we only
-          # stop when the inter-character gap indicates human typing.
-          break unless pasted
-        when "\x7f", "\x08" # backspace: raw mode does not erase for us.
-          next if buf.empty?
-          buf.chop
-          print "\b \b"
-          $stdout.flush
-          next
-        else
-          buf << (c == "\t" ? "  " : c)
-          print c
-          $stdout.flush
-        end
-
-        # If this character arrived quickly after the previous one, the input
-        # is almost certainly a paste burst (human typing is always slower).
-        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        if last_char_time && (now - last_char_time) < PASTE_CHAR_INTERVAL
-          pasted = true
-        end
-        last_char_time = now
+  # Persist history on exit (best-effort).
+  def save_history
+    File.open(HISTORY_FILE, 'w') do |f|
+      Reline::HISTORY.each do |entry|
+        f.puts escape_history_entry(entry)
       end
     end
-
-    finish_command(lines, buf)
+  rescue StandardError => e
+    puts e.message
+    # Ignore — history persistence is best-effort.
   end
 
-  # Non-interactive fallback (piped stdin, no tty): plain getc, a newline
-  # ends the input, no paste detection (meaningless without a tty).
-  def get_command_fallback
-    lines = []
-    buf   = +""
-
-    loop do
-      c = $stdin.getc
-      break if c.nil?
-
-      if c == "\n" || c == "\r"
-        line = buf
-        buf  = +""
-
-        if line.end_with?('\\')
-          lines << line[0..-2]
-          next
-        end
-
-        lines << line
-        break
-      elsif c == "\t"
-        buf << "  "
-      else
-        buf << c
-      end
-    end
-
-    finish_command(lines, buf)
+  # Encode a (possibly multiline) history entry as a single line:
+  # backslashes first, then newlines.
+  def escape_history_entry(text)
+    text.gsub('\\', '\\\\').gsub("\n", '\\n')
   end
 
-  # Shared tail for both input modes: append a trailing line without a final
-  # newline, summarize pastes, and return the joined command (or nil on EOF).
-  def finish_command(lines, buf)
-    lines << buf unless buf.empty?
-    return nil if lines.empty?
-
-    @last_lines = lines
-    lines.join("\n")
+  # Decode a single history line back into the original entry.
+  # Single-pass scan so that e.g. a literal `\n` in the original text
+  # (escaped as `\\n`) is not mistaken for a newline.
+  def unescape_history_entry(line)
+    line.gsub(/\\(.)/) { |m| m[1] == 'n' ? "\n" : m[1] }
   end
 
   def handle_command(input)
@@ -370,22 +279,21 @@ class CLI
         new file (user confirmation required).
 
       Multiline input:
-        * Paste: paste a multiline block directly at the prompt. It is captured
-          as a single prompt and summarized as "[pasted N lines, Y chars]"
-          (the pasted text itself is not re-printed). A trailing linefeed in
-          the pasted text will NOT cause an early send.
+        * Paste: paste a multiline block directly at the prompt — it is
+          captured as a single prompt (Reline's bracketed paste).
         * Type: end a line with a trailing backslash (\\) to continue the
-          prompt on the next line. A continuation prompt ("... ") is shown
-          until the line no longer ends with a backslash.
+          prompt on the next line (unbalanced quotes also continue).
 
       Keys:
-        Ctrl+C   Clear the current input (quits if the input is empty)
-        Ctrl+D   Finish the input (sends it if non-empty, quits if empty)
+        Ctrl+C   Cancel the current input (or interrupt a running request)
+        Ctrl+D   Quit (on an empty prompt)
+        Up/Down  Browse command history
     HELP
   end
 
   def run_direct_prompt(text)
     puts
+    #puts "[LLM]"
     harness.run_prompt(text)
     puts
   end
