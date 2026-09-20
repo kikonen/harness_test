@@ -12,6 +12,8 @@
 
 LOG_FILE = ENV['HARNESS_LOG_FILE'] || 'harness.log'
 
+require 'debug'
+
 require_relative 'lib/cli'
 
 # -- Entry point ----------------------------------------------------------

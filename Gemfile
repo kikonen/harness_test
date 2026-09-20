@@ -7,3 +7,5 @@ source 'https://rubygems.org'
 # "will no longer be part of the default gems" warnings.
 gem 'logger'
 gem 'fiddle'
+
+gem 'debug'
