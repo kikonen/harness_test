@@ -27,7 +27,7 @@ class CLI
   # default buffered mode the kernel hands us the whole paste in a single
   # read, so every character "arrives" at the same instant and everything
   # looks like a paste.
-  PASTE_CHAR_INTERVAL = 0.05
+  PASTE_CHAR_INTERVAL = 0.005
 
   def initialize
     @options   = parse_options
@@ -250,7 +250,7 @@ class CLI
       end
     end
 
-    finish_command(lines, buf, pasted)
+    finish_command(lines, buf)
   end
 
   # Non-interactive fallback (piped stdin, no tty): plain getc, a newline
@@ -281,20 +281,14 @@ class CLI
       end
     end
 
-    finish_command(lines, buf, false)
+    finish_command(lines, buf)
   end
 
   # Shared tail for both input modes: append a trailing line without a final
   # newline, summarize pastes, and return the joined command (or nil on EOF).
-  def finish_command(lines, buf, pasted)
+  def finish_command(lines, buf)
     lines << buf unless buf.empty?
     return nil if lines.empty?
-
-    if pasted
-      n     = lines.size
-      chars = lines.sum { |l| l.length }
-      puts "[pasted #{n} line#{'s' if n != 1}, #{chars} char#{'s' if chars != 1}]"
-    end
 
     @last_lines = lines
     lines.join("\n")
