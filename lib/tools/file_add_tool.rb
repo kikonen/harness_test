@@ -9,12 +9,13 @@ class FileAddTool < Tool
     super(
       name: 'file_add',
       description: 'Adds a file path to the allowed file list so it can be read or written. ' \
+                   'Paths are relative to the harness working directory. ' \
                    'The file does not need to exist yet (useful for creating new files). ' \
                    'The user will be prompted for confirmation before the file is added.',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Path of the file to add to the allowed list' }
+          path: { type: 'string', description: 'Path of the file to add to the allowed list (relative to the working directory)' }
         },
         required: ['path']
       }
@@ -22,7 +23,7 @@ class FileAddTool < Tool
   end
 
   def execute(args)
-    path = args['path']
+    path = @file_list.resolve(args['path'])
 
     # Security: sensitive files (e.g. .env*) are never allowed, no prompt.
     if @file_list.sensitive?(path)

@@ -8,7 +8,12 @@
 #   ruby harness.rb -m qwen2.5-coder:32b
 #   ruby harness.rb -m my-model --base-url http://192.168.1.10:8000/v1 --token sk-abc123
 #   ruby harness.rb -m my-model -f src/app.rb -f lib/util.rb
+#   ruby harness.rb -m my-model -d /path/to/project -f src/app.rb
 #   HARNESS_TOKEN=sk-abc123 ruby harness.rb -m gpt-4o
+#
+# All file access (allowed file list, /file command, file tools, log and
+# history files) is relative to the working directory (-d / --workdir,
+# default: the current directory).
 
 LOG_FILE = ENV['HARNESS_LOG_FILE'] || 'harness.log'
 

@@ -9,13 +9,14 @@ class FileShaTool < Tool
     super(
       name: 'file_sha',
       description: 'Returns the SHA-256 digest of a file without its contents. ' \
+                   'Paths are relative to the harness working directory. ' \
                    'Use this to verify a file is up to date (i.e. unchanged since you last read it) ' \
                    'before writing, or to obtain the sha required by file_write. ' \
                    'Only files in the allowed list can be checked.',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Path to the file to hash' }
+          path: { type: 'string', description: 'Path to the file to hash (relative to the working directory)' }
         },
         required: ['path']
       }
@@ -23,7 +24,7 @@ class FileShaTool < Tool
   end
 
   def execute(args)
-    path = args['path']
+    path = @file_list.resolve(args['path'])
     unless @file_list.include?(path)
       puts "  [file_sha] ✗ #{path} (not in allowed list)"
       $stdout.flush

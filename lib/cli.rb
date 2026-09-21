@@ -14,15 +14,15 @@ class CLI
   attr_reader :options, :harness, :file_list
 
   # Where command history is persisted (best-effort).
-  # Kept in the current working directory so that different harness
+  # Kept in the harness working directory so that different harness
   # instances (i.e. different working directories) do not mix their history.
   # NOTE: if you change the default or add new env vars read here, remember
   # to update the corresponding exports in the _env file.
-  HISTORY_FILE = ENV['HARNESS_HISTORY_FILE'] || File.join(Dir.pwd, '.harness_history')
+  HISTORY_FILE = ENV['HARNESS_HISTORY_FILE'] || '.harness_history'
 
   def initialize
     @options   = parse_options
-    @file_list = FileList.new(@options[:files] || [])
+    @file_list = FileList.new(@options[:files] || [], workdir: @options[:workdir])
     @harness   = Harness.new(@options, @file_list)
   end
 
@@ -38,6 +38,7 @@ class CLI
       o.on('--system TEXT',  'Override system prompt')                           { |v| opts[:system]   = v }
       o.on('--num-ctx N',    'Context window size in tokens [or $HARNESS_NUM_CTX]') { |v| opts[:num_ctx] = v.to_i }
       o.on('--reasoning-effort LEVEL', 'Reasoning effort [or $HARNESS_REASONING_EFFORT]') { |v| opts[:reasoning_effort] = v }
+      o.on('-d DIR', '--workdir DIR', 'Working directory; all file paths are relative to it [or $HARNESS_WORKDIR]') { |v| opts[:workdir] = v }
       o.on('-f FILE', '--file FILE', 'Add a file to the allowed file list (repeatable)') { |v| (opts[:files] ||= []) << v }
       o.on('--dry-run',      'Print edits, do not write files')                  { opts[:dry_run]  = true }
       o.on('-v', '--verbose', 'Show full prompt and raw response')               { opts[:verbose]  = true }
@@ -57,8 +58,15 @@ class CLI
     opts[:token]    ||= ENV['HARNESS_TOKEN']
     opts[:num_ctx]  ||= ENV['HARNESS_NUM_CTX']&.to_i
     opts[:reasoning_effort] ||= ENV['HARNESS_REASONING_EFFORT']
+    opts[:workdir]  ||= ENV['HARNESS_WORKDIR'] || Dir.pwd
 
     raise HarnessError, '-m / --model is required' unless opts[:model]
+
+    # Resolve the working directory and make sure it exists.
+    opts[:workdir] = File.expand_path(opts[:workdir])
+    unless File.directory?(opts[:workdir])
+      raise HarnessError, "working directory does not exist: #{opts[:workdir]}"
+    end
 
     # Security: never allow sensitive files (e.g. .env*) into the list.
     (opts[:files] || []).each do |f|
@@ -76,6 +84,7 @@ class CLI
     setup_history
 
     puts "Harness ready. Type /help for commands, /exit to quit."
+    puts "Working directory: #{@file_list.workdir}"
     puts "Tip: type a plain message (no /) to send it directly to the model."
     puts "Tip: paste multiline text directly, or end a line with a backslash (\\) to continue."
     puts
@@ -112,6 +121,12 @@ class CLI
   end
 
   private
+
+  # History file lives in the working directory so different harness
+  # instances (different working directories) do not mix their history.
+  def history_file
+    File.join(@file_list.workdir, HISTORY_FILE)
+  end
 
   def show_file_list
     if @file_list.empty?
@@ -164,10 +179,10 @@ class CLI
   # newlines escaped (see escape_history_entry / unescape_history_entry), so
   # multiline entries survive the round trip.
   def setup_history
-    return unless File.exist?(HISTORY_FILE)
+    return unless File.exist?(history_file)
 
     Reline::HISTORY.clear
-    File.foreach(HISTORY_FILE) do |line|
+    File.foreach(history_file) do |line|
       entry = line.chomp
       next if entry.empty?
 
@@ -180,7 +195,7 @@ class CLI
 
   # Persist history on exit (best-effort).
   def save_history
-    File.open(HISTORY_FILE, 'w') do |f|
+    File.open(history_file, 'w') do |f|
       Reline::HISTORY.each do |entry|
         f.puts escape_history_entry(entry)
       end
@@ -210,9 +225,10 @@ class CLI
     case input
     when /\A\/file\s+(.+)\z/
       pattern = $1.strip
-      # Support globs: expand the pattern against the filesystem.
+      # Support globs: expand the pattern against the filesystem,
+      # relative to the working directory.
       if pattern =~ /[\\\*\?\[\]]/
-        matches = Dir.glob(pattern).sort
+        matches = Dir.glob(File.join(@file_list.workdir, pattern)).sort
         if matches.empty?
           puts "No files match: #{pattern}"
         else

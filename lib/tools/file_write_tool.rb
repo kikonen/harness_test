@@ -11,6 +11,7 @@ class FileWriteTool < Tool
     super(
       name: 'file_write',
       description: 'Writes content to a file. Only files in the allowed list can be written. ' \
+                   'Paths are relative to the harness working directory. ' \
                    'The content must be the COMPLETE file content. ' \
                    'If the file already exists you must also provide the sha256 digest of the file ' \
                    'as it was when you last read it (from file_read or file_sha); it is verified to ' \
@@ -19,7 +20,7 @@ class FileWriteTool < Tool
       parameters: {
         type: 'object',
         properties: {
-          path:    { type: 'string', description: 'Path to the file to write' },
+          path:    { type: 'string', description: 'Path to the file to write (relative to the working directory)' },
           content: { type: 'string', description: 'Complete content to write to the file' },
           sha:     { type: 'string', description: 'SHA-256 digest of the file as last read (from file_read or file_sha); must match the file on disk. Leave empty only when creating a new file that does not exist yet.' }
         },
@@ -29,7 +30,7 @@ class FileWriteTool < Tool
   end
 
   def execute(args)
-    path    = args['path']
+    path    = @file_list.resolve(args['path'])
     content = args['content']
     sha     = args['sha']
 

@@ -8,6 +8,10 @@ require_relative 'sensitive_files'
 # around it (e.g. sensitive-file blocking). Every code path that adds,
 # checks, or inspects files (CLI options, the /file command, the file_add
 # tool, file_read / file_write tools) goes through this class.
+#
+# All paths are resolved relative to the working directory (@workdir), so
+# the harness can operate on a project tree without the user having to
+# cd into it first.
 class FileList
   include Enumerable
 
@@ -24,9 +28,18 @@ class FileList
     Digest::SHA256.file(path).hexdigest
   end
 
-  def initialize(initial = [])
-    @files = []
+  attr_reader :workdir
+
+  def initialize(initial = [], workdir: Dir.pwd)
+    @workdir = File.expand_path(workdir)
+    @files   = []
     initial.each { |f| add(f) }
+  end
+
+  # Resolve a path relative to the working directory (absolute paths are
+  # returned unchanged).
+  def resolve(path)
+    File.expand_path(path, @workdir)
   end
 
   # Add a file to the list. Returns a symbol describing the outcome:
@@ -34,6 +47,7 @@ class FileList
   #   :duplicate — file was already in the list
   #   :blocked  — file is sensitive and can never be added
   def add(path)
+    path = resolve(path)
     return :blocked   if sensitive?(path)
     return :duplicate if include?(path)
 
@@ -46,7 +60,7 @@ class FileList
   end
 
   def include?(path)
-    @files.include?(path)
+    @files.include?(resolve(path))
   end
 
   def clear

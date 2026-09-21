@@ -9,12 +9,13 @@ class FileReadTool < Tool
     super(
       name: 'file_read',
       description: 'Reads the contents of a file. Only files in the allowed list can be read. ' \
+                   'Paths are relative to the harness working directory. ' \
                    'Returns the SHA-256 digest of the file along with its full contents. ' \
                    'Pass the returned sha back to file_write to prove the file has not changed since you read it.',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Path to the file to read' }
+          path: { type: 'string', description: 'Path to the file to read (relative to the working directory)' }
         },
         required: ['path']
       }
@@ -22,7 +23,7 @@ class FileReadTool < Tool
   end
 
   def execute(args)
-    path = args['path']
+    path = @file_list.resolve(args['path'])
     unless @file_list.include?(path)
       puts "  [file_read] ✗ #{path} (not in allowed list)"
       $stdout.flush

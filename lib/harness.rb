@@ -35,6 +35,7 @@ class Harness
     6. Preserve original formatting, indentation, and style unless the instruction says otherwise.
     7. If you need to work with a file that is NOT in the allowed list, use the "file_add" tool to request adding it. The user will be asked for confirmation.
     8. Use the "file_sha" tool to check a file's SHA-256 digest without reading its contents, e.g. to verify the file is still up to date before writing.
+    9. All file paths are relative to the harness working directory (shown in the available files list).
 
     When the instruction is a query, conversation, or does not involve file editing, respond with plain text.
 
@@ -73,7 +74,10 @@ class Harness
   end
 
   def build_logger
-    logger = Logger.new(LOG_FILE)
+    # Log file lives in the working directory so different harness
+    # instances (different working directories) do not share a log.
+    log_file = File.join(@file_list.workdir, LOG_FILE)
+    logger = Logger.new(log_file)
     logger.formatter = proc { |severity, datetime, _progname, msg|
       "#{datetime.strftime('%Y-%m-%d %H:%M:%S')} [#{severity}] #{msg}\n"
     }
@@ -95,9 +99,9 @@ class Harness
   def build_user_prompt(file_list, instruction)
     files = file_list.to_a
     if files.empty?
-      "## Instruction\n\n#{instruction}\n"
+      "## Working Directory\n\n#{file_list.workdir}\n\n## Instruction\n\n#{instruction}\n"
     else
-      "## Available Files\n\n#{files.map { |f| "- #{f}" }.join("\n")}\n\n## Instruction\n\n#{instruction}\n"
+      "## Working Directory\n\n#{file_list.workdir}\n\n## Available Files\n\n#{files.map { |f| "- #{f}" }.join("\n")}\n\n## Instruction\n\n#{instruction}\n"
     end
   end
 
