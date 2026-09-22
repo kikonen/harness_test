@@ -11,6 +11,7 @@ require_relative 'harness_error'
 require_relative 'spinner'
 require_relative 'tool'
 require_relative 'file_list'
+require_relative 'session'
 require_relative 'tools/echo_tool'
 require_relative 'tools/notify_tool'
 require_relative 'tools/get_time_tool'
@@ -63,13 +64,14 @@ class Harness
   # Default reasoning effort (NOTE KI default for qwen is xhigh)
   REASONING_EFFORT = "medium"
 
-  attr_reader :options, :logger, :tool_registry, :file_list
+  attr_reader :options, :logger, :tool_registry, :file_list, :session
 
   def initialize(options, file_list)
     @options       = options
     @file_list     = file_list
     @logger        = build_logger
     @tool_registry = build_tool_registry
+    @session       = Session.new(options[:system])
     @spinner       = nil
   end
 
@@ -190,11 +192,12 @@ class Harness
     end
   end
 
-  def call_llm(base_url, model, system, user, auth_token: nil, timeout: DEFAULT_READ_TIMEOUT)
-    messages = [
-      { role: 'system', content: system },
-      { role: 'user',   content: user   }
-    ]
+  # Sends the current session message chain to the LLM (with the tool loop).
+  # On success the final assistant reply is appended to the session and the
+  # stats are recorded. On failure the session is left untouched (the pending
+  # user message stays in the chain) so it can be retried with #retry.
+  def call_llm
+    messages = @session.messages.dup
 
     tools = tool_registry.empty? ? nil : tool_registry.to_openai
 
@@ -210,7 +213,7 @@ class Harness
       iteration += 1
       raise ToolLoopError, "exceeded max tool iterations (#{MAX_TOOL_ITERATIONS})" if iteration > MAX_TOOL_ITERATIONS
 
-      data    = make_request(base_url, model, messages, auth_token: auth_token, timeout: timeout, tools: tools)
+      data    = make_request(options[:base_url], options[:model], messages, auth_token: options[:token], tools: tools)
       message = data[:choices][0][:message]
 
       # Accumulate usage stats
@@ -283,14 +286,20 @@ class Harness
 
       # No tool calls — final response
       elapsed = (Time.now - start_time).round(2)
+      stats = {
+        elapsed_seconds: elapsed,
+        iterations:      iteration,
+        usage:           total_usage
+      }
+
+      # Commit the successful exchange to the session.
+      @session.add_assistant(message[:content])
+      @session.record_stats(stats)
+
       return {
         reasoning: message[:reasoning],
         content:   message[:content],
-        stats: {
-          elapsed_seconds: elapsed,
-          iterations:      iteration,
-          usage:           total_usage
-        }
+        stats:     stats
       }
     end
   end
@@ -310,6 +319,9 @@ class Harness
     puts "  [#{parts.join(' | ')}]"
   end
 
+  # Appends a new user prompt to the session and sends the chain to the LLM.
+  # If the request fails, the prompt stays in the session (pending) so it can
+  # be re-sent with #retry.
   def run_prompt(instruction)
     user_prompt = build_user_prompt(@file_list, instruction)
 
@@ -319,16 +331,32 @@ class Harness
       logger.info("--- #{options[:model]} @ #{options[:base_url]} ---")
     end
 
+    @session.add_user(user_prompt)
+    send_session
+  end
+
+  # Re-sends the current session chain (e.g. after a failed request).
+  # Requires a pending user prompt at the end of the chain.
+  def retry
+    unless @session.pending?
+      raise HarnessError, 'nothing to retry — no pending prompt in the session (send a prompt first)'
+    end
+
+    logger.info("--- retry: re-sending session chain (#{@session.messages.size} messages) ---")
+    send_session
+  end
+
+  private
+
+  # Sends the session chain to the LLM and prints the response.
+  def send_session
     spinner = Spinner.new("Sending to #{options[:model]}")
     @spinner = spinner
     spinner.start
 
     response = nil
     begin
-      response = call_llm(
-        options[:base_url], options[:model], options[:system], user_prompt,
-        auth_token: options[:token]
-      )
+      response = call_llm
     ensure
       spinner.stop
       @spinner = nil

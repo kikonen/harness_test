@@ -102,6 +102,7 @@ class CLI
         puts "  [error] #{e.message}"
       rescue LLMError => e
         puts "  [LLM error] #{e.message}"
+        puts "  (the prompt is kept in the session — type /retry to re-send it)"
       rescue ToolLoopError => e
         puts "  [tool loop] #{e.message}"
       rescue StandardError => e
@@ -269,6 +270,16 @@ class CLI
       @file_list.clear
       puts "File list cleared."
 
+    when /\A\/retry\Z/
+      harness.retry
+
+    when /\A\/session\Z/
+      puts harness.session.summary
+
+    when /\A\/session-clear\Z/
+      harness.session.clear
+      puts "Session cleared (conversation history reset)."
+
     when /\A\/help\Z/
       show_help
 
@@ -292,6 +303,9 @@ class CLI
       Available commands:
         /file <path>   Add a file to the allowed file list (globs like src/*.rb work)
         /clear         Remove all files from the list
+        /retry         Re-send the session message chain (after a failed request)
+        /session       Show a summary of the current session
+        /session-clear Reset the session (drop all conversation messages)
         /tools         List available tools
         /help          Show this help
         /exit          Exit the harness
@@ -301,6 +315,12 @@ class CLI
         The model will see the list of allowed files and can use file_read /
         file_write tools to access them. Use file_add to request adding a
         new file (user confirmation required).
+
+      Session:
+        Prompts are accumulated in a session, so the model sees the whole
+        conversation. If a request to the LLM fails, the prompt stays in the
+        session — use /retry to re-send the chain. /session shows a summary,
+        /session-clear starts a fresh conversation.
 
       Multiline input:
         * Paste: paste a multiline block directly at the prompt — it is
