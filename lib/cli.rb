@@ -24,6 +24,7 @@ class CLI
     @options   = parse_options
     @file_list = FileList.new(@options[:files] || [], workdir: @options[:workdir])
     @harness   = Harness.new(@options, @file_list)
+    resume_from_cli if @options[:resume]
   end
 
   def parse_options
@@ -40,6 +41,7 @@ class CLI
       o.on('--reasoning-effort LEVEL', 'Reasoning effort [or $HARNESS_REASONING_EFFORT]') { |v| opts[:reasoning_effort] = v }
       o.on('-d DIR', '--workdir DIR', 'Working directory; all file paths are relative to it [or $HARNESS_WORKDIR]') { |v| opts[:workdir] = v }
       o.on('-f FILE', '--file FILE', 'Add a file to the allowed file list (repeatable)') { |v| (opts[:files] ||= []) << v }
+      o.on('-r ID', '--resume ID', 'Resume a saved session by id (see /sessions)') { |v| opts[:resume] = v }
       o.on('--dry-run',      'Print edits, do not write files')                  { opts[:dry_run]  = true }
       o.on('-v', '--verbose', 'Show full prompt and raw response')               { opts[:verbose]  = true }
       o.on('-h', '--help')                                                        { puts o; exit }
@@ -118,10 +120,41 @@ class CLI
     end
 
     save_history
+    id = auto_save_session
     puts "Goodbye."
+    if id
+      puts "Session saved as #{id} (#{harness.sessions_dir}/#{id}.json)."
+      puts "Resume it later with: #{resume_command(id)}"
+    end
   end
 
   private
+
+  # Resume a saved session given via -r / --resume (best-effort: a missing
+  # or ambiguous id raises HarnessError, which the entry point reports).
+  def resume_from_cli
+    id   = @options[:resume]
+    path = @harness.resume_session(id)
+    puts "Resumed session #{File.basename(path, '.json')} (conversation and file list restored — see /session)."
+  end
+
+  # Auto-save the session on exit (best-effort). Returns the session id,
+  # or nil if there was nothing to save or saving failed.
+  def auto_save_session
+    return nil if @harness.session.empty?
+
+    @harness.save_session
+  rescue StandardError => e
+    puts "  [warning] could not auto-save session: #{e.message}"
+    nil
+  end
+
+  # Build the command line to resume a saved session in a new harness run.
+  def resume_command(id)
+    parts = ['ruby harness.rb', "-m #{@options[:model]}", "--resume #{id}"]
+    parts << "-d #{@file_list.workdir}" unless @file_list.workdir == Dir.pwd
+    parts.join(' ')
+  end
 
   # History file lives in the working directory so different harness
   # instances (different working directories) do not mix their history.
@@ -284,6 +317,7 @@ class CLI
       id = harness.save_session
       puts "Session saved as #{id} (#{harness.sessions_dir}/#{id}.json)"
       puts "Resume it later with: /resume #{id}"
+      puts "  or from the command line: #{resume_command(id)}"
 
     when /\A\/resume\s+(.+)\Z/
       id = $1.strip
@@ -325,7 +359,7 @@ class CLI
       puts "  #{s[:id]}  saved #{s[:saved_at].strftime('%Y-%m-%d %H:%M:%S')}  " \
            "#{s[:messages]} messages, #{s[:files]} file(s)  [workdir: #{s[:workdir]}]"
     end
-    puts "Resume one with: /resume <id>"
+    puts "Resume one with: /resume <id>  (or: ruby harness.rb -m <model> --resume <id>)"
   end
 
   def show_help
@@ -356,12 +390,14 @@ class CLI
         /session-clear starts a fresh conversation.
 
       Saving / resuming sessions:
-        /save stores the current session (conversation history AND the
-        allowed file list) as a JSON file in .sessions/ inside the working
-        directory. Each saved session gets an id — the first 8 hex chars of
-        the SHA-256 digest of the saved data. /sessions lists all saved
-        sessions; /resume <id> restores the conversation and file list
-        (the id may be abbreviated as long as it is unambiguous).
+        The session (conversation history AND the allowed file list) is
+        auto-saved to .sessions/ inside the working directory when the
+        harness exits — the resume command is printed on exit. /save stores
+        it manually at any time. Each saved session gets an id — the first
+        8 hex chars of the SHA-256 digest of the saved data. /sessions lists
+        all saved sessions; /resume <id> restores the conversation and file
+        list (the id may be abbreviated as long as it is unambiguous).
+        From the command line: ruby harness.rb -m <model> --resume <id>
 
       Multiline input:
         * Paste: paste a multiline block directly at the prompt — it is
