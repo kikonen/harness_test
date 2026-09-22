@@ -6,6 +6,8 @@ require 'json'
 require 'logger'
 require 'time'
 require 'thread'
+require 'digest'
+require 'fileutils'
 
 require_relative 'harness_error'
 require_relative 'spinner'
@@ -64,6 +66,11 @@ class Harness
   # Default reasoning effort (NOTE KI default for qwen is xhigh)
   REASONING_EFFORT = "medium"
 
+  # Saved sessions live in this directory (inside the working directory).
+  SESSIONS_DIR = '.sessions'
+  # How many hex chars of the SHA-256 digest are used as the session id.
+  SESSION_ID_LENGTH = 8
+
   attr_reader :options, :logger, :tool_registry, :file_list, :session
 
   def initialize(options, file_list)
@@ -117,6 +124,141 @@ class Harness
   # $HARNESS_REASONING_EFFORT), falling back to the built-in default.
   def reasoning_effort
     options[:reasoning_effort] || REASONING_EFFORT
+  end
+
+  # -- Session persistence ------------------------------------------------
+  #
+  # Sessions are saved as JSON files in the .sessions directory inside the
+  # working directory. Each session is identified by the first
+  # SESSION_ID_LENGTH hex chars of the SHA-256 digest of the saved file
+  # contents, so the id is stable and unique per saved session.
+
+  # Directory where saved sessions are stored (inside the working directory).
+  def sessions_dir
+    File.join(@file_list.workdir, SESSIONS_DIR)
+  end
+
+  # Save the current session (conversation + file list) to disk.
+  # Returns the session id (short SHA-256 prefix).
+  def save_session
+    FileUtils.mkdir_p(sessions_dir)
+
+    data = @session.to_h(@file_list)
+    json = JSON.generate(data)
+
+    id = Digest::SHA256.hexdigest(json)[0, SESSION_ID_LENGTH]
+    path = File.join(sessions_dir, "#{id}.json")
+
+    File.write(path, json)
+    logger.info("session saved: #{id} (#{path})")
+    id
+  end
+
+  # Resume a saved session by id (full or abbreviated SHA-256 prefix).
+  # Restores the conversation chain and the file list.
+  def resume_session(id)
+    id = id.to_s.strip
+    raise HarnessError, 'usage: /resume <session-id>' if id.empty?
+
+    path = find_session_file(id)
+    raise HarnessError, "no saved session matching '#{id}' (see /sessions)" unless path
+
+    data = JSON.parse(File.read(path), symbolize_names: true)
+    @session.restore(data, @file_list)
+    logger.info("session resumed: #{File.basename(path, '.json')} (#{path})")
+    path
+  end
+
+  # List saved sessions, newest first. Returns an array of hashes:
+  #   { id:, path:, saved_at:, messages:, files:, workdir: }
+  # Corrupt/unreadable entries are skipped rather than aborting the listing.
+  def list_sessions
+    return [] unless File.directory?(sessions_dir)
+
+    Dir.glob(File.join(sessions_dir, '*.json')).sort_by { |p| File.mtime(p) }.reverse.map do |path|
+      data = JSON.parse(File.read(path), symbolize_names: true)
+      {
+        id:       File.basename(path, '.json'),
+        path:     path,
+        saved_at: File.mtime(path),
+        messages: (data[:messages] || []).size,
+        files:    (data[:files] || []).size,
+        workdir:  data[:workdir]
+      }
+    rescue JSON::ParserError, StandardError
+      nil
+    end.compact
+  end
+
+  # -- Public prompt API (called by the CLI with an explicit receiver) ----
+
+  # Appends a new user prompt to the session and sends the chain to the LLM.
+  # If the request fails, the prompt stays in the session (pending) so it can
+  # be re-sent with #retry.
+  def run_prompt(instruction)
+    user_prompt = build_user_prompt(@file_list, instruction)
+
+    if options[:verbose]
+      logger.info("--- system ---\n#{options[:system]}")
+      logger.info("--- user ---\n#{user_prompt}")
+      logger.info("--- #{options[:model]} @ #{options[:base_url]} ---")
+    end
+
+    @session.add_user(user_prompt)
+    send_session
+  end
+
+  # Re-sends the current session chain (e.g. after a failed request).
+  # Requires a pending user prompt at the end of the chain.
+  def retry
+    unless @session.pending?
+      raise HarnessError, 'nothing to retry — no pending prompt in the session (send a prompt first)'
+    end
+
+    logger.info("--- retry: re-sending session chain (#{@session.messages.size} messages) ---")
+    send_session
+  end
+
+  # Sends the session chain to the LLM and prints the response.
+  def send_session
+    spinner = Spinner.new("Sending to #{options[:model]}")
+    @spinner = spinner
+    spinner.start
+
+    response = nil
+    begin
+      response = call_llm
+    ensure
+      spinner.stop
+      @spinner = nil
+    end
+
+    if options[:verbose]
+      logger.info("--- reasoning ---\n#{response[:reasoning]}")
+      logger.info("--- response ---\n#{response[:content]}")
+    end
+
+    puts response[:content]
+    print_stats(response[:stats])
+  end
+
+  private
+
+  # Find a saved session file by (abbreviated) id: the id must be a prefix
+  # of the file name (without extension). Raises HarnessError on ambiguity.
+  def find_session_file(id)
+    raise HarnessError, "invalid session id: #{id}" unless id =~ /\A[0-9a-fA-F]+\Z/
+
+    matches = Dir.glob(File.join(sessions_dir, '*.json')).select do |p|
+      File.basename(p, '.json').downcase.start_with?(id.downcase)
+    end
+
+    case matches.size
+    when 0 then nil
+    when 1 then matches.first
+    else
+      raise HarnessError, "ambiguous session id '#{id}' — matches: #{matches.map { |p| File.basename(p, '.json') }.join(', ')}"
+    end
   end
 
   def make_request(base_url, model, messages, auth_token: nil, timeout: DEFAULT_READ_TIMEOUT, tools: nil)
@@ -317,57 +459,5 @@ class Harness
       parts << "📊 #{usage[:prompt_tokens]}→#{usage[:completion_tokens]} tokens (#{usage[:total_tokens]} total)"
     end
     puts "  [#{parts.join(' | ')}]"
-  end
-
-  # Appends a new user prompt to the session and sends the chain to the LLM.
-  # If the request fails, the prompt stays in the session (pending) so it can
-  # be re-sent with #retry.
-  def run_prompt(instruction)
-    user_prompt = build_user_prompt(@file_list, instruction)
-
-    if options[:verbose]
-      logger.info("--- system ---\n#{options[:system]}")
-      logger.info("--- user ---\n#{user_prompt}")
-      logger.info("--- #{options[:model]} @ #{options[:base_url]} ---")
-    end
-
-    @session.add_user(user_prompt)
-    send_session
-  end
-
-  # Re-sends the current session chain (e.g. after a failed request).
-  # Requires a pending user prompt at the end of the chain.
-  def retry
-    unless @session.pending?
-      raise HarnessError, 'nothing to retry — no pending prompt in the session (send a prompt first)'
-    end
-
-    logger.info("--- retry: re-sending session chain (#{@session.messages.size} messages) ---")
-    send_session
-  end
-
-  private
-
-  # Sends the session chain to the LLM and prints the response.
-  def send_session
-    spinner = Spinner.new("Sending to #{options[:model]}")
-    @spinner = spinner
-    spinner.start
-
-    response = nil
-    begin
-      response = call_llm
-    ensure
-      spinner.stop
-      @spinner = nil
-    end
-
-    if options[:verbose]
-      logger.info("--- reasoning ---\n#{response[:reasoning]}")
-      logger.info("--- response ---\n#{response[:content]}")
-    end
-
-    puts response[:content]
-    print_stats(response[:stats])
   end
 end

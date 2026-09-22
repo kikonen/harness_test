@@ -3,3 +3,4 @@
 *.log
 *_copy.rb
 .harness_history
+.sessions

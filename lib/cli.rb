@@ -280,6 +280,20 @@ class CLI
       harness.session.clear
       puts "Session cleared (conversation history reset)."
 
+    when /\A\/save\Z/
+      id = harness.save_session
+      puts "Session saved as #{id} (#{harness.sessions_dir}/#{id}.json)"
+      puts "Resume it later with: /resume #{id}"
+
+    when /\A\/resume\s+(.+)\Z/
+      id = $1.strip
+      path = harness.resume_session(id)
+      puts "Session #{File.basename(path, '.json')} resumed."
+      puts "  (conversation and file list restored — see /session)"
+
+    when /\A\/sessions\Z/
+      list_sessions
+
     when /\A\/help\Z/
       show_help
 
@@ -298,6 +312,22 @@ class CLI
     end
   end
 
+  # List saved sessions (newest first).
+  def list_sessions
+    sessions = harness.list_sessions
+    if sessions.empty?
+      puts "No saved sessions (#{harness.sessions_dir})."
+      return
+    end
+
+    puts "Saved sessions (#{sessions.size}):"
+    sessions.each do |s|
+      puts "  #{s[:id]}  saved #{s[:saved_at].strftime('%Y-%m-%d %H:%M:%S')}  " \
+           "#{s[:messages]} messages, #{s[:files]} file(s)  [workdir: #{s[:workdir]}]"
+    end
+    puts "Resume one with: /resume <id>"
+  end
+
   def show_help
     puts <<~HELP
       Available commands:
@@ -306,6 +336,9 @@ class CLI
         /retry         Re-send the session message chain (after a failed request)
         /session       Show a summary of the current session
         /session-clear Reset the session (drop all conversation messages)
+        /save          Save the session (conversation + file list) to .sessions/
+        /resume <id>   Resume a saved session by its id (see /sessions)
+        /sessions      List saved sessions
         /tools         List available tools
         /help          Show this help
         /exit          Exit the harness
@@ -321,6 +354,14 @@ class CLI
         conversation. If a request to the LLM fails, the prompt stays in the
         session — use /retry to re-send the chain. /session shows a summary,
         /session-clear starts a fresh conversation.
+
+      Saving / resuming sessions:
+        /save stores the current session (conversation history AND the
+        allowed file list) as a JSON file in .sessions/ inside the working
+        directory. Each saved session gets an id — the first 8 hex chars of
+        the SHA-256 digest of the saved data. /sessions lists all saved
+        sessions; /resume <id> restores the conversation and file list
+        (the id may be abbreviated as long as it is unambiguous).
 
       Multiline input:
         * Paste: paste a multiline block directly at the prompt — it is

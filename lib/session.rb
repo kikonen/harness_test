@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'time'
+
 # -- Session --------------------------------------------------------------
 #
 # Holds the conversation message chain (OpenAI chat format) for the current
@@ -7,9 +9,13 @@
 # messages build on previous context. If a request to the LLM fails, the
 # chain is kept intact so it can be retried (/retry). The session can be
 # inspected (/session) and reset (/session-clear).
+#
+# The allowed file list logically belongs to the session (it is part of the
+# working context), so it is serialized/restored together with the session
+# (see #to_h / #restore).
 
 class Session
-  attr_reader :messages, :created_at
+  attr_reader :messages, :created_at, :system_prompt
 
   def initialize(system_prompt)
     @system_prompt = system_prompt
@@ -76,6 +82,37 @@ class Session
       lines << 'No successful requests yet.'
     end
     lines.join("\n")
+  end
+
+  # Serialize the session (including the file list) into a plain hash that
+  # can be JSON-encoded. The file list is part of the session state, so it
+  # is saved/restored together with the conversation.
+  def to_h(file_list)
+    {
+      version:       1,
+      created_at:    created_at.iso8601,
+      system_prompt: @system_prompt,
+      user_prompts:  @user_prompts,
+      last_stats:    @last_stats,
+      messages:      @messages,
+      workdir:       file_list.workdir,
+      files:         file_list.to_a
+    }
+  end
+
+  # Restore the session from a hash (as produced by #to_h, after a JSON
+  # round trip with symbolized names). Also restores the given file list:
+  # it is cleared and re-populated from the saved file list.
+  def restore(data, file_list)
+    @system_prompt = data[:system_prompt]
+    @created_at    = Time.parse(data[:created_at])
+    @user_prompts  = data[:user_prompts] || 0
+    @last_stats    = data[:last_stats]
+    @messages      = data[:messages] || [system_message]
+
+    file_list.clear
+    (data[:files] || []).each { |f| file_list.add(f) }
+    self
   end
 
   private
