@@ -89,6 +89,8 @@ class CLI
     puts "Working directory: #{@file_list.workdir}"
     puts "Tip: type a plain message (no /) to send it directly to the model."
     puts "Tip: paste multiline text directly, or end a line with a backslash (\\) to continue."
+    puts "Tip: to finish a multiline prompt, type ... on its own line."
+    puts "Tip: a line starting with / is a command (executed immediately)."
     puts
 
     loop do
@@ -109,6 +111,7 @@ class CLI
         puts "  [tool loop] #{e.message}"
       rescue StandardError => e
         puts "  [unexpected error] #{e.class}: #{e.message}"
+        puts e.backtrace.join("\n")
         puts "  (harness continues — type /exit to quit)"
       end
 
@@ -182,22 +185,51 @@ class CLI
   #   * line editing (arrows, kill, word movement),
   #   * history (up/down arrows), persisted to HISTORY_FILE.
   #
+  # The block below is Reline's "keep reading" predicate. Two independent
+  # termination logics coexist:
+  #   * Quick slash-command detection: if the first line starts with "/"
+  #     (first character, no stripping) and the last line does NOT end with
+  #     "\", the input is presumed to be a command to be executed now
+  #     (reading stops).
+  #   * "..." terminator: if the last stripped line is exactly "...", the
+  #     multiline user prompt is finished (reading stops). This is the
+  #     general way to terminate a multiline prompt until a better
+  #     mechanism is available; it also works for slash commands.
+  # Otherwise Reline keeps reading lines (backslash continuation, unbalanced
+  # quotes, etc.).
+  #
   # Ctrl+C raises Interrupt (rescued in the run loop); Ctrl+D on an empty
   # line returns nil (EOF => quit).
   #
   # The input is kept as an array of lines in @last_lines so that future work
   # (cursor movement between lines, editing existing lines, inserting new
   # lines) can operate on the structured form rather than a flat string.
+  PASTE_LF_INTERVAL = 0.05
   def get_command
-    puts "[... to EOF input]> "
+    puts "[harness] > "
     $stdout.flush
 
+    last_lf_time = nil #Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
     text = Reline.readmultiline(
-      "",
+      "  ",
       add_history: true,
-      rprompt: "") do |multiline_input|
-      # HACK KI this is BAD, but qwen wrote itself into corner
-      multiline_input.split.last == "..."
+      rprompt: "  ") do |multiline_input|
+
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+      if multiline_input.start_with?("/")
+        true
+      elsif multiline_input.end_with?("\\\n")
+        false
+      else
+        # HACK KI this is BAD, but qwen wrote itself into corner
+        #multiline_input.split.last == "..."
+        #puts "diff: #{(now - last_lf_time)}" if last_lf_time
+        pasted = !last_lf_time || (now - last_lf_time) < PASTE_LF_INTERVAL
+        last_lf_time = now if pasted
+        !pasted
+      end
     end
 
     return nil if text.nil?
@@ -224,6 +256,7 @@ class CLI
     end
   rescue StandardError => e
     puts e.message
+    puts e.backtrace.join("\n")
     # Corrupt or unreadable history — start fresh.
   end
 
@@ -236,6 +269,7 @@ class CLI
     end
   rescue StandardError => e
     puts e.message
+    puts e.backtrace.join("\n")
     # Ignore — history persistence is best-effort.
   end
 
@@ -256,11 +290,11 @@ class CLI
     input = input.strip
     return if input.empty?
 
-    # TEMPORARY HACK: slash commands are single-line. If the input is
-    # multiline, take just the first line as the command for now.
-    if input.start_with?('/')
-      input = input.lines.first.to_s.strip
-    end
+    # Multiline slash commands are flattened: every linefeed (with
+    # surrounding whitespace) becomes a single space, so the command
+    # dispatch sees one line of text. Direct prompts keep their original
+    # formatting (linefeeds preserved).
+    input = input.gsub(/\s*\n\s*/, ' ') if input.start_with?('/')
 
     case input
     when /\A\/file\s+(.+)\Z/
@@ -337,8 +371,8 @@ class CLI
     when /\A\/tools\Z/
       show_tools
 
-    when /\A\/\S*\Z/
-      puts "Unknown command: #{input}. Type /help for available commands."
+    when /\A\/.*\Z/
+      puts "Unknown command: #{input}.\n----\nType /help for available commands."
 
     else
       # Non-slash input: direct prompt to the model
@@ -414,7 +448,7 @@ class CLI
 
   def run_direct_prompt(text)
     puts
-    #puts "[LLM]"
+    #puts "-------[LLM]---------\n#{text}\n------------------"
     harness.run_prompt(text)
     puts
   end
