@@ -24,21 +24,22 @@ class FileReadTool < Tool
 
   def execute(args)
     path = @file_list.resolve(args['path'])
+    shown = @file_list.display_path(path)
     unless @file_list.include?(path)
-      puts "  [file_read] ✗ #{path} (not in allowed list)"
+      puts "  [file_read] ✗ #{shown} (not in allowed list)"
       $stdout.flush
-      return "error: file '#{path}' is not in the allowed file list"
+      return "error: file '#{shown}' is not in the allowed file list"
     end
     unless File.file?(path)
-      puts "  [file_read] ✗ #{path} (not found)"
+      puts "  [file_read] ✗ #{shown} (not found)"
       $stdout.flush
-      return "error: file not found: #{path}"
+      return "error: file not found: #{shown}"
     end
 
     content = File.read(path)
     sha     = FileList.sha256(path)
 
-    puts "  [file_read] ✓ #{path} (sha256: #{sha})"
+    puts "  [file_read] ✓ #{shown} (sha256: #{sha})"
     $stdout.flush
 
     "sha256: #{sha}\n---\n#{content}"

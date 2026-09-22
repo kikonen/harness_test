@@ -23,19 +23,20 @@ class FileAddTool < Tool
   end
 
   def execute(args)
-    path = @file_list.resolve(args['path'])
+    path  = @file_list.resolve(args['path'])
+    shown = @file_list.display_path(path)
 
     # Security: sensitive files (e.g. .env*) are never allowed, no prompt.
     if @file_list.sensitive?(path)
-      puts "  [file_add] ✗ #{path} (blocked: sensitive file)"
+      puts "  [file_add] ✗ #{shown} (blocked: sensitive file)"
       $stdout.flush
-      return "error: file '#{path}' is blocked and can never be added to the allowed file list"
+      return "error: file '#{shown}' is blocked and can never be added to the allowed file list"
     end
 
     if @file_list.include?(path)
-      puts "  [file_add] = #{path} (already in allowed list)"
+      puts "  [file_add] = #{shown} (already in allowed list)"
       $stdout.flush
-      return "ok: file '#{path}' is already in the allowed file list"
+      return "ok: file '#{shown}' is already in the allowed file list"
     end
 
     # Determine whether the file already exists on disk.
@@ -44,7 +45,7 @@ class FileAddTool < Tool
     # Security: prompt the user for confirmation
     puts
     puts "  [file_add] ⚠  The model is requesting to add a file to the allowed list:"
-    puts "              #{path}  (#{file_status})"
+    puts "              #{shown}  (#{file_status})"
     print  "              Allow? (y/n): "
     $stdout.flush
 
@@ -53,13 +54,13 @@ class FileAddTool < Tool
 
     if answer == 'y' || answer == 'yes'
       @file_list.add(path)
-      puts "  [file_add] ✓ #{path} (#{file_status} — added to allowed list)"
+      puts "  [file_add] ✓ #{shown} (#{file_status} — added to allowed list)"
       $stdout.flush
-      "ok: file '#{path}' (#{file_status}) has been added to the allowed file list"
+      "ok: file '#{shown}' (#{file_status}) has been added to the allowed file list"
     else
-      puts "  [file_add] ✗ #{path} (#{file_status} — denied by user)"
+      puts "  [file_add] ✗ #{shown} (#{file_status} — denied by user)"
       $stdout.flush
-      "error: user denied adding file '#{path}' (#{file_status}) to the allowed file list"
+      "error: user denied adding file '#{shown}' (#{file_status}) to the allowed file list"
     end
   end
 end

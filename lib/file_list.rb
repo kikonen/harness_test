@@ -42,6 +42,16 @@ class FileList
     File.expand_path(path, @workdir)
   end
 
+  # Display form of a path: relative to the working directory when the
+  # file is inside it (e.g. "lib/cli.rb"), otherwise the full path.
+  # Use this for ALL user-facing output so that files in the workdir are
+  # shown as short paths and files elsewhere are clearly distinguishable.
+  def display_path(path)
+    path   = resolve(path)
+    prefix = @workdir + File::SEPARATOR
+    path.start_with?(prefix) ? path.sub(prefix, '') : path
+  end
+
   # Add a file to the list. Returns a symbol describing the outcome:
   #   :added    — file was added
   #   :duplicate — file was already in the list

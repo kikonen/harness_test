@@ -134,7 +134,7 @@ class CLI
     else
       puts "Files (#{@file_list.size}):"
       @file_list.each_with_index do |f, i|
-        puts "  #{i + 1}. #{f}"
+        puts "  #{i + 1}. #{@file_list.display_path(f)}"
       end
     end
   end
@@ -234,26 +234,28 @@ class CLI
         else
           added = 0
           matches.each do |path|
+            shown = @file_list.display_path(path)
             case @file_list.add(path)
             when :blocked
-              puts "  [security] ✗ #{path} (blocked: sensitive file)"
+              puts "  [security] ✗ #{shown} (blocked: sensitive file)"
             when :duplicate
-              puts "Already in list: #{path}"
+              puts "Already in list: #{shown}"
             when :added
               added += 1
-              puts "Added: #{path}"
+              puts "Added: #{shown}"
             end
           end
           puts "Added #{added} file#{'s' if added != 1} matching #{pattern}."
         end
       else
+        shown = @file_list.display_path(pattern)
         case @file_list.add(pattern)
         when :blocked
-          puts "  [security] ✗ #{pattern} (blocked: sensitive file)"
+          puts "  [security] ✗ #{shown} (blocked: sensitive file)"
         when :duplicate
-          puts "Already in list: #{pattern}"
+          puts "Already in list: #{shown}"
         when :added
-          puts "Added: #{pattern}"
+          puts "Added: #{shown}"
         end
       end
 

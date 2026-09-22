@@ -31,13 +31,14 @@ class FileWriteTool < Tool
 
   def execute(args)
     path    = @file_list.resolve(args['path'])
+    shown   = @file_list.display_path(path)
     content = args['content']
     sha     = args['sha']
 
     unless @file_list.include?(path)
-      puts "  [file_write] ✗ #{path} (not in allowed list)"
+      puts "  [file_write] ✗ #{shown} (not in allowed list)"
       $stdout.flush
-      return "error: file '#{path}' is not in the allowed file list"
+      return "error: file '#{shown}' is not in the allowed file list"
     end
 
     current_sha = FileList.sha256(path)
@@ -45,31 +46,31 @@ class FileWriteTool < Tool
     if current_sha
       # File exists: the provided sha must match the file on disk.
       if sha.nil? || sha.empty?
-        puts "  [file_write] ✗ #{path} (missing sha)"
+        puts "  [file_write] ✗ #{shown} (missing sha)"
         $stdout.flush
         return "error: 'sha' is required for an existing file — pass the SHA-256 digest returned by file_read or file_sha"
       end
 
       unless current_sha == sha
-        puts "  [file_write] ✗ #{path} (sha mismatch)"
+        puts "  [file_write] ✗ #{shown} (sha mismatch)"
         $stdout.flush
-        return "error: sha mismatch for '#{path}' — the file has changed since you read it. " \
+        return "error: sha mismatch for '#{shown}' — the file has changed since you read it. " \
                "Current sha256: #{current_sha}. Re-read the file with file_read and retry."
       end
     end
     # If current_sha is nil the file does not exist yet (new file) — allow the write.
 
     if @options[:dry_run]
-      puts "  [file_write] ~ #{path} (dry run, #{content.length} chars)"
+      puts "  [file_write] ~ #{shown} (dry run, #{content.length} chars)"
       $stdout.flush
-      return "DRY RUN: would write #{content.length} chars to #{path}"
+      return "DRY RUN: would write #{content.length} chars to #{shown}"
     end
 
     dir = File.dirname(path)
     FileUtils.mkdir_p(dir) unless dir == '.'
     File.write(path, content)
-    puts "  [file_write] ✓ #{path} (#{content.length} chars)"
+    puts "  [file_write] ✓ #{shown} (#{content.length} chars)"
     $stdout.flush
-    "ok: wrote #{content.length} chars to #{path}"
+    "ok: wrote #{content.length} chars to #{shown}"
   end
 end

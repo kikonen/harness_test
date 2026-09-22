@@ -101,7 +101,7 @@ class Harness
     if files.empty?
       "## Working Directory\n\n#{file_list.workdir}\n\n## Instruction\n\n#{instruction}\n"
     else
-      "## Working Directory\n\n#{file_list.workdir}\n\n## Available Files\n\n#{files.map { |f| "- #{f}" }.join("\n")}\n\n## Instruction\n\n#{instruction}\n"
+      "## Working Directory\n\n#{file_list.workdir}\n\n## Available Files\n\n#{files.map { |f| "- #{file_list.display_path(f)}" }.join("\n")}\n\n## Instruction\n\n#{instruction}\n"
     end
   end
 
