@@ -227,7 +227,7 @@ class CLI
         #multiline_input.split.last == "..."
         #puts "diff: #{(now - last_lf_time)}" if last_lf_time
         pasted = !last_lf_time || (now - last_lf_time) < PASTE_LF_INTERVAL
-        last_lf_time = now if pasted
+        last_lf_time = now #if pasted
         !pasted
       end
     end
