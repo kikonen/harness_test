@@ -222,8 +222,14 @@ class CLI
     input = input.strip
     return if input.empty?
 
+    # TEMPORARY HACK: slash commands are single-line. If the input is
+    # multiline, take just the first line as the command for now.
+    if input.start_with?('/')
+      input = input.lines.first.to_s.strip
+    end
+
     case input
-    when /\A\/file\s+(.+)\z/
+    when /\A\/file\s+(.+)\Z/
       pattern = $1.strip
       # Support globs: expand the pattern against the filesystem,
       # relative to the working directory.
@@ -259,20 +265,20 @@ class CLI
         end
       end
 
-    when /\A\/clear\z/
+    when /\A\/clear\Z/
       @file_list.clear
       puts "File list cleared."
 
-    when /\A\/help\z/
+    when /\A\/help\Z/
       show_help
 
-    when /\A\/exit\z/
+    when /\A\/exit\Z/
       @exiting = true
 
-    when /\A\/tools\z/
+    when /\A\/tools\Z/
       show_tools
 
-    when /\A\/\S*\z/
+    when /\A\/\S*\Z/
       puts "Unknown command: #{input}. Type /help for available commands."
 
     else
