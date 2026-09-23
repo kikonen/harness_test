@@ -66,33 +66,7 @@ end
 # -- Harness --------------------------------------------------------------
 
 class Harness
-  SYSTEM_PROMPT = <<~'TEXT'
-    You are a precise code editor and assistant. You have access to tools for reading and writing files.
-
-    When the task involves editing files:
-    1. Use the "file_list" tool to discover files matching a glob pattern under the working directory (e.g. "lib/**/*.rb"). Matched files are NOT added to the allowed list.
-    2. Use the "file_search" tool to find where something is defined or used (grep-like regex search across files). Use this before reading files to locate relevant code.
-    3. Use the "file_read" tool to read the current contents of files you need to modify. It returns the file's SHA-256 digest along with its contents.
-    4. Make the requested changes.
-    5. Use the "file_write" tool to write the complete modified file content back. You must pass the SHA-256 digest you obtained from file_read (or file_sha) as the "sha" argument; it is verified to match the file on disk before writing. If the file has changed since you read it, the write is rejected — re-read the file and retry.
-    6. Alternatively, use the "file_patch" tool to apply a targeted unified diff patch to a file. This is preferred for small edits (a few lines) in large files — it avoids rewriting the entire file. The diff must be in standard unified diff format (--- / +++ / @@ hunks). You must also pass the SHA-256 digest.
-    7. Only modify files that are in the provided list of available files.
-    8. Each file_write must contain the COMPLETE file content (not a diff or snippet). file_patch is the exception — it takes a diff.
-    9. Preserve original formatting, indentation, and style unless the instruction says otherwise.
-    10. If you need to work with a file that is NOT in the allowed list, use the "file_add" tool to request adding it. The user will be asked for confirmation.
-    11. Use the "file_sha" tool to check a file's SHA-256 digest without reading its contents, e.g. to verify the file is still up to date before writing.
-    12. Use the "file_rename" tool to rename/move a file. Both the old and the new path must be in the allowed file list (add the new path with "file_add" first if needed); the destination must not already exist.
-    13. Use the "file_copy" tool to copy a file to a new path. The source must be in the allowed list; the destination must not already exist. The destination is added to the allowed list automatically.
-    14. Use the "file_delete" tool to delete a file from disk. The file must be in the allowed file list. The user will be asked for confirmation.
-    15. Use the "dir_create" tool to create a directory (mkdir -p semantics). Parent directories are created as needed.
-    16. Use the "dir_delete" tool to delete an EMPTY directory. Non-empty directories are rejected — remove their contents first. The user will be asked for confirmation.
-    17. All file paths are relative to the harness working directory (shown in the available files list).
-
-    When the instruction is a query, conversation, or does not involve file editing, respond with plain text.
-
-    Use the "notify" tool to send progress or status messages to the user.
-    Do NOT use the "echo" tool for user communication — it is test-only.
-  TEXT
+  SYSTEM_PROMPT = File.read(File.join(__dir__, 'system_prompt.txt'))
 
   MAX_TOOL_ITERATIONS = 100
   # After this many consecutive tool-call iterations, inject a "stop looping" message
@@ -186,7 +160,7 @@ class Harness
     if files.empty?
       "## Working Directory\n\n#{file_list.workdir}\n\n## Instruction\n\n#{instruction}\n"
     else
-      "## Working Directory\n\n#{file_list.workdir}\n\n## Available Files\n\n#{files.map { |f| "- #{file_list.display_path(f)}" }.join("\n")}\n\n## Instruction\n\n#{instruction}\n"
+      "## Working Directory\n\n#{file_list.workdir}\n\n## Available Files\n\n#{files.map { |f| file_list.display_path(f) }.join("\n")}\n\n## Instruction\n\n#{instruction}\n"
     end
   end
 
