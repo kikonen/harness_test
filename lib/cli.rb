@@ -449,10 +449,12 @@ class CLI
         The session (conversation history AND the allowed file list) is
         auto-saved to .sessions/ inside the working directory when the
         harness exits — the resume command is printed on exit. /save stores
-        it manually at any time. Each saved session gets an id — the first
-        8 hex chars of the SHA-256 digest of the saved data. /sessions lists
-        all saved sessions; /resume <id> restores the conversation and file
-        list (the id may be abbreviated as long as it is unambiguous).
+        it manually at any time. Each session has a stable UUID id, so
+        saving again (possibly multiple times) overwrites the same file —
+        a session can be continued and re-saved instead of creating a new
+        one. /sessions lists all saved sessions; /resume <id> restores the
+        conversation and file list (the id may be abbreviated as long as it
+        is unambiguous).
         From the command line: ruby harness.rb -m <model> --resume <id>
         To list saved sessions without starting the harness:
           ruby harness.rb --list-sessions

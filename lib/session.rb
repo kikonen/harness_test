@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'time'
+require 'securerandom'
 
 # -- Session --------------------------------------------------------------
 #
@@ -13,13 +14,21 @@ require 'time'
 # The allowed file list logically belongs to the session (it is part of the
 # working context), so it is serialized/restored together with the session
 # (see #to_h / #restore).
+#
+# Each session has a stable UUID id (#session_id). Saving the session
+# (possibly multiple times) always writes to the same file, so a session can
+# be continued and re-saved under the same id instead of creating a new
+# session file each time.
 
 class Session
-  attr_reader :messages, :created_at, :system_prompt
+  UUID_RE = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
+
+  attr_reader :messages, :created_at, :system_prompt, :session_id
 
   def initialize(system_prompt)
     @system_prompt = system_prompt
     @created_at    = Time.now
+    @session_id    = SecureRandom.uuid
     @user_prompts  = 0
     @last_stats    = nil
     @messages      = [system_message]
@@ -66,6 +75,7 @@ class Session
     @messages.each { |m| counts[m[:role]] += 1 }
 
     lines = []
+    lines << "Session id:      #{session_id}"
     lines << "Session started: #{created_at.strftime('%Y-%m-%d %H:%M:%S')}"
     lines << "Messages:        #{@messages.size} total"
     counts.each { |role, n| lines << "  - #{role}: #{n}" }
@@ -90,6 +100,7 @@ class Session
   def to_h(file_list)
     {
       version:       1,
+      session_id:    @session_id,
       created_at:    created_at.iso8601,
       system_prompt: @system_prompt,
       user_prompts:  @user_prompts,
@@ -106,6 +117,7 @@ class Session
   def restore(data, file_list)
     @system_prompt = data[:system_prompt]
     @created_at    = Time.parse(data[:created_at])
+    @session_id    = data[:session_id] if data[:session_id]
     @user_prompts  = data[:user_prompts] || 0
     @last_stats    = data[:last_stats]
     @messages      = data[:messages] || [system_message]

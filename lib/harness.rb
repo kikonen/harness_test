@@ -116,8 +116,6 @@ class Harness
 
   # Saved sessions live in this directory (inside the working directory).
   SESSIONS_DIR = '.sessions'
-  # How many hex chars of the SHA-256 digest are used as the session id.
-  SESSION_ID_LENGTH = 8
 
   attr_reader :options, :logger, :tool_registry, :file_list, :session
 
@@ -179,9 +177,11 @@ class Harness
   # -- Session persistence ------------------------------------------------
   #
   # Sessions are saved as JSON files in the .sessions directory inside the
-  # working directory. Each session is identified by the first
-  # SESSION_ID_LENGTH hex chars of the SHA-256 digest of the saved file
-  # contents, so the id is stable and unique per saved session.
+  # working directory. Each session has a stable UUID id (assigned by the
+  # Session, see Session#session_id), so saving the session — possibly
+  # multiple times — always writes to the same file: a session can be
+  # continued and re-saved under the same id instead of creating a new
+  # session file each time.
 
   # Directory where saved sessions are stored (inside the working directory).
   def sessions_dir
@@ -189,14 +189,14 @@ class Harness
   end
 
   # Save the current session (conversation + file list) to disk.
-  # Returns the session id (short SHA-256 prefix).
+  # Returns the session id (UUID).
   def save_session
     FileUtils.mkdir_p(sessions_dir)
 
     data = @session.to_h(@file_list)
     json = JSON.generate(data)
 
-    id = Digest::SHA256.hexdigest(json)[0, SESSION_ID_LENGTH]
+    id   = @session.session_id
     path = File.join(sessions_dir, "#{id}.json")
 
     File.write(path, json)
@@ -204,7 +204,7 @@ class Harness
     id
   end
 
-  # Resume a saved session by id (full or abbreviated SHA-256 prefix).
+  # Resume a saved session by id (full or abbreviated UUID).
   # Restores the conversation chain and the file list.
   def resume_session(id)
     id = id.to_s.strip
@@ -297,7 +297,7 @@ class Harness
   # Find a saved session file by (abbreviated) id: the id must be a prefix
   # of the file name (without extension). Raises HarnessError on ambiguity.
   def find_session_file(id)
-    raise HarnessError, "invalid session id: #{id}" unless id =~ /\A[0-9a-fA-F]+\Z/
+    raise HarnessError, "invalid session id: #{id}" unless id =~ /\A[0-9a-fA-F-]+\Z/
 
     matches = Dir.glob(File.join(sessions_dir, '*.json')).select do |p|
       File.basename(p, '.json').downcase.start_with?(id.downcase)
@@ -476,7 +476,7 @@ class Harness
           messages << {
             role: 'user',
             content: 'Reminder: You have called the same tool multiple times in a row. ' \
-                     'If you have enough information, stop calling tools and provide your final answer now.'
+                     'If you have enough information, stop calling the same tool and provide your final answer now.'
           }
         end
 
