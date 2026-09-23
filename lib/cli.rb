@@ -295,17 +295,28 @@ class CLI
     # Ignore — history persistence is best-effort.
   end
 
-  # Encode a (possibly multiline) history entry as a single line:
-  # backslashes first, then newlines.
+  # Encode a (possibly multiline) history entry as a single line.
+  # Backslashes are escaped first, then newlines and carriage returns are
+  # replaced by their two-character escape sequences, so the entry fits on
+  # one line of the history file.
   def escape_history_entry(text)
-    text.gsub('\\', '\\\\').gsub("\n", '\\n')
+    text.gsub('\\', '\\\\').gsub("\n", '\\n').gsub("\r", '\\r')
   end
 
   # Decode a single history line back into the original entry.
   # Single-pass scan so that e.g. a literal `\n` in the original text
-  # (escaped as `\\n`) is not mistaken for a newline.
+  # (escaped as `\\n`) is not mistaken for a newline. Only the escape
+  # sequences produced by escape_history_entry are interpreted; any other
+  # `\X` sequence is kept as-is (backslash preserved).
   def unescape_history_entry(line)
-    line.gsub(/\\(.)/) { |m| m[1] == 'n' ? "\n" : m[1] }
+    line.gsub(/\\(.)/) do |m|
+      case m[1]
+      when 'n' then "\n"
+      when 'r' then "\r"
+      when '\\' then '\\'
+      else m # unknown escape — keep the backslash and the character
+      end
+    end
   end
 
   def handle_command(input)
