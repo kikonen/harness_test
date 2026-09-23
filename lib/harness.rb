@@ -118,8 +118,22 @@ class Harness
     @file_list     = file_list
     @logger        = build_logger
     @tool_registry = build_tool_registry
-    @session       = Session.new(options[:system])
+    @session       = Session.new(build_system_prompt)
     @spinner       = nil
+  end
+
+  # Base system prompt (from --system / $HARNESS_SYSTEM / the built-in
+  # default) plus optional project-specific rules from a harness.md file
+  # in the working directory. This lets each project keep its own
+  # centralized set of rules for the LLM.
+  def build_system_prompt
+    base = options[:system]
+    project_file = File.join(@file_list.workdir, 'harness.md')
+    if File.file?(project_file)
+      content = File.read(project_file).strip
+      return "#{base}\n\n## Project-Specific Rules\n\n#{content}\n" unless content.empty?
+    end
+    base
   end
 
   def build_logger
@@ -251,7 +265,7 @@ class Harness
     user_prompt = build_user_prompt(@file_list, instruction)
 
     if options[:verbose]
-      logger.info("--- system ---\n#{options[:system]}")
+      logger.info("--- system ---\n#{@session.system_prompt}")
       logger.info("--- user ---\n#{user_prompt}")
       logger.info("--- #{options[:model]} @ #{options[:base_url]} ---")
     end
@@ -269,6 +283,62 @@ class Harness
 
     logger.info("--- retry: re-sending session chain (#{@session.messages.size} messages) ---")
     send_session
+  end
+
+  # Compact the session: ask the LLM to summarize the conversation, then
+  # replace the full message chain with the summary. This frees up context
+  # window space while preserving the essential information.
+  #
+  # The last N recent messages (Session::COMPACT_RECENT_MESSAGES) are
+  # retained verbatim after the summary so the immediate working context
+  # is not lost to summarization.
+  #
+  # Returns a hash: { summary:, before:, after:, retained: }
+  def compact_session
+    before = @session.messages.size
+
+    if @session.conversation_size < 4
+      raise HarnessError, 'session too small to compact (need at least 4 conversation messages)'
+    end
+
+    # Build a standalone summarization request (no tools, no system prompt
+    # from the session — just the conversation + an instruction).
+    conversation = @session.messages[1..] # skip the system message
+    messages = conversation + [
+      {
+        role: 'user',
+        content: 'Summarize the entire conversation above in a concise, structured format. ' \
+                 'Include: (1) what was being worked on, (2) key decisions made, ' \
+                 '(3) files that were modified or created, (4) any pending tasks or ' \
+                 'unresolved issues, (5) important context needed to continue. ' \
+                 'Keep it under 500 words. Do NOT include the summarization instruction itself.'
+      }
+    ]
+
+    spinner = Spinner.new("Compacting session (#{before} messages to summary)")
+    @spinner = spinner
+    spinner.start
+
+    summary_text = nil
+    begin
+      data = make_request(options[:base_url], options[:model], messages,
+                          auth_token: options[:token], tools: nil)
+      summary_text = data[:choices][0][:message][:content]
+    ensure
+      spinner.stop
+      @spinner = nil
+    end
+
+    raise HarnessError, 'LLM returned empty summary' if summary_text.nil? || summary_text.strip.empty?
+
+    summary_text = summary_text.strip
+    @session.compact(summary_text)
+    after = @session.messages.size
+    # after = system + summary + ack + retained recent messages
+    retained = [after - 3, 0].max
+
+    logger.info("session compacted: #{before} to #{after} messages (summary: #{summary_text.length} chars, #{retained} recent retained)")
+    { summary: summary_text, before: before, after: after, retained: retained }
   end
 
   # Sends the session chain to the LLM and prints the response.
@@ -309,7 +379,7 @@ class Harness
     when 0 then nil
     when 1 then matches.first
     else
-      raise HarnessError, "ambiguous session id '#{id}' — matches: #{matches.map { |p| File.basename(p, '.json') }.join(', ')}"
+      raise HarnessError, "ambiguous session id '#{id}' — matches: #{matches.map { |p| File.basename(p) }.join(', ')}"
     end
   end
 

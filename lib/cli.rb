@@ -417,6 +417,15 @@ class CLI
       harness.session.clear
       puts "Session cleared (conversation history reset)."
 
+    when /\A\/compact\Z/
+      result = harness.compact_session
+      retained = result[:retained]
+      puts "Session compacted: #{result[:before]} messages -> #{result[:after]} messages (#{retained} recent retained)."
+      puts
+      puts "Summary:"
+      puts result[:summary]
+      puts
+
     when /\A\/save\Z/
       id = harness.save_session
       puts "Session saved as #{id} (#{harness.sessions_dir}/#{id}.json)"
@@ -474,6 +483,7 @@ class CLI
         /retry         Re-send the session message chain (after a failed request)
         /session       Show a summary of the current session
         /session-clear Reset the session (drop all conversation messages)
+        /compact       Compact the session (summarize conversation to free context)
         /save          Save the session (conversation + file list) to .harness/sessions/
         /resume <id>   Resume a saved session by its id (see /sessions)
         /sessions      List saved sessions
@@ -491,7 +501,11 @@ class CLI
         Prompts are accumulated in a session, so the model sees the whole
         conversation. If a request to the LLM fails, the prompt stays in the
         session — use /retry to re-send the chain. /session shows a summary,
-        /session-clear starts a fresh conversation.
+        /session-clear starts a fresh conversation. /compact summarizes the
+        conversation to free up context window space (use when the session
+        is getting long and you want to continue with less context). The
+        last few messages are kept verbatim after the summary so the
+        immediate working context is not lost.
 
       Saving / resuming sessions:
         The session (conversation history AND the allowed file list) is

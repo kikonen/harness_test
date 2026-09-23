@@ -23,6 +23,11 @@ require 'securerandom'
 class Session
   UUID_RE = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
 
+  # How many recent messages to retain verbatim after compaction, so the
+  # immediate working context (exact file contents, tool outputs, etc.)
+  # is not lost to summarization.
+  COMPACT_RECENT_MESSAGES = 6
+
   attr_reader :messages, :created_at, :system_prompt, :session_id
 
   def initialize(system_prompt)
@@ -67,6 +72,46 @@ class Session
     @last_stats   = nil
     @created_at   = Time.now
     self
+  end
+
+  # Compact the session: replace all conversation messages with a summary.
+  # The system prompt is preserved. After compaction the session contains:
+  #   [system, user (summary), assistant (acknowledgment), ...recent messages]
+  # so the next prompt builds naturally on the summarized context.
+  #
+  # The last N recent messages (default COMPACT_RECENT_MESSAGES) are retained
+  # verbatim after the summary so the immediate working context (exact file
+  # contents, tool outputs, precise wording) is not lost to summarization.
+  #
+  # The retained window is trimmed so it never begins with a `tool` message:
+  # a `tool` result must be preceded by the assistant message that carries
+  # the matching `tool_calls`, and if that assistant message fell into the
+  # summarized (dropped) region the API would reject the chain. Dropping
+  # leading `tool` messages guarantees the window starts on a safe boundary.
+  def compact(summary_text, recent_count: COMPACT_RECENT_MESSAGES)
+    # Grab the last N conversation messages (excluding system) before we
+    # replace the chain.
+    conversation = @messages[1..]
+    recent = nil
+    if recent_count > 0 && conversation.size > recent_count
+      recent = conversation.last(recent_count)
+      # Trim leading `tool` messages (orphaned by the summarization boundary).
+      recent = recent.drop_while { |m| m[:role] == 'tool' }
+    end
+
+    @messages = [
+      system_message,
+      { role: 'user', content: "This is a summary of our previous conversation:\n\n#{summary_text}" },
+      { role: 'assistant', content: 'Understood. I have the context from our previous conversation. How can I help you continue?' }
+    ]
+    @messages.concat(recent) if recent && !recent.empty?
+    @last_stats = nil
+    self
+  end
+
+  # Number of conversation messages (excluding the system message).
+  def conversation_size
+    @messages.size - 1
   end
 
   # Human-readable summary of the session state.
