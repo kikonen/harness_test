@@ -45,7 +45,7 @@ class CLI
       o.on('-r ID', '--resume ID', 'Resume a saved session by id (see /sessions)') { |v| opts[:resume] = v }
       o.on('--list-sessions', 'List saved sessions and exit (no model needed)')  { opts[:list_sessions] = true }
       o.on('--dry-run',      'Print edits, do not write files')                  { opts[:dry_run]  = true }
-      o.on('-v', '--verbose', 'Show full prompt and raw response')               { opts[:verbose]  = true }
+      o.on('-v', '--verbose', 'Show full prompt and raw response')               { |v| opts[:verbose]  = true }
       o.on('-h', '--help')                                                        { puts o; exit }
     end
     parser.parse!
@@ -103,33 +103,39 @@ class CLI
     puts "Tip: a line starting with / is a command (executed immediately)."
     puts
 
-    loop do
-      show_file_list
-      input = get_command
-      break if input.nil?
+    begin
+      loop do
+        show_file_list
+        input = get_command
+        break if input.nil?
 
-      begin
-        handle_command(input)
-      rescue Interrupt
-        puts "\n  [interrupted]"
-      rescue HarnessError => e
-        puts "  [error] #{e.message}"
-      rescue LLMError => e
-        puts "  [LLM error] #{e.message}"
-        puts "  (the prompt is kept in the session — type /retry to re-send it)"
-      rescue ToolLoopError => e
-        puts "  [tool loop] #{e.message}"
-      rescue StandardError => e
-        puts "  [unexpected error] #{e.class}: #{e.message}"
-        puts e.backtrace.join("\n")
-        puts "  (harness continues — type /exit to quit)"
+        begin
+          handle_command(input)
+        rescue Interrupt
+          puts "\n  [interrupted]"
+        rescue HarnessError => e
+          puts "  [error] #{e.message}"
+        rescue LLMError => e
+          puts "  [LLM error] #{e.message}"
+          puts "  (the prompt is kept in the session — type /retry to re-send it)"
+        rescue ToolLoopError => e
+          puts "  [tool loop] #{e.message}"
+        rescue StandardError => e
+          puts "  [unexpected error] #{e.class}: #{e.message}"
+          puts e.backtrace.join("\n")
+          puts "  (harness continues — type /exit to quit)"
+        end
+
+        break if @exiting
+
+        puts
+        puts "-" * 40
+        puts
       end
-
-      break if @exiting
-
-      puts
-      puts "-" * 40
-      puts
+    rescue Interrupt
+      # Ctrl+C at the prompt (or anywhere the loop is waiting): treat as
+      # a normal exit so that history and the session are still saved.
+      puts "\n  [interrupted]"
     end
 
     save_history
@@ -458,7 +464,8 @@ class CLI
           prompt on the next line (unbalanced quotes also continue).
 
       Keys:
-        Ctrl+C   Cancel the current input (or interrupt a running request)
+        Ctrl+C   Cancel the current input (or interrupt a running request);
+                 at the prompt it exits the harness (session is auto-saved)
         Ctrl+D   Quit (on an empty prompt)
         Up/Down  Browse command history
     HELP
