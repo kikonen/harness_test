@@ -227,6 +227,13 @@ class Harness
     options[:reasoning_effort] || REASONING_EFFORT
   end
 
+  # Number of recent messages retained verbatim after compaction:
+  # prefer the value from options (CLI flag or $HARNESS_COMPACT_RECENT),
+  # falling back to the built-in default.
+  def compact_recent_messages
+    options[:compact_recent] || Session::COMPACT_RECENT_MESSAGES
+  end
+
   # -- Session persistence ------------------------------------------------
   #
   # Sessions are saved as JSON files in the .harness/sessions directory
@@ -332,9 +339,9 @@ class Harness
   # replace the full message chain with the summary. This frees up context
   # window space while preserving the essential information.
   #
-  # The last N recent messages (Session::COMPACT_RECENT_MESSAGES) are
-  # retained verbatim after the summary so the immediate working context
-  # is not lost to summarization.
+  # The last N recent messages (tunable via $HARNESS_COMPACT_RECENT or
+  # --compact-recent) are retained verbatim after the summary so the
+  # immediate working context is not lost to summarization.
   #
   # Returns a hash: { summary:, before:, after:, retained: }
   def compact_session
@@ -375,7 +382,7 @@ class Harness
     raise HarnessError, 'LLM returned empty summary' if summary_text.nil? || summary_text.strip.empty?
 
     summary_text = summary_text.strip
-    @session.compact(summary_text)
+    @session.compact(summary_text, recent_count: compact_recent_messages)
     after = @session.messages.size
     # after = system + summary + ack + retained recent messages
     retained = [after - 3, 0].max

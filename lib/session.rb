@@ -26,6 +26,9 @@ class Session
   # How many recent messages to retain verbatim after compaction, so the
   # immediate working context (exact file contents, tool outputs, etc.)
   # is not lost to summarization.
+  # This is the built-in default; it can be overridden per run via the
+  # $HARNESS_COMPACT_RECENT environment variable (see _env) or the
+  # --compact-recent CLI flag.
   COMPACT_RECENT_MESSAGES = 6
 
   attr_reader :messages, :created_at, :system_prompt, :session_id

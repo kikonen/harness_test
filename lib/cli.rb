@@ -43,6 +43,7 @@ class CLI
       o.on('--system TEXT',  'Override system prompt')                           { |v| opts[:system]   = v }
       o.on('--num-ctx N',    'Context window size in tokens [or $HARNESS_NUM_CTX]') { |v| opts[:num_ctx] = v.to_i }
       o.on('--reasoning-effort LEVEL', 'Reasoning effort [or $HARNESS_REASONING_EFFORT]') { |v| opts[:reasoning_effort] = v }
+      o.on('--compact-recent N', 'Messages to retain verbatim after /compact [or $HARNESS_COMPACT_RECENT]') { |v| opts[:compact_recent] = v.to_i }
       o.on('-d DIR', '--workdir DIR', 'Working directory; all file paths are relative to it [or $HARNESS_WORKDIR]') { |v| opts[:workdir] = v }
       o.on('-f FILE', '--file FILE', 'Add a file to the allowed file list (repeatable)') { |v| (opts[:files] ||= []) << v }
       o.on('-r ID', '--resume ID', 'Resume a saved session by id (see /sessions)') { |v| opts[:resume] = v }
@@ -65,6 +66,7 @@ class CLI
     opts[:token]    ||= ENV['HARNESS_TOKEN']
     opts[:num_ctx]  ||= ENV['HARNESS_NUM_CTX']&.to_i
     opts[:reasoning_effort] ||= ENV['HARNESS_REASONING_EFFORT']
+    opts[:compact_recent] ||= ENV['HARNESS_COMPACT_RECENT']&.to_i
     opts[:workdir]  ||= ENV['HARNESS_WORKDIR'] || Dir.pwd
 
     # --list-sessions only reads the .harness/sessions directory, so no
@@ -135,7 +137,7 @@ class CLI
         puts
       end
     rescue Interrupt
-      # Ctrl+C at the prompt (or anywhere the loop is waiting): treat as
+      # Ctrl+C at the prompt (or anywhere in the loop is waiting): treat as
       # a normal exit so that history and the session are still saved.
       puts "\n  [interrupted]"
     end
@@ -511,7 +513,9 @@ class CLI
         conversation to free up context window space (use when the session
         is getting long and you want to continue with less context). The
         last few messages are kept verbatim after the summary so the
-        immediate working context is not lost.
+        immediate working context is not lost. The number of retained
+        messages is tunable via $HARNESS_COMPACT_RECENT (see _env) or the
+        --compact-recent CLI flag.
 
       Project rules (harness.md):
         If a harness.md file exists in the working directory, its content

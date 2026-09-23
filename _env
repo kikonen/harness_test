@@ -4,3 +4,7 @@ export HARNESS_MODEL=qwen3.8-27b-ki-32k:latest
 export HARNESS_NUM_CTX=32768
 export HARNESS_REASONING_EFFORT=medium
 export HARNESS_HISTORY_FILE=.harness/harness_history
+# How many recent messages to retain verbatim after /compact (default 6).
+# Lower it to free more context on small models; raise it to keep more
+# immediate working context. Can also be set per-run with --compact-recent N.
+export HARNESS_COMPACT_RECENT=6
