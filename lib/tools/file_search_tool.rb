@@ -66,6 +66,9 @@ class FileSearchTool < Tool
       end
       next if content.include?("\x00")  # skip binary files
 
+      # Normalize CRLF to LF for consistent line splitting and output.
+      content = content.gsub("\r\n", "\n")
+
       lines = content.split("\n")
       lines.each_with_index do |line, idx|
         if line.match?(regex)
@@ -73,7 +76,7 @@ class FileSearchTool < Tool
           if context > 0
             start  = [idx - context, 0].max
             finish = [idx + context, lines.size - 1].min
-            block  = lines[start..finish].map(&:chomp)
+            block  = lines[start..finish]
             matches << { file: shown, line: idx + 1, text: block.join("\n") }
           else
             matches << { file: shown, line: idx + 1, text: line }

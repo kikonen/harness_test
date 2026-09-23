@@ -95,6 +95,11 @@ class FilePatchTool < Tool
     end
 
     content = File.read(path)
+
+    # Detect and normalize line endings so context matching works
+    # regardless of whether the file uses CRLF (Windows) or LF.
+    crlf    = content.include?("\r\n")
+    content = content.gsub("\r\n", "\n") if crlf
     lines   = content.split("\n")
 
     # Apply hunks in reverse order so line numbers from earlier hunks
@@ -113,6 +118,8 @@ class FilePatchTool < Tool
     end
 
     new_content = lines.join("\n")
+    # Restore the original line-ending style.
+    new_content = new_content.gsub("\n", "\r\n") if crlf
 
     if @options[:dry_run]
       puts "  [file_patch] ~ #{shown} (dry run, #{applied} hunk(s) applied)"
@@ -133,6 +140,8 @@ class FilePatchTool < Tool
   # where each line is [type, text] with type being ' ', '-', or '+'.
   # Returns nil if the diff is malformed.
   def parse_unified_diff(diff)
+    # Normalize the diff itself to LF so parsing is consistent.
+    diff = diff.gsub("\r\n", "\n")
     lines = diff.split("\n")
     hunks = []
     i     = 0

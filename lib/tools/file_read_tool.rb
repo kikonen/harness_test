@@ -39,6 +39,11 @@ class FileReadTool < Tool
     content = File.read(path)
     sha     = FileList.sha256(path)
 
+    # Normalize CRLF to LF so the LLM always sees clean line endings.
+    # This ensures patches generated from this content will match
+    # the normalized content used by file_patch.
+    content = content.gsub("\r\n", "\n")
+
     puts "  [file_read] ✓ #{shown} (sha256: #{sha})"
     $stdout.flush
 
