@@ -114,8 +114,16 @@ class Harness
   # Default reasoning effort (NOTE KI default for qwen is xhigh)
   REASONING_EFFORT = "medium"
 
-  # Saved sessions live in this directory (inside the working directory).
-  SESSIONS_DIR = '.sessions'
+  # All harness state (saved sessions, log, history) lives in this
+  # directory inside the working directory, so it can be ignored from
+  # git with a single entry (.harness/).
+  HARNESS_DIR = '.harness'
+
+  # Saved sessions live in this subdirectory of HARNESS_DIR.
+  SESSIONS_DIR = File.join(HARNESS_DIR, 'sessions')
+
+  # Log file name (inside HARNESS_DIR).
+  LOG_FILE = 'harness.log'
 
   attr_reader :options, :logger, :tool_registry, :file_list, :session
 
@@ -129,9 +137,11 @@ class Harness
   end
 
   def build_logger
-    # Log file lives in the working directory so different harness
-    # instances (different working directories) do not share a log.
-    log_file = File.join(@file_list.workdir, LOG_FILE)
+    # Log file lives in the .harness directory inside the working
+    # directory so different harness instances (different working
+    # directories) do not share a log.
+    log_file = File.join(@file_list.workdir, HARNESS_DIR, LOG_FILE)
+    FileUtils.mkdir_p(File.dirname(log_file))
     logger = Logger.new(log_file)
     logger.formatter = proc { |severity, datetime, _progname, msg|
       "#{datetime.strftime('%Y-%m-%d %H:%M:%S')} [#{severity}] #{msg}\n"
@@ -176,12 +186,12 @@ class Harness
 
   # -- Session persistence ------------------------------------------------
   #
-  # Sessions are saved as JSON files in the .sessions directory inside the
-  # working directory. Each session has a stable UUID id (assigned by the
-  # Session, see Session#session_id), so saving the session — possibly
-  # multiple times — always writes to the same file: a session can be
-  # continued and re-saved under the same id instead of creating a new
-  # session file each time.
+  # Sessions are saved as JSON files in the .harness/sessions directory
+  # inside the working directory. Each session has a stable UUID id
+  # (assigned by the Session, see Session#session_id), so saving the
+  # session — possibly multiple times — always writes to the same file:
+  # a session can be continued and re-saved under the same id instead of
+  # creating a new session file each time.
 
   # Directory where saved sessions are stored (inside the working directory).
   def sessions_dir

@@ -14,16 +14,19 @@ class CLI
   attr_reader :options, :harness, :file_list
 
   # Where command history is persisted (best-effort).
-  # Kept in the harness working directory so that different harness
-  # instances (i.e. different working directories) do not mix their history.
+  # Kept in the .harness directory inside the harness working directory so
+  # that different harness instances (i.e. different working directories) do
+  # not mix their history, and all harness state can be ignored from git
+  # with a single entry (.harness/).
   # NOTE: if you change the default or add new env vars read here, remember
   # to update the corresponding exports in the _env file.
-  HISTORY_FILE = ENV['HARNESS_HISTORY_FILE'] || '.harness_history'
+  HISTORY_FILE = ENV['HARNESS_HISTORY_FILE'] || File.join(Harness::HARNESS_DIR, 'harness_history')
 
   def initialize
     @options   = parse_options
     @file_list = FileList.new(@options[:files] || [], workdir: @options[:workdir])
     @harness   = Harness.new(@options, @file_list)
+    migrate_legacy_state
     list_sessions_and_exit if @options[:list_sessions]
     resume_from_cli if @options[:resume]
   end
@@ -64,8 +67,8 @@ class CLI
     opts[:reasoning_effort] ||= ENV['HARNESS_REASONING_EFFORT']
     opts[:workdir]  ||= ENV['HARNESS_WORKDIR'] || Dir.pwd
 
-    # --list-sessions only reads the .sessions directory, so no model is
-    # needed for it.
+    # --list-sessions only reads the .harness/sessions directory, so no
+    # model is needed for it.
     raise HarnessError, '-m / --model is required' unless opts[:model] || opts[:list_sessions]
 
     # Resolve the working directory and make sure it exists.
@@ -149,6 +152,44 @@ class CLI
 
   private
 
+  # One-time migration of harness state that used to live scattered in the
+  # working directory into the .harness directory:
+  #   .sessions/          -> .harness/sessions/
+  #   .harness_history    -> .harness/harness_history
+  #   harness.log         -> .harness/harness.log
+  # Existing files are moved (not copied) and only if the destination does
+  # not exist yet. Best-effort: any failure is silently ignored.
+  def migrate_legacy_state
+    workdir = @file_list.workdir
+    harness_dir = File.join(workdir, Harness::HARNESS_DIR)
+
+    # .sessions/ -> .harness/sessions/
+    old_sessions = File.join(workdir, '.sessions')
+    new_sessions = File.join(harness_dir, 'sessions')
+    if File.directory?(old_sessions) && !File.directory?(new_sessions)
+      FileUtils.mkdir_p(harness_dir)
+      FileUtils.mv(old_sessions, new_sessions)
+    end
+
+    # .harness_history -> .harness/harness_history
+    old_history = File.join(workdir, '.harness_history')
+    new_history = File.join(harness_dir, 'harness_history')
+    if File.file?(old_history) && !File.exist?(new_history)
+      FileUtils.mkdir_p(harness_dir)
+      FileUtils.mv(old_history, new_history)
+    end
+
+    # harness.log -> .harness/harness.log
+    old_log = File.join(workdir, 'harness.log')
+    new_log = File.join(harness_dir, 'harness.log')
+    if File.file?(old_log) && !File.exist?(new_log)
+      FileUtils.mkdir_p(harness_dir)
+      FileUtils.mv(old_log, new_log)
+    end
+  rescue StandardError
+    # Migration is best-effort — never block the harness on it.
+  end
+
   # Resume a saved session given via -r / --resume (best-effort: a missing
   # or ambiguous id raises HarnessError, which the entry point reports).
   def resume_from_cli
@@ -175,8 +216,9 @@ class CLI
     parts.join(' ')
   end
 
-  # History file lives in the working directory so different harness
-  # instances (different working directories) do not mix their history.
+  # History file lives in the .harness directory inside the working
+  # directory so different harness instances (different working directories)
+  # do not mix their history.
   def history_file
     File.join(@file_list.workdir, HISTORY_FILE)
   end
@@ -284,6 +326,7 @@ class CLI
 
   # Persist history on exit (best-effort).
   def save_history
+    FileUtils.mkdir_p(File.dirname(history_file))
     File.open(history_file, 'w') do |f|
       Reline::HISTORY.each do |entry|
         f.puts escape_history_entry(entry)
@@ -437,7 +480,7 @@ class CLI
         /retry         Re-send the session message chain (after a failed request)
         /session       Show a summary of the current session
         /session-clear Reset the session (drop all conversation messages)
-        /save          Save the session (conversation + file list) to .sessions/
+        /save          Save the session (conversation + file list) to .harness/sessions/
         /resume <id>   Resume a saved session by its id (see /sessions)
         /sessions      List saved sessions
         /tools         List available tools
@@ -458,10 +501,10 @@ class CLI
 
       Saving / resuming sessions:
         The session (conversation history AND the allowed file list) is
-        auto-saved to .sessions/ inside the working directory when the
-        harness exits — the resume command is printed on exit. /save stores
-        it manually at any time. Each session has a stable UUID id, so
-        saving again (possibly multiple times) overwrites the same file —
+        auto-saved to .harness/sessions/ inside the working directory when
+        the harness exits — the resume command is printed on exit. /save
+        stores it manually at any time. Each session has a stable UUID id,
+        so saving again (possibly multiple times) overwrites the same file —
         a session can be continued and re-saved instead of creating a new
         one. /sessions lists all saved sessions; /resume <id> restores the
         conversation and file list (the id may be abbreviated as long as it

@@ -1,6 +1,5 @@
 .env
 .emacs*
-*.log
+tmp/**
 *_copy.rb
-.harness_history
-.sessions
+.harness/**

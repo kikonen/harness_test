@@ -16,7 +16,8 @@ module SensitiveFiles
   # Directory names that must never be traversed into (matched against every
   # path component, so e.g. '.git/config' and 'vendor/.git/HEAD' are blocked).
   SENSITIVE_DIRS = [
-    '.git'
+    '.git',
+    '.harness'
   ].freeze
 
   def self.sensitive?(path)
