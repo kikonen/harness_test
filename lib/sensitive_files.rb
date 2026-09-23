@@ -13,8 +13,16 @@ module SensitiveFiles
     '.env*'
   ].freeze
 
+  # Directory names that must never be traversed into (matched against every
+  # path component, so e.g. '.git/config' and 'vendor/.git/HEAD' are blocked).
+  SENSITIVE_DIRS = [
+    '.git'
+  ].freeze
+
   def self.sensitive?(path)
     name = File.basename(path.to_s)
-    SENSITIVE_PATTERNS.any? { |pat| File.fnmatch?(pat, name, File::FNM_DOTMATCH) }
+    return true if SENSITIVE_PATTERNS.any? { |pat| File.fnmatch?(pat, name, File::FNM_DOTMATCH) }
+
+    SENSITIVE_DIRS.any? { |dir| path.to_s.split(File::SEPARATOR).include?(dir) }
   end
 end
