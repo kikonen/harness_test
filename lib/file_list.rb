@@ -65,6 +65,23 @@ class FileList
     :added
   end
 
+  # Rename a file in the list: the old path must be in the list, the new
+  # path must not be sensitive. If the new path is already in the list it
+  # is replaced by the rename. Returns a symbol describing the outcome:
+  #   :renamed   — the list now contains the new path instead of the old one
+  #   :not_found — the old path is not in the list
+  #   :blocked   — the new path is sensitive and can never be added
+  def rename(old_path, new_path)
+    old_path = resolve(old_path)
+    new_path = resolve(new_path)
+    return :not_found unless include?(old_path)
+    return :blocked   if sensitive?(new_path)
+
+    @files.reject! { |f| f == old_path || f == new_path }
+    @files << new_path
+    :renamed
+  end
+
   def sensitive?(path)
     FileList.sensitive?(path)
   end
