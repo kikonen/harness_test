@@ -65,6 +65,17 @@ class FileList
     :added
   end
 
+  # Remove a file from the list. Returns a symbol describing the outcome:
+  #   :removed    — file was removed
+  #   :not_found  — file was not in the list
+  def remove(path)
+    path = resolve(path)
+    return :not_found unless include?(path)
+
+    @files.reject! { |f| f == path }
+    :removed
+  end
+
   # Rename a file in the list: the old path must be in the list, the new
   # path must not be sensitive. If the new path is already in the list it
   # is replaced by the rename. Returns a symbol describing the outcome:

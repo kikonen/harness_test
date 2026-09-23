@@ -22,6 +22,7 @@ require_relative 'tools/file_write_tool'
 require_relative 'tools/file_sha_tool'
 require_relative 'tools/file_add_tool'
 require_relative 'tools/file_rename_tool'
+require_relative 'tools/file_delete_tool'
 require_relative 'tools/file_list_tool'
 require_relative 'tool_registry'
 
@@ -74,7 +75,8 @@ class Harness
     8. If you need to work with a file that is NOT in the allowed list, use the "file_add" tool to request adding it. The user will be asked for confirmation.
     9. Use the "file_sha" tool to check a file's SHA-256 digest without reading its contents, e.g. to verify the file is still up to date before writing.
     10. Use the "file_rename" tool to rename/move a file. Both the old and the new path must be in the allowed file list (add the new path with "file_add" first if needed); the destination must not already exist.
-    11. All file paths are relative to the harness working directory (shown in the available files list).
+    11. Use the "file_delete" tool to delete a file from disk. The file must be in the allowed file list. The user will be asked for confirmation.
+    12. All file paths are relative to the harness working directory (shown in the available files list).
 
     When the instruction is a query, conversation, or does not involve file editing, respond with plain text.
 
@@ -160,6 +162,7 @@ class Harness
     registry.register(FileShaTool.new(@file_list))
     registry.register(FileAddTool.new(@file_list))
     registry.register(FileRenameTool.new(@file_list, @options))
+    registry.register(FileDeleteTool.new(@file_list, @options))
     registry
   end
 
