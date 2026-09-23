@@ -102,7 +102,6 @@ class CLI
     puts "Working directory: #{@file_list.workdir}"
     puts "Tip: type a plain message (no /) to send it directly to the model."
     puts "Tip: paste multiline text directly, or end a line with a backslash (\\) to continue."
-    puts "Tip: to finish a multiline prompt, type ... on its own line."
     puts "Tip: a line starting with / is a command (executed immediately)."
     puts
 
@@ -249,12 +248,10 @@ class CLI
   #     (first character, no stripping) and the last line does NOT end with
   #     "\", the input is presumed to be a command to be executed now
   #     (reading stops).
-  #   * "..." terminator: if the last stripped line is exactly "...", the
-  #     multiline user prompt is finished (reading stops). This is the
-  #     general way to terminate a multiline prompt until a better
-  #     mechanism is available; it also works for slash commands.
-  # Otherwise Reline keeps reading lines (backslash continuation, unbalanced
-  # quotes, etc.).
+  #   * Paste detection: if the time between the last two linefeeds is
+  #     shorter than PASTE_LF_INTERVAL, the input was pasted (not typed),
+  #     so reading stops. Otherwise Reline keeps reading lines (backslash
+  #     continuation, unbalanced quotes, etc.).
   #
   # Ctrl+C raises Interrupt (rescued in the run loop); Ctrl+D on an empty
   # line returns nil (EOF => quit).
@@ -267,7 +264,7 @@ class CLI
     puts "[harness] > "
     $stdout.flush
 
-    last_lf_time = nil #Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    last_lf_time = nil
 
     text = Reline.readmultiline(
       "  ",
@@ -284,11 +281,8 @@ class CLI
       elsif multiline_input.end_with?("\\\n")
         false
       else
-        # HACK KI this is BAD, but qwen wrote itself into corner
-        #multiline_input.split.last == "..."
-        #puts "diff: #{(now - last_lf_time)}" if last_lf_time
         pasted = !last_lf_time || (now - last_lf_time) < PASTE_LF_INTERVAL
-        last_lf_time = now #if pasted
+        last_lf_time = now
         !pasted
       end
     end
