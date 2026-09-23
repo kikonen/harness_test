@@ -9,6 +9,7 @@ require 'thread'
 require 'digest'
 require 'fileutils'
 
+require_relative 'harness_env'
 require_relative 'harness_error'
 require_relative 'spinner'
 require_relative 'tool'

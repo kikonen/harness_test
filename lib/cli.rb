@@ -20,7 +20,7 @@ class CLI
   # with a single entry (.harness/).
   # NOTE: if you change the default or add new env vars read here, remember
   # to update the corresponding exports in the _env file.
-  HISTORY_FILE = ENV['HARNESS_HISTORY_FILE'] || File.join(Harness::HARNESS_DIR, 'harness_history')
+  HISTORY_FILE = HarnessEnv.get('HARNESS_HISTORY_FILE') || File.join(Harness::HARNESS_DIR, 'harness_history')
 
   def initialize
     @options   = parse_options
@@ -60,14 +60,14 @@ class CLI
     # Treat all remaining positional args as files so globs work.
     ARGV.each { |a| (opts[:files] ||= []) << a }
 
-    opts[:base_url] ||= ENV['HARNESS_BASE_URL']
-    opts[:model]    ||= ENV['HARNESS_MODEL']
+    opts[:base_url] ||= HarnessEnv.get('HARNESS_BASE_URL')
+    opts[:model]    ||= HarnessEnv.get('HARNESS_MODEL')
     opts[:system]   ||= Harness::SYSTEM_PROMPT
-    opts[:token]    ||= ENV['HARNESS_TOKEN']
-    opts[:num_ctx]  ||= ENV['HARNESS_NUM_CTX']&.to_i
-    opts[:reasoning_effort] ||= ENV['HARNESS_REASONING_EFFORT']
-    opts[:compact_recent] ||= ENV['HARNESS_COMPACT_RECENT']&.to_i
-    opts[:workdir]  ||= ENV['HARNESS_WORKDIR'] || Dir.pwd
+    opts[:token]    ||= HarnessEnv.get('HARNESS_TOKEN')
+    opts[:num_ctx]  ||= HarnessEnv.get('HARNESS_NUM_CTX')&.to_i
+    opts[:reasoning_effort] ||= HarnessEnv.get('HARNESS_REASONING_EFFORT')
+    opts[:compact_recent] ||= HarnessEnv.get('HARNESS_COMPACT_RECENT')&.to_i
+    opts[:workdir]  ||= HarnessEnv.get('HARNESS_WORKDIR') || Dir.pwd
 
     # --list-sessions only reads the .harness/sessions directory, so no
     # model is needed for it.
