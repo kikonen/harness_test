@@ -24,6 +24,7 @@ class CLI
     @options   = parse_options
     @file_list = FileList.new(@options[:files] || [], workdir: @options[:workdir])
     @harness   = Harness.new(@options, @file_list)
+    list_sessions_and_exit if @options[:list_sessions]
     resume_from_cli if @options[:resume]
   end
 
@@ -42,6 +43,7 @@ class CLI
       o.on('-d DIR', '--workdir DIR', 'Working directory; all file paths are relative to it [or $HARNESS_WORKDIR]') { |v| opts[:workdir] = v }
       o.on('-f FILE', '--file FILE', 'Add a file to the allowed file list (repeatable)') { |v| (opts[:files] ||= []) << v }
       o.on('-r ID', '--resume ID', 'Resume a saved session by id (see /sessions)') { |v| opts[:resume] = v }
+      o.on('--list-sessions', 'List saved sessions and exit (no model needed)')  { opts[:list_sessions] = true }
       o.on('--dry-run',      'Print edits, do not write files')                  { opts[:dry_run]  = true }
       o.on('-v', '--verbose', 'Show full prompt and raw response')               { opts[:verbose]  = true }
       o.on('-h', '--help')                                                        { puts o; exit }
@@ -62,7 +64,9 @@ class CLI
     opts[:reasoning_effort] ||= ENV['HARNESS_REASONING_EFFORT']
     opts[:workdir]  ||= ENV['HARNESS_WORKDIR'] || Dir.pwd
 
-    raise HarnessError, '-m / --model is required' unless opts[:model]
+    # --list-sessions only reads the .sessions directory, so no model is
+    # needed for it.
+    raise HarnessError, '-m / --model is required' unless opts[:model] || opts[:list_sessions]
 
     # Resolve the working directory and make sure it exists.
     opts[:workdir] = File.expand_path(opts[:workdir])
@@ -80,6 +84,12 @@ class CLI
     opts[:files] = (opts[:files] || []).reject { |f| FileList.sensitive?(f) }
 
     opts
+  end
+
+  # List saved sessions and exit (used by --list-sessions).
+  def list_sessions_and_exit
+    list_sessions
+    exit 0
   end
 
   def run
@@ -216,6 +226,9 @@ class CLI
       add_history: true,
       rprompt: "  ") do |multiline_input|
 
+      # Normalize Windows line endings: always work with a single \n.
+      multiline_input = multiline_input.gsub("\r\n", "\n")
+
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
       if multiline_input.start_with?("/")
@@ -233,6 +246,9 @@ class CLI
     end
 
     return nil if text.nil?
+
+    # Normalize Windows line endings: always work with a single \n.
+    text = text.gsub("\r\n", "\n")
 
     @last_lines = text.split("\n", -1)
     text
@@ -432,6 +448,8 @@ class CLI
         all saved sessions; /resume <id> restores the conversation and file
         list (the id may be abbreviated as long as it is unambiguous).
         From the command line: ruby harness.rb -m <model> --resume <id>
+        To list saved sessions without starting the harness:
+          ruby harness.rb --list-sessions
 
       Multiline input:
         * Paste: paste a multiline block directly at the prompt — it is
