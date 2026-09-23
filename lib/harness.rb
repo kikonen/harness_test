@@ -28,6 +28,7 @@ require_relative 'tools/file_search_tool'
 require_relative 'tools/file_patch_tool'
 require_relative 'tools/file_copy_tool'
 require_relative 'tools/dir_create_tool'
+require_relative 'tools/dir_delete_tool'
 require_relative 'tool_registry'
 
 # -- KeepAliveHTTP --------------------------------------------------------
@@ -84,7 +85,8 @@ class Harness
     13. Use the "file_copy" tool to copy a file to a new path. The source must be in the allowed list; the destination must not already exist. The destination is added to the allowed list automatically.
     14. Use the "file_delete" tool to delete a file from disk. The file must be in the allowed file list. The user will be asked for confirmation.
     15. Use the "dir_create" tool to create a directory (mkdir -p semantics). Parent directories are created as needed.
-    16. All file paths are relative to the harness working directory (shown in the available files list).
+    16. Use the "dir_delete" tool to delete an EMPTY directory. Non-empty directories are rejected — remove their contents first. The user will be asked for confirmation.
+    17. All file paths are relative to the harness working directory (shown in the available files list).
 
     When the instruction is a query, conversation, or does not involve file editing, respond with plain text.
 
@@ -175,6 +177,7 @@ class Harness
     registry.register(FilePatchTool.new(@file_list, @options))
     registry.register(FileCopyTool.new(@file_list, @options))
     registry.register(DirCreateTool.new(@file_list))
+    registry.register(DirDeleteTool.new(@file_list, @options))
     registry
   end
 
