@@ -426,6 +426,11 @@ class CLI
       puts result[:summary]
       puts
 
+    when /\A\/reload\Z/
+      harness.reload_rules
+      puts "harness.md reloaded — project rules updated in the system prompt."
+      puts
+
     when /\A\/save\Z/
       id = harness.save_session
       puts "Session saved as #{id} (#{harness.sessions_dir}/#{id}.json)"
@@ -484,6 +489,7 @@ class CLI
         /session       Show a summary of the current session
         /session-clear Reset the session (drop all conversation messages)
         /compact       Compact the session (summarize conversation to free context)
+        /reload        Reload harness.md (project rules) into the system prompt
         /save          Save the session (conversation + file list) to .harness/sessions/
         /resume <id>   Resume a saved session by its id (see /sessions)
         /sessions      List saved sessions
@@ -506,6 +512,13 @@ class CLI
         is getting long and you want to continue with less context). The
         last few messages are kept verbatim after the summary so the
         immediate working context is not lost.
+
+      Project rules (harness.md):
+        If a harness.md file exists in the working directory, its content
+        is appended to the system prompt as "Project-Specific Rules".
+        The file is auto-detected when its modification time changes
+        (checked before each prompt). Use /reload to force a re-read
+        (e.g. after editing harness.md with file_write or file_patch).
 
       Saving / resuming sessions:
         The session (conversation history AND the allowed file list) is

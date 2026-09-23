@@ -111,6 +111,12 @@ class Harness
   # Log file name (inside HARNESS_DIR).
   LOG_FILE = 'harness.log'
 
+  # Name of the project-specific rules file (in the working directory).
+  # If present, its content is appended to the system prompt as
+  # "Project-Specific Rules". The file is re-read automatically when
+  # its modification time changes (detected before each prompt).
+  RULES_FILE = 'harness.md'
+
   attr_reader :options, :logger, :tool_registry, :file_list, :session
 
   def initialize(options, file_list)
@@ -120,6 +126,7 @@ class Harness
     @tool_registry = build_tool_registry
     @session       = Session.new(build_system_prompt)
     @spinner       = nil
+    @rules_mtime   = current_rules_mtime
   end
 
   # Base system prompt (from --system / $HARNESS_SYSTEM / the built-in
@@ -128,12 +135,42 @@ class Harness
   # centralized set of rules for the LLM.
   def build_system_prompt
     base = options[:system]
-    project_file = File.join(@file_list.workdir, 'harness.md')
+    project_file = File.join(@file_list.workdir, RULES_FILE)
     if File.file?(project_file)
       content = File.read(project_file).strip
       return "#{base}\n\n## Project-Specific Rules\n\n#{content}\n" unless content.empty?
     end
     base
+  end
+
+  # Current mtime of the rules file (nil if it doesn't exist).
+  def current_rules_mtime
+    path = File.join(@file_list.workdir, RULES_FILE)
+    File.file?(path) ? File.mtime(path) : nil
+  end
+
+  # Check whether harness.md has been modified since the last check.
+  # If so, rebuild the system prompt and update the session in-place.
+  # Returns true if a reload happened, false otherwise.
+  def check_rules_reload
+    mtime = current_rules_mtime
+    return false if mtime == @rules_mtime
+
+    @rules_mtime = mtime
+    new_prompt = build_system_prompt
+    @session.update_system_prompt(new_prompt)
+    logger.info("harness.md reloaded (mtime changed)")
+    true
+  end
+
+  # Explicitly reload harness.md (called by /reload command).
+  # Always re-reads the file regardless of mtime.
+  def reload_rules
+    new_prompt = build_system_prompt
+    @session.update_system_prompt(new_prompt)
+    @rules_mtime = current_rules_mtime
+    logger.info("harness.md reloaded (manual /reload)")
+    new_prompt
   end
 
   def build_logger
@@ -231,6 +268,7 @@ class Harness
 
     data = JSON.parse(File.read(path), symbolize_names: true)
     @session.restore(data, @file_list)
+    @rules_mtime = current_rules_mtime
     logger.info("session resumed: #{File.basename(path, '.json')} (#{path})")
     path
   end
@@ -262,6 +300,11 @@ class Harness
   # If the request fails, the prompt stays in the session (pending) so it can
   # be re-sent with #retry.
   def run_prompt(instruction)
+    # Auto-detect harness.md changes before each prompt.
+    if check_rules_reload
+      puts "  [harness.md reloaded — project rules updated]"
+    end
+
     user_prompt = build_user_prompt(@file_list, instruction)
 
     if options[:verbose]

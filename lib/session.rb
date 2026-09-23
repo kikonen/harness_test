@@ -74,6 +74,14 @@ class Session
     self
   end
 
+  # Replace the system prompt in-place (e.g. after harness.md is updated).
+  # Updates both the stored prompt and the first message in the chain.
+  def update_system_prompt(new_prompt)
+    @system_prompt = new_prompt
+    @messages[0][:content] = new_prompt
+    self
+  end
+
   # Compact the session: replace all conversation messages with a summary.
   # The system prompt is preserved. After compaction the session contains:
   #   [system, user (summary), assistant (acknowledgment), ...recent messages]
