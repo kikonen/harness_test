@@ -56,6 +56,26 @@ class Harness
   # (tool execution between requests easily exceeds it), so we raise it.
   KEEP_ALIVE_TIMEOUT = 60
 
+  # Transient network errors that are safe to retry (the request was never
+  # completed, so re-sending it is idempotent from the server's perspective).
+  RETRYABLE_ERRORS = [
+    Errno::ECONNRESET,
+    Errno::EPIPE,
+    Errno::ECONNREFUSED,
+    Errno::ETIMEDOUT,
+    Errno::EHOSTUNREACH,
+    OpenSSL::SSL::SSLError,
+    IOError,
+    Net::OpenTimeout,
+    Net::ReadTimeout
+  ].freeze
+
+  # Automatic retry settings for transient network errors.
+  # RETRY_COUNT: total number of attempts (1 initial + N-1 retries).
+  # RETRY_DELAY: base delay in seconds (exponential backoff: 2s, 4s, 8s, ...).
+  RETRY_COUNT = 3
+  RETRY_DELAY = 2
+
   # Ollama generation limits. -1 means "no limit" (generate until the model
   # stops on its own). num_ctx is the context window size (65K tokens).
   NUM_PREDICT = -1
@@ -196,6 +216,20 @@ class Harness
   # falling back to the built-in default.
   def compact_recent_messages
     options[:compact_recent] || Session::COMPACT_RECENT_MESSAGES
+  end
+
+  # Number of retry attempts for transient network errors:
+  # prefer the value from options (CLI flag or $HARNESS_RETRY_COUNT),
+  # falling back to the built-in default.
+  def retry_count
+    options[:retry_count] || RETRY_COUNT
+  end
+
+  # Base delay (seconds) between retries (exponential backoff):
+  # prefer the value from options (CLI flag or $HARNESS_RETRY_DELAY),
+  # falling back to the built-in default.
+  def retry_delay
+    options[:retry_delay] || RETRY_DELAY
   end
 
   # -- Session persistence ------------------------------------------------
@@ -429,22 +463,32 @@ class Harness
     req['Authorization'] = "Bearer #{auth_token}" if auth_token
     req.body = JSON.generate(body)
 
-    resp = http.request(req)
-    raise LLMError, "LLM error (HTTP #{resp.code}):\n#{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
+    attempts = retry_count
+    attempts.times do |attempt|
+      begin
+        resp = http.request(req)
+      rescue *RETRYABLE_ERRORS => e
+        if attempt < attempts - 1
+          delay = retry_delay * (2 ** attempt)
+          logger.warn("network error (attempt #{attempt + 1}/#{attempts}): #{e.class}: #{e.message} — retrying in #{delay}s")
+          sleep(delay)
+          next
+        end
+        raise LLMError, "LLM request failed after #{attempts} attempts: #{e.class}: #{e.message}"
+      end
 
-    logger.info("=" * 50)
-    logger.info(resp.body)
-    logger.info("=" * 50)
+      raise LLMError, "LLM error (HTTP #{resp.code}):\n#{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
 
-    JSON.parse(resp.body, symbolize_names: true)
-  rescue Net::OpenTimeout => e
-    raise LLMError, "LLM request timed out (open): #{e.message}"
-  rescue Net::ReadTimeout => e
-    raise LLMError, "LLM request timed out (read): #{e.message}"
-  rescue SocketError => e
-    raise LLMError, "LLM connection failed: #{e.message}"
-  rescue JSON::ParserError => e
-    raise LLMError, "LLM returned invalid JSON: #{e.message}"
+      logger.info("=" * 50)
+      logger.info(resp.body)
+      logger.info("=" * 50)
+
+      begin
+        JSON.parse(resp.body, symbolize_names: true)
+      rescue JSON::ParserError => e
+        raise LLMError, "LLM returned invalid JSON: #{e.message}"
+      end
+    end
   end
 
   def execute_tool_call(tool_call)

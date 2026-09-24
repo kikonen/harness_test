@@ -44,6 +44,8 @@ class CLI
       o.on('--num-ctx N',    'Context window size in tokens [or $HARNESS_NUM_CTX]') { |v| opts[:num_ctx] = v.to_i }
       o.on('--reasoning-effort LEVEL', 'Reasoning effort [or $HARNESS_REASONING_EFFORT]') { |v| opts[:reasoning_effort] = v }
       o.on('--compact-recent N', 'Messages to retain verbatim after /compact [or $HARNESS_COMPACT_RECENT]') { |v| opts[:compact_recent] = v.to_i }
+      o.on('--retry-count N', 'Max attempts for transient network errors [or $HARNESS_RETRY_COUNT]') { |v| opts[:retry_count] = v.to_i }
+      o.on('--retry-delay S', 'Base delay (seconds) between retries [or $HARNESS_RETRY_DELAY]') { |v| opts[:retry_delay] = v.to_f }
       o.on('-d DIR', '--workdir DIR', 'Working directory; all file paths are relative to it [or $HARNESS_WORKDIR]') { |v| opts[:workdir] = v }
       o.on('-f FILE', '--file FILE', 'Add a file to the allowed file list (repeatable)') { |v| (opts[:files] ||= []) << v }
       o.on('-r ID', '--resume ID', 'Resume a saved session by id (see /sessions)') { |v| opts[:resume] = v }
@@ -67,6 +69,8 @@ class CLI
     opts[:num_ctx]  ||= HarnessEnv.get('HARNESS_NUM_CTX')&.to_i
     opts[:reasoning_effort] ||= HarnessEnv.get('HARNESS_REASONING_EFFORT')
     opts[:compact_recent] ||= HarnessEnv.get('HARNESS_COMPACT_RECENT')&.to_i
+    opts[:retry_count]  ||= HarnessEnv.get('HARNESS_RETRY_COUNT')&.to_i
+    opts[:retry_delay]  ||= HarnessEnv.get('HARNESS_RETRY_DELAY')&.to_f
     opts[:workdir]  ||= HarnessEnv.get('HARNESS_WORKDIR') || Dir.pwd
 
     # --list-sessions only reads the .harness/sessions directory, so no

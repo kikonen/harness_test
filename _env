@@ -8,3 +8,8 @@ export HARNESS_HISTORY_FILE=.harness/harness_history
 # Lower it to free more context on small models; raise it to keep more
 # immediate working context. Can also be set per-run with --compact-recent N.
 export HARNESS_COMPACT_RECENT=6
+# Automatic retry for transient network errors (ECONNRESET, SSL errors, etc.).
+# RETRY_COUNT: total attempts (1 initial + N-1 retries). Default 3.
+# RETRY_DELAY: base delay in seconds (exponential backoff: 2s, 4s, 8s...). Default 2.
+export HARNESS_RETRY_COUNT=3
+export HARNESS_RETRY_DELAY=2
