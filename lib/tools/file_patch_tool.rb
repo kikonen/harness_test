@@ -149,6 +149,15 @@ class FilePatchTool < Tool
 
   private
 
+  # True for real unified-diff header lines: exactly '---' or '+++', or
+  # followed by a space (e.g. '--- a/path'). A bare start_with?('---') would
+  # also swallow hunk body deletion lines (which start with '-'), so the
+  # stricter check is required.
+  def header_line?(line)
+    line == '---' || line == '+++' ||
+      line.start_with?('--- ') || line.start_with?('+++ ')
+  end
+
   # Parses a unified diff into an array of hunk hashes:
   #   { old_start:, old_count:, new_count:, lines: [...] }
   # where each line is [type, text] with type being ' ', '-', or '+'.
@@ -170,7 +179,7 @@ class FilePatchTool < Tool
     # Skip the --- / +++ header lines (and any leading blank lines).
     while i < lines.size
       line = lines[i]
-      if line.start_with?('---') || line.start_with?('+++') || line.strip.empty?
+      if header_line?(line) || line.strip.empty?
         i += 1
         next
       end
