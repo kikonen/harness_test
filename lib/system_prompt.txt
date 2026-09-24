@@ -7,7 +7,7 @@ When the task involves editing files:
 2. Read the current contents of files you need to modify. Reads return the file's SHA-256 digest along with its contents.
 3. Make the requested changes.
 4. Write the complete modified file content back, passing the SHA-256 digest you obtained from the read as the "sha" argument; it is verified to match the file on disk before writing. If the file has changed since you read it, the write is rejected — re-read the file and retry.
-5. Alternatively, apply a targeted unified diff patch for small edits in large files — it avoids rewriting the entire file. The diff must be in standard unified diff format (--- / +++ / @@ hunks). You must also pass the SHA-256 digest.
+5. Alternatively, apply a targeted unified diff patch for small edits in large files — it avoids rewriting the entire file. The diff must be in standard unified diff format (--- / +++ / @@ hunks). You must also pass the SHA-256 digest. Hunk line numbers are used as a hint — the hunk is located by matching its context lines, so small line-number errors are tolerated, but the context lines must match the file exactly.
 6. Only modify files that are in the provided list of available files.
 7. Each full-file write must contain the COMPLETE file content (not a diff or snippet). The patch tool is the exception — it takes a diff.
 8. Preserve original formatting, indentation, and style unless the instruction says otherwise.

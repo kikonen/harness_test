@@ -19,13 +19,25 @@ require_relative '../file_list'
 # The tool verifies:
 #   1. The file is in the allowed list
 #   2. The SHA-256 matches (file unchanged since read)
-#   3. Each hunk applies cleanly (context lines match at the expected position)
+#   3. Each hunk's old-side lines (context + deletions) are found in the file
+#
+# Robustness:
+#   - Hunks are located by SEARCHING for their old-side lines, starting at the
+#     declared line number and expanding outward, then falling back to a
+#     full-file search. Small line-number errors in the diff therefore do not
+#     cause a failure.
+#   - Blank lines inside a hunk are treated as context lines (a common model
+#     output quirk: the leading space of a context line is omitted).
+#   - Failure messages report the first mismatching line so the model can
+#     self-correct.
 #
 # This is safer than a full file rewrite because:
 #   - The model only specifies the changed regions
 #   - Context lines are verified, preventing misapplied patches
 #   - The SHA check protects against concurrent modifications
 class FilePatchTool < Tool
+  SEARCH_WINDOW = 50  # lines to search above/below the declared position
+
   def initialize(file_list, options)
     @file_list = file_list
     @options   = options
@@ -35,7 +47,8 @@ class FilePatchTool < Tool
                    'The diff must be in unified diff format (--- / +++ / @@ hunks). ' \
                    'Only files in the allowed list can be patched. ' \
                    'You must provide the sha256 digest of the file as last read (from file.read or file.sha). ' \
-                   'Each hunk is verified against the file content — context lines must match. ' \
+                   'Hunk line numbers are used as a hint — the hunk is located by matching its context lines, ' \
+                   'so small line-number errors are tolerated. ' \
                    'Use this for targeted edits instead of rewriting the entire file with file.write.',
       parameters: {
         type: 'object',
@@ -108,10 +121,11 @@ class FilePatchTool < Tool
     hunks.reverse_each do |hunk|
       result = apply_hunk(lines, hunk)
       if result.nil?
+        diag = diagnose(lines, hunk)
         puts "  [file.patch] ✗ #{shown} (hunk at line #{hunk[:old_start]} did not apply)"
         $stdout.flush
-        return "error: hunk at old-line #{hunk[:old_start]} did not apply cleanly — " \
-               "context lines do not match. Re-read the file with file.read and adjust the diff."
+        return "error: hunk at old-line #{hunk[:old_start]} did not apply cleanly. #{diag} " \
+               "Re-read the file with file.read and adjust the diff so its context lines match exactly."
       end
       lines   = result
       applied += 1
@@ -139,6 +153,13 @@ class FilePatchTool < Tool
   #   { old_start:, old_count:, new_count:, lines: [...] }
   # where each line is [type, text] with type being ' ', '-', or '+'.
   # Returns nil if the diff is malformed.
+  #
+  # Lenient parsing rules:
+  #   - Blank lines inside a hunk are treated as context lines (models often
+  #     omit the leading space of a context line).
+  #   - If the parsed line counts disagree with the hunk header, the excess
+  #     context lines are trimmed from the end of the hunk (a common artifact
+  #     of trailing blank lines) instead of failing.
   def parse_unified_diff(diff)
     # Normalize the diff itself to LF so parsing is consistent.
     diff = diff.gsub("\r\n", "\n")
@@ -170,44 +191,34 @@ class FilePatchTool < Tool
 
         i += 1
         hunk_lines = []
-        old_seen   = 0
-        new_seen   = 0
 
+        # Consume hunk body until the next hunk header or a line that is not
+        # part of the hunk (e.g. a trailing "diff --git" line).
         while i < lines.size
           hline = lines[i]
-
-          if hline.start_with?('@@')
-            break  # next hunk
-          end
+          break if hline.start_with?('@@')
 
           if hline.start_with?('-')
             hunk_lines << ['-', hline[1..]]
-            old_seen += 1
           elsif hline.start_with?('+')
             hunk_lines << ['+', hline[1..]]
-            new_seen += 1
           elsif hline.start_with?(' ')
             hunk_lines << [' ', hline[1..]]
-            old_seen += 1
-            new_seen += 1
           elsif hline.start_with?('\\')
             # "\ No newline at end of file" — ignore
+          elsif hline.strip.empty?
+            # Blank line: treat as a context line with empty content.
+            hunk_lines << [' ', '']
           else
-            # A blank line inside a hunk is a context line with empty content.
-            # But it could also be the end of the hunk. We treat it as context
-            # only if we still expect more lines.
-            if old_seen < old_count || new_seen < new_count
-              hunk_lines << [' ', '']
-              old_seen += 1
-              new_seen += 1
-            else
-              break
-            end
+            break  # not part of the hunk
           end
-
           i += 1
-          break if old_seen >= old_count && new_seen >= new_count
         end
+
+        # Reconcile with the header counts: trim excess trailing context lines
+        # (blank-line artifacts) if the body is longer than the header says.
+        hunk_lines = reconcile_counts(hunk_lines, old_count, new_count)
+        return nil if hunk_lines.nil?
 
         hunks << {
           old_start: old_start,
@@ -223,49 +234,92 @@ class FilePatchTool < Tool
     hunks
   end
 
+  # If the parsed body has more lines than the header counts allow, trim
+  # trailing context lines until the counts match. Returns nil if the body
+  # has FEWER lines than required (unfixable).
+  def reconcile_counts(hunk_lines, old_count, new_count)
+    old_seen = hunk_lines.count { |t, _| t == ' ' || t == '-' }
+    new_seen = hunk_lines.count { |t, _| t == ' ' || t == '+' }
+
+    return nil if old_seen < old_count || new_seen < new_count
+
+    lines = hunk_lines.dup
+    while (old_seen > old_count || new_seen > new_count) && lines.last[0] == ' '
+      old_seen -= 1
+      new_seen -= 1
+      lines.pop
+    end
+
+    (old_seen == old_count && new_seen == new_count) ? lines : nil
+  end
+
   # Applies a single hunk to the lines array. Returns the new lines array,
   # or nil if the hunk does not apply cleanly.
   #
-  # The hunk's old_start is 1-based (standard unified diff).
+  # The hunk is located by searching for its old-side lines (context +
+  # deletions), starting at the declared 1-based old_start and expanding
+  # outward, then falling back to a full-file search.
   def apply_hunk(lines, hunk)
-    old_start = hunk[:old_start]  # 1-based
-    idx       = old_start - 1     # 0-based index into lines
+    old_side = hunk[:lines].select { |t, _| t == ' ' || t == '-' }.map { |_, text| text }
+    new_side = hunk[:lines].select { |t, _| t == ' ' || t == '+' }.map { |_, text| text }
+    return nil if old_side.empty? && new_side.empty?
 
-    # Verify the hunk fits within the file.
-    return nil if idx < 0 || idx >= lines.size + 1
+    expected = hunk[:old_start] - 1  # 0-based
 
-    # Walk through the hunk lines, verifying context and '-' lines match.
-    pos = idx
-    new_lines = []
+    pos = find_position(lines, old_side, expected)
+    return nil if pos.nil?
 
-    # Copy lines before the hunk.
-    new_lines.concat(lines[0...idx])
+    lines[0...pos] + new_side + lines[pos + old_side.size..]
+  end
 
-    hunk[:lines].each do |type, text|
-      case type
-      when ' '
-        # Context line: must match the file.
-        if pos >= lines.size || lines[pos] != text
-          return nil
-        end
-        new_lines << text
-        pos += 1
-      when '-'
-        # Deletion: must match the file.
-        if pos >= lines.size || lines[pos] != text
-          return nil
-        end
-        pos += 1
-        # (line is not added to new_lines)
-      when '+'
-        # Addition: insert into new content.
-        new_lines << text
+  # Finds the 0-based index where old_side matches lines, preferring the
+  # position closest to expected. Returns nil if not found.
+  def find_position(lines, old_side, expected)
+    return 0 if old_side.empty?
+
+    # 1. Exact position first.
+    return expected if matches_at?(lines, expected, old_side)
+
+    # 2. Expand a window around the expected position.
+    (1..SEARCH_WINDOW).each do |d|
+      [expected - d, expected + d].each do |pos|
+        next unless pos >= 0 && pos + old_side.size <= lines.size
+        return pos if matches_at?(lines, pos, old_side)
       end
     end
 
-    # Copy remaining lines after the hunk.
-    new_lines.concat(lines[pos..] || [])
+    # 3. Full-file fallback (bounded by file size).
+    (0...[lines.size - old_side.size + 1, 1].max).each do |pos|
+      next if (pos - expected).abs <= SEARCH_WINDOW
+      return pos if matches_at?(lines, pos, old_side)
+    end
 
-    new_lines
+    nil
+  end
+
+  def matches_at?(lines, pos, old_side)
+    old_side.each_with_index do |text, k|
+      return false if lines[pos + k].nil? || lines[pos + k] != text
+    end
+    true
+  end
+
+  # Produces a short diagnostic for a failed hunk: the first old-side line
+  # that does not match at the declared position.
+  def diagnose(lines, hunk)
+    old_side = hunk[:lines].select { |t, _| t == ' ' || t == '-' }.map { |_, text| text }
+    pos      = hunk[:old_start] - 1
+
+    old_side.each_with_index do |text, k|
+      actual = lines[pos + k]
+      if actual.nil?
+        return "Expected line #{pos + k + 1} to be #{text.inspect}, but the file ends at line #{lines.size}."
+      end
+      if actual != text
+        return "Expected line #{pos + k + 1} to be #{text.inspect}, but found #{actual.inspect}."
+      end
+    end
+
+    'The hunk could not be located anywhere in the file — its context lines do not match.'
   end
 end
