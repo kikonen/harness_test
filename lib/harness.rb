@@ -478,7 +478,16 @@ class Harness
         raise LLMError, "LLM request failed after #{attempts} attempts: #{e.class}: #{e.message}"
       end
 
-      raise LLMError, "LLM error (HTTP #{resp.code}):\n#{resp.body}" unless resp.is_a?(Net::HTTPSuccess)
+      unless resp.is_a?(Net::HTTPSuccess)
+        # 5xx = transient server-side error (gateway, overload, timeout) → retry
+        if resp.code.to_i >= 500 && attempt < attempts - 1
+          delay = retry_delay * (2 ** attempt)
+          logger.warn("HTTP #{resp.code} (attempt #{attempt + 1}/#{attempts}) — retrying in #{delay}s")
+          sleep(delay)
+          next
+        end
+        raise LLMError, "LLM error (HTTP #{resp.code}):\n#{resp.body}"
+      end
 
       logger.info("=" * 50)
       logger.info(resp.body)
