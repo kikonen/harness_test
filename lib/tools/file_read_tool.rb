@@ -7,11 +7,11 @@ class FileReadTool < Tool
   def initialize(file_list)
     @file_list = file_list
     super(
-      name: 'file_read',
+      name: 'file.read',
       description: 'Reads the contents of a file. Only files in the allowed list can be read. ' \
                    'Paths are relative to the harness working directory. ' \
                    'Returns the SHA-256 digest of the file along with its full contents. ' \
-                   'Pass the returned sha back to file_write to prove the file has not changed since you read it.',
+                   'Pass the returned sha back to file.write to prove the file has not changed since you read it.',
       parameters: {
         type: 'object',
         properties: {
@@ -26,12 +26,12 @@ class FileReadTool < Tool
     path = @file_list.resolve(args['path'])
     shown = @file_list.display_path(path)
     unless @file_list.include?(path)
-      puts "  [file_read] ✗ #{shown} (not in allowed list)"
+      puts "  [file.read] ✗ #{shown} (not in allowed list)"
       $stdout.flush
       return "error: file '#{shown}' is not in the allowed file list"
     end
     unless File.file?(path)
-      puts "  [file_read] ✗ #{shown} (not found)"
+      puts "  [file.read] ✗ #{shown} (not found)"
       $stdout.flush
       return "error: file not found: #{shown}"
     end
@@ -41,10 +41,10 @@ class FileReadTool < Tool
 
     # Normalize CRLF to LF so the LLM always sees clean line endings.
     # This ensures patches generated from this content will match
-    # the normalized content used by file_patch.
+    # the normalized content used by file.patch.
     content = content.gsub("\r\n", "\n")
 
-    puts "  [file_read] ✓ #{shown} (sha256: #{sha})"
+    puts "  [file.read] ✓ #{shown} (sha256: #{sha})"
     $stdout.flush
 
     "sha256: #{sha}\n---\n#{content}"

@@ -6,7 +6,7 @@ require 'time'
 class GetTimeTool < Tool
   def initialize
     super(
-      name: 'get_current_time',
+      name: 'time.now',
       description: 'Returns the current date and time in ISO 8601 format.',
       parameters: {
         type: 'object',

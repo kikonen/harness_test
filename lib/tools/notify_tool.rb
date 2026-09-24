@@ -5,7 +5,7 @@ require_relative '../tool'
 class NotifyTool < Tool
   def initialize
     super(
-      name: 'notify',
+      name: 'ui.notify',
       description: 'Sends a progress or status message directly to the user\'s console. Use this to inform the user about what you are doing (e.g., "Analyzing file...", "Applying changes..."). This is the ONLY tool for communicating with the user.',
       parameters: {
         type: 'object',
@@ -19,7 +19,7 @@ class NotifyTool < Tool
 
   def execute(args)
     msg = args['message'] || ''
-    puts "  [notify] #{msg}"
+    puts "  [ui.notify] #{msg}"
     $stdout.flush
     'ok'
   end

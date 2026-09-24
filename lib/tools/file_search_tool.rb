@@ -14,12 +14,12 @@ class FileSearchTool < Tool
   def initialize(file_list)
     @file_list = file_list
     super(
-      name: 'file_search',
+      name: 'file.search',
       description: 'Searches for a regex pattern in files under the working directory (like grep). ' \
                    'Returns matching lines as "file:line: text". ' \
                    'Sensitive files are excluded. ' \
                    'Use the optional glob to limit which files are searched (e.g. "lib/**/*.rb"). ' \
-                   'Matched files are NOT added to the allowed list — use file_add to work with them.',
+                   'Matched files are NOT added to the allowed list — use file.add to work with them.',
       parameters: {
         type: 'object',
         properties: {
@@ -34,7 +34,7 @@ class FileSearchTool < Tool
 
   def execute(args)
     pattern_str = args['pattern'].to_s
-    return 'error: usage: file_search(pattern)' if pattern_str.empty?
+    return 'error: usage: file.search(pattern)' if pattern_str.empty?
 
     regex = Regexp.new(pattern_str)
     glob  = (args['glob'] || '**/*').to_s.strip
@@ -86,13 +86,13 @@ class FileSearchTool < Tool
     end
 
     if matches.empty?
-      puts "  [file_search] no matches for /#{pattern_str}/"
+      puts "  [file.search] no matches for /#{pattern_str}/"
       $stdout.flush
       return "no matches for /#{pattern_str}/"
     end
 
     shown_matches = matches.first(MAX_RESULTS)
-    puts "  [file_search] #{matches.size} match(es) for /#{pattern_str}/"
+    puts "  [file.search] #{matches.size} match(es) for /#{pattern_str}/"
     $stdout.flush
 
     result = shown_matches.map do |m|

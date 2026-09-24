@@ -2,7 +2,7 @@
 
 # Central guard for files that must NEVER be added to the allowed file list,
 # regardless of the method used (CLI -f / positional args, the /file command,
-# or the file_add tool).
+# or the file.add tool).
 #
 # To block additional sensitive files later, just append more glob patterns
 # to SENSITIVE_PATTERNS (e.g. 'id_rsa', '*.pem', 'credentials.json').

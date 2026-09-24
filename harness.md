@@ -56,5 +56,5 @@ Keep this in mind:
 ## Pending / Deferred
 
 - `run_command` tool: deferred pending a security model review.
-- CRLF handling: implemented in file_read / file_search / file_patch;
+- CRLF handling: implemented in file.read / file.search / file.patch;
   verify end-to-end on Windows if patching still misbehaves.

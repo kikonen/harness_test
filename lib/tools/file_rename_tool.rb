@@ -9,7 +9,7 @@ class FileRenameTool < Tool
     @file_list = file_list
     @options   = options
     super(
-      name: 'file_rename',
+      name: 'file.rename',
       description: 'Renames (moves) a file to a new path. BOTH the old and the new path ' \
                    'must be in the allowed file list — otherwise the rename is rejected. ' \
                    'Paths are relative to the harness working directory. ' \
@@ -35,38 +35,38 @@ class FileRenameTool < Tool
 
     # Both paths must be in the allowed file list.
     unless @file_list.include?(old_path)
-      puts "  [file_rename] ✗ #{old_shown} (old path not in allowed list)"
+      puts "  [file.rename] ✗ #{old_shown} (old path not in allowed list)"
       $stdout.flush
       return "error: old path '#{old_shown}' is not in the allowed file list"
     end
 
     unless @file_list.include?(new_path)
-      puts "  [file_rename] ✗ #{new_shown} (new path not in allowed list)"
+      puts "  [file.rename] ✗ #{new_shown} (new path not in allowed list)"
       $stdout.flush
       return "error: new path '#{new_shown}' is not in the allowed file list"
     end
 
     # Security: the new path must not be sensitive.
     if @file_list.sensitive?(new_path)
-      puts "  [file_rename] ✗ #{new_shown} (blocked: sensitive file)"
+      puts "  [file.rename] ✗ #{new_shown} (blocked: sensitive file)"
       $stdout.flush
       return "error: new path '#{new_shown}' is blocked and can never be added to the allowed file list"
     end
 
     unless File.file?(old_path)
-      puts "  [file_rename] ✗ #{old_shown} (file does not exist)"
+      puts "  [file.rename] ✗ #{old_shown} (file does not exist)"
       $stdout.flush
       return "error: file '#{old_shown}' does not exist on disk"
     end
 
     if File.exist?(new_path)
-      puts "  [file_rename] ✗ #{new_shown} (destination already exists)"
+      puts "  [file.rename] ✗ #{new_shown} (destination already exists)"
       $stdout.flush
       return "error: destination '#{new_shown}' already exists — choose a different new path"
     end
 
     if @options[:dry_run]
-      puts "  [file_rename] ~ #{old_shown} → #{new_shown} (dry run)"
+      puts "  [file.rename] ~ #{old_shown} → #{new_shown} (dry run)"
       $stdout.flush
       return "DRY RUN: would rename #{old_shown} to #{new_shown}"
     end
@@ -78,7 +78,7 @@ class FileRenameTool < Tool
     # Update the allowed file list: old path replaced by the new one.
     @file_list.rename(old_path, new_path)
 
-    puts "  [file_rename] ✓ #{old_shown} → #{new_shown}"
+    puts "  [file.rename] ✓ #{old_shown} → #{new_shown}"
     $stdout.flush
     "ok: renamed #{old_shown} to #{new_shown} (allowed file list updated)"
   end

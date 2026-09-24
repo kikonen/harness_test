@@ -6,8 +6,8 @@ require_relative 'sensitive_files'
 
 # Single source of truth for the allowed file list and ALL access control
 # around it (e.g. sensitive-file blocking). Every code path that adds,
-# checks, or inspects files (CLI options, the /file command, the file_add
-# tool, file_read / file_write tools) goes through this class.
+# checks, or inspects files (CLI options, the /file command, the file.add
+# tool, file.read / file.write tools) goes through this class.
 #
 # All paths are resolved relative to the working directory (@workdir), so
 # the harness can operate on a project tree without the user having to

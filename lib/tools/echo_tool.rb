@@ -5,8 +5,8 @@ require_relative '../tool'
 class EchoTool < Tool
   def initialize
     super(
-      name: 'echo',
-      description: 'TEST-ONLY tool: returns the input text as-is. Do NOT use this to communicate with the user or send progress messages. Use the "notify" tool instead for any user-facing output.',
+      name: 'test.echo',
+      description: 'TEST-ONLY tool: returns the input text as-is. Do NOT use this to communicate with the user or send progress messages. Use the "ui.notify" tool instead for any user-facing output.',
       parameters: {
         type: 'object',
         properties: {

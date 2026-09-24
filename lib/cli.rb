@@ -486,6 +486,19 @@ class CLI
     puts "Resume one with: /resume <id>  (or: ruby harness.rb -m <model> --resume <id>)"
   end
 
+  # List all available tools, grouped by namespace (mirrors the summary
+  # generated into the system prompt, but with full descriptions).
+  def show_tools
+    registry = harness.tool_registry
+    puts "Available tools (#{registry.tools.size}):"
+    registry.grouped.each do |ns, tools|
+      puts "  #{ns}:"
+      tools.each do |t|
+        puts "    #{t.name} — #{t.description}"
+      end
+    end
+  end
+
   def show_help
     puts <<~HELP
       Available commands:
@@ -505,9 +518,9 @@ class CLI
 
       Direct prompt:
         Type any text (not starting with /) to send it directly to the model.
-        The model will see the list of allowed files and can use file_read /
-        file_write tools to access them. Use file_add to request adding a
-        new file (user confirmation required).
+        The model will see the list of allowed files and can use the file
+        namespace (file.read / file.write) to access them. Use file.add to
+        request adding a new file (user confirmation required).
 
       Session:
         Prompts are accumulated in a session, so the model sees the whole
@@ -526,7 +539,7 @@ class CLI
         is appended to the system prompt as "Project-Specific Rules".
         The file is auto-detected when its modification time changes
         (checked before each prompt). Use /reload to force a re-read
-        (e.g. after editing harness.md with file_write or file_patch).
+        (e.g. after editing harness.md with file.write or file.patch).
 
       Saving / resuming sessions:
         The session (conversation history AND the allowed file list) is

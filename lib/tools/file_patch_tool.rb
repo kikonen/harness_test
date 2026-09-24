@@ -30,19 +30,19 @@ class FilePatchTool < Tool
     @file_list = file_list
     @options   = options
     super(
-      name: 'file_patch',
+      name: 'file.patch',
       description: 'Applies a standard unified diff patch to a file. ' \
                    'The diff must be in unified diff format (--- / +++ / @@ hunks). ' \
                    'Only files in the allowed list can be patched. ' \
-                   'You must provide the sha256 digest of the file as last read (from file_read or file_sha). ' \
+                   'You must provide the sha256 digest of the file as last read (from file.read or file.sha). ' \
                    'Each hunk is verified against the file content — context lines must match. ' \
-                   'Use this for targeted edits instead of rewriting the entire file with file_write.',
+                   'Use this for targeted edits instead of rewriting the entire file with file.write.',
       parameters: {
         type: 'object',
         properties: {
           path: { type: 'string', description: 'Path to the file to patch (relative to the working directory)' },
           diff: { type: 'string', description: 'Unified diff to apply (standard format with --- / +++ / @@ hunks)' },
-          sha:  { type: 'string', description: 'SHA-256 digest of the file as last read (from file_read or file_sha); must match the file on disk' }
+          sha:  { type: 'string', description: 'SHA-256 digest of the file as last read (from file.read or file.sha); must match the file on disk' }
         },
         required: ['path', 'diff', 'sha']
       }
@@ -56,13 +56,13 @@ class FilePatchTool < Tool
     sha   = args['sha'].to_s
 
     unless @file_list.include?(path)
-      puts "  [file_patch] ✗ #{shown} (not in allowed list)"
+      puts "  [file.patch] ✗ #{shown} (not in allowed list)"
       $stdout.flush
       return "error: file '#{shown}' is not in the allowed file list"
     end
 
     unless File.file?(path)
-      puts "  [file_patch] ✗ #{shown} (file does not exist)"
+      puts "  [file.patch] ✗ #{shown} (file does not exist)"
       $stdout.flush
       return "error: file '#{shown}' does not exist on disk"
     end
@@ -70,26 +70,26 @@ class FilePatchTool < Tool
     current_sha = FileList.sha256(path)
 
     if sha.empty?
-      puts "  [file_patch] ✗ #{shown} (missing sha)"
+      puts "  [file.patch] ✗ #{shown} (missing sha)"
       $stdout.flush
-      return "error: 'sha' is required — pass the SHA-256 digest returned by file_read or file_sha"
+      return "error: 'sha' is required — pass the SHA-256 digest returned by file.read or file.sha"
     end
 
     unless current_sha == sha
-      puts "  [file_patch] ✗ #{shown} (sha mismatch)"
+      puts "  [file.patch] ✗ #{shown} (sha mismatch)"
       $stdout.flush
       return "error: sha mismatch for '#{shown}' — the file has changed since you read it. " \
-             "Current sha256: #{current_sha}. Re-read the file with file_read and retry."
+             "Current sha256: #{current_sha}. Re-read the file with file.read and retry."
     end
 
     hunks = parse_unified_diff(diff)
     if hunks.nil?
-      puts "  [file_patch] ✗ #{shown} (invalid diff format)"
+      puts "  [file.patch] ✗ #{shown} (invalid diff format)"
       $stdout.flush
       return "error: could not parse the diff — expected unified diff format with @@ hunks"
     end
     if hunks.empty?
-      puts "  [file_patch] ✗ #{shown} (no hunks in diff)"
+      puts "  [file.patch] ✗ #{shown} (no hunks in diff)"
       $stdout.flush
       return "error: the diff contains no hunks (no @@ ... @@ sections)"
     end
@@ -108,10 +108,10 @@ class FilePatchTool < Tool
     hunks.reverse_each do |hunk|
       result = apply_hunk(lines, hunk)
       if result.nil?
-        puts "  [file_patch] ✗ #{shown} (hunk at line #{hunk[:old_start]} did not apply)"
+        puts "  [file.patch] ✗ #{shown} (hunk at line #{hunk[:old_start]} did not apply)"
         $stdout.flush
         return "error: hunk at old-line #{hunk[:old_start]} did not apply cleanly — " \
-               "context lines do not match. Re-read the file with file_read and adjust the diff."
+               "context lines do not match. Re-read the file with file.read and adjust the diff."
       end
       lines   = result
       applied += 1
@@ -122,13 +122,13 @@ class FilePatchTool < Tool
     new_content = new_content.gsub("\n", "\r\n") if crlf
 
     if @options[:dry_run]
-      puts "  [file_patch] ~ #{shown} (dry run, #{applied} hunk(s) applied)"
+      puts "  [file.patch] ~ #{shown} (dry run, #{applied} hunk(s) applied)"
       $stdout.flush
       return "DRY RUN: would apply #{applied} hunk(s) to #{shown}"
     end
 
     File.write(path, new_content)
-    puts "  [file_patch] ✓ #{shown} (#{applied} hunk(s) applied)"
+    puts "  [file.patch] ✓ #{shown} (#{applied} hunk(s) applied)"
     $stdout.flush
     "ok: applied #{applied} hunk(s) to #{shown}"
   end

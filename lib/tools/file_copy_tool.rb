@@ -14,7 +14,7 @@ class FileCopyTool < Tool
     @file_list = file_list
     @options   = options
     super(
-      name: 'file_copy',
+      name: 'file.copy',
       description: 'Copies a file to a new path. The source must be in the allowed file list. ' \
                    'The destination must not already exist on disk. ' \
                    'Paths are relative to the harness working directory. ' \
@@ -38,32 +38,32 @@ class FileCopyTool < Tool
 
     # The source must be in the allowed file list.
     unless @file_list.include?(src)
-      puts "  [file_copy] ✗ #{src_shown} (source not in allowed list)"
+      puts "  [file.copy] ✗ #{src_shown} (source not in allowed list)"
       $stdout.flush
       return "error: source '#{src_shown}' is not in the allowed file list"
     end
 
     # Security: the destination must not be sensitive.
     if @file_list.sensitive?(dst)
-      puts "  [file_copy] ✗ #{dst_shown} (blocked: sensitive file)"
+      puts "  [file.copy] ✗ #{dst_shown} (blocked: sensitive file)"
       $stdout.flush
       return "error: destination '#{dst_shown}' is blocked and can never be written"
     end
 
     unless File.file?(src)
-      puts "  [file_copy] ✗ #{src_shown} (file does not exist)"
+      puts "  [file.copy] ✗ #{src_shown} (file does not exist)"
       $stdout.flush
       return "error: source file '#{src_shown}' does not exist on disk"
     end
 
     if File.exist?(dst)
-      puts "  [file_copy] ✗ #{dst_shown} (destination already exists)"
+      puts "  [file.copy] ✗ #{dst_shown} (destination already exists)"
       $stdout.flush
       return "error: destination '#{dst_shown}' already exists — choose a different path"
     end
 
     if @options[:dry_run]
-      puts "  [file_copy] ~ #{src_shown} → #{dst_shown} (dry run)"
+      puts "  [file.copy] ~ #{src_shown} → #{dst_shown} (dry run)"
       $stdout.flush
       return "DRY RUN: would copy #{src_shown} to #{dst_shown}"
     end
@@ -75,7 +75,7 @@ class FileCopyTool < Tool
     # Add the destination to the allowed file list.
     @file_list.add(dst)
 
-    puts "  [file_copy] ✓ #{src_shown} → #{dst_shown}"
+    puts "  [file.copy] ✓ #{src_shown} → #{dst_shown}"
     $stdout.flush
     "ok: copied #{src_shown} to #{dst_shown} (destination added to allowed file list)"
   end

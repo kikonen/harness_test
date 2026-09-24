@@ -31,6 +31,8 @@ require_relative 'tools/file_patch_tool'
 require_relative 'tools/file_copy_tool'
 require_relative 'tools/dir_create_tool'
 require_relative 'tools/dir_delete_tool'
+require_relative 'tools/tools_list_tool'
+require_relative 'tools/tools_search_tool'
 require_relative 'tool_registry'
 
 # -- Harness --------------------------------------------------------------
@@ -114,17 +116,35 @@ class Harness
   end
 
   # Base system prompt (from --system / $HARNESS_SYSTEM / the built-in
-  # default) plus optional project-specific rules from a harness.md file
-  # in the working directory. This lets each project keep its own
+  # default) plus the generated tool list (stable, sorted, grouped by
+  # namespace) plus optional project-specific rules from a harness.md
+  # file in the working directory. This lets each project keep its own
   # centralized set of rules for the LLM.
+  #
+  # The tool list is GENERATED from the tool registry (not hardcoded),
+  # so adding/removing a tool automatically updates the prompt. The list
+  # is stable (sorted) so the prompt prefix stays cache-friendly.
   def build_system_prompt
     base = options[:system]
+    base = inject_tool_list(base)
     project_file = File.join(@file_list.workdir, RULES_FILE)
     if File.file?(project_file)
       content = File.read(project_file).strip
       return "#{base}\n\n## Project-Specific Rules\n\n#{content}\n" unless content.empty?
     end
     base
+  end
+
+  # Replace the {{TOOL_LIST}} placeholder in the system prompt with the
+  # generated, sorted tool list from the registry. If the placeholder is
+  # not present (custom system prompt), append the list at the end.
+  def inject_tool_list(base)
+    tool_list = @tool_registry.tool_list
+    if base.include?('{{TOOL_LIST}}')
+      base.sub('{{TOOL_LIST}}', tool_list)
+    else
+      "#{base}\n\n## Available Tools (summary)\n\n#{tool_list}\n"
+    end
   end
 
   # Current mtime of the rules file (nil if it doesn't exist).
@@ -187,6 +207,11 @@ class Harness
     registry.register(FileCopyTool.new(@file_list, @options))
     registry.register(DirCreateTool.new(@file_list))
     registry.register(DirDeleteTool.new(@file_list, @options))
+    # Meta-tools (discovery): registered last so they appear at the end
+    # of the sorted tool list. They take the registry itself as an
+    # argument (built before the tools are instantiated).
+    registry.register(ToolsListTool.new(registry))
+    registry.register(ToolsSearchTool.new(registry))
     registry
   end
 
@@ -607,7 +632,7 @@ class Harness
           messages << {
             role: 'user',
             content: 'STOP. You are stuck in a tool loop. Do NOT call any more tools. ' \
-                     'Respond NOW with your final answer. If you were editing files, use the file_write tool to save them. ' \
+                     'Respond NOW with your final answer. If you were editing files, use the file.write tool to save them. ' \
                      'If this was a query, answer it directly in plain text.'
           }
           next
