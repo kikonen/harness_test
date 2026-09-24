@@ -464,6 +464,7 @@ class Harness
     req.body = JSON.generate(body)
 
     attempts = retry_count
+    result = nil
     attempts.times do |attempt|
       begin
         resp = http.request(req)
@@ -484,11 +485,13 @@ class Harness
       logger.info("=" * 50)
 
       begin
-        JSON.parse(resp.body, symbolize_names: true)
+        result = JSON.parse(resp.body, symbolize_names: true)
       rescue JSON::ParserError => e
         raise LLMError, "LLM returned invalid JSON: #{e.message}"
       end
+      break
     end
+    result
   end
 
   def execute_tool_call(tool_call)
