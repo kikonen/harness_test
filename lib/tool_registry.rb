@@ -45,19 +45,6 @@ class ToolRegistry
           .map { |ns, tools| [ns, tools.sort_by(&:name)] }
   end
 
-  # Generate a compact, stable tool list for the system prompt.
-  # Grouped by namespace, alphabetical within each group.
-  # Example output:
-  #   file: add, copy, delete, list, patch, read, rename, search, sha, write
-  #   dir:  create, delete
-  #   ui:   notify
-  #   time: now
-  def tool_list
-    grouped.map do |ns, tools|
-      "#{ns}: #{tools.map(&:short_name).join(', ')}"
-    end.join("\n")
-  end
-
   # Search tools by name or description (case-insensitive substring match).
   # Returns an array of matching Tool objects, sorted by name.
   def search(query)

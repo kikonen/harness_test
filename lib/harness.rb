@@ -116,35 +116,23 @@ class Harness
   end
 
   # Base system prompt (from --system / $HARNESS_SYSTEM / the built-in
-  # default) plus the generated tool list (stable, sorted, grouped by
-  # namespace) plus optional project-specific rules from a harness.md
+  # default) plus optional project-specific rules from a harness.md
   # file in the working directory. This lets each project keep its own
   # centralized set of rules for the LLM.
   #
-  # The tool list is GENERATED from the tool registry (not hardcoded),
-  # so adding/removing a tool automatically updates the prompt. The list
-  # is stable (sorted) so the prompt prefix stays cache-friendly.
+  # NOTE: the tool list is NOT included in the system prompt — the full
+  # tool schemas (names, descriptions, parameters) are already provided
+  # in the API "tools" field, so repeating them here would be pure
+  # duplication. Tool discovery is handled by the tools.list /
+  # tools.search meta-tools.
   def build_system_prompt
     base = options[:system]
-    base = inject_tool_list(base)
     project_file = File.join(@file_list.workdir, RULES_FILE)
     if File.file?(project_file)
       content = File.read(project_file).strip
       return "#{base}\n\n## Project-Specific Rules\n\n#{content}\n" unless content.empty?
     end
     base
-  end
-
-  # Replace the {{TOOL_LIST}} placeholder in the system prompt with the
-  # generated, sorted tool list from the registry. If the placeholder is
-  # not present (custom system prompt), append the list at the end.
-  def inject_tool_list(base)
-    tool_list = @tool_registry.tool_list
-    if base.include?('{{TOOL_LIST}}')
-      base.sub('{{TOOL_LIST}}', tool_list)
-    else
-      "#{base}\n\n## Available Tools (summary)\n\n#{tool_list}\n"
-    end
   end
 
   # Current mtime of the rules file (nil if it doesn't exist).
