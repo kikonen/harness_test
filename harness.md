@@ -30,6 +30,7 @@ Keep this in mind:
 - Comments explain *why*, not *what*.
 - Preserve existing formatting and style when editing — do not reformat
   untouched code.
+- All text files have new line in the end.
 
 ## Conventions
 
