@@ -21,7 +21,7 @@ class CLI
 
   def initialize
     @options   = parse_options
-    @file_list = FileList.new(@options[:files] || [], workdir: @options[:workdir])
+    @file_list = FileList.new([], workdir: @options[:workdir])
     @harness   = Harness.new(@options, @file_list)
     @commands  = CommandHandler.new(@harness, @file_list, @options)
     @history   = HistoryManager.new(@file_list.workdir)
@@ -34,7 +34,7 @@ class CLI
     opts = {}
 
     parser = OptionParser.new do |o|
-      o.banner  = 'Usage: harness.rb [options] [FILE...]'
+      o.banner  = 'Usage: harness.rb [options]'
       o.separator ''
       o.on('-c FILE', '--config FILE',
            'Path to the YAML config file. Default: .harness/config.yml, ' \
@@ -42,44 +42,13 @@ class CLI
         opts[:config_path] = v
       end
       o.on('-m MODEL', '--model MODEL', 'Model name (required)') { |v| opts[:model] = v }
-      o.on('--base-url URL',
-           'API base URL [default: http://localhost:11434/v1]') do |v|
-        opts[:base_url] = v
-      end
-      o.on('--token TOKEN', 'Bearer auth token') do |v|
-        opts[:token] = v
-      end
       o.on('--system-file FILE',
            'Use this file as the system prompt (overrides config / built-in)') do |v|
         opts[:system_file] = v
       end
-      o.on('--num-ctx N',
-           'Context window size in tokens') do |v|
-        opts[:num_ctx] = v.to_i
-      end
-      o.on('--reasoning-effort LEVEL',
-           'Reasoning effort') do |v|
-        opts[:reasoning_effort] = v
-      end
-      o.on('--temperature F',
-           'Sampling temperature') do |v|
-        opts[:temperature] = v.to_f
-      end
-      o.on('--top-p F',
-           'Nucleus sampling (top_p)') do |v|
-        opts[:top_p] = v.to_f
-      end
-      o.on('--compact-recent N',
-           'Messages to retain verbatim after /compact') do |v|
-        opts[:compact_recent] = v.to_i
-      end
       o.on('-d DIR', '--workdir DIR',
            'Working directory; all file paths are relative to it') do |v|
         opts[:workdir] = v
-      end
-      o.on('-f FILE', '--file FILE',
-           'Add a file to the allowed file list (repeatable)') do |v|
-        (opts[:files] ||= []) << v
       end
       o.on('-r ID', '--resume ID',
            'Resume a saved session by id (see /sessions)') { |v| opts[:resume] = v }
@@ -87,18 +56,11 @@ class CLI
            'List saved sessions and exit (no model needed)') do
         opts[:list_sessions] = true
       end
-      o.on('--dry-run', 'Print edits, do not write files') { opts[:dry_run] = true }
       o.on('-v', '--verbose',
            'Show full prompt and raw response') { |v| opts[:verbose] = true }
       o.on('-h', '--help') { puts o; exit }
     end
     parser.parse!
-
-    # Shell glob expansion: `harness.rb -f src/*.rb` expands to
-    # `-f src/a.rb src/b.rb ...` - OptionParser only consumes the first
-    # argument as the option value; the rest become positional args.
-    # Treat all remaining positional args as files so globs work.
-    ARGV.each { |a| (opts[:files] ||= []) << a }
 
     # Resolve the working directory first (config discovery depends on it).
     opts[:workdir] ||= Dir.pwd
@@ -119,13 +81,13 @@ class CLI
     end
 
     if profile
-      opts[:base_url] ||= profile[:url] || DEFAULT_BASE_URL
-      opts[:model]    ||= profile[:model]
-      opts[:token]    ||= profile[:token]
-      opts[:num_ctx]  ||= profile[:num_ctx]
-      opts[:reasoning_effort] ||= profile[:reasoning_effort]
-      opts[:temperature] ||= profile[:temperature]
-      opts[:top_p]     ||= profile[:top_p]
+      opts[:base_url]         = profile[:url] || DEFAULT_BASE_URL
+      opts[:model]           ||= profile[:model]
+      opts[:token]            = profile[:token]
+      opts[:num_ctx]          = profile[:num_ctx]
+      opts[:reasoning_effort] = profile[:reasoning_effort]
+      opts[:temperature]      = profile[:temperature]
+      opts[:top_p]            = profile[:top_p]
     else
       opts[:base_url] ||= DEFAULT_BASE_URL
     end
@@ -158,21 +120,9 @@ class CLI
     opts[:retry_count] = config.retry_count
     opts[:retry_delay] = config.retry_delay
 
-    # --list-sessions only reads the .harness/sessions directory, so no
-    # model is needed for it.
     unless opts[:model] || opts[:list_sessions]
       raise HarnessError, '-m / --model is required (or set default_model in the config)'
     end
-
-
-    # Security: never allow sensitive files (e.g. .env*) into the list.
-    (opts[:files] || []).each do |f|
-      if FileList.sensitive?(f)
-        puts "  [security] ✗ #{f} (blocked: sensitive file)"
-        $stdout.flush
-      end
-    end
-    opts[:files] = (opts[:files] || []).reject { |f| FileList.sensitive?(f) }
 
     opts
   end
