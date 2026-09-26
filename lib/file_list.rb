@@ -77,6 +77,7 @@ class FileList
   # Display form of a path: relative to the working directory when possible.
   def display_path(path)
     path   = resolve(path)
+    return '.' if path == @workdir
     prefix = "#{@workdir}/"
     path.start_with?(prefix) ? path.sub(prefix, '') : path
   end
@@ -193,20 +194,25 @@ class FileList
     return :granted if readable?(path) && (mode == :r || writable?(path))
     return :blocked if sensitive?(path)
 
-    parent        = File.dirname(path)
-    offer_dir_opt = within_workdir?(parent) && !File.directory?(path)
-
     puts
     verb = mode == :r ? 'read access' : 'write access'
     puts "  [access] ⚠  Access requested (#{verb}): #{shown}"
 
-    if offer_dir_opt
+    if File.directory?(path) && within_workdir?(path)
+      # Directory within workdir: grant is inherently recursive.
+      puts "             1) Allow this directory (recursive)"
+      puts "             2) Deny"
+      print  "             Choice (1/2): "
+    elsif File.file?(path) && within_workdir?(path)
+      # File within workdir: offer file-only or parent-dir (recursive).
+      parent       = File.dirname(path)
       parent_shown = display_path(parent)
       puts "             1) Allow this file only"
       puts "             2) Allow directory: #{parent_shown}/ (recursive)"
       puts "             3) Deny"
       print  "             Choice (1/2/3): "
     else
+      # Outside workdir or special path.
       puts "             1) Allow"
       puts "             2) Deny"
       print  "             Choice (1/2): "
@@ -215,7 +221,16 @@ class FileList
 
     answer = $stdin.gets&.chomp&.strip
 
-    if offer_dir_opt
+    if File.directory?(path) && within_workdir?(path)
+      if answer == '1'
+        add_dir(path, mode)
+        puts "  [access] ✓ #{shown}/ (recursive, #{mode_label(mode)})"
+        :granted
+      else
+        puts "  [access] ✗ denied"
+        :denied
+      end
+    elsif File.file?(path) && within_workdir?(path)
       case answer
       when '1'
         add_file(path, mode)
