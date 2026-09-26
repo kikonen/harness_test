@@ -23,7 +23,7 @@ class ToolsListTool < Tool
 
   def execute(_args)
     lines = @registry.sorted_tools.map do |t|
-      "#{t.name} — #{t.description}"
+      "#{t.name} - #{t.description}"
     end
     puts "  [tools.list] #{lines.size} tool(s)"
     $stdout.flush

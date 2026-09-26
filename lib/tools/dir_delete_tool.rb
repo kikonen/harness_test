@@ -4,7 +4,7 @@ require_relative '../tool'
 require_relative '../file_list'
 
 # Deletes an EMPTY directory from disk. Non-empty directories are rejected
-# (use file.delete to remove their contents first) — there is deliberately
+# (use file.delete to remove their contents first) - there is deliberately
 # no recursive deletion. The path must reside under the working directory
 # and must not be sensitive. The user is prompted for confirmation before
 # the directory is deleted.
@@ -14,7 +14,7 @@ class DirDeleteTool < Tool
     @options   = options
     super(
       name: 'dir.delete',
-      description: 'Deletes an EMPTY directory from disk. Non-empty directories are rejected — ' \
+      description: 'Deletes an EMPTY directory from disk. Non-empty directories are rejected - ' \
                    'remove their contents first (there is no recursive deletion). ' \
                    'The path must reside under the working directory and must not be sensitive. ' \
                    'Paths are relative to the harness working directory. ' \
@@ -59,7 +59,7 @@ class DirDeleteTool < Tool
     unless entries.empty?
       puts "  [dir.delete] ✗ #{shown} (not empty: #{entries.size} entr#{entries.size == 1 ? 'y' : 'ies'})"
       $stdout.flush
-      return "error: directory '#{shown}' is not empty (#{entries.size} entries) — remove its contents first; recursive deletion is not supported"
+      return "error: directory '#{shown}' is not empty (#{entries.size} entries) - remove its contents first; recursive deletion is not supported"
     end
 
     if @options[:dry_run]

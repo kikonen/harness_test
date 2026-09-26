@@ -53,7 +53,7 @@ class FileListTool < Tool
 
     result = shown.map { |p| "- #{p}" }.join("\n")
     if matches.size > MAX_RESULTS
-      result += "\n... (truncated: showing first #{MAX_RESULTS} of #{matches.size} files — narrow the pattern)"
+      result += "\n... (truncated: showing first #{MAX_RESULTS} of #{matches.size} files - narrow the pattern)"
     end
     result
   end

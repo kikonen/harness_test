@@ -1,4 +1,4 @@
-# Project Rules — harness_test
+# Project Rules - harness_test
 
 ## Self-Awareness: You Are Editing Your Own Harness
 
@@ -20,7 +20,7 @@ Keep this in mind:
 - The `harness.md` file (this file) is re-read automatically when its
   modification time changes (checked before each prompt), and can be
   force-reloaded with the `/reload` command. If you edit this file, the
-  new rules take effect on the next prompt — no restart needed.
+  new rules take effect on the next prompt - no restart needed.
 
 ## Code Style
 
@@ -28,31 +28,32 @@ Keep this in mind:
 - 2-space indentation, no tabs.
 - Prefer small, focused methods; keep classes cohesive.
 - Comments explain *why*, not *what*.
-- Preserve existing formatting and style when editing — do not reformat
+- Preserve existing formatting and style when editing - do not reformat
   untouched code.
 - Lines should be at maximum 90 characters long.
 - All text files must have newline in the end.
+- AVOID using "—" emdash use normal dash "-" instead
 
 ## Conventions
 
 - All harness state (sessions, log, history) lives in `.harness/` inside
-  the working directory — never scatter state files in the project root.
+  the working directory - never scatter state files in the project root.
 - Sensitive files/dirs (`.env*`, `.git/`, `.harness/`) are blocked from
-  LLM access — do not try to work around this.
+  LLM access - do not try to work around this.
 - Destructive operations (file delete, dir delete) require user
-  confirmation via the tool layer — do not bypass.
+  confirmation via the tool layer - do not bypass.
 - Line endings: the harness normalizes to LF for LLM-facing operations
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.
 
 ## Tunable Constants
 
-- `Session::COMPACT_RECENT_MESSAGES` — how many recent messages survive
+- `Session::COMPACT_RECENT_MESSAGES` - how many recent messages survive
   `/compact` verbatim (default 6).
 - `Harness::MAX_TOOL_ITERATIONS`, `TOOL_LOOP_WARN_THRESHOLD`,
-  `TOOL_LOOP_HARD_LIMIT` — tool-loop safety limits.
-- `Harness::NUM_CTX` — context window size (default 65536).
-- `SensitiveFiles::SENSITIVE_DIRS` / sensitive file patterns — security
+  `TOOL_LOOP_HARD_LIMIT` - tool-loop safety limits.
+- `Harness::NUM_CTX` - context window size (default 65536).
+- `SensitiveFiles::SENSITIVE_DIRS` / sensitive file patterns - security
   blocklist.
 
 ## Pending / Deferred

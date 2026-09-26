@@ -99,7 +99,7 @@ class CLI
     parser.parse!
 
     # Shell glob expansion: `harness.rb -f src/*.rb` expands to
-    # `-f src/a.rb src/b.rb ...` — OptionParser only consumes the first
+    # `-f src/a.rb src/b.rb ...` - OptionParser only consumes the first
     # argument as the option value; the rest become positional args.
     # Treat all remaining positional args as files so globs work.
     ARGV.each { |a| (opts[:files] ||= []) << a }
@@ -172,13 +172,13 @@ class CLI
           puts "  [error] #{e.message}"
         rescue LLMError => e
           puts "  [LLM error] #{e.message}"
-          puts "  (the prompt is kept in the session — type /retry to re-send it)"
+          puts "  (the prompt is kept in the session - type /retry to re-send it)"
         rescue ToolLoopError => e
           puts "  [tool loop] #{e.message}"
         rescue StandardError => e
           puts "  [unexpected error] #{e.class}: #{e.message}"
           puts e.backtrace.join("\n")
-          puts "  (harness continues — type /exit to quit)"
+          puts "  (harness continues - type /exit to quit)"
         end
 
         break if @exiting
@@ -239,7 +239,7 @@ class CLI
       FileUtils.mv(old_log, new_log)
     end
   rescue StandardError
-    # Migration is best-effort — never block the harness on it.
+    # Migration is best-effort - never block the harness on it.
   end
 
   # Resume a saved session given via -r / --resume (best-effort: a missing
@@ -248,7 +248,7 @@ class CLI
     id   = @options[:resume]
     path = @harness.resume_session(id)
     name = File.basename(path, '.json')
-    puts "Resumed session #{name} (conversation and file list restored — see /session)."
+    puts "Resumed session #{name} (conversation and file list restored - see /session)."
   end
 
   # Auto-save the session on exit (best-effort). Returns the session id,
@@ -309,7 +309,7 @@ class CLI
   # Reline handles everything the old hand-rolled raw-mode code tried to do:
   #   * multiline input (a line ending in `\` continues; unbalanced quotes
   #     also continue),
-  #   * pasted multiline text (bracketed paste — newlines inside a paste are
+  #   * pasted multiline text (bracketed paste - newlines inside a paste are
   #     inserted into the buffer instead of sending the input),
   #   * line editing (arrows, kill, word movement),
   #   * history (up/down arrows), persisted to HISTORY_FILE.
@@ -387,7 +387,7 @@ class CLI
   rescue StandardError => e
     puts e.message
     puts e.backtrace.join("\n")
-    # Corrupt or unreadable history — start fresh.
+    # Corrupt or unreadable history - start fresh.
   end
 
   # Persist history on exit (best-effort).
@@ -401,7 +401,7 @@ class CLI
   rescue StandardError => e
     puts e.message
     puts e.backtrace.join("\n")
-    # Ignore — history persistence is best-effort.
+    # Ignore - history persistence is best-effort.
   end
 
   # Encode a (possibly multiline) history entry as a single line.
@@ -423,7 +423,7 @@ class CLI
       when 'n' then "\n"
       when 'r' then "\r"
       when '\\' then '\\'
-      else m # unknown escape — keep the backslash and the character
+      else m # unknown escape - keep the backslash and the character
       end
     end
   end
@@ -538,7 +538,7 @@ class CLI
 
     when /\A\/reload\Z/
       harness.reload_rules
-      puts "harness.md reloaded — project rules updated in the system prompt."
+      puts "harness.md reloaded - project rules updated in the system prompt."
       puts
 
     when /\A\/save\Z/
@@ -551,7 +551,7 @@ class CLI
       id = $1.strip
       path = harness.resume_session(id)
       puts "Session #{File.basename(path, '.json')} resumed."
-      puts "  (conversation and file list restored — see /session)"
+      puts "  (conversation and file list restored - see /session)"
 
     when /\A\/sessions\Z/
       list_sessions
@@ -598,7 +598,7 @@ class CLI
     registry.grouped.each do |ns, tools|
       puts "  #{ns}:"
       tools.each do |t|
-        puts "    #{t.name} — #{t.description}"
+        puts "    #{t.name} - #{t.description}"
       end
     end
   end
@@ -630,7 +630,7 @@ class CLI
       Session:
         Prompts are accumulated in a session, so the model sees the whole
         conversation. If a request to the LLM fails, the prompt stays in the
-        session — use /retry to re-send the chain. /session shows a summary,
+        session - use /retry to re-send the chain. /session shows a summary,
         /session-clear starts a fresh conversation. /compact summarizes the
         conversation to free up context window space.
 

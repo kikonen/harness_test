@@ -102,7 +102,7 @@ class FileSearchTool < Tool
     end.join("\n")
 
     if matches.size > MAX_RESULTS
-      result += "\n... (truncated: showing first #{MAX_RESULTS} of #{matches.size} matches — narrow the pattern or glob)"
+      result += "\n... (truncated: showing first #{MAX_RESULTS} of #{matches.size} matches - narrow the pattern or glob)"
     end
     result
   end

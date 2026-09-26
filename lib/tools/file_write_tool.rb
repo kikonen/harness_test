@@ -46,13 +46,13 @@ class FileWriteTool < Tool
       if sha.nil? || sha.empty?
         puts "  [file.write] ✗ #{shown} (missing sha)"
         $stdout.flush
-        return "error: 'sha' is required for an existing file — pass the SHA-256 digest returned by file.read or file.sha"
+        return "error: 'sha' is required for an existing file - pass the SHA-256 digest returned by file.read or file.sha"
       end
 
       unless current_sha == sha
         puts "  [file.write] ✗ #{shown} (sha mismatch)"
         $stdout.flush
-        return "error: sha mismatch for '#{shown}' — the file has changed since you read it. " \
+        return "error: sha mismatch for '#{shown}' - the file has changed since you read it. " \
                "Current sha256: #{current_sha}. Re-read the file with file.read and retry."
       end
     end

@@ -52,7 +52,7 @@ class FileCopyTool < Tool
     if File.exist?(dst)
       puts "  [file.copy] ✗ #{dst_shown} (destination already exists)"
       $stdout.flush
-      return "error: destination '#{dst_shown}' already exists — choose a different path"
+      return "error: destination '#{dst_shown}' already exists - choose a different path"
     end
 
     if @options[:dry_run]

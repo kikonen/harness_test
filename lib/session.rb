@@ -48,7 +48,7 @@ class Session
   end
 
   # True when the chain ends with a user message that has not been answered
-  # yet (e.g. after a failed request) — i.e. there is something to retry.
+  # yet (e.g. after a failed request) - i.e. there is something to retry.
   def pending?
     @messages.last[:role] == 'user'
   end
@@ -136,7 +136,7 @@ class Session
     lines << "Messages:        #{@messages.size} total"
     counts.each { |role, n| lines << "  - #{role}: #{n}" }
     lines << "User prompts:    #{@user_prompts}"
-    lines << "Pending prompt:  #{pending? ? 'yes (last request failed — use /retry)' : 'no'}"
+    lines << "Pending prompt:  #{pending? ? 'yes (last request failed - use /retry)' : 'no'}"
     if @last_stats
       usage = @last_stats[:usage]
       parts = ["last request: #{@last_stats[:elapsed_seconds]}s, #{@last_stats[:iterations]} iteration(s)"]

@@ -51,7 +51,7 @@ class FileRenameTool < Tool
     if File.exist?(new_path)
       puts "  [file.rename] ✗ #{new_shown} (destination already exists)"
       $stdout.flush
-      return "error: destination '#{new_shown}' already exists — choose a different new path"
+      return "error: destination '#{new_shown}' already exists - choose a different new path"
     end
 
     if @options[:dry_run]

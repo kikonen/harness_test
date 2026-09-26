@@ -124,7 +124,7 @@ class Harness
   # file in the working directory. This lets each project keep its own
   # centralized set of rules for the LLM.
   #
-  # NOTE: the tool list is NOT included in the system prompt — the full
+  # NOTE: the tool list is NOT included in the system prompt - the full
   # tool schemas (names, descriptions, parameters) are already provided
   # in the API "tools" field, so repeating them here would be pure
   # duplication. Tool discovery is handled by the tools.list /
@@ -275,7 +275,7 @@ class Harness
   # Sessions are saved as JSON files in the .harness/sessions directory
   # inside the working directory. Each session has a stable UUID id
   # (assigned by the Session, see Session#session_id), so saving the
-  # session — possibly multiple times — always writes to the same file:
+  # session - possibly multiple times - always writes to the same file:
   # a session can be continued and re-saved under the same id instead of
   # creating a new session file each time.
 
@@ -345,7 +345,7 @@ class Harness
   def run_prompt(instruction)
     # Auto-detect harness.md changes before each prompt.
     if check_rules_reload
-      puts "  [harness.md reloaded — project rules updated]"
+      puts "  [harness.md reloaded - project rules updated]"
     end
 
     user_prompt = build_user_prompt(@file_list, instruction)
@@ -364,7 +364,7 @@ class Harness
   # Requires a pending user prompt at the end of the chain.
   def retry
     unless @session.pending?
-      raise HarnessError, 'nothing to retry — no pending prompt in the session (send a prompt first)'
+      raise HarnessError, 'nothing to retry - no pending prompt in the session (send a prompt first)'
     end
 
     logger.info("--- retry: re-sending session chain (#{@session.messages.size} messages) ---")
@@ -388,7 +388,7 @@ class Harness
     end
 
     # Build a standalone summarization request (no tools, no system prompt
-    # from the session — just the conversation + an instruction).
+    # from the session - just the conversation + an instruction).
     conversation = @session.messages[1..] # skip the system message
     messages = conversation + [
       {
@@ -465,7 +465,7 @@ class Harness
     when 0 then nil
     when 1 then matches.first
     else
-      raise HarnessError, "ambiguous session id '#{id}' — matches: #{matches.map { |p| File.basename(p) }.join(', ')}"
+      raise HarnessError, "ambiguous session id '#{id}' - matches: #{matches.map { |p| File.basename(p) }.join(', ')}"
     end
   end
 
@@ -478,7 +478,7 @@ class Harness
     http.read_timeout = timeout
     # NOTE: keep-alive is the default in Net::HTTP (the keep_alive= setter
     # was removed in Ruby 3.4), so no explicit setting is needed here.
-    # But the default keep_alive_timeout is only 2 seconds — too short for
+    # But the default keep_alive_timeout is only 2 seconds - too short for
     # the tool loop (tool execution between requests easily exceeds it),
     # so raise it to keep the connection reusable across iterations.
     http.keep_alive_timeout = KEEP_ALIVE_TIMEOUT
@@ -514,7 +514,7 @@ class Harness
       rescue *RETRYABLE_ERRORS => e
         if attempt < attempts - 1
           delay = retry_delay * (2 ** attempt)
-          logger.warn("network error (attempt #{attempt + 1}/#{attempts}): #{e.class}: #{e.message} — retrying in #{delay}s")
+          logger.warn("network error (attempt #{attempt + 1}/#{attempts}): #{e.class}: #{e.message} - retrying in #{delay}s")
           sleep(delay)
           next
         end
@@ -525,7 +525,7 @@ class Harness
         # 5xx = transient server-side error (gateway, overload, timeout) → retry
         if resp.code.to_i >= 500 && attempt < attempts - 1
           delay = retry_delay * (2 ** attempt)
-          logger.warn("HTTP #{resp.code} (attempt #{attempt + 1}/#{attempts}) — retrying in #{delay}s")
+          logger.warn("HTTP #{resp.code} (attempt #{attempt + 1}/#{attempts}) - retrying in #{delay}s")
           sleep(delay)
           next
         end
@@ -618,10 +618,10 @@ class Harness
         end
 
         if consecutive_tool_calls >= TOOL_LOOP_HARD_LIMIT
-          logger.warn("tool-loop hard limit reached (#{consecutive_tool_calls} consecutive calls to '#{current_tool_name}') — forcing final response")
+          logger.warn("tool-loop hard limit reached (#{consecutive_tool_calls} consecutive calls to '#{current_tool_name}') - forcing final response")
           loop_hard_break = true
         elsif consecutive_tool_calls >= TOOL_LOOP_WARN_THRESHOLD && !loop_warning_injected
-          logger.warn("tool-loop warning: #{consecutive_tool_calls} consecutive calls to '#{current_tool_name}' — injecting stop message")
+          logger.warn("tool-loop warning: #{consecutive_tool_calls} consecutive calls to '#{current_tool_name}' - injecting stop message")
           loop_warning_injected = true
         end
 
@@ -668,7 +668,7 @@ class Harness
         next
       end
 
-      # No tool calls — final response
+      # No tool calls - final response
       elapsed = (Time.now - start_time).round(2)
       stats = {
         elapsed_seconds: elapsed,

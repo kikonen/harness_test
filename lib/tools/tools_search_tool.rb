@@ -35,7 +35,7 @@ class ToolsSearchTool < Tool
       return "no tools match '#{query}'"
     end
 
-    lines = matches.map { |t| "#{t.name} — #{t.description}" }
+    lines = matches.map { |t| "#{t.name} - #{t.description}" }
     puts "  [tools.search] #{matches.size} tool(s) match '#{query}'"
     $stdout.flush
     lines.join("\n")

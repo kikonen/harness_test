@@ -31,8 +31,8 @@ require_relative '../file_list'
 #     context lines are trimmed from the body.
 #   - If the full old-side does not match anywhere (e.g. the model included
 #     extra or wrong context lines), matching degrades to progressively
-#     shorter old-side patterns — context lines are dropped one by one from
-#     the hunk ends, NEVER '-' / '+' edit lines — until a match is found.
+#     shorter old-side patterns - context lines are dropped one by one from
+#     the hunk ends, NEVER '-' / '+' edit lines - until a match is found.
 #   - Blank lines inside a hunk are treated as context lines (a common model
 #     output quirk: the leading space of a context line is omitted).
 #   - Failure messages report the first mismatching line so the model can
@@ -53,7 +53,7 @@ class FilePatchTool < Tool
       description: 'Applies a standard unified diff patch to a file. ' \
                    'The diff must be in unified diff format (--- / +++ / @@ hunks). ' \
                    'You must provide the sha256 digest of the file as last read (from file.read or file.sha). ' \
-                   'Hunk line numbers are used as a hint — the hunk is located by matching its context lines, ' \
+                   'Hunk line numbers are used as a hint - the hunk is located by matching its context lines, ' \
                    'so small line-number errors are tolerated. ' \
                    'Use this for targeted edits instead of rewriting the entire file with file.write.',
       parameters: {
@@ -90,13 +90,13 @@ class FilePatchTool < Tool
     if sha.empty?
       puts "  [file.patch] ✗ #{shown} (missing sha)"
       $stdout.flush
-      return "error: 'sha' is required — pass the SHA-256 digest returned by file.read or file.sha"
+      return "error: 'sha' is required - pass the SHA-256 digest returned by file.read or file.sha"
     end
 
     unless current_sha == sha
       puts "  [file.patch] ✗ #{shown} (sha mismatch)"
       $stdout.flush
-      return "error: sha mismatch for '#{shown}' — the file has changed since you read it. " \
+      return "error: sha mismatch for '#{shown}' - the file has changed since you read it. " \
              "Current sha256: #{current_sha}. Re-read the file with file.read and retry."
     end
 
@@ -104,7 +104,7 @@ class FilePatchTool < Tool
     if hunks.nil?
       puts "  [file.patch] ✗ #{shown} (invalid diff format)"
       $stdout.flush
-      return "error: could not parse the diff — expected unified diff format with @@ hunks"
+      return "error: could not parse the diff - expected unified diff format with @@ hunks"
     end
     if hunks.empty?
       puts "  [file.patch] ✗ #{shown} (no hunks in diff)"
@@ -222,7 +222,7 @@ class FilePatchTool < Tool
           elsif hline.start_with?(' ')
             hunk_lines << [' ', hline[1..]]
           elsif hline.start_with?('\\')
-            # "\ No newline at end of file" — ignore
+            # "\ No newline at end of file" - ignore
           elsif hline.strip.empty?
             # Blank line: treat as a context line with empty content.
             hunk_lines << [' ', '']
@@ -237,7 +237,7 @@ class FilePatchTool < Tool
         hunk_lines = reconcile_counts(hunk_lines, old_count, new_count)
         return nil if hunk_lines.nil?
 
-        # Use the RECOUNTED counts as the source of truth — they describe
+        # Use the RECOUNTED counts as the source of truth - they describe
         # what the hunk body actually contains.
         recounted_old = hunk_lines.count { |t, _| t == ' ' || t == '-' }
         recounted_new = hunk_lines.count { |t, _| t == ' ' || t == '+' }
@@ -261,7 +261,7 @@ class FilePatchTool < Tool
   # so mismatches are resolved in favor of the BODY:
   #   - Body LONGER than the header: trim excess trailing context lines
   #     (blank-line artifacts are the most common cause of count drift).
-  #   - Body SHORTER than the header: accept it as-is — the header is likely
+  #   - Body SHORTER than the header: accept it as-is - the header is likely
   #     just wrong, and the body still carries the real edit.
   # Returns nil only when the body is empty (nothing to apply at all).
   def reconcile_counts(hunk_lines, old_count, new_count)
@@ -271,7 +271,7 @@ class FilePatchTool < Tool
     lines = hunk_lines.dup
 
     # Only trim when the body exceeds the header count, and only trailing
-    # context lines — never '-' / '+' lines, which carry the actual edit.
+    # context lines - never '-' / '+' lines, which carry the actual edit.
     while (old_seen > old_count || new_seen > new_count) && lines.last[0] == ' '
       old_seen -= 1
       new_seen -= 1
@@ -287,7 +287,7 @@ class FilePatchTool < Tool
   # Strategy: locate the hunk by matching its old-side lines (context +
   # deletions) against the file, preferring the declared position. If the
   # full old-side does not match anywhere, progressively SHORTER old-side
-  # patterns are tried — context lines are dropped one at a time from the
+  # patterns are tried - context lines are dropped one at a time from the
   # hunk ends (trailing first), while all '-' / '+' edit lines are always
   # kept. The corresponding new-side context lines are dropped in the same
   # way, so the actual edit is never altered.
@@ -398,6 +398,6 @@ class FilePatchTool < Tool
       end
     end
 
-    'The hunk could not be located anywhere in the file — its context lines do not match.'
+    'The hunk could not be located anywhere in the file - its context lines do not match.'
   end
 end

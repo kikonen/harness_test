@@ -7,9 +7,9 @@ require_relative 'sensitive_files'
 # Single source of truth for file access permissions.
 #
 # Access is granted at three granularities:
-#   * files  — individual file grants (exact path match)
-#   * dirs   — non-recursive directory grants (only direct children)
-#   * trees  — recursive directory grants (all files under the directory)
+#   * files  - individual file grants (exact path match)
+#   * dirs   - non-recursive directory grants (only direct children)
+#   * trees  - recursive directory grants (all files under the directory)
 #
 # Sensitive files/directories are always blocked, regardless of grants.
 #
