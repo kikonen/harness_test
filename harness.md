@@ -33,7 +33,7 @@ Keep this in mind:
 - Preserve existing formatting and style when editing - do not reformat
   untouched code.
 - Lines should be at maximum 90 characters long.
-- All text files must have newline in the end.
+- Ruby and other text files must retain trailing newline in the end
 - AVOID using "—" emdash use normal dash "-" instead
 
 ## Conventions
