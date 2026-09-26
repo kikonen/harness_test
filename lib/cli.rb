@@ -5,6 +5,7 @@ require 'fileutils'
 require 'reline'
 
 require_relative 'harness_error'
+require_relative 'harness_config'
 require_relative 'harness'
 require_relative 'file_list'
 
@@ -13,15 +14,15 @@ require_relative 'file_list'
 class CLI
   attr_reader :options, :harness, :file_list
 
+  # Default API base URL (used when neither the CLI nor the config provides one).
+  DEFAULT_BASE_URL = 'http://localhost:11434/v1'
+
   # Where command history is persisted (best-effort).
   # Kept in the .harness directory inside the harness working directory so
   # that different harness instances (i.e. different working directories) do
   # not mix their history, and all harness state can be ignored from git
   # with a single entry (.harness/).
-  # NOTE: if you change the default or add new env vars read here, remember
-  # to update the corresponding exports in the _env file.
-  HISTORY_FILE = HarnessEnv.get('HARNESS_HISTORY_FILE') ||
-                 File.join(Harness::HARNESS_DIR, 'harness_history')
+  HISTORY_FILE = File.join(Harness::HARNESS_DIR, 'harness_history')
 
   def initialize
     @options   = parse_options
@@ -38,47 +39,52 @@ class CLI
     parser = OptionParser.new do |o|
       o.banner  = 'Usage: harness.rb [options] [FILE...]'
       o.separator ''
+      o.on('-c FILE', '--config FILE',
+           'Path to the YAML config file (default: .harness/config.yml)') do |v|
+        opts[:config_path] = v
+      end
       o.on('-m MODEL', '--model MODEL', 'Model name (required)') { |v| opts[:model] = v }
       o.on('--base-url URL',
            'API base URL [default: http://localhost:11434/v1]') do |v|
         opts[:base_url] = v
       end
-      o.on('--token TOKEN', 'Bearer auth token [or $HARNESS_TOKEN]') do |v|
+      o.on('--token TOKEN', 'Bearer auth token') do |v|
         opts[:token] = v
       end
-      o.on('--system TEXT', 'Override system prompt') { |v| opts[:system] = v }
+      o.on('--system-file FILE',
+           'Use this file as the system prompt (overrides config / built-in)') do |v|
+        opts[:system_file] = v
+      end
       o.on('--num-ctx N',
-           'Context window size in tokens [or $HARNESS_NUM_CTX]') do |v|
+           'Context window size in tokens') do |v|
         opts[:num_ctx] = v.to_i
       end
       o.on('--reasoning-effort LEVEL',
-           'Reasoning effort [or $HARNESS_REASONING_EFFORT]') do |v|
+           'Reasoning effort') do |v|
         opts[:reasoning_effort] = v
       end
       o.on('--temperature F',
-           'Sampling temperature [or $HARNESS_TEMPERATURE]') do |v|
+           'Sampling temperature') do |v|
         opts[:temperature] = v.to_f
       end
       o.on('--top-p F',
-           'Nucleus sampling (top_p) [or $HARNESS_TOP_P]') do |v|
+           'Nucleus sampling (top_p)') do |v|
         opts[:top_p] = v.to_f
       end
       o.on('--compact-recent N',
-           'Messages to retain verbatim after /compact ' \
-           '[or $HARNESS_COMPACT_RECENT]') do |v|
+           'Messages to retain verbatim after /compact') do |v|
         opts[:compact_recent] = v.to_i
       end
       o.on('--retry-count N',
-           'Max attempts for transient network errors [or $HARNESS_RETRY_COUNT]') do |v|
+           'Max attempts for transient network errors') do |v|
         opts[:retry_count] = v.to_i
       end
       o.on('--retry-delay S',
-           'Base delay (seconds) between retries [or $HARNESS_RETRY_DELAY]') do |v|
+           'Base delay (seconds) between retries') do |v|
         opts[:retry_delay] = v.to_f
       end
       o.on('-d DIR', '--workdir DIR',
-           'Working directory; all file paths are relative to it ' \
-           '[or $HARNESS_WORKDIR]') do |v|
+           'Working directory; all file paths are relative to it') do |v|
         opts[:workdir] = v
       end
       o.on('-f FILE', '--file FILE',
@@ -104,30 +110,52 @@ class CLI
     # Treat all remaining positional args as files so globs work.
     ARGV.each { |a| (opts[:files] ||= []) << a }
 
-    opts[:base_url] ||= HarnessEnv.get('HARNESS_BASE_URL')
-    opts[:model]    ||= HarnessEnv.get('HARNESS_MODEL')
-    opts[:system]   ||= Harness::SYSTEM_PROMPT
-    opts[:token]    ||= HarnessEnv.get('HARNESS_TOKEN')
-    opts[:num_ctx]  ||= HarnessEnv.get('HARNESS_NUM_CTX')&.to_i
-    opts[:reasoning_effort] ||= HarnessEnv.get('HARNESS_REASONING_EFFORT')
-    opts[:temperature] ||= HarnessEnv.get('HARNESS_TEMPERATURE')&.to_f
-    opts[:top_p]     ||= HarnessEnv.get('HARNESS_TOP_P')&.to_f
-    opts[:compact_recent] ||= HarnessEnv.get('HARNESS_COMPACT_RECENT')&.to_i
-    opts[:retry_count]  ||= HarnessEnv.get('HARNESS_RETRY_COUNT')&.to_i
-    opts[:retry_delay]  ||= HarnessEnv.get('HARNESS_RETRY_DELAY')&.to_f
-    opts[:workdir]  ||= HarnessEnv.get('HARNESS_WORKDIR') || Dir.pwd
-
-    # --list-sessions only reads the .harness/sessions directory, so no
-    # model is needed for it.
-    unless opts[:model] || opts[:list_sessions]
-      raise HarnessError, '-m / --model is required'
-    end
-
-    # Resolve the working directory and make sure it exists.
+    # Resolve the working directory first (config discovery depends on it).
+    opts[:workdir] ||= Dir.pwd
     opts[:workdir] = File.expand_path(opts[:workdir])
     unless File.directory?(opts[:workdir])
       raise HarnessError, "working directory does not exist: #{opts[:workdir]}"
     end
+
+    # Load the YAML config file (models, default_model, compact, system).
+    # Precedence for every setting is: CLI flag > config file > built-in.
+    config = HarnessConfig.load(opts[:config_path], opts[:workdir])
+
+    # Resolve the active model profile from the config. When no models are
+    # configured, -m is treated as a raw model id (backward compatible).
+    profile = nil
+    if config.models_configured? && !opts[:list_sessions]
+      profile = config.resolve_model(opts[:model])
+    end
+
+    if profile
+      opts[:base_url] ||= profile[:url] || DEFAULT_BASE_URL
+      opts[:model]    ||= profile[:model]
+      opts[:token]    ||= profile[:token]
+      opts[:num_ctx]  ||= profile[:num_ctx]
+      opts[:reasoning_effort] ||= profile[:reasoning_effort]
+      opts[:temperature] ||= profile[:temperature]
+      opts[:top_p]     ||= profile[:top_p]
+    else
+      opts[:base_url] ||= DEFAULT_BASE_URL
+    end
+
+    # System prompt: --system-file > config 'system' > built-in default.
+    if opts[:system_file]
+      opts[:system] = File.read(opts[:system_file])
+    else
+      opts[:system] = config.system || Harness::SYSTEM_PROMPT
+    end
+
+    opts[:compact_recent]   ||= config.compact_recent_messages
+    opts[:compact_max_size] = config.compact_max_size
+
+    # --list-sessions only reads the .harness/sessions directory, so no
+    # model is needed for it.
+    unless opts[:model] || opts[:list_sessions]
+      raise HarnessError, '-m / --model is required (or set default_model in the config)'
+    end
+
 
     # Security: never allow sensitive files (e.g. .env*) into the list.
     (opts[:files] || []).each do |f|

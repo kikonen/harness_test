@@ -1,0 +1,164 @@
+# frozen_string_literal: true
+
+require 'yaml'
+
+require_relative 'harness_error'
+
+# -- HarnessConfig --------------------------------------------------------
+#
+# Central configuration, loaded from a YAML config file. This replaces the
+# old per-value ENV-based configuration (HARNESS_MODEL, HARNESS_BASE_URL,
+# HARNESS_TOKEN, HARNESS_NUM_CTX, ...) which had become unmanageable.
+#
+# Precedence for every setting is:
+#   CLI flag  >  config file  >  built-in default (constants in harness.rb)
+#
+# Config file schema (every key is optional; missing keys fall back to the
+# built-in defaults):
+#
+#   models:                     # one or more named model profiles
+#     - name: local             # selection key (used by -m / default_model)
+#       url: http://localhost:11434/v1
+#       model: qwen2.5-coder:32b
+#       token: sk-...           # optional bearer token
+#       num_ctx: 65536          # optional context window size (tokens)
+#       reasoning_effort: medium
+#       temperature: 0.2
+#       top_p: 0.9
+#   default_model: local        # model used when -m is not given
+#   compact:
+#     recent_messages: 6        # messages retained verbatim after /compact
+#     max_size: 500             # max length (words) of the compaction summary
+#   system: |                   # full system prompt (overrides the built-in)
+#     You are a precise code editor...
+#
+class HarnessConfig
+  HARNESS_DIR = '.harness'
+
+  attr_reader :models, :default_model, :system
+
+  def initialize(data = {})
+    data          = {} if data.nil?
+    @raw          = data
+    @models       = normalize_models(Array(data['models']))
+    @default_model = nonblank(data['default_model'])
+    @system       = nonblank(data['system'])
+    @compact      = {
+      recent_messages: int_or_nil(data.dig('compact', 'recent_messages')),
+      max_size:        int_or_nil(data.dig('compact', 'max_size'))
+    }
+  end
+
+  # Load the config from the first existing file among the candidates.
+  # Returns an empty config (built-in defaults only) when no file is found.
+  def self.load(cli_path, workdir)
+    path = find_file(cli_path, workdir)
+    return new({}) if path.nil?
+
+    new(parse(path))
+  end
+
+  # Candidate config file paths, in priority order. The first existing one wins.
+  def self.default_paths(workdir)
+    paths = []
+    paths << ENV['HARNESS_CONFIG'] if ENV['HARNESS_CONFIG']
+    paths << File.join(workdir, HARNESS_DIR, 'config.yml') if workdir
+    paths << File.join(Dir.home, '.config', 'harness', 'config.yml')
+    paths
+  end
+
+  # Find the first existing config file among cli_path + the default paths.
+  def self.find_file(cli_path, workdir)
+    candidates = []
+    candidates << cli_path if cli_path
+    candidates.concat(default_paths(workdir))
+    candidates.each do |p|
+      return p if File.file?(p)
+    end
+    nil
+  end
+
+  # Parse a YAML config file into a plain hash.
+  def self.parse(path)
+    YAML.safe_load(File.read(path)) || {}
+  rescue Psych::SyntaxError => e
+    raise HarnessError, "invalid config file #{path}: #{e.message}"
+  end
+
+  # True when at least one model profile is configured.
+  def models_configured?
+    !@models.empty?
+  end
+
+  # Number of recent messages retained verbatim after compaction (or nil).
+  def compact_recent_messages
+    @compact[:recent_messages]
+  end
+
+  # Max length (words) of the compaction summary (or nil).
+  def compact_max_size
+    @compact[:max_size]
+  end
+
+  # Resolve the active model profile. selection is the value of -m (or nil).
+  # Returns a normalized hash { name:, url:, model:, token:, num_ctx:, ... }
+  # when model profiles are configured, or nil when none are (so the caller
+  # can fall back to treating -m as a raw model id).
+  def resolve_model(selection)
+    return nil unless models_configured?
+
+    key = nonblank(selection) || @default_model
+    raise HarnessError, 'no model selected and no default_model configured' if key.nil?
+
+    match = @models.find { |m| m[:name] == key || m[:model] == key }
+    raise HarnessError, "unknown model '#{key}'. Available: #{@models.map { |m| m[:name] || m[:model] }.join(', ')}" unless match
+
+    match
+  end
+
+  # The raw (parsed) config hash.
+  def to_h
+    @raw
+  end
+
+  private
+
+  def normalize_models(list)
+    list.map do |m|
+      raise HarnessError, "each entry in 'models' must be a mapping" unless m.is_a?(Hash)
+
+      {
+        name:             nonblank(m['name']),
+        url:              nonblank(m['url']),
+        model:            nonblank(m['model']),
+        token:            nonblank(m['token']),
+        num_ctx:          int_or_nil(m['num_ctx']),
+        reasoning_effort: nonblank(m['reasoning_effort']),
+        temperature:      float_or_nil(m['temperature']),
+        top_p:            float_or_nil(m['top_p'])
+      }
+    end
+  end
+
+  # A string is "present" when it is non-nil and not blank.
+  def nonblank(val)
+    val = val.to_s.strip
+    val.empty? ? nil : val
+  end
+
+  def int_or_nil(val)
+    return nil if val.nil?
+
+    Integer(val)
+  rescue ArgumentError, TypeError
+    raise HarnessError, "expected an integer, got: #{val.inspect}"
+  end
+
+  def float_or_nil(val)
+    return nil if val.nil?
+
+    Float(val)
+  rescue ArgumentError, TypeError
+    raise HarnessError, "expected a number, got: #{val.inspect}"
+  end
+end

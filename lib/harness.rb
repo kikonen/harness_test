@@ -9,7 +9,6 @@ require 'thread'
 require 'digest'
 require 'fileutils'
 
-require_relative 'harness_env'
 require_relative 'keep_alive_http'
 require_relative 'harness_error'
 require_relative 'spinner'
@@ -124,8 +123,8 @@ class Harness
     @rules_mtime   = current_rules_mtime
   end
 
-  # Base system prompt (from --system / $HARNESS_SYSTEM / the built-in
-  # default) plus optional project-specific rules from a harness.md
+  # Base system prompt (from --system-file, the config 'system' key, or
+  # the built-in default) plus optional project-specific rules from a harness.md
   # file in the working directory. This lets each project keep its own
   # centralized set of rules for the LLM.
   #
@@ -247,14 +246,14 @@ class Harness
     parts.join("\n\n")
   end
 
-  # Context window size: prefer the value from options (CLI flag or
-  # $HARNESS_NUM_CTX), falling back to the built-in default.
+  # Context window size: prefer the value from options (CLI flag or config
+  # file), falling back to the built-in default.
   def num_ctx
     options[:num_ctx] || NUM_CTX
   end
 
-  # Reasoning effort: prefer the value from options (CLI flag or
-  # $HARNESS_REASONING_EFFORT), falling back to the built-in default.
+  # Reasoning effort: prefer the value from options (CLI flag or config
+  # file), falling back to the built-in default.
   def reasoning_effort
     options[:reasoning_effort] || REASONING_EFFORT
   end
@@ -271,22 +270,28 @@ class Harness
   end
 
   # Number of recent messages retained verbatim after compaction:
-  # prefer the value from options ($HARNESS_COMPACT_RECENT or
-  # --compact-recent), falling back to the built-in default.
+  # prefer the value from options (CLI flag or config 'compact.recent_messages'),
+  # falling back to the built-in default.
   def compact_recent_messages
     options[:compact_recent] || Session::COMPACT_RECENT_MESSAGES
   end
 
+  # Max length (words) of the compaction summary, from the config
+  # 'compact.max_size' key. nil means "no explicit limit".
+  def compact_max_size
+    options[:compact_max_size]
+  end
+
   # Number of retry attempts for transient network errors:
-  # prefer the value from options ($HARNESS_RETRY_COUNT or
-  # --retry-count), falling back to the built-in default.
+  # prefer the value from options (CLI flag), falling back to the built-in
+  # default.
   def retry_count
     options[:retry_count] || RETRY_COUNT
   end
 
   # Base delay (seconds) between retries (exponential backoff):
-  # prefer the value from options ($HARNESS_RETRY_DELAY or
-  # --retry-delay), falling back to the built-in default.
+  # prefer the value from options (CLI flag), falling back to the built-in
+  # default.
   def retry_delay
     options[:retry_delay] || RETRY_DELAY
   end
@@ -395,9 +400,8 @@ class Harness
   # Compact the session: ask the LLM to summarize the conversation, then
   # replace the full message chain with the summary. This frees up context
   # window space while preserving the essential information.
-  #
-  # The last N recent messages (tunable via $HARNESS_COMPACT_RECENT or
-  # --compact-recent) are retained verbatim after the summary so the
+  # The last N recent messages (tunable via --compact-recent or the config
+  # 'compact.recent_messages' key) are retained verbatim after the summary so
   # immediate working context is not lost to summarization.
   #
   # Returns a hash: { summary:, before:, after:, retained: }
@@ -411,6 +415,7 @@ class Harness
     # Build a standalone summarization request (no tools, no system prompt
     # from the session - just the conversation + an instruction).
     conversation = @session.messages[1..] # skip the system message
+    max_words = compact_max_size || 500
     messages = conversation + [
       {
         role: 'user',
@@ -418,7 +423,7 @@ class Harness
                  'Include: (1) what was being worked on, (2) key decisions made, ' \
                  'files that were modified or created, (4) any pending tasks or ' \
                  'unresolved issues, (5) important context needed to continue. ' \
-                 'Keep it under 500 words. Do NOT include the summarization instruction itself.'
+                 "Keep it under #{max_words} words. Do NOT include the summarization instruction itself."
       }
     ]
 
