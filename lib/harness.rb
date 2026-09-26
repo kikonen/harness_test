@@ -487,7 +487,11 @@ class Harness
       model: model,
       messages: messages,
       temperature: temperature,
+      min_p: 0,
       top_p: top_p,
+      top_k: 20,
+      presence_penalty: 1.0,
+      repeat_penalty: 1.05,
       max_tokens: NUM_PREDICT,
       reasoning_effort: reasoning_effort,
       options: {

@@ -7,8 +7,8 @@ export HARNESS_REASONING_EFFORT=medium
 # top_p: nucleus sampling, keep the smallest set of tokens whose cumulative
 # probability reaches top_p (default 0.9). Can also be set per-run with
 # --temperature F / --top-p F.
-export HARNESS_TEMPERATURE=0.2
-export HARNESS_TOP_P=0.9
+export HARNESS_TEMPERATURE=0.6
+export HARNESS_TOP_P=0.95
 export HARNESS_HISTORY_FILE=.harness/harness_history
 # How many recent messages to retain verbatim after /compact (default 6).
 # Lower it to free more context on small models; raise it to keep more
