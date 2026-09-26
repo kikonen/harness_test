@@ -1,0 +1,149 @@
+# frozen_string_literal: true
+
+require 'open3'
+require 'timeout'
+
+require_relative '../tool'
+
+# Executes a shell command in the harness working directory.
+#
+# SAFETY MODEL:
+#   - The FULL command string is displayed to the user before anything runs.
+#   - The user must explicitly type "1" (Allow) at an interactive prompt;
+#     any other answer denies execution. There is no auto-approval and no
+#     "always allow" memory - every invocation is confirmed individually.
+#   - Commands run under a timeout (default 60 s, hard cap 300 s) so a
+#     hung process can never block the session.
+#   - Output is truncated to a line limit (default 200, max 5000) because
+#     it goes into the LLM context window.
+class RunCommandTool < Tool
+  DEFAULT_TIMEOUT = 60    # seconds
+  MAX_TIMEOUT     = 300   # hard cap for the `timeout` parameter
+  DEFAULT_LIMIT   = 200   # output lines
+  MAX_LIMIT       = 5000  # hard cap for the `limit` parameter
+
+  def initialize(file_list, options)
+    @file_list = file_list
+    @options   = options
+    super(
+      name: 'run.command',
+      description: 'Executes a shell command in the harness working directory. ' \
+                   'The full command is shown to the user and they must ' \
+                   'explicitly confirm ("Allow") before it runs; otherwise ' \
+                   'it is denied. Use this for tasks no dedicated tool ' \
+                   'covers (running tests, build steps, one-off scripts). ' \
+                   'Output is captured and returned with the exit code.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: {
+            type: 'string',
+            description: 'The full shell command to execute (e.g. "bundle exec rspec spec/foo_spec.rb"). ' \
+                         'It will be shown verbatim to the user for confirmation.'
+          },
+          cwd: {
+            type: 'string',
+            description: 'Optional working directory for the command (relative to the harness ' \
+                         'working directory). Defaults to the working directory itself.'
+          },
+          timeout: {
+            type: 'integer',
+            description: "Optional timeout in seconds (default #{DEFAULT_TIMEOUT}, max #{MAX_TIMEOUT})."
+          },
+          limit: {
+            type: 'integer',
+            description: "Optional maximum number of output lines returned (default #{DEFAULT_LIMIT}, max #{MAX_LIMIT})."
+          }
+        },
+        required: ['command']
+      }
+    )
+  end
+
+  def execute(args)
+    command = args['command'].to_s.strip
+    if command.empty?
+      return "error: 'command' must be a non-empty shell command"
+    end
+
+    dir   = args['cwd'] ? @file_list.resolve(args['cwd']) : @file_list.workdir
+    shown = @file_list.display_path(dir)
+    unless File.directory?(dir)
+      return "error: directory '#{shown}' does not exist"
+    end
+
+    timeout = [args['timeout'].to_i, DEFAULT_TIMEOUT].max
+    timeout = [timeout, MAX_TIMEOUT].min
+    limit   = args['limit'].to_i
+    limit   = DEFAULT_LIMIT if limit <= 0
+    limit   = [limit, MAX_LIMIT].min
+
+    puts
+    puts "  [run.command] ⚠  The model is requesting to run a shell command:"
+    puts "                  $ #{command}"
+    puts "                  cwd:     #{shown}"
+    puts "                  timeout: #{timeout}s"
+    puts "                  1) Allow"
+    puts "                  2) Deny"
+    print  "                  Choice (1/2): "
+    $stdout.flush
+
+    answer = $stdin.gets
+    answer = answer&.chomp&.strip
+
+    unless answer == '1'
+      puts "  [run.command] ✗ denied by user"
+      $stdout.flush
+      return "error: user denied executing the command"
+    end
+
+    if @options[:dry_run]
+      puts "  [run.command] ~ #{command} (dry run)"
+      $stdout.flush
+      return "DRY RUN: would execute '#{command}' in #{shown}"
+    end
+
+    started = Time.now
+    begin
+      stdout, stderr, status = Timeout.timeout(timeout) do
+        Open3.capture3('sh', '-c', command, chdir: dir)
+      end
+    rescue Timeout::Error
+      puts "  [run.command] ✗ #{command} (timed out after #{timeout}s)"
+      $stdout.flush
+      return "error: command timed out after #{timeout}s"
+    end
+    elapsed = (Time.now - started).round(2)
+    code    = status.exitstatus
+
+    out, truncated = truncate(stdout, limit)
+    err            = truncate(stderr, limit)[0] unless stderr.strip.empty?
+
+    if code.zero?
+      puts "  [run.command] ✓ #{command} (exit 0, #{elapsed}s)"
+    else
+      puts "  [run.command] ✗ #{command} (exit #{code}, #{elapsed}s)"
+    end
+    $stdout.flush
+
+    msg = "exit code: #{code} (#{elapsed}s)\n"
+    msg += "--- stdout ---\n#{out}\n" if out.strip != ''
+    msg += "--- stderr ---\n#{err}\n" if err&.strip&.!= ''
+    msg += "\n(output truncated to #{limit} lines)" if truncated
+    msg
+  end
+
+  private
+
+  # Truncate text to `limit` lines (from the top), appending a notice with
+  # the number of dropped lines. Returns [text, truncated?].
+  def truncate(text, limit)
+    lines = text.split("\n", -1)
+    return [text, false] if lines.size <= limit
+
+    dropped = lines.size - limit
+    notice  = "... (output truncated: #{dropped} more line(s) omitted - " \
+              "raise 'limit' or narrow the command to see them)"
+    [lines.first(limit).join("\n") + "\n" + notice, true]
+  end
+end

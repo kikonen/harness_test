@@ -34,6 +34,7 @@ require_relative 'tools/git_status_tool'
 require_relative 'tools/git_log_tool'
 require_relative 'tools/git_grep_tool'
 require_relative 'tools/git_apply_tool'
+require_relative 'tools/run_command_tool'
 require_relative 'tools/tools_list_tool'
 require_relative 'tools/tools_search_tool'
 require_relative 'tool_registry'
@@ -118,6 +119,8 @@ class Harness
     registry.register(GitLogTool.new(@file_list))
     registry.register(GitGrepTool.new(@file_list))
     registry.register(GitApplyTool.new(@file_list))
+    # Shell execution (always requires explicit user confirmation).
+    registry.register(RunCommandTool.new(@file_list, @options))
     # Meta-tools (discovery): registered last so they appear at the end
     # of the sorted tool list. They take the registry itself as an
     # argument (built before the tools are instantiated).

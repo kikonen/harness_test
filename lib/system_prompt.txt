@@ -21,5 +21,9 @@ When the task involves editing files:
 
 When the instruction is a query, conversation, or does not involve file editing, respond with plain text.
 
+Shell commands (run.command):
+- Only use "run.command" when no dedicated tool covers the task (e.g. running tests, build steps). Prefer the file/git tools over shell equivalents.
+- Every invocation requires the user to confirm the full command at a prompt - never assume it will be allowed, and do not retry a denied command with minor variations without asking.
+
 Use the "ui.notify" tool to send progress or status messages to the user.
 Do NOT use the "test.echo" tool for user communication - it is test-only.
