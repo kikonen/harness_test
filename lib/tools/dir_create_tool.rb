@@ -14,7 +14,7 @@ class DirCreateTool < Tool
     super(
       name: 'dir.create',
       description: 'Creates a directory (mkdir -p semantics: parent directories are created as needed). ' \
-                   'The path must reside under the working directory. ' \
+                   'Paths outside the working directory require explicit user approval. ' \
                    'If the directory already exists, the call is a no-op (success). ' \
                    'Paths are relative to the harness working directory.',
       parameters: {
@@ -30,13 +30,6 @@ class DirCreateTool < Tool
   def execute(args)
     path  = @file_list.resolve(args['path'])
     shown = @file_list.display_path(path)
-
-    # The path must reside under the working directory.
-    unless @file_list.within_workdir?(path)
-      puts "  [dir.create] ✗ #{shown} (outside working directory)"
-      $stdout.flush
-      return "error: path '#{shown}' must reside under the working directory (#{@file_list.workdir})"
-    end
 
     # Security: sensitive paths (e.g. inside .git or .harness) are blocked.
     if @file_list.sensitive?(path)

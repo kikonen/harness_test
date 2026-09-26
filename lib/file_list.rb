@@ -170,7 +170,6 @@ class FileList
     path = resolve(path)
     return :blocked   if sensitive?(path)
     return :duplicate if granted?(mode, :dirs, path)
-    return :outside   unless within_workdir?(path)
 
     grant(mode, :dirs, path)
     :added
@@ -215,7 +214,11 @@ class FileList
       # Outside workdir or special path.
       puts "             ⚠  WARNING: this path is OUTSIDE the working directory."
       puts "               Granting access may be a sandbox escape."
-      puts "             1) Allow"
+      if File.directory?(path)
+        puts "             1) Allow this directory (recursive)"
+      else
+        puts "             1) Allow"
+      end
       puts "             2) Deny"
       print  "             Choice (1/2): "
     end
@@ -248,8 +251,13 @@ class FileList
       end
     else
       if answer == '1'
-        add_file(path, mode)
-        puts "  [access] ✓ #{shown} (#{mode_label(mode)})"
+        if File.directory?(path)
+          add_dir(path, mode)
+          puts "  [access] ✓ #{shown}/ (recursive, #{mode_label(mode)})"
+        else
+          add_file(path, mode)
+          puts "  [access] ✓ #{shown} (#{mode_label(mode)})"
+        end
         :granted
       else
         puts "  [access] ✗ denied"
@@ -336,11 +344,9 @@ class FileList
     return true if granted_dirs.include?(path)
 
     dir = File.dirname(path)
-    return false unless within_workdir?(path)
-
     loop do
       return true if granted_dirs.include?(dir)
-      return false if dir == @workdir || dir == '/'
+      return false if dir == '/'
 
       parent = File.dirname(dir)
       break if parent == dir

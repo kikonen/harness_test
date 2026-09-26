@@ -32,11 +32,7 @@ class FileListTool < Tool
     pattern = args['pattern'].to_s.strip
     return 'error: usage: file.list(pattern)' if pattern.empty?
 
-    # The pattern must reside under the working directory.
     expanded = File.expand_path(pattern, @file_list.workdir)
-    unless @file_list.within_workdir?(expanded)
-      return "error: pattern '#{pattern}' must reside under the working directory (#{@file_list.workdir})"
-    end
 
     # Listing a directory requires read access to that directory.
     base_dir = File.dirname(expanded.sub(/\/\*\*?\/.*\z/, '').sub(/\/\*\*?\z/, ''))

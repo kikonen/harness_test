@@ -40,9 +40,6 @@ class FileSearchTool < Tool
     context = (args['context'] || 0).to_i
 
     expanded = File.expand_path(glob, @file_list.workdir)
-    unless @file_list.within_workdir?(expanded)
-      return "error: glob '#{glob}' must reside under the working directory (#{@file_list.workdir})"
-    end
 
     # Searching a directory requires READ access to that directory.
     base_dir = File.dirname(expanded.sub(/\/\*\*?\/.*\z/, '').sub(/\/\*\*?\z/, ''))

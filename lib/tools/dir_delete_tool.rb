@@ -16,7 +16,7 @@ class DirDeleteTool < Tool
       name: 'dir.delete',
       description: 'Deletes an EMPTY directory from disk. Non-empty directories are rejected - ' \
                    'remove their contents first (there is no recursive deletion). ' \
-                   'The path must reside under the working directory and must not be sensitive. ' \
+                   'Paths outside the working directory require explicit user approval. ' \
                    'Paths are relative to the harness working directory. ' \
                    'The user will be prompted for confirmation before the directory is deleted.',
       parameters: {
@@ -32,14 +32,6 @@ class DirDeleteTool < Tool
   def execute(args)
     path  = @file_list.resolve(args['path'])
     shown = @file_list.display_path(path)
-
-    # The path must reside under the working directory (and not be the
-    # working directory itself).
-    unless @file_list.within_workdir?(path)
-      puts "  [dir.delete] ✗ #{shown} (outside working directory)"
-      $stdout.flush
-      return "error: path '#{shown}' must reside under the working directory (#{@file_list.workdir})"
-    end
 
     # Security: sensitive paths (e.g. inside .git or .harness) are blocked.
     if @file_list.sensitive?(path)
