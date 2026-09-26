@@ -30,6 +30,11 @@ require_relative 'tools/file_patch_tool'
 require_relative 'tools/file_copy_tool'
 require_relative 'tools/dir_create_tool'
 require_relative 'tools/dir_delete_tool'
+require_relative 'tools/git_diff_tool'
+require_relative 'tools/git_show_tool'
+require_relative 'tools/git_status_tool'
+require_relative 'tools/git_log_tool'
+require_relative 'tools/git_apply_tool'
 require_relative 'tools/tools_list_tool'
 require_relative 'tools/tools_search_tool'
 require_relative 'tool_registry'
@@ -52,9 +57,9 @@ class Harness
   DEFAULT_READ_TIMEOUT = 1800
 
   # How long (seconds) an idle keep-alive connection may sit unused before
-  # Net::HTTP closes it and re-establishes a new one for the next request.
-  # The default is only 2 seconds, which is too short for the tool loop
-  # (tool execution between requests easily exceeds it), so we raise it.
+  # Net::HTTP closes it and re-establishes a new one. The default is only
+  # 2 seconds, which is too short for the tool loop (tool execution between
+  # requests easily exceeds it), so we raise it.
   KEEP_ALIVE_TIMEOUT = 60
 
   # Transient network errors that are safe to retry (the request was never
@@ -152,8 +157,8 @@ class Harness
     mtime = current_rules_mtime
     return false if mtime == @rules_mtime
 
-    @rules_mtime = mtime
-    new_prompt = build_system_prompt
+    @rules_mtime   = mtime
+    new_prompt     = build_system_prompt
     @session.update_system_prompt(new_prompt)
     logger.info("harness.md reloaded (mtime changed)")
     true
@@ -163,7 +168,6 @@ class Harness
   # Always re-reads the file regardless of mtime.
   def reload_rules
     new_prompt = build_system_prompt
-    @session.update_system_prompt(new_prompt)
     @rules_mtime = current_rules_mtime
     logger.info("harness.md reloaded (manual /reload)")
     new_prompt
@@ -198,6 +202,12 @@ class Harness
     registry.register(FileCopyTool.new(@file_list, @options))
     registry.register(DirCreateTool.new(@file_list))
     registry.register(DirDeleteTool.new(@file_list, @options))
+    # Git tools (operate on the repository containing the working dir).
+    registry.register(GitDiffTool.new(@file_list))
+    registry.register(GitShowTool.new(@file_list))
+    registry.register(GitStatusTool.new(@file_list))
+    registry.register(GitLogTool.new(@file_list))
+    registry.register(GitApplyTool.new(@file_list))
     # Meta-tools (discovery): registered last so they appear at the end
     # of the sorted tool list. They take the registry itself as an
     # argument (built before the tools are instantiated).
@@ -237,35 +247,34 @@ class Harness
     options[:reasoning_effort] || REASONING_EFFORT
   end
 
-  # Sampling temperature: prefer the value from options (CLI flag or
-  # $HARNESS_TEMPERATURE), falling back to the built-in default.
+  # Sampling temperature (defaults). temperature controls randomness
+  # (lower = more deterministic); top_p is nucleus sampling.
   def temperature
     options[:temperature] || TEMPERATURE
   end
 
-  # Nucleus sampling (top_p): prefer the value from options (CLI flag or
-  # $HARNESS_TOP_P), falling back to the built-in default.
+  # Nucleus sampling (top_p)
   def top_p
     options[:top_p] || TOP_P
   end
 
   # Number of recent messages retained verbatim after compaction:
-  # prefer the value from options (CLI flag or $HARNESS_COMPACT_RECENT),
-  # falling back to the built-in default.
+  # prefer the value from options ($HARNESS_COMPACT_RECENT or
+  # --compact-recent), falling back to the built-in default.
   def compact_recent_messages
     options[:compact_recent] || Session::COMPACT_RECENT_MESSAGES
   end
 
   # Number of retry attempts for transient network errors:
-  # prefer the value from options (CLI flag or $HARNESS_RETRY_COUNT),
-  # falling back to the built-in default.
+  # prefer the value from options ($HARNESS_RETRY_COUNT or
+  # --retry-count), falling back to the built-in default.
   def retry_count
     options[:retry_count] || RETRY_COUNT
   end
 
   # Base delay (seconds) between retries (exponential backoff):
-  # prefer the value from options (CLI flag or $HARNESS_RETRY_DELAY),
-  # falling back to the built-in default.
+  # prefer the value from options ($HARNESS_RETRY_DELAY or
+  # --retry-delay), falling back to the built-in default.
   def retry_delay
     options[:retry_delay] || RETRY_DELAY
   end
@@ -518,7 +527,7 @@ class Harness
           sleep(delay)
           next
         end
-        raise LLMError, "LLM request failed after #{attempts} attempts: #{e.class}: #{e.message}"
+        raise LLMError, "LLM request failed after #{attempts} attempts: #{e.message}"
       end
 
       unless resp.is_a?(Net::HTTPSuccess)
