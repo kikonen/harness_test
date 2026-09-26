@@ -296,6 +296,88 @@ class Harness
     options[:retry_delay] || RETRY_DELAY
   end
 
+  # -- Model selection ----------------------------------------------------
+  # The active model can be switched at runtime (/model). Model profiles come
+  # from the config file (options[:model_profiles]); switching applies the
+  # profile's settings to options in place, so the very next request uses them.
+  # options is shared with the CLI, so no other wiring is needed.
+
+  # All configured model profiles (array of hashes), or [] when none.
+  def model_profiles
+    Array(options[:model_profiles])
+  end
+
+  # Name (or id) of the configured default model, or nil.
+  def default_model_name
+    options[:default_model]
+  end
+
+  # Name (or id) of the currently active model.
+  def active_model_name
+    options[:active_model] || options[:model]
+  end
+
+  # Switch to a configured model profile by name (or raw model id). Applies
+  # the profile's settings to options in place and returns the applied
+  # profile hash. Raises HarnessError when the model is not found.
+  def switch_model(name)
+    name = name.to_s.strip
+    raise HarnessError, 'usage: /model <name>' if name.empty?
+
+    profiles = model_profiles
+    if profiles.empty?
+      # No profiles configured: treat the argument as a raw model id.
+      options[:model]        = name
+      options[:active_model] = name
+      return { name: name, model: name }
+    end
+
+    match = find_profile(name)
+    raise HarnessError, "unknown model '#{name}'. Type /models to see the available models." unless match
+
+    apply_profile(match)
+    match
+  end
+
+  # Find a configured profile by its name or raw model id (nil when absent).
+  def find_profile(name)
+    model_profiles.find { |p| p[:name] == name || p[:model] == name }
+  end
+
+  # Apply a model profile's settings to options in place. Missing (nil)
+  # sampling values fall back to the built-in defaults via the accessor
+  # methods above; base_url keeps its current value when the profile has none.
+  def apply_profile(profile)
+    options[:base_url]         = profile[:url] || options[:base_url]
+    options[:model]            = profile[:model]
+    options[:token]            = profile[:token]
+    options[:num_ctx]          = profile[:num_ctx]
+    options[:reasoning_effort] = profile[:reasoning_effort]
+    options[:temperature]      = profile[:temperature]
+    options[:top_p]            = profile[:top_p]
+    options[:active_model]     = profile[:name] || profile[:model]
+  end
+
+  # Restore the model saved in a session:
+  #   * nil (the default was active when the session was saved) - the config
+  #     default is already active, so there is nothing to do.
+  #   * a known model - switch to it.
+  #   * an unknown model (e.g. removed from the config since the save) -
+  #     show an error and reset to the config default.
+  def restore_active_model(name)
+    return if name.nil?
+
+    name = name.to_s.strip
+    return if name.empty?
+
+    match = find_profile(name)
+    unless match
+      raise HarnessError, "session's model '#{name}' is not configured anymore - reset to the default model"
+    end
+
+    apply_profile(match)
+  end
+
   # -- Session persistence ------------------------------------------------
   #
   # Sessions are saved as JSON files in the .harness/sessions directory
@@ -316,6 +398,7 @@ class Harness
     FileUtils.mkdir_p(sessions_dir)
 
     data = @session.to_h(@file_list)
+    data[:active_model] = options[:active_model]
     json = JSON.generate(data)
 
     id   = @session.session_id
@@ -337,6 +420,7 @@ class Harness
 
     data = JSON.parse(File.read(path), symbolize_names: true)
     @session.restore(data, @file_list)
+    restore_active_model(data[:active_model])
     @rules_mtime = current_rules_mtime
     logger.info("session resumed: #{File.basename(path, '.json')} (#{path})")
     path

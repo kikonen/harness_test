@@ -141,6 +141,13 @@ class CLI
       opts[:base_url] ||= DEFAULT_BASE_URL
     end
 
+    # Expose the configured model profiles so /models can list them and
+    # /model can switch between them at runtime. The active model name is
+    # tracked separately (options[:active_model]) for display and persistence.
+    opts[:model_profiles] = config.models
+    opts[:default_model]  = config.default_model
+    opts[:active_model]   ||= opts[:model]
+
     # System prompt: --system-file > config 'system' > built-in default.
     if opts[:system_file]
       opts[:system] = File.read(opts[:system_file])
@@ -596,6 +603,19 @@ class CLI
     when /\A\/tools\Z/
       show_tools
 
+    when /\A\/models\Z/
+      show_models
+
+    when /\A\/model\Z/
+      puts "Current model: #{harness.active_model_name} (@ #{@options[:base_url]})"
+      puts "List models with /models, switch with /model <name>."
+
+    when /\A\/model\s+(.+)\Z/
+      profile = harness.switch_model($1)
+      name = profile[:name] || profile[:model]
+      url  = profile[:url] || @options[:base_url]
+      puts "Switched to model: #{name} (#{profile[:model]} @ #{url})"
+
     when /\A\/.*\Z/
       puts "Unknown command: #{input}.\n----\nType /help for available commands."
 
@@ -654,6 +674,32 @@ class CLI
     end
   end
 
+  # List the configured model profiles, marking the default and the active one.
+  def show_models
+    profiles = harness.model_profiles
+    current  = harness.active_model_name
+
+    if profiles.empty?
+      puts "No model profiles configured."
+      puts "Current model: #{current} (@ #{@options[:base_url]})"
+      return
+    end
+
+    default_name = harness.default_model_name
+
+    puts "Configured models (#{profiles.size}):"
+    profiles.each do |p|
+      name   = p[:name] || p[:model]
+      marks  = []
+      marks << 'default' if default_name && (name == default_name || p[:model] == default_name)
+      marks << 'active'  if name == current
+      suffix = marks.empty? ? '' : "   [#{marks.join(', ')}]"
+      puts "  #{name}  ->  #{p[:model]} @ #{p[:url] || DEFAULT_BASE_URL}#{suffix}"
+    end
+    puts
+    puts "Switch with: /model <name>   (current: #{current})"
+  end
+
   def show_help
     puts <<~HELP
       Available commands:
@@ -672,6 +718,9 @@ class CLI
         /resume <id>   Resume a saved session by its id (see /sessions)
         /sessions      List saved sessions
         /tools         List available tools
+        /models        List configured models (marks the default and active one)
+        /model <name>  Switch the active model for this run (remembered in the session)
+        /model         Show the currently active model
         /help          Show this help
         /exit          Exit the harness
 

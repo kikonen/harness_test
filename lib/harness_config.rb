@@ -24,11 +24,11 @@ require_relative 'harness_error'
 #       token: sk-...           # optional bearer token
 #       num_ctx: 65536          # optional context window size (tokens)
 #       reasoning_effort: medium
-#       temperature: 0.2
-#       top_p: 0.9
+#       temperature: 0.6
+#       top_p: 0.95
 #   default_model: local        # model used when -m is not given
 #   compact:
-#     recent_messages: 6        # messages retained verbatim after /compact
+#     recent_messages: 3        # messages retained verbatim after /compact
 #     max_size: 500             # max length (words) of the compaction summary
 #   system: |                   # full system prompt (overrides the built-in)
 #     You are a precise code editor...
@@ -54,8 +54,8 @@ class HarnessConfig
         # token: sk-...        # optional bearer token
         num_ctx: 65536         # context window size (tokens)
         reasoning_effort: medium
-        temperature: 0.2
-        top_p: 0.9
+        temperature: 0.6
+        top_p: 0.95
 
     # Model used when -m is not given on the command line.
     default_model: local
