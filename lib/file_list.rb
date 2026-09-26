@@ -229,13 +229,23 @@ class FileList
       puts "  [access] ⚠  Access requested (#{verb}): #{shown}"
     end
 
-    if File.directory?(path) && within_workdir?(path)
+    # Decide the branch on PATH LOCATION, not existence: a new file that does
+    # not exist yet must still be treated as inside-workdir. Existence is only
+    # used to pick dir-style vs file-style prompt options.
+    is_dir      = File.directory?(path)
+    inside      = within_workdir?(path)
+    # Treat an inside-workdir path as a "file" prompt unless it is a real
+    # directory (a non-existent target defaults to the file-style prompt).
+    dir_prompt  = inside && is_dir
+    file_prompt = inside && !is_dir
+
+    if dir_prompt
       # Directory within workdir: offer flat or recursive.
       puts "             1) Allow this directory only"
       puts "             2) Allow this directory and subdirs (recursive)"
       puts "             3) Deny"
       print  "             Choice (1/2/3): "
-    elsif File.file?(path) && within_workdir?(path)
+    elsif file_prompt
       # File within workdir: offer file-only or parent-dir (flat/recursive).
       parent       = File.dirname(path)
       parent_shown = display_path(parent)
@@ -248,20 +258,22 @@ class FileList
       # Outside workdir or special path.
       puts "             ⚠  WARNING: this path is OUTSIDE the working directory."
       puts "               Granting access may be a sandbox escape."
-      if File.directory?(path)
+      if is_dir
         puts "             1) Allow this directory only"
         puts "             2) Allow this directory and subdirs (recursive)"
+        puts "             3) Deny"
+        print  "             Choice (1/2/3): "
       else
         puts "             1) Allow"
+        puts "             2) Deny"
+        print  "             Choice (1/2): "
       end
-      puts File.directory?(path) ? "             3) Deny" : "             2) Deny"
-      print  File.directory?(path) ? "             Choice (1/2/3): " : "             Choice (1/2): "
     end
     $stdout.flush
 
     answer = $stdin.gets&.chomp&.strip
 
-    if File.directory?(path) && within_workdir?(path)
+    if dir_prompt
       case answer
       when '1'
         add_flat_dir(path, mode)
@@ -275,7 +287,8 @@ class FileList
         puts "  [access] ✗ denied"
         :denied
       end
-    elsif File.file?(path) && within_workdir?(path)
+    elsif file_prompt
+      parent = File.dirname(path)
       case answer
       when '1'
         add_file(path, mode)
@@ -293,26 +306,26 @@ class FileList
         puts "  [access] ✗ denied"
         :denied
       end
+    elsif is_dir
+      case answer
+      when '1'
+        add_flat_dir(path, mode)
+        puts "  [access] ✓ #{shown}/ (dir only, #{mode_label(mode)})"
+        :granted
+      when '2'
+        add_dir(path, mode)
+        puts "  [access] ✓ #{shown}/ (recursive, #{mode_label(mode)})"
+        :granted
+      else
+        puts "  [access] ✗ denied"
+        :denied
+      end
     else
       case answer
       when '1'
-        if File.directory?(path)
-          add_flat_dir(path, mode)
-          puts "  [access] ✓ #{shown}/ (dir only, #{mode_label(mode)})"
-        else
-          add_file(path, mode)
-          puts "  [access] ✓ #{shown} (#{mode_label(mode)})"
-        end
+        add_file(path, mode)
+        puts "  [access] ✓ #{shown} (#{mode_label(mode)})"
         :granted
-      when '2'
-        if File.directory?(path)
-          add_dir(path, mode)
-          puts "  [access] ✓ #{shown}/ (recursive, #{mode_label(mode)})"
-        else
-          # For non-dir outside paths, option 2 is Deny.
-          puts "  [access] ✗ denied"
-          :denied
-        end
       else
         puts "  [access] ✗ denied"
         :denied
