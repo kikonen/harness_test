@@ -2,7 +2,7 @@
 
 # Central guard for files that must NEVER be added to the allowed file list,
 # regardless of the method used (CLI -f / positional args, the /file command,
-# or the file.add tool).
+# or the dir.allow tool).
 #
 # To block additional sensitive files later, just append more glob patterns
 # to SENSITIVE_PATTERNS (e.g. 'id_rsa', '*.pem', 'credentials.json').
@@ -24,6 +24,9 @@ module SensitiveFiles
     name = File.basename(path.to_s)
     return true if SENSITIVE_PATTERNS.any? { |pat| File.fnmatch?(pat, name, File::FNM_DOTMATCH) }
 
-    SENSITIVE_DIRS.any? { |dir| path.to_s.split(File::SEPARATOR).include?(dir) }
+    # File.expand_path normalizes separators to "/" regardless of platform,
+    # so splitting on "/" works on both Windows and Unix.
+    components = File.expand_path(path.to_s).split('/')
+    SENSITIVE_DIRS.any? { |dir| components.include?(dir) }
   end
 end

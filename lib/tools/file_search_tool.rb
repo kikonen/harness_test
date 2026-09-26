@@ -19,7 +19,7 @@ class FileSearchTool < Tool
                    'Returns matching lines as "file:line: text". ' \
                    'Sensitive files are excluded. ' \
                    'Use the optional glob to limit which files are searched (e.g. "lib/**/*.rb"). ' \
-                   'Matched files are NOT added to the allowed list — use file.add to work with them.',
+                   'Matched files are NOT added to the allowed list — use dir.allow to work with them.',
       parameters: {
         type: 'object',
         properties: {
@@ -41,8 +41,7 @@ class FileSearchTool < Tool
     context = (args['context'] || 0).to_i
 
     expanded = File.expand_path(glob, @file_list.workdir)
-    prefix   = @file_list.workdir + File::SEPARATOR
-    unless expanded.start_with?(prefix)
+    unless @file_list.within_workdir?(expanded)
       return "error: glob '#{glob}' must reside under the working directory (#{@file_list.workdir})"
     end
 

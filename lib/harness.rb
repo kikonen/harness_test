@@ -22,7 +22,6 @@ require_relative 'tools/get_time_tool'
 require_relative 'tools/file_read_tool'
 require_relative 'tools/file_write_tool'
 require_relative 'tools/file_sha_tool'
-require_relative 'tools/file_add_tool'
 require_relative 'tools/file_rename_tool'
 require_relative 'tools/file_delete_tool'
 require_relative 'tools/file_list_tool'
@@ -31,6 +30,7 @@ require_relative 'tools/file_patch_tool'
 require_relative 'tools/file_copy_tool'
 require_relative 'tools/dir_create_tool'
 require_relative 'tools/dir_delete_tool'
+require_relative 'tools/dir_allow_tool'
 require_relative 'tools/tools_list_tool'
 require_relative 'tools/tools_search_tool'
 require_relative 'tool_registry'
@@ -187,7 +187,6 @@ class Harness
     registry.register(FileReadTool.new(@file_list))
     registry.register(FileWriteTool.new(@file_list, @options))
     registry.register(FileShaTool.new(@file_list))
-    registry.register(FileAddTool.new(@file_list))
     registry.register(FileRenameTool.new(@file_list, @options))
     registry.register(FileDeleteTool.new(@file_list, @options))
     registry.register(FileSearchTool.new(@file_list))
@@ -195,6 +194,7 @@ class Harness
     registry.register(FileCopyTool.new(@file_list, @options))
     registry.register(DirCreateTool.new(@file_list))
     registry.register(DirDeleteTool.new(@file_list, @options))
+    registry.register(DirAllowTool.new(@file_list))
     # Meta-tools (discovery): registered last so they appear at the end
     # of the sorted tool list. They take the registry itself as an
     # argument (built before the tools are instantiated).

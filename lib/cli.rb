@@ -20,7 +20,8 @@ class CLI
   # with a single entry (.harness/).
   # NOTE: if you change the default or add new env vars read here, remember
   # to update the corresponding exports in the _env file.
-  HISTORY_FILE = HarnessEnv.get('HARNESS_HISTORY_FILE') || File.join(Harness::HARNESS_DIR, 'harness_history')
+  HISTORY_FILE = HarnessEnv.get('HARNESS_HISTORY_FILE') ||
+                 File.join(Harness::HARNESS_DIR, 'harness_history')
 
   def initialize
     @options   = parse_options
@@ -37,22 +38,55 @@ class CLI
     parser = OptionParser.new do |o|
       o.banner  = 'Usage: harness.rb [options] [FILE...]'
       o.separator ''
-      o.on('-m MODEL', '--model MODEL', 'Model name (required)')                 { |v| opts[:model]    = v }
-      o.on('--base-url URL', 'API base URL [default: http://localhost:11434/v1]') { |v| opts[:base_url] = v }
-      o.on('--token TOKEN',  'Bearer auth token [or $HARNESS_TOKEN]')            { |v| opts[:token]    = v }
-      o.on('--system TEXT',  'Override system prompt')                           { |v| opts[:system]   = v }
-      o.on('--num-ctx N',    'Context window size in tokens [or $HARNESS_NUM_CTX]') { |v| opts[:num_ctx] = v.to_i }
-      o.on('--reasoning-effort LEVEL', 'Reasoning effort [or $HARNESS_REASONING_EFFORT]') { |v| opts[:reasoning_effort] = v }
-      o.on('--compact-recent N', 'Messages to retain verbatim after /compact [or $HARNESS_COMPACT_RECENT]') { |v| opts[:compact_recent] = v.to_i }
-      o.on('--retry-count N', 'Max attempts for transient network errors [or $HARNESS_RETRY_COUNT]') { |v| opts[:retry_count] = v.to_i }
-      o.on('--retry-delay S', 'Base delay (seconds) between retries [or $HARNESS_RETRY_DELAY]') { |v| opts[:retry_delay] = v.to_f }
-      o.on('-d DIR', '--workdir DIR', 'Working directory; all file paths are relative to it [or $HARNESS_WORKDIR]') { |v| opts[:workdir] = v }
-      o.on('-f FILE', '--file FILE', 'Add a file to the allowed file list (repeatable)') { |v| (opts[:files] ||= []) << v }
-      o.on('-r ID', '--resume ID', 'Resume a saved session by id (see /sessions)') { |v| opts[:resume] = v }
-      o.on('--list-sessions', 'List saved sessions and exit (no model needed)')  { opts[:list_sessions] = true }
-      o.on('--dry-run',      'Print edits, do not write files')                  { opts[:dry_run]  = true }
-      o.on('-v', '--verbose', 'Show full prompt and raw response')               { |v| opts[:verbose]  = true }
-      o.on('-h', '--help')                                                        { puts o; exit }
+      o.on('-m MODEL', '--model MODEL', 'Model name (required)') { |v| opts[:model] = v }
+      o.on('--base-url URL',
+           'API base URL [default: http://localhost:11434/v1]') do |v|
+        opts[:base_url] = v
+      end
+      o.on('--token TOKEN', 'Bearer auth token [or $HARNESS_TOKEN]') do |v|
+        opts[:token] = v
+      end
+      o.on('--system TEXT', 'Override system prompt') { |v| opts[:system] = v }
+      o.on('--num-ctx N',
+           'Context window size in tokens [or $HARNESS_NUM_CTX]') do |v|
+        opts[:num_ctx] = v.to_i
+      end
+      o.on('--reasoning-effort LEVEL',
+           'Reasoning effort [or $HARNESS_REASONING_EFFORT]') do |v|
+        opts[:reasoning_effort] = v
+      end
+      o.on('--compact-recent N',
+           'Messages to retain verbatim after /compact ' \
+           '[or $HARNESS_COMPACT_RECENT]') do |v|
+        opts[:compact_recent] = v.to_i
+      end
+      o.on('--retry-count N',
+           'Max attempts for transient network errors [or $HARNESS_RETRY_COUNT]') do |v|
+        opts[:retry_count] = v.to_i
+      end
+      o.on('--retry-delay S',
+           'Base delay (seconds) between retries [or $HARNESS_RETRY_DELAY]') do |v|
+        opts[:retry_delay] = v.to_f
+      end
+      o.on('-d DIR', '--workdir DIR',
+           'Working directory; all file paths are relative to it ' \
+           '[or $HARNESS_WORKDIR]') do |v|
+        opts[:workdir] = v
+      end
+      o.on('-f FILE', '--file FILE',
+           'Add a file to the allowed file list (repeatable)') do |v|
+        (opts[:files] ||= []) << v
+      end
+      o.on('-r ID', '--resume ID',
+           'Resume a saved session by id (see /sessions)') { |v| opts[:resume] = v }
+      o.on('--list-sessions',
+           'List saved sessions and exit (no model needed)') do
+        opts[:list_sessions] = true
+      end
+      o.on('--dry-run', 'Print edits, do not write files') { opts[:dry_run] = true }
+      o.on('-v', '--verbose',
+           'Show full prompt and raw response') { |v| opts[:verbose] = true }
+      o.on('-h', '--help') { puts o; exit }
     end
     parser.parse!
 
@@ -75,7 +109,9 @@ class CLI
 
     # --list-sessions only reads the .harness/sessions directory, so no
     # model is needed for it.
-    raise HarnessError, '-m / --model is required' unless opts[:model] || opts[:list_sessions]
+    unless opts[:model] || opts[:list_sessions]
+      raise HarnessError, '-m / --model is required'
+    end
 
     # Resolve the working directory and make sure it exists.
     opts[:workdir] = File.expand_path(opts[:workdir])
@@ -107,7 +143,8 @@ class CLI
     puts "Harness ready. Type /help for commands, /exit to quit."
     puts "Working directory: #{@file_list.workdir}"
     puts "Tip: type a plain message (no /) to send it directly to the model."
-    puts "Tip: paste multiline text directly, or end a line with a backslash (\\) to continue."
+    puts "Tip: paste multiline text directly, or end a line with a backslash (\\) " \
+         "to continue."
     puts "Tip: a line starting with / is a command (executed immediately)."
     puts
 
@@ -200,7 +237,8 @@ class CLI
   def resume_from_cli
     id   = @options[:resume]
     path = @harness.resume_session(id)
-    puts "Resumed session #{File.basename(path, '.json')} (conversation and file list restored — see /session)."
+    name = File.basename(path, '.json')
+    puts "Resumed session #{name} (conversation and file list restored — see /session)."
   end
 
   # Auto-save the session on exit (best-effort). Returns the session id,
@@ -232,9 +270,16 @@ class CLI
     if @file_list.empty?
       puts "(no files loaded)"
     else
-      puts "Files (#{@file_list.size}):"
+      puts "Allowed files (#{@file_list.size}):"
       @file_list.each_with_index do |f, i|
         puts "  #{i + 1}. #{@file_list.display_path(f)}"
+      end
+      dirs = @file_list.dirs
+      unless dirs.empty?
+        puts "Allowed directories (#{dirs.size}):"
+        dirs.each_with_index do |d, i|
+          puts "  #{i + 1}. #{@file_list.display_path(d)}/"
+        end
       end
     end
   end
@@ -347,7 +392,7 @@ class CLI
   end
 
   # Decode a single history line back into the original entry.
-  # Single-pass scan so that e.g. a literal `\n` in the original text
+  # Single-pass scan so that e.g. a literal `\n` in the original entry
   # (escaped as `\\n`) is not mistaken for a newline. Only the escape
   # sequences produced by escape_history_entry are interpreted; any other
   # `\X` sequence is kept as-is (backslash preserved).
@@ -409,6 +454,43 @@ class CLI
         end
       end
 
+    when /\A\/dir\s+(.+)\Z/
+      pattern = $1.strip
+      # Support globs: expand the pattern against the filesystem,
+      # relative to the working directory.
+      if pattern =~ /[\\\*\?\[\]]/
+        matches = Dir.glob(File.join(@file_list.workdir, pattern)).sort
+        dirs = matches.select { |p| File.directory?(p) }
+        if dirs.empty?
+          puts "No directories match: #{pattern}"
+        else
+          added = 0
+          dirs.each do |path|
+            shown = @file_list.display_path(path)
+            case @file_list.add_dir(path)
+            when :blocked
+              puts "  [security] ✗ #{shown} (blocked: sensitive directory)"
+            when :duplicate
+              puts "Already allowed: #{shown}/"
+            when :added
+              added += 1
+              puts "Allowed: #{shown}/"
+            end
+          end
+          puts "Allowed #{added} director#{added == 1 ? 'y' : 'ies'} matching #{pattern}."
+        end
+      else
+        shown = @file_list.display_path(pattern)
+        case @file_list.add_dir(pattern)
+        when :blocked
+          puts "  [security] ✗ #{shown} (blocked: sensitive directory)"
+        when :duplicate
+          puts "Already allowed: #{shown}/"
+        when :added
+          puts "Allowed: #{shown}/"
+        end
+      end
+
     when /\A\/clear\Z/
       @file_list.clear
       puts "File list cleared."
@@ -426,7 +508,8 @@ class CLI
     when /\A\/compact\Z/
       result = harness.compact_session
       retained = result[:retained]
-      puts "Session compacted: #{result[:before]} messages -> #{result[:after]} messages (#{retained} recent retained)."
+      puts "Session compacted: #{result[:before]} messages -> " \
+           "#{result[:after]} messages (#{retained} recent retained)."
       puts
       puts "Summary:"
       puts result[:summary]
@@ -503,7 +586,8 @@ class CLI
     puts <<~HELP
       Available commands:
         /file <path>   Add a file to the allowed file list (globs like src/*.rb work)
-        /clear         Remove all files from the list
+        /dir <path>    Allow a directory tree (all files under it, recursively)
+        /clear         Remove all files and directories from the list
         /retry         Re-send the session message chain (after a failed request)
         /session       Show a summary of the current session
         /session-clear Reset the session (drop all conversation messages)
@@ -518,9 +602,10 @@ class CLI
 
       Direct prompt:
         Type any text (not starting with /) to send it directly to the model.
-        The model will see the list of allowed files and can use the file
-        namespace (file.read / file.write) to access them. Use file.add to
-        request adding a new file (user confirmation required).
+        The model will see the list of allowed files and directories and can
+        use the file namespace (file.read / file.write) to access them.
+        Use dir.allow to allow a directory tree (all files under it,
+        recursively) — user confirmation required.
 
       Session:
         Prompts are accumulated in a session, so the model sees the whole

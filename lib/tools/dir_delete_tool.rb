@@ -35,8 +35,7 @@ class DirDeleteTool < Tool
 
     # The path must reside under the working directory (and not be the
     # working directory itself).
-    prefix = @file_list.workdir + File::SEPARATOR
-    unless path.start_with?(prefix)
+    unless @file_list.within_workdir?(path)
       puts "  [dir.delete] ✗ #{shown} (outside working directory)"
       $stdout.flush
       return "error: path '#{shown}' must reside under the working directory (#{@file_list.workdir})"

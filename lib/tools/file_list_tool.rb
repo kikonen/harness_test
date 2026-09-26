@@ -7,7 +7,7 @@ require_relative '../file_list'
 # The pattern must reside inside the workdir (no escaping via ".." or
 # absolute paths). Sensitive files are excluded from the results.
 # Matched files are NOT added to the allowed file list — the model must
-# still use file.add (with user confirmation) to work with a file.
+# still use dir.allow (with user confirmation) to work with a file.
 class FileListTool < Tool
   # Safety cap so a too-broad pattern cannot flood the context.
   MAX_RESULTS = 500
@@ -19,7 +19,7 @@ class FileListTool < Tool
       description: 'Lists files matching a glob pattern under the harness working directory. ' \
                    'The pattern must reside inside the working directory (e.g. "lib/**/*.rb"). ' \
                    'Sensitive files are excluded from the results. ' \
-                   'Matched files are NOT added to the allowed file list — use file.add to add a file you want to work with.',
+                   'Matched files are NOT added to the allowed file list — use dir.allow to allow a directory you want to work with.',
       parameters: {
         type: 'object',
         properties: {
@@ -36,8 +36,7 @@ class FileListTool < Tool
 
     # The pattern must reside under the working directory.
     expanded = File.expand_path(pattern, @file_list.workdir)
-    prefix   = @file_list.workdir + File::SEPARATOR
-    unless expanded.start_with?(prefix)
+    unless @file_list.within_workdir?(expanded)
       return "error: pattern '#{pattern}' must reside under the working directory (#{@file_list.workdir})"
     end
 

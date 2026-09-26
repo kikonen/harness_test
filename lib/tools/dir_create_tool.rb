@@ -32,8 +32,7 @@ class DirCreateTool < Tool
     shown = @file_list.display_path(path)
 
     # The path must reside under the working directory.
-    prefix = @file_list.workdir + File::SEPARATOR
-    unless path.start_with?(prefix)
+    unless @file_list.within_workdir?(path)
       puts "  [dir.create] ✗ #{shown} (outside working directory)"
       $stdout.flush
       return "error: path '#{shown}' must reside under the working directory (#{@file_list.workdir})"
