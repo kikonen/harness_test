@@ -144,9 +144,15 @@ class CLI
     # Expose the configured model profiles so /models can list them and
     # /model can switch between them at runtime. The active model name is
     # tracked separately (options[:active_model]) for display and persistence.
+    # It is stored as nil when the config default is active: a null value in
+    # the session means "use whatever the config default is", so sessions
+    # keep working even if the default model changes later.
     opts[:model_profiles] = config.models
     opts[:default_model]  = config.default_model
-    opts[:active_model]   ||= opts[:model]
+    explicit_model = !opts[:model].nil? && !opts[:model].to_s.strip.empty?
+    default_key    = config.default_model
+    using_default  = profile && !explicit_model && (default_key.nil? || (profile[:name] == default_key || profile[:model] == default_key))
+    opts[:active_model]   = using_default ? nil : (profile ? (profile[:name] || profile[:model]) : opts[:model])
 
     # System prompt: --system-file > config 'system' > built-in default.
     if opts[:system_file]
@@ -187,6 +193,7 @@ class CLI
     setup_history
 
     puts "Harness ready. Type /help for commands, /exit to quit."
+    puts "Model: #{harness.active_model_name} (@ #{@options[:base_url]})"
     puts "Working directory: #{@file_list.workdir}"
     puts "Tip: type a plain message (no /) to send it directly to the model."
     puts "Tip: paste multiline text directly, or end a line with a backslash (\\) " \

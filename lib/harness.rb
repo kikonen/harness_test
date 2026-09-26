@@ -420,12 +420,25 @@ class Harness
 
     data = JSON.parse(File.read(path), symbolize_names: true)
     @session.restore(data, @file_list)
-    restore_active_model(data[:active_model])
+    restore_session_model(data[:active_model])
     @rules_mtime = current_rules_mtime
     logger.info("session resumed: #{File.basename(path, '.json')} (#{path})")
     path
   end
 
+  # Restore the session's model (see #restore_active_model). When the stored
+  # model is no longer configured, show an error and reset to the config
+  # default model. A nil stored value means the default was active when the
+  # session was saved - it is already active, so nothing to do.
+  def restore_session_model(name)
+    restore_active_model(name)
+  rescue HarnessError => e
+    puts "  [error] #{e.message}"
+    default = default_model_name
+    raise HarnessError, "#{e.message} - and no default model is configured either" unless default
+
+    apply_profile(find_profile(default))
+  end
   # List saved sessions, newest first. Returns an array of hashes:
   #   { id:, path:, saved_at:, messages:, files:, workdir: }
   # Corrupt/unreadable entries are skipped rather than aborting the listing.
