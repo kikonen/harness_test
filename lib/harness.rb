@@ -27,6 +27,7 @@ require_relative 'tools/file_list_tool'
 require_relative 'tools/file_search_tool'
 require_relative 'tools/file_patch_tool'
 require_relative 'tools/file_copy_tool'
+require_relative 'tools/file_info_tool'
 require_relative 'tools/dir_create_tool'
 require_relative 'tools/dir_delete_tool'
 require_relative 'tools/git_diff_tool'
@@ -203,6 +204,7 @@ class Harness
     registry.register(FileSearchTool.new(@file_list))
     registry.register(FilePatchTool.new(@file_list, @options))
     registry.register(FileCopyTool.new(@file_list, @options))
+    registry.register(FileInfoTool.new(@file_list))
     registry.register(DirCreateTool.new(@file_list))
     registry.register(DirDeleteTool.new(@file_list, @options))
     # Git tools (operate on the repository containing the working dir).
