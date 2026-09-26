@@ -1,4 +1,7 @@
+.#*
+*#
 .env
 .emacs*
-*.log
+tmp/**
 *_copy.rb
+.harness/**
