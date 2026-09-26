@@ -220,7 +220,8 @@ class Harness
 
     access = file_list.accessible_paths
     any_grants = access.any? do |_mode, section|
-      !section[:files].empty? || !section[:dirs].empty?
+      !section[:files].empty? || !section[:dirs].empty? ||
+        !(section[:flat_dirs] || []).empty?
     end
 
     if any_grants
@@ -230,6 +231,7 @@ class Harness
         lines = []
         lines += section[:files].map { |f| file_list.display_path(f) }
         lines += section[:dirs].map { |d| "#{file_list.display_path(d)}/ (recursive)" }
+        lines += (section[:flat_dirs] || []).map { |d| "#{file_list.display_path(d)}/ (dir only)" }
         next if lines.empty?
 
         label = case mode

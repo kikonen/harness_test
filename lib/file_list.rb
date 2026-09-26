@@ -10,6 +10,9 @@ require_relative 'sensitive_files'
 #   * files  - individual file grants (exact path match)
 #   * dirs   - directory grants (RECURSIVE: every file under the directory)
 #
+#   * flat_dirs - non-recursive directory grants (the dir itself + direct
+#     children only, NOT deeper nesting)
+#
 # A path is readable/writable when any of its ancestor directories (up to
 # and including the working directory) has a grant for that mode, or when
 # the exact file has a grant. This makes directory grants naturally
@@ -52,8 +55,9 @@ class FileList
     @workdir = File.expand_path(workdir)
     # grants[mode] -> { files: [...], dirs: [...] } of canonical paths.
     # "dirs" grants are recursive (cover every file under the directory).
-    @grants = { r: { files: [], dirs: [] },
-                w: { files: [], dirs: [] } }
+    # "flat_dirs" grants are non-recursive (dir itself + direct children).
+    @grants = { r: { files: [], dirs: [], flat_dirs: [] },
+                w: { files: [], dirs: [], flat_dirs: [] } }
     initial.each { |f| add_file(f, :rw) }
   end
 
@@ -98,6 +102,10 @@ class FileList
     return false if sensitive?(path)
     return true  if @grants[:r][:files].include?(path) ||
                     @grants[:w][:files].include?(path)
+    return true  if @grants[:r][:flat_dirs].include?(path) ||
+                    @grants[:w][:flat_dirs].include?(path)
+    return true  if flat_dir_covers?(@grants[:r][:flat_dirs], path) ||
+                    flat_dir_covers?(@grants[:w][:flat_dirs], path)
 
     ancestor_granted?(@grants[:r][:dirs], path) ||
       ancestor_granted?(@grants[:w][:dirs], path)
@@ -115,6 +123,8 @@ class FileList
     path = resolve(path)
     return false if sensitive?(path)
     return true  if @grants[:w][:files].include?(path)
+    return true  if @grants[:w][:flat_dirs].include?(path)
+    return true  if flat_dir_covers?(@grants[:w][:flat_dirs], path)
 
     ancestor_granted?(@grants[:w][:dirs], path)
   end
@@ -133,18 +143,23 @@ class FileList
     w_files = @grants[:w][:files].uniq
     r_dirs  = @grants[:r][:dirs].uniq
     w_dirs  = @grants[:w][:dirs].uniq
+    r_flat  = @grants[:r][:flat_dirs].uniq
+    w_flat  = @grants[:w][:flat_dirs].uniq
 
     files_both  = (r_files & w_files).sort
     dirs_both   = (r_dirs & w_dirs).sort
+    flat_both   = (r_flat & w_flat).sort
     files_read  = (r_files - w_files).sort
     dirs_read   = (r_dirs - w_dirs).sort
+    flat_read   = (r_flat - w_flat).sort
     files_write = (w_files - r_files).sort
     dirs_write  = (w_dirs - r_dirs).sort
+    flat_write  = (w_flat - r_flat).sort
 
     {
-      both:  { files: files_both,  dirs: dirs_both },
-      read:  { files: files_read,  dirs: dirs_read },
-      write: { files: files_write, dirs: dirs_write }
+      both:  { files: files_both,  dirs: dirs_both,   flat_dirs: flat_both },
+      read:  { files: files_read,  dirs: dirs_read,   flat_dirs: flat_read },
+      write: { files: files_write, dirs: dirs_write,  flat_dirs: flat_write }
     }
   end
 
@@ -175,6 +190,17 @@ class FileList
     :added
   end
 
+  # Grant access to a directory (non-recursive: the dir itself + direct
+  # children only, NOT deeper nesting).
+  def add_flat_dir(path, mode = :rw)
+    path = resolve(path)
+    return :blocked   if sensitive?(path)
+    return :duplicate if granted?(mode, :flat_dirs, path)
+
+    grant(mode, :flat_dirs, path)
+    :added
+  end
+
   # Alias for add_dir (recursive directory grant; kept for clarity).
   def add_tree(path, mode = :rw)
     add_dir(path, mode)
@@ -182,11 +208,12 @@ class FileList
 
   # Prompt the user to grant access to a path.
   # mode: :r (read), :w (write), or :rw (read + write; default).
+  # purpose: optional string explaining WHY access is needed (e.g. "to create directory 'somedir'").
   # Returns :granted, :denied, or :blocked.
   #
   # The prompt ALWAYS uses numbered choices so the user has a consistent
   # interaction pattern regardless of path location.
-  def grant_access(path, mode = :rw)
+  def grant_access(path, mode = :rw, purpose: nil)
     path  = resolve(path)
     shown = display_path(path)
 
@@ -195,39 +222,52 @@ class FileList
 
     puts
     verb = mode == :r ? 'read access' : 'write access'
-    puts "  [access] ⚠  Access requested (#{verb}): #{shown}"
+    if purpose
+      puts "  [access] ⚠  Access requested (#{verb}): #{shown}"
+      puts "                     #{purpose}"
+    else
+      puts "  [access] ⚠  Access requested (#{verb}): #{shown}"
+    end
 
     if File.directory?(path) && within_workdir?(path)
-      # Directory within workdir: grant is inherently recursive.
-      puts "             1) Allow this directory (recursive)"
-      puts "             2) Deny"
-      print  "             Choice (1/2): "
+      # Directory within workdir: offer flat or recursive.
+      puts "             1) Allow this directory only"
+      puts "             2) Allow this directory and subdirs (recursive)"
+      puts "             3) Deny"
+      print  "             Choice (1/2/3): "
     elsif File.file?(path) && within_workdir?(path)
-      # File within workdir: offer file-only or parent-dir (recursive).
+      # File within workdir: offer file-only or parent-dir (flat/recursive).
       parent       = File.dirname(path)
       parent_shown = display_path(parent)
       puts "             1) Allow this file only"
-      puts "             2) Allow directory: #{parent_shown}/ (recursive)"
-      puts "             3) Deny"
-      print  "             Choice (1/2/3): "
+      puts "             2) Allow directory: #{parent_shown}/ (dir only)"
+      puts "             3) Allow directory: #{parent_shown}/ (recursive)"
+      puts "             4) Deny"
+      print  "             Choice (1/2/3/4): "
     else
       # Outside workdir or special path.
       puts "             ⚠  WARNING: this path is OUTSIDE the working directory."
       puts "               Granting access may be a sandbox escape."
       if File.directory?(path)
-        puts "             1) Allow this directory (recursive)"
+        puts "             1) Allow this directory only"
+        puts "             2) Allow this directory and subdirs (recursive)"
       else
         puts "             1) Allow"
       end
-      puts "             2) Deny"
-      print  "             Choice (1/2): "
+      puts File.directory?(path) ? "             3) Deny" : "             2) Deny"
+      print  File.directory?(path) ? "             Choice (1/2/3): " : "             Choice (1/2): "
     end
     $stdout.flush
 
     answer = $stdin.gets&.chomp&.strip
 
     if File.directory?(path) && within_workdir?(path)
-      if answer == '1'
+      case answer
+      when '1'
+        add_flat_dir(path, mode)
+        puts "  [access] ✓ #{shown}/ (dir only, #{mode_label(mode)})"
+        :granted
+      when '2'
         add_dir(path, mode)
         puts "  [access] ✓ #{shown}/ (recursive, #{mode_label(mode)})"
         :granted
@@ -242,6 +282,10 @@ class FileList
         puts "  [access] ✓ #{shown} (#{mode_label(mode)})"
         :granted
       when '2'
+        add_flat_dir(parent, mode)
+        puts "  [access] ✓ #{display_path(parent)}/ (dir only, #{mode_label(mode)})"
+        :granted
+      when '3'
         add_dir(parent, mode)
         puts "  [access] ✓ #{display_path(parent)}/ (recursive, #{mode_label(mode)})"
         :granted
@@ -250,15 +294,25 @@ class FileList
         :denied
       end
     else
-      if answer == '1'
+      case answer
+      when '1'
         if File.directory?(path)
-          add_dir(path, mode)
-          puts "  [access] ✓ #{shown}/ (recursive, #{mode_label(mode)})"
+          add_flat_dir(path, mode)
+          puts "  [access] ✓ #{shown}/ (dir only, #{mode_label(mode)})"
         else
           add_file(path, mode)
           puts "  [access] ✓ #{shown} (#{mode_label(mode)})"
         end
         :granted
+      when '2'
+        if File.directory?(path)
+          add_dir(path, mode)
+          puts "  [access] ✓ #{shown}/ (recursive, #{mode_label(mode)})"
+        else
+          # For non-dir outside paths, option 2 is Deny.
+          puts "  [access] ✗ denied"
+          :denied
+        end
       else
         puts "  [access] ✗ denied"
         :denied
@@ -294,12 +348,14 @@ class FileList
     [:r, :w].each do |mode|
       @grants[mode][:files].clear
       @grants[mode][:dirs].clear
+      @grants[mode][:flat_dirs].clear
     end
   end
 
   def empty?
     [:r, :w].all? do |mode|
-      @grants[mode][:files].empty? && @grants[mode][:dirs].empty?
+      @grants[mode][:files].empty? && @grants[mode][:dirs].empty? &&
+        @grants[mode][:flat_dirs].empty?
     end
   end
 
@@ -311,7 +367,8 @@ class FileList
   # both read and write modes).
   def access_grant_count
     (@grants[:r][:files] + @grants[:w][:files] +
-     @grants[:r][:dirs] + @grants[:w][:dirs]).uniq.size
+     @grants[:r][:dirs] + @grants[:w][:dirs] +
+     @grants[:r][:flat_dirs] + @grants[:w][:flat_dirs]).uniq.size
   end
 
   # Grants for a mode (default :r). mode may be :r, :w, or :rw (union of both).
@@ -321,6 +378,10 @@ class FileList
 
   def dirs(mode = :r)
     lists_for(mode, :dirs)
+  end
+
+  def flat_dirs(mode = :r)
+    lists_for(mode, :flat_dirs)
   end
 
   # Backward-compatible accessor for recursive dir grants.
@@ -334,6 +395,16 @@ class FileList
 
   def each(&block)
     to_a.each(&block)
+  end
+
+  # True if the path is a direct child of (or equal to) any directory in the
+  # given flat_dirs list. A flat grant covers the dir itself and its direct
+  # children, but NOT deeper nesting.
+  def flat_dir_covers?(flat_dirs, path)
+    return false if flat_dirs.empty?
+
+    parent = File.dirname(path)
+    flat_dirs.any? { |d| d == parent }
   end
 
   private

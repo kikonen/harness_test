@@ -54,7 +54,7 @@ class FileDeleteTool < Tool
     puts
     puts "  [file.delete] ⚠  The model is requesting to DELETE a file:"
     puts "                  #{shown}"
-    puts "                  1) Confirm delete"
+    puts "                  1) Allow delete"
     puts "                  2) Deny"
     print  "                  Choice (1/2): "
     $stdout.flush

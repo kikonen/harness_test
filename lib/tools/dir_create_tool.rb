@@ -53,7 +53,8 @@ class DirCreateTool < Tool
     # Creating a directory requires WRITE access to the PARENT directory.
     parent = File.dirname(path)
     unless @file_list.writable?(parent)
-      result = @file_list.grant_access(parent, :w)
+      purpose = "to create directory '#{shown}'"
+      result = @file_list.grant_access(parent, :w, purpose: purpose)
       return "error: write access denied for '#{@file_list.display_path(parent)}'" \
              unless result == :granted
     end

@@ -57,7 +57,8 @@ class DirDeleteTool < Tool
     # Deleting a directory requires WRITE access to the PARENT directory.
     parent = File.dirname(path)
     unless @file_list.writable?(parent)
-      result = @file_list.grant_access(parent, :w)
+      purpose = "to delete directory '#{shown}'"
+      result = @file_list.grant_access(parent, :w, purpose: purpose)
       return "error: write access denied for '#{@file_list.display_path(parent)}'" \
              unless result == :granted
     end
@@ -72,7 +73,7 @@ class DirDeleteTool < Tool
     puts
     puts "  [dir.delete] ⚠  The model is requesting to DELETE an empty directory:"
     puts "                  #{shown}"
-    puts "                  1) Confirm delete"
+    puts "                  1) Allow delete"
     puts "                  2) Deny"
     print  "                  Choice (1/2): "
     $stdout.flush

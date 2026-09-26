@@ -4,7 +4,7 @@ The full list of available tools (names, descriptions, and parameters) is provid
 
 File access is permission-based:
 - Read and write access are tracked SEPARATELY. A read grant never implies write access, but a write grant implies read access to the same path.
-- When you attempt an operation without the required access, the user will be prompted to grant it at the granularity they prefer: the single file, or its parent directory (recursive - all files under it). The prompt states which mode (read or write) is being requested.
+- When you attempt an operation without the required access, the user will be prompted to grant it at the granularity they prefer: the single file, the directory only (direct children), or the directory recursively (all subdirs). The prompt states which mode (read or write) is being requested.
 - Listing or searching a directory requires READ access to that directory; writing/patching a file requires WRITE access to the file (or its containing directory); creating a directory requires WRITE access to the PARENT directory.
 - Sensitive files/directories (e.g. .env*, .git, .harness) are always blocked.
 - Once a mode is granted, subsequent operations of that kind on the same path (or files under the granted directory) will not prompt again. A read-only grant means write attempts will still prompt.

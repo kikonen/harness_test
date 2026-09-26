@@ -329,7 +329,8 @@ class CLI
       section = access[mode]
       files   = section[:files]
       dirs    = section[:dirs]
-      next if files.empty? && dirs.empty?
+      flats   = section[:flat_dirs] || []
+      next if files.empty? && dirs.empty? && flats.empty?
 
       puts "#{labels[mode]}:"
       unless files.empty?
@@ -337,9 +338,16 @@ class CLI
           puts "  #{i + 1}. #{@file_list.display_path(f)}"
         end
       end
+      idx = files.size + 1
       unless dirs.empty?
         dirs.each_with_index do |d, i|
-          puts "  #{i + files.size + 1}. #{@file_list.display_path(d)}/ (recursive)"
+          puts "  #{idx + i}. #{@file_list.display_path(d)}/ (recursive)"
+        end
+      end
+      idx += dirs.size
+      unless flats.empty?
+        flats.each_with_index do |d, i|
+          puts "  #{idx + i}. #{@file_list.display_path(d)}/ (dir only)"
         end
       end
     end
@@ -736,8 +744,8 @@ class CLI
         The model can use file.read / file.write / file.patch etc. to access
         files. When it attempts to access a file that is not yet allowed,
         you will be prompted to grant the required access (read or write) at
-        the granularity you prefer: the single file, or its parent directory
-        (recursive - all files under it).
+        the granularity you prefer: the single file, the directory only
+        (direct children), or the directory recursively (all subdirs).
 
       Session:
         Prompts are accumulated in a session, so the model sees the whole

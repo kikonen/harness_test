@@ -202,6 +202,7 @@ class Session
         section = access[section_key] || {}
         (section[:files] || []).each { |f| file_list.add_file(f, mode) }
         (section[:dirs]  || []).each { |d| file_list.add_dir(d, mode) }
+        (section[:flat_dirs] || []).each { |d| file_list.add_flat_dir(d, mode) }
       end
       return
     end
