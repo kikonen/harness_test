@@ -196,10 +196,11 @@ class Session
   def restore_access_grants(data, file_list)
     file_list.clear
 
-    access = data[:access]
+    access = data[:access] || data['access']
     if access.is_a?(Hash)
-      %i[both read write].each do |mode|
-        section = access[mode] || {}
+      # Section names -> FileList grant modes (:rw / :r / :w).
+      { both: :rw, read: :r, write: :w }.each do |section_key, mode|
+        section = access[section_key] || {}
         (section[:files] || []).each { |f| file_list.add_file(f, mode) }
         (section[:dirs]  || []).each { |d| file_list.add_dir(d, mode) }
       end

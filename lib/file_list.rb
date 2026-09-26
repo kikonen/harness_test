@@ -342,7 +342,7 @@ class FileList
   # Grant a path under the given mode(s) and tier.
   # With a block: applies the block to each affected list (used by #remove).
   def grant(mode, tier, path = nil, &block)
-    modes = [mode].flatten
+    modes = mode == :rw ? %i[r w] : [mode].flatten
     modes.each do |m|
       next unless %i[r w].include?(m)
 
