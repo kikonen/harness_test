@@ -26,6 +26,7 @@ class GitRunner < Tool
     show:   1000,
     status: 200,
     log:    200,
+    grep:   300,
     apply:  100
   }.freeze
 
