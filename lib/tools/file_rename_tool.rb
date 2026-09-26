@@ -31,8 +31,9 @@ class FileRenameTool < Tool
     old_shown = @file_list.display_path(old_path)
     new_shown = @file_list.display_path(new_path)
 
-    unless @file_list.include?(old_path)
-      result = @file_list.grant_access(old_path)
+    # Renaming requires WRITE access to the file being moved.
+    unless @file_list.writable?(old_path)
+      result = @file_list.grant_access(old_path, :w)
       return "error: access denied for '#{old_shown}'" unless result == :granted
     end
 
@@ -40,6 +41,12 @@ class FileRenameTool < Tool
       puts "  [file.rename] ✗ #{new_shown} (blocked: sensitive file)"
       $stdout.flush
       return "error: new path '#{new_shown}' is blocked and can never be written"
+    end
+
+    # ...and WRITE access to the destination (the move creates it there).
+    unless @file_list.writable?(new_path)
+      result = @file_list.grant_access(new_path, :w)
+      return "error: write access denied for '#{new_shown}'" unless result == :granted
     end
 
     unless File.file?(old_path)

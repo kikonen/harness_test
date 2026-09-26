@@ -57,6 +57,14 @@ class DirCreateTool < Tool
       return "error: '#{shown}' already exists and is a file, not a directory"
     end
 
+    # Creating a directory requires WRITE access to the PARENT directory.
+    parent = File.dirname(path)
+    unless @file_list.writable?(parent)
+      result = @file_list.grant_access(parent, :w)
+      return "error: write access denied for '#{@file_list.display_path(parent)}'" \
+             unless result == :granted
+    end
+
     FileUtils.mkdir_p(path)
 
     puts "  [dir.create] ✓ #{shown}"

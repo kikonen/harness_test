@@ -44,8 +44,18 @@ class FileSearchTool < Tool
       return "error: glob '#{glob}' must reside under the working directory (#{@file_list.workdir})"
     end
 
+    # Searching a directory requires READ access to that directory.
+    base_dir = File.dirname(expanded.sub(/\/\*\*?\/.*\z/, '').sub(/\/\*\*?\z/, ''))
+    unless @file_list.can_list_dir?(base_dir)
+      result = @file_list.grant_access(base_dir, :r)
+      return "error: read access denied for directory '#{@file_list.display_path(base_dir)}'" \
+             unless result == :granted
+    end
+
     files = Dir.glob(expanded, File::FNM_DOTMATCH).select do |path|
-      File.file?(path) && !@file_list.sensitive?(path)
+      # Only readable files are searched (readable? also excludes sensitive
+      # paths).
+      File.file?(path) && @file_list.readable?(path)
     end.sort
 
     if files.size > MAX_FILES

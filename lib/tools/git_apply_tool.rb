@@ -42,6 +42,18 @@ class GitApplyTool < GitRunner
     dry_run   = args['dry_run'] == true
     three_way = args['three_way'] == true
 
+    # Applying a patch modifies files: every file the diff touches must be
+    # writable. Missing grants are requested one by one (the user can grant
+    # a parent directory recursively, which may cover several targets at once).
+    targets = touched_files(diff).map { |rel| resolve_path(rel) }
+    targets.each do |target|
+      next if @file_list.writable?(target)
+
+      result = @file_list.grant_access(target, :w)
+      return "error: write access denied for '#{@file_list.display_path(target)}'" \
+             unless result == :granted
+    end
+
     Tempfile.create(['harness_git_apply', '.diff']) do |tmp|
       # Normalize to LF - git apply expects consistent line endings.
       tmp.write(diff.gsub("\r\n", "\n"))
@@ -83,5 +95,17 @@ class GitApplyTool < GitRunner
     # Be lenient about whitespace (a common model output quirk).
     flags << '--whitespace=nowarn'
     flags
+  end
+
+  # Extracts the list of files a unified diff touches, from its
+  # "diff --git a/x b/y" / "--- a/x" / "+++ b/y" header lines.
+  # Returns workdir-relative paths (deduplicated). "/dev/null"
+  # entries (new/deleted files) are skipped - the other side of the
+  # pair still names the real file.
+  def touched_files(diff)
+    diff.gsub("\r\n", "\n").lines.map do |line|
+      m = line.match(/\A(?:diff --git a\/\S+ b\/|\+\+\+ b\/)(\S+)/)
+      m && m[1] != '/dev/null' ? m[1] : nil
+    end.compact.uniq
   end
 end

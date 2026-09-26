@@ -5,7 +5,8 @@ require_relative '../file_list'
 
 # Lists files matching a glob pattern under the harness working directory.
 # The pattern must reside inside the workdir (no escaping via ".." or
-# absolute paths). Sensitive files are excluded from the results.
+# absolute paths). Listing requires READ access to the directory being
+# listed; sensitive files and files without read grants are excluded.
 class FileListTool < Tool
   # Safety cap so a too-broad pattern cannot flood the context.
   MAX_RESULTS = 500
@@ -37,8 +38,16 @@ class FileListTool < Tool
       return "error: pattern '#{pattern}' must reside under the working directory (#{@file_list.workdir})"
     end
 
+    # Listing a directory requires read access to that directory.
+    base_dir = File.dirname(expanded.sub(/\/\*\*?\/.*\z/, '').sub(/\/\*\*?\z/, ''))
+    unless @file_list.can_list_dir?(base_dir)
+      result = @file_list.grant_access(base_dir, :r)
+      return "error: read access denied for directory '#{@file_list.display_path(base_dir)}'" \
+             unless result == :granted
+    end
+
     matches = Dir.glob(expanded, File::FNM_DOTMATCH).select do |path|
-      File.file?(path) && !@file_list.sensitive?(path)
+      File.file?(path) && @file_list.readable?(path)
     end.sort
 
     if matches.empty?

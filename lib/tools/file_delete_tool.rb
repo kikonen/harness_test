@@ -33,8 +33,9 @@ class FileDeleteTool < Tool
       return "error: file '#{shown}' is blocked and can never be deleted"
     end
 
-    unless @file_list.include?(path)
-      result = @file_list.grant_access(path)
+    # Deleting a file requires WRITE access (read alone is not enough).
+    unless @file_list.writable?(path)
+      result = @file_list.grant_access(path, :w)
       return "error: access denied for '#{shown}'" unless result == :granted
     end
 

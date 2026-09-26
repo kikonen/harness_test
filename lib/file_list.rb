@@ -6,10 +6,24 @@ require_relative 'sensitive_files'
 
 # Single source of truth for file access permissions.
 #
-# Access is granted at three granularities:
+# Access is tracked SEPARATELY for reads and writes, at two granularities:
 #   * files  - individual file grants (exact path match)
-#   * dirs   - non-recursive directory grants (only direct children)
-#   * trees  - recursive directory grants (all files under the directory)
+#   * dirs   - directory grants (RECURSIVE: every file under the directory)
+#
+# A path is readable/writable when any of its ancestor directories (up to
+# and including the working directory) has a grant for that mode, or when
+# the exact file has a grant. This makes directory grants naturally
+# recursive, which is what listing/searching/editing under a subtree needs.
+#
+# Permission rules:
+#   * reading a file        -> read grant on the file or an ancestor dir
+#   * listing/searching     -> read grant covering the directory listed
+#   * writing/patching      -> write grant on the file or an ancestor dir
+#   * creating a directory  -> write grant on the PARENT directory
+#   * deleting/renaming     -> write grant on the affected path(s)
+#
+# A write grant implies read access to the same path (writing a file
+# requires reading it back), but a read grant never implies write.
 #
 # Sensitive files/directories are always blocked, regardless of grants.
 #
@@ -18,6 +32,9 @@ require_relative 'sensitive_files'
 # so ".." segments and separator mismatches are handled correctly.
 class FileList
   include Enumerable
+
+  # Permission modes.
+  MODES = %i[r w rw].freeze
 
   def self.sensitive?(path)
     SensitiveFiles.sensitive?(path)
@@ -33,10 +50,11 @@ class FileList
 
   def initialize(initial = [], workdir: Dir.pwd)
     @workdir = File.expand_path(workdir)
-    @files   = []
-    @dirs    = []
-    @trees   = []
-    initial.each { |f| add_file(f) }
+    # grants[mode] -> { files: [...], dirs: [...] } of canonical paths.
+    # "dirs" grants are recursive (cover every file under the directory).
+    @grants = { r: { files: [], dirs: [] },
+                w: { files: [], dirs: [] } }
+    initial.each { |f| add_file(f, :rw) }
   end
 
   # Resolve a path relative to the working directory.
@@ -67,75 +85,123 @@ class FileList
     FileList.sensitive?(path)
   end
 
-  # True if the path is accessible (any tier). Sensitive paths are never accessible.
-  def include?(path)
+  # -- permission checks ----------------------------------------------------
+
+  # True if the path is readable: a read OR write grant on the file itself
+  # or on any ancestor directory (recursive). Writing a file requires being
+  # able to read it back, so a write grant implies read access to the same
+  # path - but a read grant never implies write. Sensitive paths are never
+  # accessible.
+  def readable?(path)
     path = resolve(path)
     return false if sensitive?(path)
-    return true  if @files.include?(path)
+    return true  if @grants[:r][:files].include?(path) ||
+                    @grants[:w][:files].include?(path)
 
-    parent = File.dirname(path)
-    return true if @dirs.include?(parent)
-
-    @trees.any? { |t| within?(path, t) }
+    ancestor_granted?(@grants[:r][:dirs], path) ||
+      ancestor_granted?(@grants[:w][:dirs], path)
   end
 
-  # Grant access to a single file.
-  def add_file(path)
+  # Backward-compatible alias: a path is "included" when it is readable.
+  def include?(path)
+    readable?(path)
+  end
+
+  # True if the path is writable: a write grant on the file itself or on any
+  # ancestor directory (recursive). Sensitive paths are never accessible.
+  # A read grant does NOT imply write access.
+  def writable?(path)
+    path = resolve(path)
+    return false if sensitive?(path)
+    return true  if @grants[:w][:files].include?(path)
+
+    ancestor_granted?(@grants[:w][:dirs], path)
+  end
+
+  # True if a directory can be listed: read access to the directory itself.
+  def can_list_dir?(dir)
+    readable?(dir)
+  end
+
+  # Summary of all grants, grouped by effective access. Each section is a
+  # list of canonical paths; "both" (granted for read AND write) is listed
+  # first and excluded from the read-only / write-only sections, so no path
+  # appears twice. Used by the CLI display, the user prompt, and /session.
+  def accessible_paths
+    r_files = @grants[:r][:files].uniq
+    w_files = @grants[:w][:files].uniq
+    r_dirs  = @grants[:r][:dirs].uniq
+    w_dirs  = @grants[:w][:dirs].uniq
+
+    files_both  = (r_files & w_files).sort
+    dirs_both   = (r_dirs & w_dirs).sort
+    files_read  = (r_files - w_files).sort
+    dirs_read   = (r_dirs - w_dirs).sort
+    files_write = (w_files - r_files).sort
+    dirs_write  = (w_dirs - r_dirs).sort
+
+    {
+      both:  { files: files_both,  dirs: dirs_both },
+      read:  { files: files_read,  dirs: dirs_read },
+      write: { files: files_write, dirs: dirs_write }
+    }
+  end
+
+  # -- grants ---------------------------------------------------------------
+
+  # Grant access to a single file. mode: :r, :w, or :rw (default).
+  def add_file(path, mode = :rw)
     path = resolve(path)
     return :blocked   if sensitive?(path)
-    return :duplicate if @files.include?(path)
+    return :duplicate if granted?(mode, :files, path)
 
-    @files << path
+    grant(mode, :files, path)
     :added
   end
 
   # Alias for add_file (backward compatibility).
-  def add(path)
-    add_file(path)
+  def add(path, mode = :rw)
+    add_file(path, mode)
   end
 
-  # Grant access to a directory (non-recursive: only direct children).
-  def add_dir(path)
+  # Grant access to a directory (recursive: every file under it).
+  def add_dir(path, mode = :rw)
     path = resolve(path)
     return :blocked   if sensitive?(path)
-    return :duplicate if @dirs.include?(path)
+    return :duplicate if granted?(mode, :dirs, path)
     return :outside   unless within_workdir?(path)
 
-    @dirs << path
+    grant(mode, :dirs, path)
     :added
   end
 
-  # Grant access to a directory tree (recursive: all files under it).
-  def add_tree(path)
-    path = resolve(path)
-    return :blocked   if sensitive?(path)
-    return :duplicate if @trees.include?(path)
-    return :outside   unless within_workdir?(path)
-
-    @trees << path
-    :added
+  # Alias for add_dir (recursive directory grant; kept for clarity).
+  def add_tree(path, mode = :rw)
+    add_dir(path, mode)
   end
 
   # Prompt the user to grant access to a path.
+  # mode: :r (read), :w (write), or :rw (read + write; default).
   # Returns :granted, :denied, or :blocked.
-  def grant_access(path, context = nil)
+  def grant_access(path, mode = :rw)
     path  = resolve(path)
     shown = display_path(path)
 
-    return :granted if include?(path)
+    return :granted if readable?(path) && (mode == :r || writable?(path))
     return :blocked if sensitive?(path)
 
     parent            = File.dirname(path)
     parent_in_workdir = within_workdir?(parent)
 
     puts
-    puts "  [access] ⚠  Access requested: #{shown}"
-    puts "             1) Allow this file only"
+    verb = mode == :r ? 'read access' : 'write access'
+    puts "  [access] ⚠  Access requested (#{verb}): #{shown}"
     if parent_in_workdir
       parent_shown = display_path(parent)
-      puts "             2) Allow directory: #{parent_shown}/ (direct files only)"
-      puts "             3) Allow directory tree: #{parent_shown}/ (recursive)"
-      print  "             Choice (1/2/3): "
+      noun = File.directory?(path) ? 'this directory' : 'this file'
+      puts "             1) Allow #{noun} only"
+      puts "             2) Allow directory: #{parent_shown}/ (recursive - all files under it)"
+      print  "             Choice (1/2): "
     else
       print  "             Allow? (y/n): "
     end
@@ -146,16 +212,12 @@ class FileList
     if parent_in_workdir
       case answer
       when '1'
-        add_file(path)
-        puts "  [access] ✓ #{shown}"
+        add_file(path, mode)
+        puts "  [access] ✓ #{shown} (#{mode_label(mode)})"
         :granted
       when '2'
-        add_dir(parent)
-        puts "  [access] ✓ #{display_path(parent)}/"
-        :granted
-      when '3'
-        add_tree(parent)
-        puts "  [access] ✓ #{display_path(parent)}/ (recursive)"
+        add_dir(parent, mode)
+        puts "  [access] ✓ #{display_path(parent)}/ (recursive, #{mode_label(mode)})"
         :granted
       else
         puts "  [access] ✗ denied"
@@ -163,8 +225,8 @@ class FileList
       end
     else
       if answer == 'y' || answer == 'yes'
-        add_file(path)
-        puts "  [access] ✓ #{shown}"
+        add_file(path, mode)
+        puts "  [access] ✓ #{shown} (#{mode_label(mode)})"
         :granted
       else
         puts "  [access] ✗ denied"
@@ -173,55 +235,131 @@ class FileList
     end
   end
 
-  # Remove a file from the list.
-  def remove(path)
+  # Remove a file grant from the list.
+  def remove(path, mode = :rw)
     path = resolve(path)
-    @files.delete(path) ? :removed : :not_found
+    removed = false
+    grant(mode, :files) { |list| removed ||= list.delete(path) }
+    removed ? :removed : :not_found
   end
 
-  # Rename a file in the list.
+  # Rename a file grant in the list (applies to both read and write grants).
   def rename(old_path, new_path)
     old_path = resolve(old_path)
     new_path = resolve(new_path)
-    return :not_found unless @files.include?(old_path)
+    return :not_found unless (@grants[:r][:files] + @grants[:w][:files]).include?(old_path)
     return :blocked   if sensitive?(new_path)
 
-    @files.reject! { |f| f == old_path || f == new_path }
-    @files << new_path
+    [:r, :w].each do |mode|
+      list = @grants[mode][:files]
+      had_grant = list.include?(old_path)
+      list.reject! { |f| f == old_path || f == new_path }
+      list << new_path if had_grant
+    end
     :renamed
   end
 
   def clear
-    @files.clear
-    @dirs.clear
-    @trees.clear
+    [:r, :w].each do |mode|
+      @grants[mode][:files].clear
+      @grants[mode][:dirs].clear
+    end
   end
 
   def empty?
-    @files.empty? && @dirs.empty? && @trees.empty?
+    [:r, :w].all? do |mode|
+      @grants[mode][:files].empty? && @grants[mode][:dirs].empty?
+    end
   end
 
   def size
-    @files.size
+    (@grants[:r][:files] + @grants[:w][:files]).uniq.size
   end
 
-  def files
-    @files.dup
+  # Total number of distinct access grants (files + directories, across
+  # both read and write modes).
+  def access_grant_count
+    (@grants[:r][:files] + @grants[:w][:files] +
+     @grants[:r][:dirs] + @grants[:w][:dirs]).uniq.size
   end
 
-  def dirs
-    @dirs.dup
+  # Grants for a mode (default :r). mode may be :r, :w, or :rw (union of both).
+  def files(mode = :r)
+    lists_for(mode, :files)
   end
 
-  def trees
-    @trees.dup
+  def dirs(mode = :r)
+    lists_for(mode, :dirs)
+  end
+
+  # Backward-compatible accessor for recursive dir grants.
+  def trees(mode = :r)
+    dirs(mode)
   end
 
   def to_a
-    @files.dup
+    files(:rw)
   end
 
   def each(&block)
-    @files.each(&block)
+    to_a.each(&block)
+  end
+
+  private
+
+  # True if the path itself (when it is a granted directory) or any of its
+  # ancestor directories is present in the given list of granted directories.
+  def ancestor_granted?(granted_dirs, path)
+    return true if granted_dirs.include?(path)
+
+    dir = File.dirname(path)
+    return false unless within_workdir?(path)
+
+    loop do
+      return true if granted_dirs.include?(dir)
+      return false if dir == @workdir || dir == '/'
+
+      parent = File.dirname(dir)
+      break if parent == dir
+
+      dir = parent
+    end
+    false
+  end
+
+  def mode_label(mode)
+    case mode
+    when :r then 'read'
+    when :w then 'write'
+    else 'read+write'
+    end
+  end
+
+  def granted?(mode, tier, path)
+    lists_for(mode, tier).include?(path)
+  end
+
+  # Grant a path under the given mode(s) and tier.
+  # With a block: applies the block to each affected list (used by #remove).
+  def grant(mode, tier, path = nil, &block)
+    modes = [mode].flatten
+    modes.each do |m|
+      next unless %i[r w].include?(m)
+
+      list = @grants[m][tier]
+      if block
+        yield list
+      else
+        list << path unless list.include?(path)
+      end
+    end
+  end
+
+  def lists_for(mode, tier)
+    case mode
+    when :r then @grants[:r][tier].dup
+    when :w then @grants[:w][tier].dup
+    else (@grants[:r][tier] + @grants[:w][tier]).uniq
+    end
   end
 end

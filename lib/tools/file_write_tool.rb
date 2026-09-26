@@ -35,8 +35,8 @@ class FileWriteTool < Tool
     content = args['content']
     sha     = args['sha']
 
-    unless @file_list.include?(path)
-      result = @file_list.grant_access(path)
+    unless @file_list.writable?(path)
+      result = @file_list.grant_access(path, :w)
       return "error: access denied for '#{shown}'" unless result == :granted
     end
 

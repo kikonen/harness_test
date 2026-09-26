@@ -32,8 +32,8 @@ class FileCopyTool < Tool
     src_shown = @file_list.display_path(src)
     dst_shown = @file_list.display_path(dst)
 
-    unless @file_list.include?(src)
-      result = @file_list.grant_access(src)
+    unless @file_list.readable?(src)
+      result = @file_list.grant_access(src, :r)
       return "error: access denied for '#{src_shown}'" unless result == :granted
     end
 
@@ -41,6 +41,12 @@ class FileCopyTool < Tool
       puts "  [file.copy] ✗ #{dst_shown} (blocked: sensitive file)"
       $stdout.flush
       return "error: destination '#{dst_shown}' is blocked and can never be written"
+    end
+
+    # Writing the copy requires write access to the destination file.
+    unless @file_list.writable?(dst)
+      result = @file_list.grant_access(dst, :w)
+      return "error: write access denied for '#{dst_shown}'" unless result == :granted
     end
 
     unless File.file?(src)

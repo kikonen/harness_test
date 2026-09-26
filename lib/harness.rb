@@ -219,16 +219,28 @@ class Harness
   def build_user_prompt(file_list, instruction)
     parts = ["## Working Directory\n\n#{file_list.workdir}"]
 
-    files = file_list.files
-    dirs  = file_list.dirs
-    trees = file_list.trees
+    access = file_list.accessible_paths
+    any_grants = access.any? do |_mode, section|
+      !section[:files].empty? || !section[:dirs].empty?
+    end
 
-    unless files.empty? || dirs.empty? || trees.empty?
+    if any_grants
       sections = []
-      sections << files.map { |f| file_list.display_path(f) }.join("\n") unless files.empty?
-      sections << dirs.map { |d| "#{file_list.display_path(d)}/" }.join("\n") unless dirs.empty?
-      sections << trees.map { |t| "#{file_list.display_path(t)}/ (recursive)" }.join("\n") unless trees.empty?
-      parts << "## Accessible Paths\n\n#{sections.join("\n")}"
+      %i[both read write].each do |mode|
+        section = access[mode]
+        lines = []
+        lines += section[:files].map { |f| file_list.display_path(f) }
+        lines += section[:dirs].map { |d| "#{file_list.display_path(d)}/ (recursive)" }
+        next if lines.empty?
+
+        label = case mode
+                when :both then 'Read + write'
+                when :read then 'Read only'
+                else 'Write only'
+                end
+        sections << "#{label}:\n#{lines.join("\n")}"
+      end
+      parts << "## Accessible Paths\n\n#{sections.join("\n\n")}"
     end
 
     parts << "## Instruction\n\n#{instruction}\n"

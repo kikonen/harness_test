@@ -163,9 +163,15 @@ class Session
       last_stats:    @last_stats,
       messages:      @messages,
       workdir:       file_list.workdir,
-      files:         file_list.files,
-      dirs:          file_list.dirs,
-      trees:         file_list.trees
+      # Access grants are saved per mode (read / write / both) so that
+      # separate read and write permissions survive a session round trip.
+      # The sections are disjoint (a path granted for read AND write only
+      # appears under "both"), so restore re-adds each grant exactly once.
+      access:        {
+        both:  file_list.accessible_paths[:both],
+        read:  file_list.accessible_paths[:read],
+        write: file_list.accessible_paths[:write]
+      }
     }
   end
 
@@ -180,11 +186,30 @@ class Session
     @last_stats    = data[:last_stats]
     @messages      = data[:messages] || [system_message]
 
-    file_list.clear
-    (data[:files] || []).each { |f| file_list.add_file(f) }
-    (data[:dirs] || []).each { |d| file_list.add_dir(d) }
-    (data[:trees] || []).each { |t| file_list.add_tree(t) }
+    restore_access_grants(data, file_list)
     self
+  end
+
+  # Re-populate the file list from saved access grants. New session files
+  # carry a per-mode "access" hash; older files used flat "files", "dirs"
+  # and "trees" lists (granted for read AND write).
+  def restore_access_grants(data, file_list)
+    file_list.clear
+
+    access = data[:access]
+    if access.is_a?(Hash)
+      %i[both read write].each do |mode|
+        section = access[mode] || {}
+        (section[:files] || []).each { |f| file_list.add_file(f, mode) }
+        (section[:dirs]  || []).each { |d| file_list.add_dir(d, mode) }
+      end
+      return
+    end
+
+    # Legacy format: everything was granted read+write.
+    (data[:files] || []).each { |f| file_list.add_file(f) }
+    (data[:dirs]  || []).each { |d| file_list.add_dir(d) }
+    (data[:trees] || []).each { |t| file_list.add_tree(t) }
   end
 
   private

@@ -279,27 +279,27 @@ class CLI
   def show_file_list
     if @file_list.empty?
       puts "(no access granted)"
-    else
-      files = @file_list.files
-      dirs  = @file_list.dirs
-      trees = @file_list.trees
+      return
+    end
 
+    access = @file_list.accessible_paths
+    labels = { both: 'Read + write', read: 'Read only', write: 'Write only' }
+
+    %i[both read write].each do |mode|
+      section = access[mode]
+      files   = section[:files]
+      dirs    = section[:dirs]
+      next if files.empty? && dirs.empty?
+
+      puts "#{labels[mode]}:"
       unless files.empty?
-        puts "Allowed files (#{files.size}):"
         files.each_with_index do |f, i|
           puts "  #{i + 1}. #{@file_list.display_path(f)}"
         end
       end
       unless dirs.empty?
-        puts "Allowed directories (#{dirs.size}):"
         dirs.each_with_index do |d, i|
-          puts "  #{i + 1}. #{@file_list.display_path(d)}/"
-        end
-      end
-      unless trees.empty?
-        puts "Allowed trees (#{trees.size}):"
-        trees.each_with_index do |t, i|
-          puts "  #{i + 1}. #{@file_list.display_path(t)}/ (recursive)"
+          puts "  #{i + files.size + 1}. #{@file_list.display_path(d)}/ (recursive)"
         end
       end
     end
@@ -439,8 +439,9 @@ class CLI
     input = input.gsub(/\s*\n\s*/, ' ') if input.start_with?('/')
 
     case input
-    when /\A\/file\s+(.+)\Z/
+    when /\A\/file\s+(.+?)(\s+(?:r|w|rw))?\Z/
       pattern = $1.strip
+      mode    = parse_grant_mode($2)
       # Support globs: expand the pattern against the filesystem,
       # relative to the working directory.
       if pattern =~ /[\\\*\?\[\]]/
@@ -451,32 +452,33 @@ class CLI
           added = 0
           matches.each do |path|
             shown = @file_list.display_path(path)
-            case @file_list.add_file(path)
+            case @file_list.add_file(path, mode)
             when :blocked
               puts "  [security] ✗ #{shown} (blocked: sensitive file)"
             when :duplicate
               puts "Already in list: #{shown}"
             when :added
               added += 1
-              puts "Added: #{shown}"
+              puts "Added: #{shown} (#{mode_label(mode)})"
             end
           end
-          puts "Added #{added} file#{'s' if added != 1} matching #{pattern}."
+          puts "Added #{added} file#{'s' if added != 1} matching #{pattern} (#{mode_label(mode)})."
         end
       else
         shown = @file_list.display_path(pattern)
-        case @file_list.add_file(pattern)
+        case @file_list.add_file(pattern, mode)
         when :blocked
           puts "  [security] ✗ #{shown} (blocked: sensitive file)"
         when :duplicate
           puts "Already in list: #{shown}"
         when :added
-          puts "Added: #{shown}"
+          puts "Added: #{shown} (#{mode_label(mode)})"
         end
       end
 
-    when /\A\/dir\s+(.+)\Z/
+    when /\A\/dir\s+(.+?)(\s+(?:r|w|rw))?\Z/
       pattern = $1.strip
+      mode    = parse_grant_mode($2)
       # Support globs: expand the pattern against the filesystem,
       # relative to the working directory.
       if pattern =~ /[\\\*\?\[\]]/
@@ -488,27 +490,27 @@ class CLI
           added = 0
           dirs.each do |path|
             shown = @file_list.display_path(path)
-            case @file_list.add_tree(path)
+            case @file_list.add_tree(path, mode)
             when :blocked
               puts "  [security] ✗ #{shown} (blocked: sensitive directory)"
             when :duplicate
               puts "Already allowed: #{shown}/"
             when :added
               added += 1
-              puts "Allowed: #{shown}/ (recursive)"
+              puts "Allowed: #{shown}/ (recursive, #{mode_label(mode)})"
             end
           end
-          puts "Allowed #{added} director#{added == 1 ? 'y' : 'ies'} matching #{pattern}."
+          puts "Allowed #{added} director#{added == 1 ? 'y' : 'ies'} matching #{pattern} (#{mode_label(mode)})."
         end
       else
         shown = @file_list.display_path(pattern)
-        case @file_list.add_tree(pattern)
+        case @file_list.add_tree(pattern, mode)
         when :blocked
           puts "  [security] ✗ #{shown} (blocked: sensitive directory)"
         when :duplicate
           puts "Already allowed: #{shown}/"
         when :added
-          puts "Allowed: #{shown}/ (recursive)"
+          puts "Allowed: #{shown}/ (recursive, #{mode_label(mode)})"
         end
       end
 
@@ -574,6 +576,26 @@ class CLI
     end
   end
 
+  # Parse the optional mode suffix of /file and /dir commands.
+  # Accepts "r" (read), "w" (write), "rw" (both); defaults to :rw.
+  def parse_grant_mode(suffix)
+    case suffix&.strip
+    when 'r' then :r
+    when 'w' then :w
+    when 'rw' then :rw
+    else :rw
+    end
+  end
+
+  # Human-readable label for a grant mode (used in command output).
+  def mode_label(mode)
+    case mode
+    when :r then 'read'
+    when :w then 'write'
+    else 'read+write'
+    end
+  end
+
   # List saved sessions (newest first).
   def list_sessions
     sessions = harness.list_sessions
@@ -606,9 +628,12 @@ class CLI
   def show_help
     puts <<~HELP
       Available commands:
-        /file <path>   Add a file to the allowed list (globs like src/*.rb work)
-        /dir <path>    Allow a directory tree (all files under it, recursively)
+        /file <path> [r|w|rw]  Add a file to the allowed list (globs like src/*.rb work).
+                               Mode: r = read only, w = write only, rw = both (default).
+        /dir <path> [r|w|rw]   Allow a directory tree (all files under it, recursively).
+                               Mode: r = read only, w = write only, rw = both (default).
         /clear         Remove all grants from the list
+
         /retry         Re-send the session message chain (after a failed request)
         /session       Show a summary of the current session
         /session-clear Reset the session (drop all conversation messages)
@@ -621,11 +646,16 @@ class CLI
         /help          Show this help
         /exit          Exit the harness
 
+      Read and write access are tracked separately. A read grant never implies
+      write access, but a write grant implies read access to the same path.
+
       Direct prompt:
         Type any text (not starting with /) to send it directly to the model.
         The model can use file.read / file.write / file.patch etc. to access
         files. When it attempts to access a file that is not yet allowed,
-        you will be prompted to grant access (file, directory, or tree).
+        you will be prompted to grant the required access (read or write) at
+        the granularity you prefer: the single file, or its parent directory
+        (recursive - all files under it).
 
       Session:
         Prompts are accumulated in a session, so the model sees the whole

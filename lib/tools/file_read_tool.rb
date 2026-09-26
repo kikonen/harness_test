@@ -26,8 +26,8 @@ class FileReadTool < Tool
     path = @file_list.resolve(args['path'])
     shown = @file_list.display_path(path)
 
-    unless @file_list.include?(path)
-      result = @file_list.grant_access(path)
+    unless @file_list.readable?(path)
+      result = @file_list.grant_access(path, :r)
       return "error: access denied for '#{shown}'" unless result == :granted
     end
 
