@@ -40,7 +40,8 @@ class FileListTool < Tool
     stripped = expanded.sub(/\/\*\*?\/.*\z/, '').sub(/\/\*\*?\z/, '')
     base_dir = (stripped != expanded) ? stripped : File.dirname(stripped)
     unless @file_list.can_list_dir?(base_dir)
-      result = @file_list.grant_access(base_dir, :r)
+      purpose = "to list files matching '#{pattern}'"
+      result  = @file_list.grant_access(base_dir, :r, purpose: purpose)
       return "error: read access denied for directory '#{@file_list.display_path(base_dir)}'" \
              unless result == :granted
     end
