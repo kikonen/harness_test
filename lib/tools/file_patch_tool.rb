@@ -25,6 +25,14 @@ require_relative '../file_list'
 #     declared line number and expanding outward, then falling back to a
 #     full-file search. Small line-number errors in the diff therefore do not
 #     cause a failure.
+#   - Hunk line COUNTS in the @@ header are treated as hints, not facts: a
+#     wrong count (a very common model error) must not fail the patch. The
+#     hunk body is recounted and trusted over the header; excess trailing
+#     context lines are trimmed from the body.
+#   - If the full old-side does not match anywhere (e.g. the model included
+#     extra or wrong context lines), matching degrades to progressively
+#     shorter old-side patterns — context lines are dropped one by one from
+#     the hunk ends, NEVER '-' / '+' edit lines — until a match is found.
 #   - Blank lines inside a hunk are treated as context lines (a common model
 #     output quirk: the leading space of a context line is omitted).
 #   - Failure messages report the first mismatching line so the model can
@@ -163,9 +171,12 @@ class FilePatchTool < Tool
   # Lenient parsing rules:
   #   - Blank lines inside a hunk are treated as context lines (models often
   #     omit the leading space of a context line).
-  #   - If the parsed line counts disagree with the hunk header, the excess
-  #     context lines are trimmed from the end of the hunk (a common artifact
-  #     of trailing blank lines) instead of failing.
+  #   - The line counts in the @@ header are treated as hints, not facts:
+  #     they are RECOUNTED from the actual hunk body (a wrong count is one of
+  #     the most common model errors) and the recounted values are used.
+  #     Excess trailing context lines are trimmed only when the body exceeds
+  #     the header count; a body shorter than the header is still accepted,
+  #     since the body is the more trustworthy source.
   def parse_unified_diff(diff)
     # Normalize the diff itself to LF so parsing is consistent.
     diff = diff.gsub("\r\n", "\n")
@@ -221,15 +232,20 @@ class FilePatchTool < Tool
           i += 1
         end
 
-        # Reconcile with the header counts: trim excess trailing context lines
-        # (blank-line artifacts) if the body is longer than the header says.
+        # Reconcile with the header counts (see #reconcile_counts): trim
+        # excess trailing context lines, never required '-' / '+' lines.
         hunk_lines = reconcile_counts(hunk_lines, old_count, new_count)
         return nil if hunk_lines.nil?
 
+        # Use the RECOUNTED counts as the source of truth — they describe
+        # what the hunk body actually contains.
+        recounted_old = hunk_lines.count { |t, _| t == ' ' || t == '-' }
+        recounted_new = hunk_lines.count { |t, _| t == ' ' || t == '+' }
+
         hunks << {
           old_start: old_start,
-          old_count: old_count,
-          new_count: new_count,
+          old_count: recounted_old,
+          new_count: recounted_new,
           lines:     hunk_lines
         }
       else
@@ -240,31 +256,41 @@ class FilePatchTool < Tool
     hunks
   end
 
-  # If the parsed body has more lines than the header counts allow, trim
-  # trailing context lines until the counts match. Returns nil if the body
-  # has FEWER lines than required (unfixable).
+  # Reconciles a parsed hunk body with the counts declared in its header.
+  # The counts are treated as hints (a wrong count is a common model error),
+  # so mismatches are resolved in favor of the BODY:
+  #   - Body LONGER than the header: trim excess trailing context lines
+  #     (blank-line artifacts are the most common cause of count drift).
+  #   - Body SHORTER than the header: accept it as-is — the header is likely
+  #     just wrong, and the body still carries the real edit.
+  # Returns nil only when the body is empty (nothing to apply at all).
   def reconcile_counts(hunk_lines, old_count, new_count)
     old_seen = hunk_lines.count { |t, _| t == ' ' || t == '-' }
     new_seen = hunk_lines.count { |t, _| t == ' ' || t == '+' }
 
-    return nil if old_seen < old_count || new_seen < new_count
-
     lines = hunk_lines.dup
+
+    # Only trim when the body exceeds the header count, and only trailing
+    # context lines — never '-' / '+' lines, which carry the actual edit.
     while (old_seen > old_count || new_seen > new_count) && lines.last[0] == ' '
       old_seen -= 1
       new_seen -= 1
       lines.pop
     end
 
-    (old_seen == old_count && new_seen == new_count) ? lines : nil
+    lines.empty? ? nil : lines
   end
 
   # Applies a single hunk to the lines array. Returns the new lines array,
   # or nil if the hunk does not apply cleanly.
   #
-  # The hunk is located by searching for its old-side lines (context +
-  # deletions), starting at the declared 1-based old_start and expanding
-  # outward, then falling back to a full-file search.
+  # Strategy: locate the hunk by matching its old-side lines (context +
+  # deletions) against the file, preferring the declared position. If the
+  # full old-side does not match anywhere, progressively SHORTER old-side
+  # patterns are tried — context lines are dropped one at a time from the
+  # hunk ends (trailing first), while all '-' / '+' edit lines are always
+  # kept. The corresponding new-side context lines are dropped in the same
+  # way, so the actual edit is never altered.
   def apply_hunk(lines, hunk)
     old_side = hunk[:lines].select { |t, _| t == ' ' || t == '-' }.map { |_, text| text }
     new_side = hunk[:lines].select { |t, _| t == ' ' || t == '+' }.map { |_, text| text }
@@ -272,10 +298,56 @@ class FilePatchTool < Tool
 
     expected = hunk[:old_start] - 1  # 0-based
 
-    pos = find_position(lines, old_side, expected)
-    return nil if pos.nil?
+    # Pure insertion hunk (no old-side lines at all): insert at the
+    # declared position, anchoring on a new-side context line if one exists
+    # so the insertion lands in the right place.
+    if old_side.empty?
+      anchor = new_side.find { |t| t != '' }
+      pos    = anchor ? find_position(lines, [anchor], expected) : nil
+      pos    = [[expected, 0].max, lines.size].min if pos.nil?
+      return lines[0...pos] + new_side + lines[pos..]
+    end
 
-    lines[0...pos] + new_side + lines[pos + old_side.size..]
+    # How many context lines may be dropped without touching edit lines.
+    ctx_count = hunk[:lines].count { |t, _| t == ' ' }
+    (0..ctx_count).each do |drop|
+      # Trailing context is dropped first; once all trailing context is
+      # gone, leading context is dropped as well.
+      back_drop  = [drop, ctx_count].min
+      front_drop = drop - back_drop
+
+      kept    = drop_hunk_context(hunk[:lines], front_drop, back_drop)
+      pattern = kept.select { |t, _| t == ' ' || t == '-' }.map { |_, text| text }
+      next if pattern.empty?
+
+      pos = find_position(lines, pattern, expected)
+      next if pos.nil?
+
+      new_used = kept.select { |t, _| t == ' ' || t == '+' }.map { |_, text| text }
+      return lines[0...pos] + new_used + lines[pos + pattern.size..]
+    end
+
+    nil
+  end
+
+  # Returns the hunk lines with `front_drop` leading and `back_drop` trailing
+  # CONTEXT lines removed. '-' / '+' edit lines are always preserved.
+  def drop_hunk_context(hunk_lines, front_drop, back_drop)
+    return hunk_lines if front_drop.zero? && back_drop.zero?
+
+    ctx_total = hunk_lines.count { |t, _| t == ' ' }
+    ctx_index = 0
+    kept      = []
+    hunk_lines.each do |type, text|
+      if type == ' '
+        ctx_index += 1
+        next if ctx_index <= front_drop
+        next if ctx_index > (ctx_total - back_drop)
+      end
+
+      kept << [type, text]
+    end
+    kept
   end
 
   # Finds the 0-based index where old_side matches lines, preferring the
