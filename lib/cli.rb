@@ -137,7 +137,7 @@ class CLI
     @history.load
 
     puts "Harness ready. Type /help for commands, /exit to quit."
-    puts "Model: #{harness.active_model_name} (@ #{@options[:base_url]})"
+    puts "Model: #{harness.session_manager.active_model_name} (@ #{@options[:base_url]})"
     puts "Working directory: #{@file_list.workdir}"
     puts "Tip: type a plain message (no /) to send it directly to the model."
     puts "Tip: paste multiline text directly, or end a line with a backslash (\\) " \
@@ -184,7 +184,7 @@ class CLI
     id = auto_save_session
     puts "Goodbye."
     if id
-      puts "Session saved as #{id} (#{harness.sessions_dir}/#{id}.json)."
+      puts "Session saved as #{id} (#{harness.session_manager.sessions_dir}/#{id}.json)."
       puts "Resume it later with: #{commands.resume_command(id)}"
     end
   end
@@ -195,7 +195,7 @@ class CLI
   # or ambiguous id raises HarnessError, which the entry point reports).
   def resume_from_cli
     id   = @options[:resume]
-    path = @harness.resume_session(id)
+    path = @harness.session_manager.resume_session(id)
     name = File.basename(path, '.json')
     puts "Resumed session #{name} (conversation and file list restored - see /session)."
   end
@@ -205,7 +205,7 @@ class CLI
   def auto_save_session
     return nil if @harness.session.empty?
 
-    @harness.save_session
+    @harness.session_manager.save_session
   rescue StandardError => e
     puts "  [warning] could not auto-save session: #{e.message}"
     nil

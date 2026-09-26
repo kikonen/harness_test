@@ -41,14 +41,14 @@ class CommandHandler
       file_list.clear
       puts "Access list cleared."
     when /\A\/retry\Z/
-      harness.retry
+      harness.session_manager.retry
     when /\A\/session\Z/
       puts harness.session.summary
     when /\A\/session-clear\Z/
       harness.session.clear
       puts "Session cleared (conversation history reset)."
     when /\A\/compact\Z/
-      result = harness.compact_session
+      result = harness.session_manager.compact_session
       retained = result[:retained]
       puts "Session compacted: #{result[:before]} messages -> " \
            "#{result[:after]} messages (#{retained} recent retained)."
@@ -57,17 +57,17 @@ class CommandHandler
       puts result[:summary]
       puts
     when /\A\/reload\Z/
-      harness.reload_rules
+      harness.session_manager.reload_rules
       puts "harness.md reloaded - project rules updated in the system prompt."
       puts
     when /\A\/save\Z/
-      id = harness.save_session
-      puts "Session saved as #{id} (#{harness.sessions_dir}/#{id}.json)"
+      id = harness.session_manager.save_session
+      puts "Session saved as #{id} (#{harness.session_manager.sessions_dir}/#{id}.json)"
       puts "Resume it later with: /resume #{id}"
       puts "  or from the command line: #{resume_command(id)}"
     when /\A\/resume\s+(.+)\Z/
       id = $1.strip
-      path = harness.resume_session(id)
+      path = harness.session_manager.resume_session(id)
       puts "Session #{File.basename(path, '.json')} resumed."
       puts "  (conversation and file list restored - see /session)"
     when /\A\/sessions\Z/
@@ -81,10 +81,10 @@ class CommandHandler
     when /\A\/models\Z/
       show_models
     when /\A\/model\Z/
-      puts "Current model: #{harness.active_model_name} (@ #{options[:base_url]})"
+      puts "Current model: #{harness.session_manager.active_model_name} (@ #{options[:base_url]})"
       puts "List models with /models, switch with /model <name>."
     when /\A\/model\s+(.+)\Z/
-      profile = harness.switch_model($1)
+      profile = harness.session_manager.switch_model($1)
       name = profile[:name] || profile[:model]
       url  = profile[:url] || options[:base_url]
       puts "Switched to model: #{name} (#{profile[:model]} @ #{url})"
@@ -104,9 +104,9 @@ class CommandHandler
 
   # List saved sessions (newest first).
   def list_sessions
-    sessions = harness.list_sessions
+    sessions = harness.session_manager.list_sessions
     if sessions.empty?
-      puts "No saved sessions (#{harness.sessions_dir})."
+      puts "No saved sessions (#{harness.session_manager.sessions_dir})."
       return
     end
 
@@ -231,8 +231,8 @@ class CommandHandler
 
   # List the configured model profiles, marking the default and the active one.
   def show_models
-    profiles = harness.model_profiles
-    current  = harness.active_model_name
+    profiles = harness.session_manager.model_profiles
+    current  = harness.session_manager.active_model_name
 
     if profiles.empty?
       puts "No model profiles configured."
@@ -240,7 +240,7 @@ class CommandHandler
       return
     end
 
-    default_name = harness.default_model_name
+    default_name = harness.session_manager.default_model_name
 
     puts "Configured models (#{profiles.size}):"
     profiles.each do |p|
@@ -325,7 +325,7 @@ class CommandHandler
 
   def run_direct_prompt(text)
     puts
-    harness.run_prompt(text)
+    harness.session_manager.run_prompt(text)
     puts
   end
 end
