@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'optparse'
-require 'fileutils'
 require 'reline'
 
 require_relative 'harness_error'
@@ -9,6 +8,7 @@ require_relative 'harness_config'
 require_relative 'harness'
 require_relative 'file_list'
 require_relative 'history_manager'
+require_relative 'state_migrator'
 require_relative 'command_handler'
 
 # -- CLI ------------------------------------------------------------------
@@ -25,7 +25,7 @@ class CLI
     @harness   = Harness.new(@options, @file_list)
     @commands  = CommandHandler.new(@harness, @file_list, @options)
     @history   = HistoryManager.new(@file_list.workdir)
-    migrate_legacy_state
+    StateMigrator.run(@file_list.workdir)
     list_sessions_and_exit if @options[:list_sessions]
     resume_from_cli if @options[:resume]
   end
@@ -190,44 +190,6 @@ class CLI
   end
 
   private
-
-  # One-time migration of harness state that used to live scattered in the
-  # working directory into the .harness directory:
-  #   .sessions/          -> .harness/sessions/
-  #   .harness_history    -> .harness/harness_history
-  #   harness.log         -> .harness/harness.log
-  # Existing files are moved (not copied) and only if the destination does
-  # not exist yet. Best-effort: any failure is silently ignored.
-  def migrate_legacy_state
-    workdir = @file_list.workdir
-    harness_dir = File.join(workdir, Harness::HARNESS_DIR)
-
-    # .sessions/ -> .harness/sessions/
-    old_sessions = File.join(workdir, '.sessions')
-    new_sessions = File.join(harness_dir, 'sessions')
-    if File.directory?(old_sessions) && !File.directory?(new_sessions)
-      FileUtils.mkdir_p(harness_dir)
-      FileUtils.mv(old_sessions, new_sessions)
-    end
-
-    # .harness_history -> .harness/harness_history
-    old_history = File.join(workdir, '.harness_history')
-    new_history = File.join(harness_dir, 'harness_history')
-    if File.file?(old_history) && !File.exist?(new_history)
-      FileUtils.mkdir_p(harness_dir)
-      FileUtils.mv(old_history, new_history)
-    end
-
-    # harness.log -> .harness/harness.log
-    old_log = File.join(workdir, 'harness.log')
-    new_log = File.join(harness_dir, 'harness.log')
-    if File.file?(old_log) && !File.exist?(new_log)
-      FileUtils.mkdir_p(harness_dir)
-      FileUtils.mv(old_log, new_log)
-    end
-  rescue StandardError
-    # Migration is best-effort - never block the harness on it.
-  end
 
   # Resume a saved session given via -r / --resume (best-effort: a missing
   # or ambiguous id raises HarnessError, which the entry point reports).
