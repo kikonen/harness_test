@@ -93,6 +93,10 @@ class Harness
   # (lower = more deterministic); top_p is nucleus sampling.
   TEMPERATURE = 0.2
   TOP_P       = 0.9
+  TOP_K       = 20
+  MIN_P       = 0
+  PRESENCE_PENALTY = 1.0
+  REPEAT_PENALTY   = 1.05
 
   # All harness state (saved sessions, log, history) lives in this
   # directory inside the working directory, so it can be ignored from
@@ -271,6 +275,26 @@ class Harness
     options[:top_p] || TOP_P
   end
 
+  # Top-k sampling (limit to the N most likely tokens)
+  def top_k
+    options[:top_k] || TOP_K
+  end
+
+  # Minimum probability threshold
+  def min_p
+    options[:min_p] || MIN_P
+  end
+
+  # Penalty for already-present tokens
+  def presence_penalty
+    options[:presence_penalty] || PRESENCE_PENALTY
+  end
+
+  # Penalty for repeated tokens
+  def repeat_penalty
+    options[:repeat_penalty] || REPEAT_PENALTY
+  end
+
   # Number of recent messages retained verbatim after compaction:
   # prefer the value from options (CLI flag or config 'compact.recent_messages'),
   # falling back to the built-in default.
@@ -357,6 +381,10 @@ class Harness
     options[:reasoning_effort] = profile[:reasoning_effort]
     options[:temperature]      = profile[:temperature]
     options[:top_p]            = profile[:top_p]
+    options[:top_k]            = profile[:top_k]
+    options[:min_p]            = profile[:min_p]
+    options[:presence_penalty] = profile[:presence_penalty]
+    options[:repeat_penalty]   = profile[:repeat_penalty]
     options[:active_model]     = profile[:name] || profile[:model]
   end
 
@@ -612,11 +640,11 @@ class Harness
       model: model,
       messages: messages,
       temperature: temperature,
-      min_p: 0,
       top_p: top_p,
-      top_k: 20,
-      presence_penalty: 1.0,
-      repeat_penalty: 1.05,
+      top_k: top_k,
+      min_p: min_p,
+      presence_penalty: presence_penalty,
+      repeat_penalty: repeat_penalty,
       max_tokens: NUM_PREDICT,
       reasoning_effort: reasoning_effort,
       options: {

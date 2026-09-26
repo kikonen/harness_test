@@ -26,6 +26,10 @@ require_relative 'harness_error'
 #       reasoning_effort: medium
 #       temperature: 0.6
 #       top_p: 0.95
+#       top_k: 20
+#       min_p: 0
+#       presence_penalty: 1.0
+#       repeat_penalty: 1.05
 #   default_model: local        # model used when -m is not given
 #   compact:
 #     recent_messages: 3        # messages retained verbatim after /compact
@@ -59,6 +63,10 @@ class HarnessConfig
         reasoning_effort: medium
         temperature: 0.6
         top_p: 0.95
+        top_k: 20              # sampling top-k (integer)
+        min_p: 0               # minimum probability threshold
+        presence_penalty: 1.0  # penalty for already-present tokens
+        repeat_penalty: 1.05   # penalty for repeated tokens
 
     # Model used when -m is not given on the command line.
     default_model: local
@@ -214,7 +222,11 @@ class HarnessConfig
         num_ctx:          int_or_nil(m['num_ctx']),
         reasoning_effort: nonblank(m['reasoning_effort']),
         temperature:      float_or_nil(m['temperature']),
-        top_p:            float_or_nil(m['top_p'])
+        top_p:            float_or_nil(m['top_p']),
+        top_k:            int_or_nil(m['top_k']),
+        min_p:            float_or_nil(m['min_p']),
+        presence_penalty: float_or_nil(m['presence_penalty']),
+        repeat_penalty:   float_or_nil(m['repeat_penalty'])
       }
     end
   end
