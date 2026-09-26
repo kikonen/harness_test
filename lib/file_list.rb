@@ -183,6 +183,9 @@ class FileList
   # Prompt the user to grant access to a path.
   # mode: :r (read), :w (write), or :rw (read + write; default).
   # Returns :granted, :denied, or :blocked.
+  #
+  # The prompt ALWAYS uses numbered choices so the user has a consistent
+  # interaction pattern regardless of path location.
   def grant_access(path, mode = :rw)
     path  = resolve(path)
     shown = display_path(path)
@@ -190,26 +193,29 @@ class FileList
     return :granted if readable?(path) && (mode == :r || writable?(path))
     return :blocked if sensitive?(path)
 
-    parent            = File.dirname(path)
-    parent_in_workdir = within_workdir?(parent)
+    parent        = File.dirname(path)
+    offer_dir_opt = within_workdir?(parent) && !File.directory?(path)
 
     puts
     verb = mode == :r ? 'read access' : 'write access'
     puts "  [access] ⚠  Access requested (#{verb}): #{shown}"
-    if parent_in_workdir
+
+    if offer_dir_opt
       parent_shown = display_path(parent)
-      noun = File.directory?(path) ? 'this directory' : 'this file'
-      puts "             1) Allow #{noun} only"
-      puts "             2) Allow directory: #{parent_shown}/ (recursive - all files under it)"
-      print  "             Choice (1/2): "
+      puts "             1) Allow this file only"
+      puts "             2) Allow directory: #{parent_shown}/ (recursive)"
+      puts "             3) Deny"
+      print  "             Choice (1/2/3): "
     else
-      print  "             Allow? (y/n): "
+      puts "             1) Allow"
+      puts "             2) Deny"
+      print  "             Choice (1/2): "
     end
     $stdout.flush
 
     answer = $stdin.gets&.chomp&.strip
 
-    if parent_in_workdir
+    if offer_dir_opt
       case answer
       when '1'
         add_file(path, mode)
@@ -224,7 +230,7 @@ class FileList
         :denied
       end
     else
-      if answer == 'y' || answer == 'yes'
+      if answer == '1'
         add_file(path, mode)
         puts "  [access] ✓ #{shown} (#{mode_label(mode)})"
         :granted
