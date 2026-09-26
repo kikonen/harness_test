@@ -80,13 +80,15 @@ class DirDeleteTool < Tool
     puts
     puts "  [dir.delete] ⚠  The model is requesting to DELETE an empty directory:"
     puts "                  #{shown}"
-    print  "                  Delete? (y/n): "
+    puts "                  1) Confirm delete"
+    puts "                  2) Deny"
+    print  "                  Choice (1/2): "
     $stdout.flush
 
     answer = $stdin.gets
-    answer = answer&.chomp&.downcase
+    answer = answer&.chomp&.strip
 
-    if answer == 'y' || answer == 'yes'
+    if answer == '1'
       Dir.rmdir(path)
       puts "  [dir.delete] ✓ #{shown} (deleted)"
       $stdout.flush

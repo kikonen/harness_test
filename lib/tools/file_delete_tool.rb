@@ -54,13 +54,15 @@ class FileDeleteTool < Tool
     puts
     puts "  [file.delete] ⚠  The model is requesting to DELETE a file:"
     puts "                  #{shown}"
-    print  "                  Delete? (y/n): "
+    puts "                  1) Confirm delete"
+    puts "                  2) Deny"
+    print  "                  Choice (1/2): "
     $stdout.flush
 
     answer = $stdin.gets
-    answer = answer&.chomp&.downcase
+    answer = answer&.chomp&.strip
 
-    if answer == 'y' || answer == 'yes'
+    if answer == '1'
       File.delete(path)
       puts "  [file.delete] ✓ #{shown} (deleted)"
       $stdout.flush

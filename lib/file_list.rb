@@ -213,6 +213,8 @@ class FileList
       print  "             Choice (1/2/3): "
     else
       # Outside workdir or special path.
+      puts "             ⚠  WARNING: this path is OUTSIDE the working directory."
+      puts "               Granting access may be a sandbox escape."
       puts "             1) Allow"
       puts "             2) Deny"
       print  "             Choice (1/2): "
