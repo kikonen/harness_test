@@ -31,7 +31,7 @@ Keep this in mind:
 - Preserve existing formatting and style when editing — do not reformat
   untouched code.
 - Lines should be at maximum 90 characters long.
-- All text files have new line in the end.
+- All text files must have newline in the end.
 
 ## Conventions
 

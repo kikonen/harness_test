@@ -3,6 +3,12 @@ export HARNESS_BASE_URL=http://localhost:11434/v1
 export HARNESS_MODEL=qwen3.8-27b-ki-32k:latest
 export HARNESS_NUM_CTX=32768
 export HARNESS_REASONING_EFFORT=medium
+# Sampling parameters. temperature: lower = more deterministic (default 0.2).
+# top_p: nucleus sampling, keep the smallest set of tokens whose cumulative
+# probability reaches top_p (default 0.9). Can also be set per-run with
+# --temperature F / --top-p F.
+export HARNESS_TEMPERATURE=0.2
+export HARNESS_TOP_P=0.9
 export HARNESS_HISTORY_FILE=.harness/harness_history
 # How many recent messages to retain verbatim after /compact (default 6).
 # Lower it to free more context on small models; raise it to keep more

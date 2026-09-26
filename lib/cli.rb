@@ -55,6 +55,14 @@ class CLI
            'Reasoning effort [or $HARNESS_REASONING_EFFORT]') do |v|
         opts[:reasoning_effort] = v
       end
+      o.on('--temperature F',
+           'Sampling temperature [or $HARNESS_TEMPERATURE]') do |v|
+        opts[:temperature] = v.to_f
+      end
+      o.on('--top-p F',
+           'Nucleus sampling (top_p) [or $HARNESS_TOP_P]') do |v|
+        opts[:top_p] = v.to_f
+      end
       o.on('--compact-recent N',
            'Messages to retain verbatim after /compact ' \
            '[or $HARNESS_COMPACT_RECENT]') do |v|
@@ -102,6 +110,8 @@ class CLI
     opts[:token]    ||= HarnessEnv.get('HARNESS_TOKEN')
     opts[:num_ctx]  ||= HarnessEnv.get('HARNESS_NUM_CTX')&.to_i
     opts[:reasoning_effort] ||= HarnessEnv.get('HARNESS_REASONING_EFFORT')
+    opts[:temperature] ||= HarnessEnv.get('HARNESS_TEMPERATURE')&.to_f
+    opts[:top_p]     ||= HarnessEnv.get('HARNESS_TOP_P')&.to_f
     opts[:compact_recent] ||= HarnessEnv.get('HARNESS_COMPACT_RECENT')&.to_i
     opts[:retry_count]  ||= HarnessEnv.get('HARNESS_RETRY_COUNT')&.to_i
     opts[:retry_delay]  ||= HarnessEnv.get('HARNESS_RETRY_DELAY')&.to_f

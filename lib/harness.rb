@@ -85,6 +85,11 @@ class Harness
   # Default reasoning effort (NOTE KI default for qwen is xhigh)
   REASONING_EFFORT = "medium"
 
+  # Sampling parameters (defaults). temperature controls randomness
+  # (lower = more deterministic); top_p is nucleus sampling.
+  TEMPERATURE = 0.2
+  TOP_P       = 0.9
+
   # All harness state (saved sessions, log, history) lives in this
   # directory inside the working directory, so it can be ignored from
   # git with a single entry (.harness/).
@@ -230,6 +235,18 @@ class Harness
   # $HARNESS_REASONING_EFFORT), falling back to the built-in default.
   def reasoning_effort
     options[:reasoning_effort] || REASONING_EFFORT
+  end
+
+  # Sampling temperature: prefer the value from options (CLI flag or
+  # $HARNESS_TEMPERATURE), falling back to the built-in default.
+  def temperature
+    options[:temperature] || TEMPERATURE
+  end
+
+  # Nucleus sampling (top_p): prefer the value from options (CLI flag or
+  # $HARNESS_TOP_P), falling back to the built-in default.
+  def top_p
+    options[:top_p] || TOP_P
   end
 
   # Number of recent messages retained verbatim after compaction:
@@ -469,7 +486,8 @@ class Harness
     body = {
       model: model,
       messages: messages,
-      temperature: 0.1,
+      temperature: temperature,
+      top_p: top_p,
       max_tokens: NUM_PREDICT,
       reasoning_effort: reasoning_effort,
       options: {
