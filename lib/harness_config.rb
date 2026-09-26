@@ -30,6 +30,9 @@ require_relative 'harness_error'
 #   compact:
 #     recent_messages: 3        # messages retained verbatim after /compact
 #     max_size: 500             # max length (words) of the compaction summary
+#   retry:
+#     count: 3                  # total attempts for transient network errors
+#     delay: 2                  # base delay (seconds) between retries
 #   system: |                   # full system prompt (overrides the built-in)
 #     You are a precise code editor...
 #
@@ -65,6 +68,11 @@ class HarnessConfig
       recent_messages: 6       # messages retained verbatim after /compact
       max_size: 500            # max length (words) of the compaction summary
 
+    # Automatic retries for transient network errors.
+    retry:
+      count: 3                 # total attempts (1 initial + N-1 retries)
+      delay: 2                 # base delay in seconds (exponential backoff)
+
     # Full system prompt override (uncomment to use).
     # --system-file still takes precedence.
     # system: |
@@ -82,6 +90,10 @@ class HarnessConfig
     @compact      = {
       recent_messages: int_or_nil(data.dig('compact', 'recent_messages')),
       max_size:        int_or_nil(data.dig('compact', 'max_size'))
+    }
+    @retry        = {
+      count: int_or_nil(data.dig('retry', 'count')),
+      delay: float_or_nil(data.dig('retry', 'delay'))
     }
   end
 
@@ -155,6 +167,16 @@ class HarnessConfig
   # Max length (words) of the compaction summary (or nil).
   def compact_max_size
     @compact[:max_size]
+  end
+
+  # Total retry attempts for transient network errors (or nil).
+  def retry_count
+    @retry[:count]
+  end
+
+  # Base delay (seconds) between retries (or nil).
+  def retry_delay
+    @retry[:delay]
   end
 
   # Resolve the active model profile. selection is the value of -m (or nil).

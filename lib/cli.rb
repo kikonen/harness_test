@@ -76,14 +76,6 @@ class CLI
            'Messages to retain verbatim after /compact') do |v|
         opts[:compact_recent] = v.to_i
       end
-      o.on('--retry-count N',
-           'Max attempts for transient network errors') do |v|
-        opts[:retry_count] = v.to_i
-      end
-      o.on('--retry-delay S',
-           'Base delay (seconds) between retries') do |v|
-        opts[:retry_delay] = v.to_f
-      end
       o.on('-d DIR', '--workdir DIR',
            'Working directory; all file paths are relative to it') do |v|
         opts[:workdir] = v
@@ -163,6 +155,11 @@ class CLI
 
     opts[:compact_recent]   ||= config.compact_recent_messages
     opts[:compact_max_size] = config.compact_max_size
+
+    # Retry settings come from the config file (retry: count/delay).
+    # Missing values fall back to the built-in defaults in harness.rb.
+    opts[:retry_count] = config.retry_count
+    opts[:retry_delay] = config.retry_delay
 
     # --list-sessions only reads the .harness/sessions directory, so no
     # model is needed for it.

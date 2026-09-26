@@ -282,15 +282,15 @@ class Harness
     options[:compact_max_size]
   end
 
-  # Number of retry attempts for transient network errors:
-  # prefer the value from options (CLI flag), falling back to the built-in
+  # Total retry attempts for transient network errors:
+  # from the config file ('retry.count'), falling back to the built-in
   # default.
   def retry_count
     options[:retry_count] || RETRY_COUNT
   end
 
   # Base delay (seconds) between retries (exponential backoff):
-  # prefer the value from options (CLI flag), falling back to the built-in
+  # from the config file ('retry.delay'), falling back to the built-in
   # default.
   def retry_delay
     options[:retry_delay] || RETRY_DELAY
