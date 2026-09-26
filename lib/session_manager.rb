@@ -82,10 +82,7 @@ class SessionManager
 
     summary_text = nil
     begin
-      data = @harness.make_request(
-        @harness.options[:base_url], @harness.options[:model], messages,
-        auth_token: @harness.options[:token], tools: nil
-      )
+      data = @harness.client.chat(messages)
       summary_text = data[:choices][0][:message][:content]
     ensure
       spinner.stop

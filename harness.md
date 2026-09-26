@@ -54,7 +54,9 @@ Keep this in mind:
   `/compact` verbatim (default 6).
 - `Harness::MAX_TOOL_ITERATIONS`, `TOOL_LOOP_WARN_THRESHOLD`,
   `TOOL_LOOP_HARD_LIMIT` - tool-loop safety limits.
-- `Harness::NUM_CTX` - context window size (default 65536).
+- `LLMClient::NUM_CTX` - context window size (default 65536); sampling
+  defaults (`TEMPERATURE`, `TOP_P`, `TOP_K`, `MIN_P`, penalties) and
+  retry settings (`RETRY_COUNT`, `RETRY_DELAY`) also live in LLMClient.
 - `SensitiveFiles::SENSITIVE_DIRS` / sensitive file patterns - security
   blocklist.
 
