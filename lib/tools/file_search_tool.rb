@@ -41,8 +41,11 @@ class FileSearchTool < Tool
 
     expanded = File.expand_path(glob, @file_list.workdir)
 
-    # Searching a directory requires READ access to that directory.
-    base_dir = File.dirname(expanded.sub(/\/\*\*?\/.*\z/, '').sub(/\/\*\*?\z/, ''))
+    # Determine the base directory that needs read permission.
+    # If stripping the glob changed the path, the result is already a dir.
+    # Otherwise it's a file path and we need its parent.
+    stripped = expanded.sub(/\/\*\*?\/.*\z/, '').sub(/\/\*\*?\z/, '')
+    base_dir = (stripped != expanded) ? stripped : File.dirname(stripped)
     unless @file_list.can_list_dir?(base_dir)
       result = @file_list.grant_access(base_dir, :r)
       return "error: read access denied for directory '#{@file_list.display_path(base_dir)}'" \
