@@ -1,0 +1,75 @@
+# frozen_string_literal: true
+
+module Commands
+  # /help - show available commands.
+  class HelpCommand
+    def initialize(_harness, _file_list, _options)
+    end
+
+    def handle(_args)
+      puts <<~HELP
+        Available commands:
+          /file <path> [r|w|rw]  Add a file to the allowed list (globs like src/*.rb work).
+                                 Mode: r = read only, w = write only, rw = both (default).
+          /dir <path> [r|w|rw]   Allow a directory tree (all files under it, recursively).
+                                 Mode: r = read only, w = write only, rw = both (default).
+          /clear         Remove all grants from the list
+
+          /retry         Re-send the session message chain (after a failed request)
+          /session       Show a summary of the current session
+          /session-clear Reset the session (drop all conversation messages)
+          /compact       Compact the session (summarize conversation to free context)
+          /reload        Reload harness.md (project rules) into the system prompt
+          /save          Save the session (conversation + access list) to .harness/sessions/
+          /resume <id>   Resume a saved session by its id (see /sessions)
+          /sessions      List saved sessions
+          /tools         List available tools
+          /models        List configured models (marks the default and active one)
+          /model <name>  Switch the active model for this run (remembered in the session)
+          /model         Show the currently active model
+          /help          Show this help
+          /exit          Exit the harness
+
+        Read and write access are tracked separately. A read grant never implies
+        write access, but a write grant implies read access to the same path.
+
+        Direct prompt:
+          Type any text (not starting with /) to send it directly to the model.
+          The model can use file.read / file.write / file.patch etc. to access
+          files. When it attempts to access a file that is not yet allowed,
+          you will be prompted to grant the required access (read or write) at
+          the granularity you prefer: the single file, the directory only
+          (direct children), or the directory recursively (all subdirs).
+
+        Session:
+          Prompts are accumulated in a session, so the model sees the whole
+          conversation. If a request to the LLM fails, the prompt stays in the
+          session - use /retry to re-send the chain. /session shows a summary,
+          /session-clear starts a fresh conversation. /compact summarizes the
+          conversation to free up context window space.
+
+        Project rules (harness.md):
+          If a harness.md file exists in the working directory, its content
+          is appended to the system prompt as "Project-Specific Rules".
+          The file is auto-detected when its modification time changes
+          (checked before each prompt). Use /reload to force a re-read.
+
+        Saving / resuming sessions:
+          The session (conversation history AND the access list) is
+          auto-saved to .harness/sessions/ inside the working directory when
+          the harness exits. /save stores it manually at any time.
+          /sessions lists all saved sessions; /resume <id> restores the
+          conversation and access list.
+
+        Multiline input:
+          * Paste: paste a multiline block directly at the prompt.
+          * Type: end a line with a trailing backslash (\\) to continue.
+
+        Keys:
+          Ctrl+C   Cancel the current input (or interrupt a running request)
+          Ctrl+D   Quit (on an empty prompt)
+          Up/Down  Browse command history
+      HELP
+    end
+  end
+end
