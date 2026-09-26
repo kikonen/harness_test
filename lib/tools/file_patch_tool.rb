@@ -17,7 +17,6 @@ require_relative '../file_list'
 #   +added line
 #
 # The tool verifies:
-#   1. The file is in the allowed list
 #   2. The SHA-256 matches (file unchanged since read)
 #   3. Each hunk's old-side lines (context + deletions) are found in the file
 #
@@ -45,7 +44,6 @@ class FilePatchTool < Tool
       name: 'file.patch',
       description: 'Applies a standard unified diff patch to a file. ' \
                    'The diff must be in unified diff format (--- / +++ / @@ hunks). ' \
-                   'Only files in the allowed list can be patched. ' \
                    'You must provide the sha256 digest of the file as last read (from file.read or file.sha). ' \
                    'Hunk line numbers are used as a hint — the hunk is located by matching its context lines, ' \
                    'so small line-number errors are tolerated. ' \
@@ -69,9 +67,8 @@ class FilePatchTool < Tool
     sha   = args['sha'].to_s
 
     unless @file_list.include?(path)
-      puts "  [file.patch] ✗ #{shown} (not in allowed list)"
-      $stdout.flush
-      return "error: file '#{shown}' is not in the allowed file list"
+      result = @file_list.grant_access(path)
+      return "error: access denied for '#{shown}'" unless result == :granted
     end
 
     unless File.file?(path)

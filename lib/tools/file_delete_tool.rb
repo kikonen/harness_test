@@ -3,23 +3,20 @@
 require_relative '../tool'
 require_relative '../file_list'
 
-# Deletes a file from disk and removes it from the allowed file list.
-# The file must be in the allowed file list (added via file.add or the
-# CLI). The user is prompted for confirmation before the file is deleted.
+# Deletes a file from disk. The user is prompted for confirmation.
 class FileDeleteTool < Tool
   def initialize(file_list, options)
     @file_list = file_list
     @options   = options
     super(
       name: 'file.delete',
-      description: 'Deletes a file from disk and removes it from the allowed file list. ' \
-                   'The file must be in the allowed file list — otherwise the deletion is rejected. ' \
+      description: 'Deletes a file from disk. ' \
                    'Paths are relative to the harness working directory. ' \
                    'The user will be prompted for confirmation before the file is deleted.',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Path of the file to delete (relative to the working directory); must be in the allowed file list' }
+          path: { type: 'string', description: 'Path of the file to delete (relative to the working directory)' }
         },
         required: ['path']
       }
@@ -30,18 +27,15 @@ class FileDeleteTool < Tool
     path  = @file_list.resolve(args['path'])
     shown = @file_list.display_path(path)
 
-    # The file must be in the allowed file list.
-    unless @file_list.include?(path)
-      puts "  [file.delete] ✗ #{shown} (not in allowed list)"
-      $stdout.flush
-      return "error: file '#{shown}' is not in the allowed file list"
-    end
-
-    # Security: sensitive files can never be deleted.
     if @file_list.sensitive?(path)
       puts "  [file.delete] ✗ #{shown} (blocked: sensitive file)"
       $stdout.flush
       return "error: file '#{shown}' is blocked and can never be deleted"
+    end
+
+    unless @file_list.include?(path)
+      result = @file_list.grant_access(path)
+      return "error: access denied for '#{shown}'" unless result == :granted
     end
 
     unless File.file?(path)
@@ -56,7 +50,6 @@ class FileDeleteTool < Tool
       return "DRY RUN: would delete #{shown}"
     end
 
-    # Security: prompt the user for confirmation.
     puts
     puts "  [file.delete] ⚠  The model is requesting to DELETE a file:"
     puts "                  #{shown}"
@@ -68,10 +61,9 @@ class FileDeleteTool < Tool
 
     if answer == 'y' || answer == 'yes'
       File.delete(path)
-      @file_list.remove(path)
-      puts "  [file.delete] ✓ #{shown} (deleted, removed from allowed list)"
+      puts "  [file.delete] ✓ #{shown} (deleted)"
       $stdout.flush
-      "ok: file '#{shown}' has been deleted and removed from the allowed file list"
+      "ok: file '#{shown}' has been deleted"
     else
       puts "  [file.delete] ✗ #{shown} (denied by user)"
       $stdout.flush

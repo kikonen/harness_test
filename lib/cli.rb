@@ -268,17 +268,28 @@ class CLI
 
   def show_file_list
     if @file_list.empty?
-      puts "(no files loaded)"
+      puts "(no access granted)"
     else
-      puts "Allowed files (#{@file_list.size}):"
-      @file_list.each_with_index do |f, i|
-        puts "  #{i + 1}. #{@file_list.display_path(f)}"
+      files = @file_list.files
+      dirs  = @file_list.dirs
+      trees = @file_list.trees
+
+      unless files.empty?
+        puts "Allowed files (#{files.size}):"
+        files.each_with_index do |f, i|
+          puts "  #{i + 1}. #{@file_list.display_path(f)}"
+        end
       end
-      dirs = @file_list.dirs
       unless dirs.empty?
         puts "Allowed directories (#{dirs.size}):"
         dirs.each_with_index do |d, i|
           puts "  #{i + 1}. #{@file_list.display_path(d)}/"
+        end
+      end
+      unless trees.empty?
+        puts "Allowed trees (#{trees.size}):"
+        trees.each_with_index do |t, i|
+          puts "  #{i + 1}. #{@file_list.display_path(t)}/ (recursive)"
         end
       end
     end
@@ -430,7 +441,7 @@ class CLI
           added = 0
           matches.each do |path|
             shown = @file_list.display_path(path)
-            case @file_list.add(path)
+            case @file_list.add_file(path)
             when :blocked
               puts "  [security] ✗ #{shown} (blocked: sensitive file)"
             when :duplicate
@@ -444,7 +455,7 @@ class CLI
         end
       else
         shown = @file_list.display_path(pattern)
-        case @file_list.add(pattern)
+        case @file_list.add_file(pattern)
         when :blocked
           puts "  [security] ✗ #{shown} (blocked: sensitive file)"
         when :duplicate
@@ -467,33 +478,33 @@ class CLI
           added = 0
           dirs.each do |path|
             shown = @file_list.display_path(path)
-            case @file_list.add_dir(path)
+            case @file_list.add_tree(path)
             when :blocked
               puts "  [security] ✗ #{shown} (blocked: sensitive directory)"
             when :duplicate
               puts "Already allowed: #{shown}/"
             when :added
               added += 1
-              puts "Allowed: #{shown}/"
+              puts "Allowed: #{shown}/ (recursive)"
             end
           end
           puts "Allowed #{added} director#{added == 1 ? 'y' : 'ies'} matching #{pattern}."
         end
       else
         shown = @file_list.display_path(pattern)
-        case @file_list.add_dir(pattern)
+        case @file_list.add_tree(pattern)
         when :blocked
           puts "  [security] ✗ #{shown} (blocked: sensitive directory)"
         when :duplicate
           puts "Already allowed: #{shown}/"
         when :added
-          puts "Allowed: #{shown}/"
+          puts "Allowed: #{shown}/ (recursive)"
         end
       end
 
     when /\A\/clear\Z/
       @file_list.clear
-      puts "File list cleared."
+      puts "Access list cleared."
 
     when /\A\/retry\Z/
       harness.retry
@@ -585,15 +596,15 @@ class CLI
   def show_help
     puts <<~HELP
       Available commands:
-        /file <path>   Add a file to the allowed file list (globs like src/*.rb work)
+        /file <path>   Add a file to the allowed list (globs like src/*.rb work)
         /dir <path>    Allow a directory tree (all files under it, recursively)
-        /clear         Remove all files and directories from the list
+        /clear         Remove all grants from the list
         /retry         Re-send the session message chain (after a failed request)
         /session       Show a summary of the current session
         /session-clear Reset the session (drop all conversation messages)
         /compact       Compact the session (summarize conversation to free context)
         /reload        Reload harness.md (project rules) into the system prompt
-        /save          Save the session (conversation + file list) to .harness/sessions/
+        /save          Save the session (conversation + access list) to .harness/sessions/
         /resume <id>   Resume a saved session by its id (see /sessions)
         /sessions      List saved sessions
         /tools         List available tools
@@ -602,53 +613,36 @@ class CLI
 
       Direct prompt:
         Type any text (not starting with /) to send it directly to the model.
-        The model will see the list of allowed files and directories and can
-        use the file namespace (file.read / file.write) to access them.
-        Use dir.allow to allow a directory tree (all files under it,
-        recursively) — user confirmation required.
+        The model can use file.read / file.write / file.patch etc. to access
+        files. When it attempts to access a file that is not yet allowed,
+        you will be prompted to grant access (file, directory, or tree).
 
       Session:
         Prompts are accumulated in a session, so the model sees the whole
         conversation. If a request to the LLM fails, the prompt stays in the
         session — use /retry to re-send the chain. /session shows a summary,
         /session-clear starts a fresh conversation. /compact summarizes the
-        conversation to free up context window space (use when the session
-        is getting long and you want to continue with less context). The
-        last few messages are kept verbatim after the summary so the
-        immediate working context is not lost. The number of retained
-        messages is tunable via $HARNESS_COMPACT_RECENT (see _env) or the
-        --compact-recent CLI flag.
+        conversation to free up context window space.
 
       Project rules (harness.md):
         If a harness.md file exists in the working directory, its content
         is appended to the system prompt as "Project-Specific Rules".
         The file is auto-detected when its modification time changes
-        (checked before each prompt). Use /reload to force a re-read
-        (e.g. after editing harness.md with file.write or file.patch).
+        (checked before each prompt). Use /reload to force a re-read.
 
       Saving / resuming sessions:
-        The session (conversation history AND the allowed file list) is
+        The session (conversation history AND the access list) is
         auto-saved to .harness/sessions/ inside the working directory when
-        the harness exits — the resume command is printed on exit. /save
-        stores it manually at any time. Each session has a stable UUID id,
-        so saving again (possibly multiple times) overwrites the same file —
-        a session can be continued and re-saved instead of creating a new
-        one. /sessions lists all saved sessions; /resume <id> restores the
-        conversation and file list (the id may be abbreviated as long as it
-        is unambiguous).
-        From the command line: ruby harness.rb -m <model> --resume <id>
-        To list saved sessions without starting the harness:
-          ruby harness.rb --list-sessions
+        the harness exits. /save stores it manually at any time.
+        /sessions lists all saved sessions; /resume <id> restores the
+        conversation and access list.
 
       Multiline input:
-        * Paste: paste a multiline block directly at the prompt — it is
-          captured as a single prompt (Reline's bracketed paste).
-        * Type: end a line with a trailing backslash (\\) to continue the
-          prompt on the next line (unbalanced quotes also continue).
+        * Paste: paste a multiline block directly at the prompt.
+        * Type: end a line with a trailing backslash (\\) to continue.
 
       Keys:
-        Ctrl+C   Cancel the current input (or interrupt a running request);
-                 at the prompt it exits the harness (session is auto-saved)
+        Ctrl+C   Cancel the current input (or interrupt a running request)
         Ctrl+D   Quit (on an empty prompt)
         Up/Down  Browse command history
     HELP

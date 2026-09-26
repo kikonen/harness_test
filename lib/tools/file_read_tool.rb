@@ -8,7 +8,7 @@ class FileReadTool < Tool
     @file_list = file_list
     super(
       name: 'file.read',
-      description: 'Reads the contents of a file. Only files in the allowed list can be read. ' \
+      description: 'Reads the contents of a file. ' \
                    'Paths are relative to the harness working directory. ' \
                    'Returns the SHA-256 digest of the file along with its full contents. ' \
                    'Pass the returned sha back to file.write to prove the file has not changed since you read it.',
@@ -25,11 +25,12 @@ class FileReadTool < Tool
   def execute(args)
     path = @file_list.resolve(args['path'])
     shown = @file_list.display_path(path)
+
     unless @file_list.include?(path)
-      puts "  [file.read] ✗ #{shown} (not in allowed list)"
-      $stdout.flush
-      return "error: file '#{shown}' is not in the allowed file list"
+      result = @file_list.grant_access(path)
+      return "error: access denied for '#{shown}'" unless result == :granted
     end
+
     unless File.file?(path)
       puts "  [file.read] ✗ #{shown} (not found)"
       $stdout.flush
@@ -40,8 +41,6 @@ class FileReadTool < Tool
     sha     = FileList.sha256(path)
 
     # Normalize CRLF to LF so the LLM always sees clean line endings.
-    # This ensures patches generated from this content will match
-    # the normalized content used by file.patch.
     content = content.gsub("\r\n", "\n")
 
     puts "  [file.read] ✓ #{shown} (sha256: #{sha})"

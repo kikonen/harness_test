@@ -6,8 +6,6 @@ require_relative '../file_list'
 # Lists files matching a glob pattern under the harness working directory.
 # The pattern must reside inside the workdir (no escaping via ".." or
 # absolute paths). Sensitive files are excluded from the results.
-# Matched files are NOT added to the allowed file list — the model must
-# still use dir.allow (with user confirmation) to work with a file.
 class FileListTool < Tool
   # Safety cap so a too-broad pattern cannot flood the context.
   MAX_RESULTS = 500
@@ -18,8 +16,7 @@ class FileListTool < Tool
       name: 'file.list',
       description: 'Lists files matching a glob pattern under the harness working directory. ' \
                    'The pattern must reside inside the working directory (e.g. "lib/**/*.rb"). ' \
-                   'Sensitive files are excluded from the results. ' \
-                   'Matched files are NOT added to the allowed file list — use dir.allow to allow a directory you want to work with.',
+                   'Sensitive files are excluded from the results.',
       parameters: {
         type: 'object',
         properties: {

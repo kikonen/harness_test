@@ -163,7 +163,9 @@ class Session
       last_stats:    @last_stats,
       messages:      @messages,
       workdir:       file_list.workdir,
-      files:         file_list.to_a
+      files:         file_list.files,
+      dirs:          file_list.dirs,
+      trees:         file_list.trees
     }
   end
 
@@ -179,7 +181,9 @@ class Session
     @messages      = data[:messages] || [system_message]
 
     file_list.clear
-    (data[:files] || []).each { |f| file_list.add(f) }
+    (data[:files] || []).each { |f| file_list.add_file(f) }
+    (data[:dirs] || []).each { |d| file_list.add_dir(d) }
+    (data[:trees] || []).each { |t| file_list.add_tree(t) }
     self
   end
 

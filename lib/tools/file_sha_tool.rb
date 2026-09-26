@@ -11,8 +11,7 @@ class FileShaTool < Tool
       description: 'Returns the SHA-256 digest of a file without its contents. ' \
                    'Paths are relative to the harness working directory. ' \
                    'Use this to verify a file is up to date (i.e. unchanged since you last read it) ' \
-                   'before writing, or to obtain the sha required by file.write. ' \
-                   'Only files in the allowed list can be checked.',
+                   'before writing, or to obtain the sha required by file.write.',
       parameters: {
         type: 'object',
         properties: {
@@ -26,11 +25,12 @@ class FileShaTool < Tool
   def execute(args)
     path  = @file_list.resolve(args['path'])
     shown = @file_list.display_path(path)
+
     unless @file_list.include?(path)
-      puts "  [file.sha] ✗ #{shown} (not in allowed list)"
-      $stdout.flush
-      return "error: file '#{shown}' is not in the allowed file list"
+      result = @file_list.grant_access(path)
+      return "error: access denied for '#{shown}'" unless result == :granted
     end
+
     unless File.file?(path)
       puts "  [file.sha] ✗ #{shown} (not found)"
       $stdout.flush

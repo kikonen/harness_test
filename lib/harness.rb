@@ -30,7 +30,6 @@ require_relative 'tools/file_patch_tool'
 require_relative 'tools/file_copy_tool'
 require_relative 'tools/dir_create_tool'
 require_relative 'tools/dir_delete_tool'
-require_relative 'tools/dir_allow_tool'
 require_relative 'tools/tools_list_tool'
 require_relative 'tools/tools_search_tool'
 require_relative 'tool_registry'
@@ -194,7 +193,6 @@ class Harness
     registry.register(FileCopyTool.new(@file_list, @options))
     registry.register(DirCreateTool.new(@file_list))
     registry.register(DirDeleteTool.new(@file_list, @options))
-    registry.register(DirAllowTool.new(@file_list))
     # Meta-tools (discovery): registered last so they appear at the end
     # of the sorted tool list. They take the registry itself as an
     # argument (built before the tools are instantiated).
@@ -204,12 +202,22 @@ class Harness
   end
 
   def build_user_prompt(file_list, instruction)
-    files = file_list.to_a
-    if files.empty?
-      "## Working Directory\n\n#{file_list.workdir}\n\n## Instruction\n\n#{instruction}\n"
-    else
-      "## Working Directory\n\n#{file_list.workdir}\n\n## Available Files\n\n#{files.map { |f| file_list.display_path(f) }.join("\n")}\n\n## Instruction\n\n#{instruction}\n"
+    parts = ["## Working Directory\n\n#{file_list.workdir}"]
+
+    files = file_list.files
+    dirs  = file_list.dirs
+    trees = file_list.trees
+
+    unless files.empty? || dirs.empty? || trees.empty?
+      sections = []
+      sections << files.map { |f| file_list.display_path(f) }.join("\n") unless files.empty?
+      sections << dirs.map { |d| "#{file_list.display_path(d)}/" }.join("\n") unless dirs.empty?
+      sections << trees.map { |t| "#{file_list.display_path(t)}/ (recursive)" }.join("\n") unless trees.empty?
+      parts << "## Accessible Paths\n\n#{sections.join("\n")}"
     end
+
+    parts << "## Instruction\n\n#{instruction}\n"
+    parts.join("\n\n")
   end
 
   # Context window size: prefer the value from options (CLI flag or
@@ -370,7 +378,7 @@ class Harness
         role: 'user',
         content: 'Summarize the entire conversation above in a concise, structured format. ' \
                  'Include: (1) what was being worked on, (2) key decisions made, ' \
-                 '(3) files that were modified or created, (4) any pending tasks or ' \
+                 'files that were modified or created, (4) any pending tasks or ' \
                  'unresolved issues, (5) important context needed to continue. ' \
                  'Keep it under 500 words. Do NOT include the summarization instruction itself.'
       }

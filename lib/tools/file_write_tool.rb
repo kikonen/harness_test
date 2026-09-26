@@ -10,7 +10,7 @@ class FileWriteTool < Tool
     @options   = options
     super(
       name: 'file.write',
-      description: 'Writes content to a file. Only files in the allowed list can be written. ' \
+      description: 'Writes content to a file. ' \
                    'Paths are relative to the harness working directory. ' \
                    'The content must be the COMPLETE file content. ' \
                    'If the file already exists you must also provide the sha256 digest of the file ' \
@@ -36,15 +36,13 @@ class FileWriteTool < Tool
     sha     = args['sha']
 
     unless @file_list.include?(path)
-      puts "  [file.write] ✗ #{shown} (not in allowed list)"
-      $stdout.flush
-      return "error: file '#{shown}' is not in the allowed file list"
+      result = @file_list.grant_access(path)
+      return "error: access denied for '#{shown}'" unless result == :granted
     end
 
     current_sha = FileList.sha256(path)
 
     if current_sha
-      # File exists: the provided sha must match the file on disk.
       if sha.nil? || sha.empty?
         puts "  [file.write] ✗ #{shown} (missing sha)"
         $stdout.flush
@@ -58,7 +56,6 @@ class FileWriteTool < Tool
                "Current sha256: #{current_sha}. Re-read the file with file.read and retry."
       end
     end
-    # If current_sha is nil the file does not exist yet (new file) — allow the write.
 
     if @options[:dry_run]
       puts "  [file.write] ~ #{shown} (dry run, #{content.length} chars)"

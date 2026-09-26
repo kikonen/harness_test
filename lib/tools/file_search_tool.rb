@@ -6,7 +6,7 @@ require_relative '../file_list'
 # Searches for a regex pattern in files under the harness working directory.
 # Returns matching lines with file path and line number (grep-like output).
 # Sensitive files are excluded. The optional glob limits which files are
-# searched. Matched files are NOT added to the allowed file list.
+# searched.
 class FileSearchTool < Tool
   MAX_RESULTS = 200
   MAX_FILES   = 5000
@@ -18,8 +18,7 @@ class FileSearchTool < Tool
       description: 'Searches for a regex pattern in files under the working directory (like grep). ' \
                    'Returns matching lines as "file:line: text". ' \
                    'Sensitive files are excluded. ' \
-                   'Use the optional glob to limit which files are searched (e.g. "lib/**/*.rb"). ' \
-                   'Matched files are NOT added to the allowed list — use dir.allow to work with them.',
+                   'Use the optional glob to limit which files are searched (e.g. "lib/**/*.rb").',
       parameters: {
         type: 'object',
         properties: {
