@@ -8,28 +8,23 @@ require_relative 'harness_error'
 require_relative 'harness_config'
 require_relative 'harness'
 require_relative 'file_list'
+require_relative 'history_manager'
 require_relative 'command_handler'
 
 # -- CLI ------------------------------------------------------------------
 
 class CLI
-  attr_reader :options, :harness, :file_list, :commands
+  attr_reader :options, :harness, :file_list, :commands, :history
 
   # Default API base URL (used when neither the CLI nor the config provides one).
   DEFAULT_BASE_URL = 'http://localhost:11434/v1'
-
-  # Where command history is persisted (best-effort).
-  # Kept in the .harness directory inside the harness working directory so
-  # that different harness instances (i.e. different working directories) do
-  # not mix their history, and all harness state can be ignored from git
-  # with a single entry (.harness/).
-  HISTORY_FILE = File.join(Harness::HARNESS_DIR, 'harness_history')
 
   def initialize
     @options   = parse_options
     @file_list = FileList.new(@options[:files] || [], workdir: @options[:workdir])
     @harness   = Harness.new(@options, @file_list)
     @commands  = CommandHandler.new(@harness, @file_list, @options)
+    @history   = HistoryManager.new(@file_list.workdir)
     migrate_legacy_state
     list_sessions_and_exit if @options[:list_sessions]
     resume_from_cli if @options[:resume]
@@ -189,7 +184,7 @@ class CLI
   end
 
   def run
-    setup_history
+    @history.load
 
     puts "Harness ready. Type /help for commands, /exit to quit."
     puts "Model: #{harness.active_model_name} (@ #{@options[:base_url]})"
@@ -235,7 +230,7 @@ class CLI
       puts "\n  [interrupted]"
     end
 
-    save_history
+    @history.save
     id = auto_save_session
     puts "Goodbye."
     if id
@@ -304,13 +299,6 @@ class CLI
     nil
   end
 
-  # History file lives in the .harness directory inside the working
-  # directory so different harness instances (different working directories)
-  # do not mix their history.
-  def history_file
-    File.join(@file_list.workdir, HISTORY_FILE)
-  end
-
   def show_file_list
     if @file_list.empty?
       puts "(no access granted)"
@@ -355,7 +343,7 @@ class CLI
   #   * pasted multiline text (bracketed paste - newlines inside a paste are
   #     inserted into the buffer instead of sending the input),
   #   * line editing (arrows, kill, word movement),
-  #   * history (up/down arrows), persisted to HISTORY_FILE.
+  #   * history (up/down arrows), persisted via HistoryManager.
   #
   # The block below is Reline's "keep reading" predicate. Two independent
   # termination logics coexist:
@@ -409,65 +397,5 @@ class CLI
 
     @last_lines = text.split("\n", -1)
     text
-  end
-
-  # Load persisted history into Reline (best-effort).
-  #
-  # Reline has no built-in history persistence, so we implement it ourselves.
-  # The history file is line-based: one entry per line, with backslashes and
-  # newlines escaped (see escape_history_entry / unescape_history_entry), so
-  # multiline entries survive the round trip.
-  def setup_history
-    return unless File.exist?(history_file)
-
-    Reline::HISTORY.clear
-    File.foreach(history_file) do |line|
-      entry = line.chomp
-      next if entry.empty?
-
-      Reline::HISTORY << unescape_history_entry(entry)
-    end
-  rescue StandardError => e
-    puts e.message
-    puts e.backtrace.join("\n")
-    # Corrupt or unreadable history - start fresh.
-  end
-
-  # Persist history on exit (best-effort).
-  def save_history
-    FileUtils.mkdir_p(File.dirname(history_file))
-    File.open(history_file, 'w') do |f|
-      Reline::HISTORY.each do |entry|
-        f.puts escape_history_entry(entry)
-      end
-    end
-  rescue StandardError => e
-    puts e.message
-    puts e.backtrace.join("\n")
-    # Ignore - history persistence is best-effort.
-  end
-
-  # Encode a (possibly multiline) history entry as a single line.
-  # Backslashes are escaped first, then newlines and carriage returns are
-  # replaced by their two-character escape sequences, so the entry fits on
-  # one line of the history file.
-  def escape_history_entry(text)
-    text.gsub('\\', '\\\\').gsub("\n", '\\n').gsub("\r", '\\r')
-  end
-
-  # Decode a single history line back into the original entry.
-  # Single-pass scan so that e.g. a literal `\n` in the original entry
-  # (escaped as `\\n`) is not mistaken for a newline. Only the escape
-  # sequences produced by escape_history_entry are interpreted; any other
-  # `\X` sequence is kept as-is (backslash preserved).
-  def unescape_history_entry(line)
-    line.gsub(/\\(.)/) do |m|
-      case m[1]
-      when 'n' then "\n"
-      when 'r' then "\r"
-      when '\\' then '\\'
-      else m # unknown escape - keep the backslash and the character
-      end
-    end
   end
 end
