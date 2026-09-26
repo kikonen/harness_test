@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'yaml'
+require 'fileutils'
 
 require_relative 'harness_error'
 
@@ -35,6 +36,41 @@ require_relative 'harness_error'
 class HarnessConfig
   HARNESS_DIR = '.harness'
 
+  # Template written to the default config location on first run (when no
+  # config file is found anywhere), so the user has something concrete to
+  # edit instead of discovering the schema from the docs. Values mirror the
+  # built-in defaults in harness.rb, so auto-creation changes nothing.
+  DEFAULT_TEMPLATE = <<~YAML
+    # Harness configuration (YAML).
+    #
+    # Precedence for every setting: CLI flag > this file > built-in default.
+    # Every key is optional - missing keys fall back to built-in defaults.
+
+    # One or more named model profiles.
+    models:
+      - name: local            # selection key (used by -m / default_model)
+        url: http://localhost:11434/v1
+        model: qwen2.5-coder:32b
+        # token: sk-...        # optional bearer token
+        num_ctx: 65536         # context window size (tokens)
+        reasoning_effort: medium
+        temperature: 0.2
+        top_p: 0.9
+
+    # Model used when -m is not given on the command line.
+    default_model: local
+
+    # Session compaction (/compact).
+    compact:
+      recent_messages: 6       # messages retained verbatim after /compact
+      max_size: 500            # max length (words) of the compaction summary
+
+    # Full system prompt override (uncomment to use).
+    # --system-file still takes precedence.
+    # system: |
+    #   You are a precise code editor...
+  YAML
+
   attr_reader :models, :default_model, :system
 
   def initialize(data = {})
@@ -50,12 +86,33 @@ class HarnessConfig
   end
 
   # Load the config from the first existing file among the candidates.
-  # Returns an empty config (built-in defaults only) when no file is found.
+  # When no config file exists anywhere, a default template is written to
+  # .harness/config.yml (inside the working directory) so the user has a
+  # concrete starting point to edit. Best-effort: if that location cannot
+  # be written (read-only workdir, ...), loading simply continues with
+  # built-in defaults. An explicitly given config path (-c) that does not
+  # exist is NOT auto-created - that is a user error, not a first run.
   def self.load(cli_path, workdir)
     path = find_file(cli_path, workdir)
-    return new({}) if path.nil?
+    if path.nil?
+      target = File.join(workdir, HARNESS_DIR, 'config.yml') if workdir
+      # Only auto-create when the user did not explicitly point at a file.
+      write_default_template(target) if target && cli_path.nil?
+      return new({})
+    end
 
     new(parse(path))
+  end
+
+  # Write the default template to path (creating parent directories).
+  # Never overwrites an existing file. Returns true when written.
+  def self.write_default_template(path)
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, DEFAULT_TEMPLATE)
+    true
+  rescue SystemCallError => e
+    warn "  [config] could not write default config to #{path}: #{e.message}"
+    false
   end
 
   # Candidate config file paths, in priority order. The first existing one wins.
