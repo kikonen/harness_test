@@ -42,16 +42,23 @@ class GitApplyTool < GitRunner
     dry_run   = args['dry_run'] == true
     three_way = args['three_way'] == true
 
+    files = touched_files(diff)
+
     # Applying a patch modifies files: every file the diff touches must be
     # writable. Missing grants are requested one by one (the user can grant
     # a parent directory recursively, which may cover several targets at once).
-    targets = touched_files(diff).map { |rel| resolve_path(rel) }
+    targets = files.map { |rel| resolve_path(rel) }
     targets.each do |target|
       next if @file_list.writable?(target)
 
       result = @file_list.grant_access(target, :w)
       return "error: write access denied for '#{@file_list.display_path(target)}'" \
              unless result == :granted
+    end
+
+    if files.any?
+      puts "  [git.apply] #{dry_run ? 'would patch' : 'patching'}: #{files.join(', ')}"
+      $stdout.flush
     end
 
     Tempfile.create(['harness_git_apply', '.diff']) do |tmp|
@@ -73,16 +80,19 @@ class GitApplyTool < GitRunner
         msg += '. The patch does not match the working tree - check the context lines and retry, or use file.patch per file.'
         puts "  [git.apply] ✗ #{msg}"
         $stdout.flush
-        return msg
+        return "#{msg}\nfiles: #{files.join(', ')}" if files.any?
+        msg
       end
 
       applied = result[:stdout].strip
       label   = dry_run ? 'validated (dry run)' : 'applied'
-      puts "  [git.apply] ✓ #{label}"
+      puts "  [git.apply] ✓ #{label} (#{files.join(', ')})" if files.any?
+      puts "  [git.apply] ✓ #{label}" unless files.any?
       $stdout.flush
       note = applied.empty? ? '' : "\n#{applied}"
-      dry_run ? "ok: patch is valid (dry run, nothing changed)#{note}" \
-              : "ok: patch applied to the working tree#{note}"
+      files_note = files.any? ? " [#{files.join(', ')}]" : ''
+      dry_run ? "ok: patch is valid (dry run, nothing changed)#{files_note}#{note}" \
+              : "ok: patch applied to the working tree#{files_note}#{note}"
     end
   end
 
