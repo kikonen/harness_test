@@ -60,8 +60,9 @@ class DirDeleteTool < Tool
     unless @file_list.writable?(parent)
       purpose = "to delete directory '#{shown}'"
       result = @file_list.grant_access(parent, :w, purpose: purpose)
-      return "error: write access denied for '#{@file_list.display_path(parent)}'" \
-             unless result == :granted
+      return Tool.denial_error(
+        "error: write access denied for '#{@file_list.display_path(parent)}'", result
+      ) unless Tool.granted?(result)
     end
 
     if @options[:dry_run]

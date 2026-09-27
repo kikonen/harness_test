@@ -9,8 +9,9 @@ require 'fileutils'
 # must not be sensitive. If the directory already exists, the call is a
 # no-op (success).
 class DirCreateTool < Tool
-  def initialize(file_list)
+  def initialize(file_list, options = {})
     @file_list = file_list
+    @options   = options
     super(
       name: 'dir.create',
       description: 'Creates a directory (mkdir -p semantics: parent directories are created as needed). ' \
@@ -55,8 +56,9 @@ class DirCreateTool < Tool
     unless @file_list.writable?(parent)
       purpose = "to create directory '#{shown}'"
       result = @file_list.grant_access(parent, :w, purpose: purpose)
-      return "error: write access denied for '#{@file_list.display_path(parent)}'" \
-             unless result == :granted
+      return Tool.denial_error(
+        "error: write access denied for '#{@file_list.display_path(parent)}'", result
+      ) unless Tool.granted?(result)
     end
 
     FileUtils.mkdir_p(path)

@@ -37,7 +37,7 @@ class FileDeleteTool < Tool
     # Deleting a file requires WRITE access (read alone is not enough).
     unless @file_list.writable?(path)
       result = @file_list.grant_access(path, :w)
-      return "error: access denied for '#{shown}'" unless result == :granted
+      return Tool.denial_error("error: access denied for '#{shown}'", result) unless Tool.granted?(result)
     end
 
     unless File.file?(path)

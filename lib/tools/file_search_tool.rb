@@ -49,8 +49,9 @@ class FileSearchTool < Tool
     unless @file_list.can_list_dir?(base_dir)
       purpose = "to search files matching glob '#{glob}'"
       result  = @file_list.grant_access(base_dir, :r, purpose: purpose)
-      return "error: read access denied for directory '#{@file_list.display_path(base_dir)}'" \
-             unless result == :granted
+      return Tool.denial_error(
+        "error: read access denied for directory '#{@file_list.display_path(base_dir)}'", result
+      ) unless Tool.granted?(result)
     end
 
     files = Dir.glob(expanded, File::FNM_DOTMATCH).select do |path|
