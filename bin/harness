@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Launcher: runs the harness from the caller's current directory (the
+# working directory), regardless of where this script is invoked from.
+set -euo pipefail
+
+# This script lives in bin/; the project root (Gemfile, .env, harness.rb)
+# is its parent directory.
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# .env lives in the project root (it holds HARNESS_MODEL etc.); fall back
+# to the caller's CWD if there is no .env in the project root.
+if [ -f "$ROOT_DIR/.env" ]; then
+  set -a
+  . "$ROOT_DIR/.env"
+  set +a
+elif [ -f .env ]; then
+  set -a
+  . .env
+  set +a
+fi
+
+# Non-interactive shells may not have rbenv set up (no shims on PATH).
+export RBENV_DIR="$ROOT_DIR"
+if [ -d "$HOME/.rbenv/bin" ]; then
+  export PATH="$HOME/.rbenv/bin:$PATH"
+fi
+if command -v rbenv >/dev/null 2>&1; then
+  eval "$(rbenv init - bash)"
+fi
+
+# bundle exec looks for the Gemfile in the CWD; point it at the one
+# that lives in the project root so it works from any directory.
+if [ -f "$ROOT_DIR/Gemfile" ]; then
+  export BUNDLE_GEMFILE="$ROOT_DIR/Gemfile"
+fi
+
+exec bundle exec ruby "$ROOT_DIR/harness.rb" \
+     --verbose \
+     "$@"
