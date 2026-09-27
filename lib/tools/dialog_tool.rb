@@ -14,6 +14,9 @@ require_relative '../dialog'
 # short answer instead of picking an option. The typed text is returned
 # to the model as the response - good for questions that are not black/white.
 #
+# The user may also attach a short NOTE to any choice (e.g. "1 seems fine"):
+# the chosen option's value is still returned, with the note as extra context.
+#
 # The VALUE of the selected option (or the typed free-text answer) is
 # returned to the model as the tool result; a cancelled dialog returns
 # the standard value ":cancelled".
@@ -121,10 +124,14 @@ class DialogTool < Tool
       free_text_prompt: args['free_text_prompt']
     ).show
 
-    if choice == Dialog::CANCEL_VALUE
-      'cancelled (the user dismissed the dialog without choosing an option)'
-    elsif choice.is_a?(Array) && choice.first == Dialog::FREE_TEXT
+    if choice.is_a?(Array) && choice.first == Dialog::FREE_TEXT
+      # [FREE_TEXT, text]: the user typed their own answer.
       "free text response from the user: \"#{choice[1]}\""
+    elsif choice.is_a?(Array)
+      # [option value, note]: an option was picked with a short note on top.
+      "selected: #{choice[0].inspect} (user's note: \"#{choice[1]}\")"
+    elsif choice == Dialog::CANCEL_VALUE
+      'cancelled (the user dismissed the dialog without choosing an option)'
     else
       "selected: #{choice.inspect}"
     end

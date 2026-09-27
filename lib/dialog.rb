@@ -12,6 +12,12 @@
 # may type their own short answer instead of picking a number, and that
 # text is returned to the caller verbatim.
 #
+# The user may always attach a short NOTE to any choice: they type the
+# option number, whitespace, then the note (e.g. "1 seems fine"). The
+# dialog returns [value, 'seems fine'] so the selection is not lost.
+# A plain number (no note) still returns the bare value, so existing
+# callers keep working unchanged.
+#
 #   dialog = Dialog.new(
 #     title: 'Access requested (write access): lib/foo.rb',
 #     options: [
@@ -21,7 +27,7 @@
 #                          description: 'covers every file under lib/')
 #     ]
 #   )
-#   choice = dialog.show  # => :file_only, :dir_recursive, or :cancelled
+#   choice = dialog.show  # => :file_only, [:file_only, 'note'], or :cancelled
 class Dialog
   # Standard value returned when the user picks the cancel option (or
   # dismisses the dialog with EOF).
@@ -37,7 +43,8 @@ class Dialog
     attr_reader :title, :description, :value
 
     def initialize(title:, value:, description: nil)
-      raise ArgumentError, 'option title must be a non-empty string' if title.to_s.strip.empty?
+      raise ArgumentError, 'option title must be a non-empty string' \
+                          if title.to_s.strip.empty?
       raise ArgumentError, 'option value must not be nil' if value.nil?
 
       @title       = title.to_s.strip
@@ -77,6 +84,11 @@ class Dialog
   # Returns the VALUE of the selected option, [FREE_TEXT, text] when the
   # user types their own answer (free_text dialogs only), or CANCEL_VALUE
   # when the user cancels (or stdin is closed).
+  #
+  # The user may attach a short note to ANY choice by typing
+  # "<number> <note>" (e.g. "1 seems fine"): the dialog then returns
+  # [option value, 'seems fine'] instead of the bare value - the note is
+  # extra context on top of the selection, never a replacement for it.
   def show
     title_lines = @title.split("\n")
     puts
@@ -97,9 +109,9 @@ class Dialog
     if @free_text
       hint = @free_text_prompt.to_s.strip
       hint = 'or type a short free-text answer' if hint.empty?
-      print "             Choice (1..#{@options.size}, #{hint}): "
+      print "             Choice (1..#{@options.size}, <number> + note, or #{hint}): "
     else
-      print "             Choice (1..#{@options.size}): "
+      print "             Choice (1..#{@options.size}, or <number> + short note): "
     end
     $stdout.flush
 
@@ -114,8 +126,23 @@ class Dialog
       answer = line.chomp.strip
       next if answer.empty?
 
-      idx = answer.to_i - 1
-      return @options[idx].value if answer.match?(/\A\d+\z/) && idx >= 0 && idx < @options.size
+      # "<number> <note>": option selected PLUS a free note on top.
+      m = answer.match(/\A(\d+)\s+(.*)\z/m)
+      if m
+        idx = m[1].to_i - 1
+        if idx >= 0 && idx < @options.size
+          return [@options[idx].value, m[2].strip]
+        end
+
+        # Out-of-range number: not a valid choice. Fall through - free text
+        # when allowed (the whole line is the answer), cancel otherwise.
+      end
+
+      # Plain number: the option's value, unchanged.
+      if answer.match?(/\A\d+\z/)
+        idx = answer.to_i - 1
+        return @options[idx].value if idx >= 0 && idx < @options.size
+      end
 
       # Not a valid option number: free text when allowed, cancel otherwise.
       return @free_text ? [FREE_TEXT, answer] : CANCEL_VALUE

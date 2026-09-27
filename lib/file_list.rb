@@ -286,6 +286,11 @@ class FileList
       note: note
     ).show
 
+    # The user may attach a short note to any choice ("<number> <note>");
+    # the dialog then returns [value, note]. Unwrap it - the note is just
+    # extra context, the selection itself drives the grant.
+    note_text = choice.is_a?(Array) ? choice[1] : nil
+    choice    = choice[0] if choice.is_a?(Array)
     case choice
     when :file
       add_file(path, mode)
@@ -313,7 +318,11 @@ class FileList
       puts "  [access] ✓ #{parent_shown}/ (recursive, #{mode_label(mode)})"
       :granted
     else
-      puts "  [access] ✗ denied"
+      if note_text
+        puts "  [access] ✗ denied (user's note: \"#{note_text}\")"
+      else
+        puts "  [access] ✗ denied"
+      end
       :denied
     end
   end
