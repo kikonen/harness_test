@@ -41,11 +41,25 @@ class SessionManager
     send_session
   end
 
+  # True when an error message looks like the model rejected the request
+  # because the context window was exceeded (wording varies by server).
+  def context_exceeded_error?(msg)
+    msg =~ /context|num_ctx|max.*token|too many tokens|exceeds/i
+  end
+
   # Re-sends the current session chain (e.g. after a failed request).
   # Requires a pending user prompt at the end of the chain.
   def retry
     unless @harness.session.pending?
       raise HarnessError, 'nothing to retry - no pending prompt in the session (send a prompt first)'
+    end
+
+    # The previous attempt may have failed because the context was full:
+    # compact first, then re-send.
+    if @harness.session.auto_compact_due?(@harness.options[:num_ctx] || LLMClient::NUM_CTX, @harness.compact_auto_threshold)
+      puts "  [context over threshold - compacting before retry...]"
+      result = compact_session
+      puts "  [compact done: #{result[:before]} -> #{result[:after]} messages]"
     end
 
     @harness.logger.info("--- retry: re-sending session chain (#{@harness.session.messages.size} messages) ---")
@@ -112,10 +126,23 @@ class SessionManager
     response = nil
     begin
       response = @harness.call_llm
+    rescue LLMError => e
+      # The request may have been rejected because the context window was
+      # exceeded: compact and re-send once (the pending prompt is still in
+      # the session). Anything else is re-raised for the caller to handle.
+      raise unless context_exceeded_error?(e.message) && @harness.session.conversation_size >= 4
+
+      puts "  [context window exceeded - compacting and re-sending...]"
+      result = compact_session
+      puts "  [compact done: #{result[:before]} -> #{result[:after]} messages, retrying...]"
+      response = @harness.call_llm
     ensure
       spinner.stop
       @harness.spinner = nil
     end
+
+    # Silent auto-compaction once the context usage reaches the threshold.
+    maybe_auto_compact
 
     if @harness.options[:verbose]
       @harness.logger.info("--- reasoning ---\n#{response[:reasoning]}")
@@ -124,6 +151,26 @@ class SessionManager
 
     puts response[:content]
     @harness.print_stats(response[:stats])
+  end
+
+  # Silent auto-compaction: when the context window is at/over the configured
+  # threshold, compact the session immediately (mandatory bookkeeping - no
+  # confirmation dialog). Runs best-effort: a failure here must never break
+  # the prompt flow, the next request will simply fail on the server side
+  # and the user can /compact manually.
+  def maybe_auto_compact
+    return unless @harness.session.auto_compact_due?(@harness.options[:num_ctx] || LLMClient::NUM_CTX, @harness.compact_auto_threshold)
+
+    puts "  [context at #{threshold_pct}% of the window - auto-compacting session...]"
+    result = compact_session
+    puts "  [auto-compact done: #{result[:before]} -> #{result[:after]} messages]"
+  rescue => e
+    puts "  [auto-compact failed: #{e.message} - try /compact manually]"
+  end
+
+  # The configured auto-compact threshold as a percentage.
+  def threshold_pct
+    @harness.compact_auto_threshold
   end
 
   # -- Rules file (harness.md) ---------------------------------------------

@@ -113,6 +113,7 @@ class CLI
     end
 
     opts[:compact_recent]   ||= config.compact_recent_messages
+    opts[:compact_auto_threshold] = config.compact_auto_threshold
     opts[:compact_max_size] = config.compact_max_size
 
     # Retry settings come from the config file (retry: count/delay).

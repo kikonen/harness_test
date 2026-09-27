@@ -33,6 +33,7 @@ require_relative 'harness_error'
 #   default_model: local        # model used when -m is not given
 #   compact:
 #     recent_messages: 3        # messages retained verbatim after /compact
+#     auto_threshold: 88        # auto-compact when context usage reaches this % of the window
 #     max_size: 500             # max length (words) of the compaction summary
 #   retry:
 #     count: 3                  # total attempts for transient network errors
@@ -74,6 +75,7 @@ class HarnessConfig
     # Session compaction (/compact).
     compact:
       recent_messages: 6       # messages retained verbatim after /compact
+      auto_threshold: 88       # auto-compact when context usage reaches this % of the window
       max_size: 500            # max length (words) of the compaction summary
 
     # Automatic retries for transient network errors.
@@ -97,6 +99,7 @@ class HarnessConfig
     @system       = nonblank(data['system'])
     @compact      = {
       recent_messages: int_or_nil(data.dig('compact', 'recent_messages')),
+      auto_threshold:  float_or_nil(data.dig('compact', 'auto_threshold')),
       max_size:        int_or_nil(data.dig('compact', 'max_size'))
     }
     @retry        = {
@@ -170,6 +173,11 @@ class HarnessConfig
   # Number of recent messages retained verbatim after compaction (or nil).
   def compact_recent_messages
     @compact[:recent_messages]
+  end
+
+  # Auto-compact threshold as a percentage of the context window (or nil).
+  def compact_auto_threshold
+    @compact[:auto_threshold]
   end
 
   # Max length (words) of the compaction summary (or nil).

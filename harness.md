@@ -70,6 +70,9 @@ Keep this in mind:
 
 - `Session::COMPACT_RECENT_MESSAGES` - how many recent messages survive
   `/compact` verbatim (default 6).
+- `Session::AUTO_COMPACT_THRESHOLD` - auto-compact when context usage
+  reaches this % of the window (default 88); config key
+  `compact.auto_threshold`; set to 100+ to disable.
 - `Harness::MAX_TOOL_ITERATIONS`, `TOOL_LOOP_WARN_THRESHOLD`,
   `TOOL_LOOP_HARD_LIMIT` - tool-loop safety limits.
 - `LLMClient::NUM_CTX` - context window size (default 65536); sampling
