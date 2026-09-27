@@ -4,6 +4,7 @@ GEM
     debug (1.11.1)
       irb (~> 1.10)
       reline (>= 0.3.8)
+    diff-lcs (1.6.2)
     erb (6.0.7)
     fiddle (1.1.8)
     io-console (0.9.4)
@@ -28,6 +29,19 @@ GEM
       tsort
     reline (0.7.0)
       io-console (~> 0.5)
+    rspec (3.13.2)
+      rspec-core (~> 3.13.0)
+      rspec-expectations (~> 3.13.0)
+      rspec-mocks (~> 3.13.0)
+    rspec-core (3.13.6)
+      rspec-support (~> 3.13.0)
+    rspec-expectations (3.13.5)
+      diff-lcs (>= 1.2.0, < 2.0)
+      rspec-support (~> 3.13.0)
+    rspec-mocks (3.13.8)
+      diff-lcs (>= 1.2.0, < 2.0)
+      rspec-support (~> 3.13.0)
+    rspec-support (3.13.7)
     tsort (0.2.0)
 
 PLATFORMS
@@ -38,6 +52,7 @@ DEPENDENCIES
   debug
   fiddle
   logger
+  rspec
 
 BUNDLED WITH
   4.0.20

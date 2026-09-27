@@ -9,3 +9,7 @@ gem 'logger'
 gem 'fiddle'
 
 gem 'debug'
+
+group :development do
+  gem 'rspec'
+end
