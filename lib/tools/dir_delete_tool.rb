@@ -2,6 +2,7 @@
 
 require_relative '../tool'
 require_relative '../file_list'
+require_relative '../dialog'
 
 # Deletes an EMPTY directory from disk. Non-empty directories are rejected
 # (use file.delete to remove their contents first) - there is deliberately
@@ -70,18 +71,12 @@ class DirDeleteTool < Tool
     end
 
     # Security: prompt the user for confirmation.
-    puts
-    puts "  [dir.delete] ⚠  The model is requesting to DELETE an empty directory:"
-    puts "                  #{shown}"
-    puts "                  1) Allow delete"
-    puts "                  2) Deny"
-    print  "                  Choice (1/2): "
-    $stdout.flush
+    choice = Dialog.new(
+      title: "The model is requesting to DELETE an empty directory:\n#{shown}",
+      options: [Dialog::Option.new(title: 'Allow delete', value: :allow)]
+    ).show
 
-    answer = $stdin.gets
-    answer = answer&.chomp&.strip
-
-    if answer == '1'
+    if choice == :allow
       Dir.rmdir(path)
       puts "  [dir.delete] ✓ #{shown} (deleted)"
       $stdout.flush

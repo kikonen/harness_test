@@ -3,6 +3,7 @@
 require 'digest'
 
 require_relative 'sensitive_files'
+require_relative 'dialog'
 
 # Single source of truth for file access permissions.
 #
@@ -211,8 +212,9 @@ class FileList
   # purpose: optional string explaining WHY access is needed (e.g. "to create directory 'somedir'").
   # Returns :granted, :denied, or :blocked.
   #
-  # The prompt ALWAYS uses numbered choices so the user has a consistent
-  # interaction pattern regardless of path location.
+  # The prompt is rendered through the generic Dialog (numbered options +
+  # standard cancel), so the user has a consistent interaction pattern
+  # regardless of path location.
   def grant_access(path, mode = :rw, purpose: nil)
     path  = resolve(path)
     shown = display_path(path)
@@ -220,14 +222,7 @@ class FileList
     return :granted if readable?(path) && (mode == :r || writable?(path))
     return :blocked if sensitive?(path)
 
-    puts
     verb = mode == :r ? 'read access' : 'write access'
-    if purpose
-      puts "  [access] ⚠  Access requested (#{verb}): #{shown}"
-      puts "                     #{purpose}"
-    else
-      puts "  [access] ⚠  Access requested (#{verb}): #{shown}"
-    end
 
     # Decide the branch on PATH LOCATION, not existence: a new file that does
     # not exist yet must still be treated as inside-workdir. Existence is only
@@ -239,97 +234,96 @@ class FileList
     dir_prompt  = inside && is_dir
     file_prompt = inside && !is_dir
 
-    if dir_prompt
-      # Directory within workdir: offer flat or recursive.
-      puts "             1) Allow this directory only"
-      puts "             2) Allow this directory and subdirs (recursive)"
-      puts "             3) Deny"
-      print  "             Choice (1/2/3): "
+    parent       = File.dirname(path)
+    parent_shown = display_path(parent)
+
+    options = if dir_prompt || is_dir
+      # Directory: offer flat or recursive.
+      [
+        Dialog::Option.new(title: 'Allow this directory only', value: :flat),
+        Dialog::Option.new(
+          title: 'Allow this directory and subdirs (recursive)',
+          value: :recursive,
+          description: 'covers every file under the directory'
+        )
+      ]
     elsif file_prompt
       # File within workdir: offer file-only or parent-dir (flat/recursive).
-      parent       = File.dirname(path)
-      parent_shown = display_path(parent)
-      puts "             1) Allow this file only"
-      puts "             2) Allow directory: #{parent_shown}/ (dir only)"
-      puts "             3) Allow directory: #{parent_shown}/ (recursive)"
-      puts "             4) Deny"
-      print  "             Choice (1/2/3/4): "
+      [
+        Dialog::Option.new(title: 'Allow this file only', value: :file),
+        Dialog::Option.new(
+          title: "Allow directory: #{parent_shown}/ (dir only)",
+          value: :parent_flat,
+          description: 'the directory itself + direct children only'
+        ),
+        Dialog::Option.new(
+          title: "Allow directory: #{parent_shown}/ (recursive)",
+          value: :parent_recursive,
+          description: 'every file under the directory'
+        )
+      ]
     else
       # Outside workdir or special path.
-      puts "             ⚠  WARNING: this path is OUTSIDE the working directory."
-      puts "               Granting access may be a sandbox escape."
-      if is_dir
-        puts "             1) Allow this directory only"
-        puts "             2) Allow this directory and subdirs (recursive)"
-        puts "             3) Deny"
-        print  "             Choice (1/2/3): "
-      else
-        puts "             1) Allow"
-        puts "             2) Deny"
-        print  "             Choice (1/2): "
-      end
+      [
+        Dialog::Option.new(
+          title: 'Allow',
+          value: :flat,
+          description: is_dir ? 'this directory only (not subdirs)' : nil
+        )
+      ]
     end
-    $stdout.flush
 
-    answer = $stdin.gets&.chomp&.strip
+    note = purpose
+    unless inside
+      warn_line = 'WARNING: this path is OUTSIDE the working directory - ' \
+                  'granting access may be a sandbox escape.'
+      note  = [note, warn_line].compact.join("\n")
+    end
 
-    if dir_prompt
-      case answer
-      when '1'
+    choice = Dialog.new(
+      title: "Access requested (#{verb}): #{shown}",
+      options: options,
+      note: note
+    ).show
+
+    # The user may attach a short note to any choice ("<number> <note>");
+    # the dialog then returns [value, note]. Unwrap it - the note is just
+    # extra context, the selection itself drives the grant.
+    note_text = choice.is_a?(Array) ? choice[1] : nil
+    choice    = choice[0] if choice.is_a?(Array)
+    case choice
+    when :file
+      add_file(path, mode)
+      puts "  [access] ✓ #{shown} (#{mode_label(mode)})"
+      :granted
+    when :flat
+      if is_dir
         add_flat_dir(path, mode)
         puts "  [access] ✓ #{shown}/ (dir only, #{mode_label(mode)})"
-        :granted
-      when '2'
-        add_dir(path, mode)
-        puts "  [access] ✓ #{shown}/ (recursive, #{mode_label(mode)})"
-        :granted
       else
-        puts "  [access] ✗ denied"
-        :denied
-      end
-    elsif file_prompt
-      parent = File.dirname(path)
-      case answer
-      when '1'
         add_file(path, mode)
         puts "  [access] ✓ #{shown} (#{mode_label(mode)})"
-        :granted
-      when '2'
-        add_flat_dir(parent, mode)
-        puts "  [access] ✓ #{display_path(parent)}/ (dir only, #{mode_label(mode)})"
-        :granted
-      when '3'
-        add_dir(parent, mode)
-        puts "  [access] ✓ #{display_path(parent)}/ (recursive, #{mode_label(mode)})"
-        :granted
-      else
-        puts "  [access] ✗ denied"
-        :denied
       end
-    elsif is_dir
-      case answer
-      when '1'
-        add_flat_dir(path, mode)
-        puts "  [access] ✓ #{shown}/ (dir only, #{mode_label(mode)})"
-        :granted
-      when '2'
-        add_dir(path, mode)
-        puts "  [access] ✓ #{shown}/ (recursive, #{mode_label(mode)})"
-        :granted
-      else
-        puts "  [access] ✗ denied"
-        :denied
-      end
+      :granted
+    when :recursive
+      add_dir(path, mode)
+      puts "  [access] ✓ #{shown}/ (recursive, #{mode_label(mode)})"
+      :granted
+    when :parent_flat
+      add_flat_dir(parent, mode)
+      puts "  [access] ✓ #{parent_shown}/ (dir only, #{mode_label(mode)})"
+      :granted
+    when :parent_recursive
+      add_dir(parent, mode)
+      puts "  [access] ✓ #{parent_shown}/ (recursive, #{mode_label(mode)})"
+      :granted
     else
-      case answer
-      when '1'
-        add_file(path, mode)
-        puts "  [access] ✓ #{shown} (#{mode_label(mode)})"
-        :granted
+      if note_text
+        puts "  [access] ✗ denied (user's note: \"#{note_text}\")"
       else
         puts "  [access] ✗ denied"
-        :denied
       end
+      :denied
     end
   end
 

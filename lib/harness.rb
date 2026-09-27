@@ -15,6 +15,7 @@ require_relative 'file_list'
 require_relative 'session'
 require_relative 'tools/echo_tool'
 require_relative 'tools/notify_tool'
+require_relative 'tools/dialog_tool'
 require_relative 'tools/get_time_tool'
 require_relative 'tools/file_read_tool'
 require_relative 'tools/file_write_tool'
@@ -99,6 +100,7 @@ class Harness
     registry = ToolRegistry.new
     registry.register(EchoTool.new)
     registry.register(NotifyTool.new)
+    registry.register(DialogTool.new)
     registry.register(GetTimeTool.new)
     registry.register(FileListTool.new(@file_list))
     registry.register(FileReadTool.new(@file_list))
