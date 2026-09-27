@@ -48,9 +48,15 @@ Keep this in mind:
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.
 - Spec layout: tests live under `spec/` mirroring the tree they test -
-  e.g. `lib/dialog.rb` is tested by `spec/lib/dialog_spec.rb`. Do NOT
-  drop spec files directly into the `spec/` root; only shared helpers
-  (like `spec/spec_helper.rb`) belong there.
+  e.g. `lib/dialog.rb` is tested by `spec/lib/dialog_spec.rb`, and tools
+  in `lib/tools/` are tested in `spec/lib/tools/` (e.g.
+  `lib/tools/file_read_tool.rb` ->
+  `spec/lib/tools/file_read_tool_spec.rb`). Do NOT drop spec files into
+  the `spec/` root, or at a level shallower than where they belong; only
+  shared helpers (like `spec/spec_helper.rb`) belong in the `spec/` root.
+  One spec file per class: each class gets its own `<name>_spec.rb`
+  (e.g. `FileReadTool` in `file_read_tool_spec.rb`). Do NOT bundle
+  tests for multiple classes into a single "catch-all" spec file.
 
 ## PR Workflow
 
