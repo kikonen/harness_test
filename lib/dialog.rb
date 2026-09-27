@@ -5,8 +5,8 @@
 #
 # Each option has a title, an optional description, and a value. The
 # value of the selected option is returned to the caller; selecting the
-# standard cancel option (or dismissing with EOF / invalid input)
-# returns Dialog::CANCEL_VALUE.
+# standard cancel option (or dismissing with EOF) returns
+# Dialog::CANCEL_VALUE.
 #
 # A dialog can also allow FREE TEXT: when free_text is enabled the user
 # may type their own short answer instead of picking a number, and that
@@ -24,7 +24,7 @@
 #   choice = dialog.show  # => :file_only, :dir_recursive, or :cancelled
 class Dialog
   # Standard value returned when the user picks the cancel option (or
-  # dismisses the dialog with EOF / an invalid answer).
+  # dismisses the dialog with EOF).
   CANCEL_VALUE = :cancelled
 
   # Sentinel marker for free-text answers. A free-text response is
@@ -76,7 +76,7 @@ class Dialog
   # Render the dialog and wait for the user's choice on $stdin.
   # Returns the VALUE of the selected option, [FREE_TEXT, text] when the
   # user types their own answer (free_text dialogs only), or CANCEL_VALUE
-  # when the user cancels (or the input is invalid / stdin is closed).
+  # when the user cancels (or stdin is closed).
   def show
     title_lines = @title.split("\n")
     puts
@@ -103,15 +103,23 @@ class Dialog
     end
     $stdout.flush
 
-    answer = $stdin.gets.to_s.chomp.strip
-    return CANCEL_VALUE if answer.empty?
+    # Skip blank lines: they are usually stale input (e.g. the user
+    # pressed Enter an extra time while sending the prompt, and that
+    # newline is still sitting in stdin). Only a real EOF dismisses the
+    # dialog without an answer.
+    loop do
+      line = $stdin.gets
+      break if line.nil?
 
-    idx = answer.to_i - 1
-    if answer.match?(/\A\d+\z/) && idx >= 0 && idx < @options.size
-      return @options[idx].value
+      answer = line.chomp.strip
+      next if answer.empty?
+
+      idx = answer.to_i - 1
+      return @options[idx].value if answer.match?(/\A\d+\z/) && idx >= 0 && idx < @options.size
+
+      # Not a valid option number: free text when allowed, cancel otherwise.
+      return @free_text ? [FREE_TEXT, answer] : CANCEL_VALUE
     end
-
-    # Not a valid option number: free text when allowed, cancel otherwise.
-    @free_text ? [FREE_TEXT, answer] : CANCEL_VALUE
+    CANCEL_VALUE
   end
 end
