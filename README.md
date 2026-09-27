@@ -76,6 +76,8 @@ bin/harness --system-file my.md        # override the system prompt
 bin/harness -v                         # (already on by default) verbose logging
 ```
 
+`bin/rspec` runs the harness's own test suite (rspec), from any directory.
+
 Type a plain message to send it to the model. Lines starting with `/` are
 commands. Multiline input: paste a block, or end a line with `\`.
 Keys: `Ctrl+C` cancel/interrupt, `Ctrl+D` quit (empty prompt),
@@ -153,6 +155,7 @@ Ignore it from git with a single `.harness/` entry.
 ```
 harness.rb          # entry point
 bin/harness         # launcher (env, rbenv, bundle)
+bin/rspec           # test runner (same env hygiene as the launcher)
 lib/cli.rb          # option parsing, REPL loop, input handling
 lib/harness.rb      # tool loop, tool execution, registry
 lib/llm_client.rb   # HTTP, retries, request building
