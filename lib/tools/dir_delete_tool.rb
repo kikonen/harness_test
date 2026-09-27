@@ -55,7 +55,9 @@ class DirDeleteTool < Tool
       return "error: directory '#{shown}' is not empty (#{entries.size} entries) - remove its contents first; recursive deletion is not supported"
     end
 
-    # Deleting a directory requires WRITE access to the PARENT directory.
+    # Deleting a directory requires WRITE access to the PARENT directory,
+    # because an entry is removed FROM the parent - unlike dir.create, a
+    # grant on the target itself is not enough here.
     parent = File.dirname(path)
     unless @file_list.writable?(parent)
       purpose = "to delete directory '#{shown}'"

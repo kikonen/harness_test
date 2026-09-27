@@ -38,4 +38,30 @@ RSpec.describe FileList do
       end
     end
   end
+
+  describe '#grant_access for a new directory (issue #54)' do
+    it 'offers the target directory itself as the first option' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        stub_stdin("1\n")
+        result = list.grant_access('newdir', :w)
+        expect(result).to eq(:granted)
+        # The grant must be on the TARGET, not the parent: existing siblings
+        # of the parent stay non-writable.
+        expect(list.writable?('newdir')).to be(true)
+        expect(list.writable?('sibling.txt')).to be(false)
+      end
+    end
+
+    it 'still allows a parent-dir grant when the user prefers one' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        stub_stdin("3\n") # 1=target, 2=parent flat, 3=parent recursive
+        result = list.grant_access('newdir', :w)
+        expect(result).to eq(:granted)
+        expect(list.writable?('newdir')).to be(true)
+        expect(list.writable?('sibling.txt')).to be(true)
+      end
+    end
+  end
 end

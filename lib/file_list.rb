@@ -23,8 +23,13 @@ require_relative 'dialog'
 #   * reading a file        -> read grant on the file or an ancestor dir
 #   * listing/searching     -> read grant covering the directory listed
 #   * writing/patching      -> write grant on the file or an ancestor dir
-#   * creating a directory  -> write grant on the PARENT directory
+#   * creating a directory  -> write grant on the PARENT directory, or on
+#                              the target directory itself
 #   * deleting/renaming     -> write grant on the affected path(s)
+#
+# For dir.create the grant dialog offers the TARGET DIRECTORY ITSELF as the
+# first option (issue #54), so granting does not make existing siblings of
+# the parent writeable.
 #
 # A write grant implies read access to the same path (writing a file
 # requires reading it back), but a read grant never implies write.
@@ -249,6 +254,27 @@ class FileList
           description: 'covers every file under the directory'
         )
       ]
+    elsif file_prompt && mode == :w
+      # A not-yet-existing directory (e.g. dir.create): prefer a grant on
+      # the target itself so existing siblings of the parent are NOT made
+      # writeable (issue #54).
+      [
+        Dialog::Option.new(
+          title: "Allow this directory only: #{shown}",
+          value: :target,
+          description: 'grant covers just this new directory'
+        ),
+        Dialog::Option.new(
+          title: "Allow parent directory: #{parent_shown}/ (dir only)",
+          value: :parent_flat,
+          description: 'the parent itself + direct children - makes ALL of them writeable'
+        ),
+        Dialog::Option.new(
+          title: "Allow parent directory: #{parent_shown}/ (recursive)",
+          value: :parent_recursive,
+          description: 'every file under the parent'
+        )
+      ]
     elsif file_prompt
       # File within workdir: offer file-only or parent-dir (flat/recursive).
       [
@@ -294,6 +320,10 @@ class FileList
     note_text = choice.is_a?(Array) ? choice[1] : nil
     choice    = choice[0] if choice.is_a?(Array)
     case choice
+    when :target
+      add_file(path, mode)
+      puts "  [access] ✓ #{shown}/ (dir itself only, #{mode_label(mode)})"
+      :granted
     when :file
       add_file(path, mode)
       puts "  [access] ✓ #{shown} (#{mode_label(mode)})"
