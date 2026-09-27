@@ -8,6 +8,10 @@
 # standard cancel option (or dismissing with EOF / invalid input)
 # returns Dialog::CANCEL_VALUE.
 #
+# A dialog can also allow FREE TEXT: when free_text is enabled the user
+# may type their own short answer instead of picking a number, and that
+# text is returned to the caller verbatim.
+#
 #   dialog = Dialog.new(
 #     title: 'Access requested (write access): lib/foo.rb',
 #     options: [
@@ -22,6 +26,11 @@ class Dialog
   # Standard value returned when the user picks the cancel option (or
   # dismisses the dialog with EOF / an invalid answer).
   CANCEL_VALUE = :cancelled
+
+  # Sentinel marker for free-text answers. A free-text response is
+  # returned as [FREE_TEXT, 'the typed text'], so callers can tell it
+  # apart from a plain option value (which is returned as-is).
+  FREE_TEXT = :free_text
 
   # A single selectable item in a dialog.
   class Option
@@ -44,7 +53,11 @@ class Dialog
   #          option is appended automatically.
   # note:    optional context line(s) shown under the title (e.g. a
   #          warning, or an explanation of why the dialog was asked).
-  def initialize(title:, options:, note: nil)
+  # free_text: allow the user to type their own short answer instead of
+  #            picking an option (returned as [FREE_TEXT, text]).
+  # free_text_prompt: optional hint shown to the user about what kind of
+  #            free-text answer is expected.
+  def initialize(title:, options:, note: nil, free_text: false, free_text_prompt: nil)
     raise ArgumentError, 'dialog title must be a non-empty string' if title.to_s.strip.empty?
     unless options.is_a?(Array) && !options.empty?
       raise ArgumentError, 'dialog requires a non-empty array of Dialog::Option'
@@ -55,12 +68,15 @@ class Dialog
 
     @title   = title.to_s.strip
     @note    = note&.to_s
+    @free_text = free_text ? true : false
+    @free_text_prompt = free_text_prompt&.to_s
     @options = options + [Option.new(title: 'Cancel', value: CANCEL_VALUE)]
   end
 
   # Render the dialog and wait for the user's choice on $stdin.
-  # Returns the VALUE of the selected option, or CANCEL_VALUE when the
-  # user cancels (or the input is invalid / stdin is closed).
+  # Returns the VALUE of the selected option, [FREE_TEXT, text] when the
+  # user types their own answer (free_text dialogs only), or CANCEL_VALUE
+  # when the user cancels (or the input is invalid / stdin is closed).
   def show
     title_lines = @title.split("\n")
     puts
@@ -78,14 +94,24 @@ class Dialog
       end
     end
 
-    print "             Choice (1..#{@options.size}): "
+    if @free_text
+      hint = @free_text_prompt.to_s.strip
+      hint = 'or type a short free-text answer' if hint.empty?
+      print "             Choice (1..#{@options.size}, #{hint}): "
+    else
+      print "             Choice (1..#{@options.size}): "
+    end
     $stdout.flush
 
     answer = $stdin.gets.to_s.chomp.strip
+    return CANCEL_VALUE if answer.empty?
 
     idx = answer.to_i - 1
-    opt = @options[idx] if answer.match?(/\A\d+\z/) && idx >= 0 && idx < @options.size
+    if answer.match?(/\A\d+\z/) && idx >= 0 && idx < @options.size
+      return @options[idx].value
+    end
 
-    opt ? opt.value : CANCEL_VALUE
+    # Not a valid option number: free text when allowed, cancel otherwise.
+    @free_text ? [FREE_TEXT, answer] : CANCEL_VALUE
   end
 end

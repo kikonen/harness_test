@@ -10,8 +10,13 @@ require_relative '../dialog'
 # description, and a value. The standard "Cancel" option is always present
 # (the user can dismiss the dialog without choosing).
 #
-# The VALUE of the selected option is returned to the model as the tool
-# result; a cancelled dialog returns the standard value ":cancelled".
+# Optionally the dialog allows FREE TEXT: the user may type their own
+# short answer instead of picking an option. The typed text is returned
+# to the model as the response - good for questions that are not black/white.
+#
+# The VALUE of the selected option (or the typed free-text answer) is
+# returned to the model as the tool result; a cancelled dialog returns
+# the standard value ":cancelled".
 class DialogTool < Tool
   MAX_OPTIONS = 10
 
@@ -22,9 +27,12 @@ class DialogTool < Tool
                    'The dialog has a title (what it is about), an optional note (extra context), ' \
                    'and a list of options; each option has a title, an optional description, and a value. ' \
                    'A standard "Cancel" option is always available to the user. ' \
-                   'The VALUE of the selected option is returned to you; if the user cancels, ' \
-                   'you get ":cancelled". Use this to ask the user for a decision, a preference, ' \
-                   'or clarification when you cannot decide on your own.',
+                   'Optionally enables free text so the user can type their own short answer instead of ' \
+                   'picking an option - use this when the question is not black/white but better ' \
+                   'expressed as a short note. ' \
+                   'The VALUE of the selected option (or the typed free-text answer) is returned to you; ' \
+                   'if the user cancels, you get ":cancelled". Use this to ask the user for a decision, ' \
+                   'a preference, or clarification when you cannot decide on your own.',
       parameters: {
         type: 'object',
         properties: {
@@ -51,6 +59,16 @@ class DialogTool < Tool
               },
               required: ['title', 'value']
             }
+          },
+          free_text: {
+            type: 'boolean',
+            description: 'Also let the user type their own short answer instead of picking an option. ' \
+                         'Use for questions that are not black/white (e.g. "What should the error message say?").'
+          },
+          free_text_prompt: {
+            type: 'string',
+            description: 'Optional hint shown to the user about what kind of free-text answer is expected ' \
+                         '(only relevant when free_text is true).'
           }
         },
         required: ['title', 'options']
@@ -98,11 +116,15 @@ class DialogTool < Tool
     choice = Dialog.new(
       title: title,
       options: options,
-      note: args['note']
+      note: args['note'],
+      free_text: args['free_text'] == true,
+      free_text_prompt: args['free_text_prompt']
     ).show
 
     if choice == Dialog::CANCEL_VALUE
       'cancelled (the user dismissed the dialog without choosing an option)'
+    elsif choice.is_a?(Array) && choice.first == Dialog::FREE_TEXT
+      "free text response from the user: \"#{choice[1]}\""
     else
       "selected: #{choice.inspect}"
     end
