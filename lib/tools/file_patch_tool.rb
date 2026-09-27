@@ -55,7 +55,8 @@ class FilePatchTool < Tool
                    'You must provide the sha256 digest of the file as last read (from file.read or file.sha). ' \
                    'Hunk line numbers are used as a hint - the hunk is located by matching its context lines, ' \
                    'so small line-number errors are tolerated. ' \
-                   'Use this for targeted edits instead of rewriting the entire file with file.write.',
+                   'Use this for targeted edits instead of rewriting the entire file with file.write. ' \
+                   'On success the NEW sha256 digest of the file is returned - use it for the next write/patch on the same file.',
       parameters: {
         type: 'object',
         properties: {
@@ -147,9 +148,10 @@ class FilePatchTool < Tool
     end
 
     File.write(path, new_content)
-    puts "  [file.patch] ✓ #{shown} (#{applied} hunk(s) applied)"
+    new_sha = FileList.sha256(path)
+    puts "  [file.patch] ✓ #{shown} (#{applied} hunk(s) applied, sha256: #{new_sha})"
     $stdout.flush
-    "ok: applied #{applied} hunk(s) to #{shown}"
+    "ok: applied #{applied} hunk(s) to #{shown}\nsha256: #{new_sha}"
   end
 
   private

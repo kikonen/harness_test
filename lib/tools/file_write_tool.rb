@@ -16,7 +16,8 @@ class FileWriteTool < Tool
                    'If the file already exists you must also provide the sha256 digest of the file ' \
                    'as it was when you last read it (from file.read or file.sha); it is verified to ' \
                    'match the file on disk before writing, so the file is guaranteed to be the version ' \
-                   'you based your edit on. For a brand-new file that does not exist yet, leave sha empty.',
+                   'you based your edit on. For a brand-new file that does not exist yet, leave sha empty. ' \
+                   'On success the NEW sha256 digest of the file is returned - use it for the next write/patch on the same file.',
       parameters: {
         type: 'object',
         properties: {
@@ -66,8 +67,9 @@ class FileWriteTool < Tool
     dir = File.dirname(path)
     FileUtils.mkdir_p(dir) unless dir == '.'
     File.write(path, content)
-    puts "  [file.write] ✓ #{shown} (#{content.length} chars)"
+    new_sha = FileList.sha256(path)
+    puts "  [file.write] ✓ #{shown} (#{content.length} chars, sha256: #{new_sha})"
     $stdout.flush
-    "ok: wrote #{content.length} chars to #{shown}"
+    "ok: wrote #{content.length} chars to #{shown}\nsha256: #{new_sha}"
   end
 end
