@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'open3'
+require 'bundler'
 require 'timeout'
 
 require_relative '../tool'
@@ -14,7 +15,7 @@ require_relative '../dialog'
 #     any other choice denies execution. There is no auto-approval and no
 #     "always allow" memory - every invocation is confirmed individually.
 #   - Commands run under a timeout (default 60 s, hard cap 300 s) so a
-#     hung process can never block the session.
+#     hung process can never block the session indefinitely.
 #   - Output is truncated to a line limit (default 200, max 5000) because
 #     it goes into the LLM context window.
 class RunCommandTool < Tool
@@ -98,15 +99,7 @@ class RunCommandTool < Tool
     end
 
     started = Time.now
-    begin
-      stdout, stderr, status = Timeout.timeout(timeout) do
-        Open3.capture3('sh', '-c', command, chdir: dir)
-      end
-    rescue Timeout::Error
-      puts "  [run.command] ✗ #{command} (timed out after #{timeout}s)"
-      $stdout.flush
-      return "error: command timed out after #{timeout}s"
-    end
+    stdout, stderr, status = run_in_shell(command, dir, timeout)
     elapsed = (Time.now - started).round(2)
     code    = status.exitstatus
 
@@ -125,9 +118,28 @@ class RunCommandTool < Tool
     msg += "--- stderr ---\n#{err}\n" if err&.strip&.!= ''
     msg += "\n(output truncated to #{limit} lines)" if truncated
     msg
+  rescue Timeout::Error
+    puts "  [run.command] ✗ #{command} (timed out after #{timeout}s)"
+    $stdout.flush
+    "error: command timed out after #{timeout}s"
   end
 
   private
+
+  # Runs the command in a shell with the inherited bundler env stripped
+  # (Bundler.with_unbundled_env). The harness may have been started from a
+  # shell polluted by ANOTHER project's bundler setup (BUNDLE_GEMFILE,
+  # RUBYOPT=-rbundler/setup, GEM_HOME, ...); without this, any `bundle exec`
+  # in the command would resolve against the wrong Gemfile and fail with
+  # cryptic "can't find executable" errors. Stripped, `bundle exec` falls
+  # back to the CWD's Gemfile - which is what callers expect.
+  def run_in_shell(command, dir, timeout)
+    Bundler.with_unbundled_env do
+      Timeout.timeout(timeout) do
+        Open3.capture3('sh', '-c', command, chdir: dir)
+      end
+    end
+  end
 
   # Truncate text to `limit` lines (from the top), appending a notice with
   # the number of dropped lines. Returns [text, truncated?].
