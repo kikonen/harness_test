@@ -48,6 +48,14 @@ Keep this in mind:
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.
 
+## PR Workflow
+
+- When merging a pull request, use **rebase** (`gh pr merge --rebase`)
+  so commits land on `master` as a clean linear history - no merge
+  commits. Only fall back to a regular merge if the rebase fails
+  (e.g. conflicts) and say so explicitly.
+- The PR body should state that it will be merged with rebase.
+
 ## Tunable Constants
 
 - `Session::COMPACT_RECENT_MESSAGES` - how many recent messages survive
