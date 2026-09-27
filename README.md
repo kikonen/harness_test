@@ -66,14 +66,14 @@ optional; missing values fall back to built-in defaults.
 ## Usage
 
 ```bash
-./bin/harness                          # interactive, uses default model
-./bin/harness "fix the off-by-one in lib/foo.rb"
-./bin/harness -m other                 # pick another configured profile
-./bin/harness -d /path/to/project      # set the working directory
-./bin/harness --list-sessions          # list saved sessions and exit
-./bin/harness -r <id>                  # resume a saved session
-./bin/harness --system-file my.md      # override the system prompt
-./bin/harness -v                       # (already on by default) verbose logging
+bin/harness                            # interactive, uses default model
+bin/harness "fix the off-by-one in lib/foo.rb"
+bin/harness -m other                   # pick another configured profile
+bin/harness -d /path/to/project        # set the working directory
+bin/harness --list-sessions            # list saved sessions and exit
+bin/harness -r <id>                    # resume a saved session
+bin/harness --system-file my.md        # override the system prompt
+bin/harness -v                         # (already on by default) verbose logging
 ```
 
 Type a plain message to send it to the model. Lines starting with `/` are
