@@ -51,13 +51,17 @@ class DirCreateTool < Tool
       return "error: '#{shown}' already exists and is a file, not a directory"
     end
 
-    # Creating a directory requires WRITE access to the PARENT directory.
-    parent = File.dirname(path)
-    unless @file_list.writable?(parent)
+    # Creating a directory requires WRITE access to the PARENT directory,
+    # or a write grant on the target directory itself (granted earlier for
+    # this very dir) - see FileList#grant_access.
+    # The grant request is made on the TARGET path so the dialog offers the
+    # new directory itself as the first option (issue #54): granting it does
+    # not make existing siblings of the parent writeable.
+    if !@file_list.writable?(path) && !@file_list.writable?(File.dirname(path))
       purpose = "to create directory '#{shown}'"
-      result = @file_list.grant_access(parent, :w, purpose: purpose)
+      result  = @file_list.grant_access(path, :w, purpose: purpose)
       return Tool.denial_error(
-        "error: write access denied for '#{@file_list.display_path(parent)}'", result
+        "error: write access denied for '#{shown}'", result
       ) unless Tool.granted?(result)
     end
 
