@@ -2,6 +2,7 @@
 
 require_relative '../tool'
 require_relative '../file_list'
+require_relative '../dialog'
 
 # Deletes a file from disk. The user is prompted for confirmation.
 class FileDeleteTool < Tool
@@ -51,18 +52,12 @@ class FileDeleteTool < Tool
       return "DRY RUN: would delete #{shown}"
     end
 
-    puts
-    puts "  [file.delete] ⚠  The model is requesting to DELETE a file:"
-    puts "                  #{shown}"
-    puts "                  1) Allow delete"
-    puts "                  2) Deny"
-    print  "                  Choice (1/2): "
-    $stdout.flush
+    choice = Dialog.new(
+      title: "The model is requesting to DELETE a file:\n#{shown}",
+      options: [Dialog::Option.new(title: 'Allow delete', value: :allow)]
+    ).show
 
-    answer = $stdin.gets
-    answer = answer&.chomp&.strip
-
-    if answer == '1'
+    if choice == :allow
       File.delete(path)
       puts "  [file.delete] ✓ #{shown} (deleted)"
       $stdout.flush

@@ -4,13 +4,14 @@ require 'open3'
 require 'timeout'
 
 require_relative '../tool'
+require_relative '../dialog'
 
 # Executes a shell command in the harness working directory.
 #
 # SAFETY MODEL:
 #   - The FULL command string is displayed to the user before anything runs.
-#   - The user must explicitly type "1" (Allow) at an interactive prompt;
-#     any other answer denies execution. There is no auto-approval and no
+#   - The user must explicitly select "Allow" at an interactive dialog;
+#     any other choice denies execution. There is no auto-approval and no
 #     "always allow" memory - every invocation is confirmed individually.
 #   - Commands run under a timeout (default 60 s, hard cap 300 s) so a
 #     hung process can never block the session.
@@ -78,20 +79,13 @@ class RunCommandTool < Tool
     limit   = DEFAULT_LIMIT if limit <= 0
     limit   = [limit, MAX_LIMIT].min
 
-    puts
-    puts "  [run.command] ⚠  The model is requesting to run a shell command:"
-    puts "                  $ #{command}"
-    puts "                  cwd:     #{shown}"
-    puts "                  timeout: #{timeout}s"
-    puts "                  1) Allow"
-    puts "                  2) Deny"
-    print  "                  Choice (1/2): "
-    $stdout.flush
+    choice = Dialog.new(
+      title: "The model is requesting to run a shell command:\n" \
+             "$ #{command}\ncwd: #{shown} (timeout: #{timeout}s)",
+      options: [Dialog::Option.new(title: 'Allow', value: :allow)]
+    ).show
 
-    answer = $stdin.gets
-    answer = answer&.chomp&.strip
-
-    unless answer == '1'
+    unless choice == :allow
       puts "  [run.command] ✗ denied by user"
       $stdout.flush
       return "error: user denied executing the command"
