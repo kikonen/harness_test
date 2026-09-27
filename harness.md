@@ -21,8 +21,8 @@ Keep this in mind:
   modification time changes (checked before each prompt), and can be
   force-reloaded with the `/reload` command. If you edit this file, the
   new rules take effect on the next prompt - no restart needed.
-- When creating temporary directores or files for testing "tmp" directory,
-  not root directory of project
+- When creating temporary directories or files for testing use the "tmp"
+  directory, not the root directory of the project.
 
 ## Code Style
 
@@ -47,6 +47,10 @@ Keep this in mind:
 - Line endings: the harness normalizes to LF for LLM-facing operations
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.
+- Spec layout: tests live under `spec/` mirroring the tree they test -
+  e.g. `lib/dialog.rb` is tested by `spec/lib/dialog_spec.rb`. Do NOT
+  drop spec files directly into the `spec/` root; only shared helpers
+  (like `spec/spec_helper.rb`) belong there.
 
 ## PR Workflow
 
