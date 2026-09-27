@@ -15,7 +15,8 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: file://.ruby-version
+          # Keep in sync with .ruby-version (setup-ruby does not resolve file:// here)
+          ruby-version: ruby-4.0.0
           bundler-cache: true
 
       - name: Run tests
