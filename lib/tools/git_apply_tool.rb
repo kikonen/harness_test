@@ -52,8 +52,9 @@ class GitApplyTool < GitRunner
       next if @file_list.writable?(target)
 
       result = @file_list.grant_access(target, :w)
-      return "error: write access denied for '#{@file_list.display_path(target)}'" \
-             unless result == :granted
+      return Tool.denial_error(
+        "error: write access denied for '#{@file_list.display_path(target)}'", result
+      ) unless Tool.granted?(result)
     end
 
     if files.any?

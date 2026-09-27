@@ -28,6 +28,22 @@ class Tool
     raise NotImplementedError, "#{self.class}#execute not implemented"
   end
 
+  # True if a FileList#grant_access result means access was granted.
+  def self.granted?(result)
+    result == :granted
+  end
+
+  # Build the "access denied" error string returned to the model when the
+  # user declines a grant dialog. If the user attached a short note to
+  # their denial (e.g. "no, and because X") it is included verbatim so
+  # the model can see the feedback and adapt instead of blindly retrying.
+  def self.denial_error(message, result = nil)
+    note = result.is_a?(Hash) ? result[:note] : nil
+    return "#{message} (user's note: \"#{note}\")" if note
+
+    message
+  end
+
   def to_openai
     {
       type: 'function',

@@ -210,7 +210,9 @@ class FileList
   # Prompt the user to grant access to a path.
   # mode: :r (read), :w (write), or :rw (read + write; default).
   # purpose: optional string explaining WHY access is needed (e.g. "to create directory 'somedir'").
-  # Returns :granted, :denied, or :blocked.
+  # Returns :granted, :blocked, or on denial a hash
+  # { status: :denied, note: <user's note or nil> } so the caller can
+  # forward the user's feedback to the model (see Tool#denial_error).
   #
   # The prompt is rendered through the generic Dialog (numbered options +
   # standard cancel), so the user has a consistent interaction pattern
@@ -323,7 +325,7 @@ class FileList
       else
         puts "  [access] ✗ denied"
       end
-      :denied
+      { status: :denied, note: note_text }
     end
   end
 

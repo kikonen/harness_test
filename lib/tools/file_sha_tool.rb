@@ -28,7 +28,7 @@ class FileShaTool < Tool
 
     unless @file_list.readable?(path)
       result = @file_list.grant_access(path, :r)
-      return "error: access denied for '#{shown}'" unless result == :granted
+      return Tool.denial_error("error: access denied for '#{shown}'", result) unless Tool.granted?(result)
     end
 
     unless File.file?(path)

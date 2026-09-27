@@ -34,7 +34,7 @@ class FileRenameTool < Tool
     # Renaming requires WRITE access to the file being moved.
     unless @file_list.writable?(old_path)
       result = @file_list.grant_access(old_path, :w)
-      return "error: access denied for '#{old_shown}'" unless result == :granted
+      return Tool.denial_error("error: access denied for '#{old_shown}'", result) unless Tool.granted?(result)
     end
 
     if @file_list.sensitive?(new_path)
@@ -46,7 +46,7 @@ class FileRenameTool < Tool
     # ...and WRITE access to the destination (the move creates it there).
     unless @file_list.writable?(new_path)
       result = @file_list.grant_access(new_path, :w)
-      return "error: write access denied for '#{new_shown}'" unless result == :granted
+      return Tool.denial_error("error: write access denied for '#{new_shown}'", result) unless Tool.granted?(result)
     end
 
     unless File.file?(old_path)

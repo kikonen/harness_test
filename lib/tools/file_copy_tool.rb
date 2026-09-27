@@ -34,7 +34,7 @@ class FileCopyTool < Tool
 
     unless @file_list.readable?(src)
       result = @file_list.grant_access(src, :r)
-      return "error: access denied for '#{src_shown}'" unless result == :granted
+      return Tool.denial_error("error: access denied for '#{src_shown}'", result) unless Tool.granted?(result)
     end
 
     if @file_list.sensitive?(dst)
@@ -46,7 +46,7 @@ class FileCopyTool < Tool
     # Writing the copy requires write access to the destination file.
     unless @file_list.writable?(dst)
       result = @file_list.grant_access(dst, :w)
-      return "error: write access denied for '#{dst_shown}'" unless result == :granted
+      return Tool.denial_error("error: write access denied for '#{dst_shown}'", result) unless Tool.granted?(result)
     end
 
     unless File.file?(src)
