@@ -135,6 +135,10 @@ class Harness
     options[:compact_recent] || Session::COMPACT_RECENT_MESSAGES
   end
 
+  def compact_auto_threshold
+    options[:compact_auto_threshold] || Session::AUTO_COMPACT_THRESHOLD
+  end
+
   def compact_max_size
     options[:compact_max_size]
   end
@@ -266,7 +270,23 @@ class Harness
     if usage && usage[:total_tokens] > 0
       parts << "📊 #{usage[:prompt_tokens]}→#{usage[:completion_tokens]} tokens (#{usage[:total_tokens]} total)"
     end
+    ctx = context_indicator
+    parts << ctx if ctx
+
     puts "  [#{parts.join(' | ')}]"
+  end
+
+  # Context-usage indicator, e.g. "🧠 ctx 42133/65536 (64%)". Shown on every
+  # response so the user always sees how much of the context window is used.
+  # Uses the last reported usage when available, otherwise a rough estimate.
+  def context_indicator
+    window = options[:num_ctx] || LLMClient::NUM_CTX
+    used = @session.context_used
+    return nil if used.nil?
+
+    pct = (used[:tokens].to_f / window * 100).round
+    label = used[:estimated] ? '~' : ''
+    "🧠 ctx #{label}#{used[:tokens]}/#{window} (#{pct}%)"
   end
 
   private

@@ -30,6 +30,15 @@ class Session
   # config 'compact.recent_messages' key or the --compact-recent CLI flag.
   COMPACT_RECENT_MESSAGES = 6
 
+  # Default auto-compact threshold as a fraction of the context window
+  # (0.88 = compact once the last request used ~88% of num_ctx tokens).
+  # Configurable via the 'compact.auto_threshold' config key; set it to
+  # 100 (or higher) to effectively disable auto-compaction.
+  AUTO_COMPACT_THRESHOLD = 88
+
+  # Rough chars-per-token ratio used only for fallback context estimates.
+  EST_CHARS_PER_TOKEN = 4
+
   attr_reader :messages, :created_at, :system_prompt, :session_id
 
   def initialize(system_prompt)
@@ -117,6 +126,34 @@ class Session
     @messages.concat(recent) if recent && !recent.empty?
     @last_stats = nil
     self
+  end
+
+  # Tokens currently used by the session, as reported by the last LLM
+  # response (usage.prompt_tokens). When the API did not report usage,
+  # falls back to a rough estimate of the message-chain size. Returns nil
+  # when there is no conversation yet and nothing to estimate.
+  def context_used
+    if @last_stats && (@last_stats[:usage] || {})[:prompt_tokens].to_i > 0
+      return { tokens: @last_stats[:usage][:prompt_tokens], estimated: false }
+    end
+
+    conversation = @messages[1..]
+    return nil if conversation.nil? || conversation.empty?
+
+    chars = @system_prompt.to_s.length +
+            conversation.sum { |m| m[:content].to_s.length }
+    { tokens: (chars / EST_CHARS_PER_TOKEN).ceil, estimated: true }
+  end
+
+  # True when the context usage has reached the auto-compact threshold.
+  # window_size is the model's context window in tokens; threshold_pct is
+  # the threshold as a percentage (0-100, or higher to disable). Returns
+  # false when there is nothing to measure yet.
+  def auto_compact_due?(window_size, threshold_pct)
+    used = context_used
+    return false if used.nil? || window_size.to_i <= 0
+
+    used[:tokens] >= (window_size * (threshold_pct.to_f / 100.0)).ceil
   end
 
   # Number of conversation messages (excluding the system message).

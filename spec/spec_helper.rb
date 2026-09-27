@@ -5,6 +5,7 @@ $LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
 
 require 'dialog'
 require 'file_list'
+require 'session'
 require 'tools/dialog_tool'
 
 RSpec.configure do |config|
