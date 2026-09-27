@@ -66,14 +66,14 @@ optional; missing values fall back to built-in defaults.
 ## Usage
 
 ```bash
-./run.sh                          # interactive, uses default model
-./run.sh "fix the off-by-one in lib/foo.rb"
-./run.sh -m other                 # pick another configured profile
-./run.sh -d /path/to/project      # set the working directory
-./run.sh --list-sessions          # list saved sessions and exit
-./run.sh -r <id>                  # resume a saved session
-./run.sh --system-file my.md      # override the system prompt
-./run.sh -v                       # (already on by default in run.sh) verbose logging
+./bin/harness                          # interactive, uses default model
+./bin/harness "fix the off-by-one in lib/foo.rb"
+./bin/harness -m other                 # pick another configured profile
+./bin/harness -d /path/to/project      # set the working directory
+./bin/harness --list-sessions          # list saved sessions and exit
+./bin/harness -r <id>                  # resume a saved session
+./bin/harness --system-file my.md      # override the system prompt
+./bin/harness -v                       # (already on by default) verbose logging
 ```
 
 Type a plain message to send it to the model. Lines starting with `/` are
@@ -152,7 +152,7 @@ Ignore it from git with a single `.harness/` entry.
 
 ```
 harness.rb          # entry point
-run.sh              # launcher (env, rbenv, bundle)
+bin/harness         # launcher (env, rbenv, bundle)
 lib/cli.rb          # option parsing, REPL loop, input handling
 lib/harness.rb      # tool loop, tool execution, registry
 lib/llm_client.rb   # HTTP, retries, request building
