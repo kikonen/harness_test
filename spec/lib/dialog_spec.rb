@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'stringio'
 
 RSpec.describe Dialog do
   let(:options) do
@@ -17,6 +18,16 @@ RSpec.describe Dialog do
 
   def show(dialog)
     dialog.show
+  end
+
+  # Capture everything written to $stdout while the block runs.
+  def capture_stdout
+    old = $stdout
+    $stdout = StringIO.new
+    yield
+    $stdout.string
+  ensure
+    $stdout = old
   end
 
   describe 'construction' do
@@ -90,6 +101,13 @@ RSpec.describe Dialog do
           title: 't', options: options,
           free_text: true, free_text_prompt: 'or type a short note'
         )
+      end
+
+      it 'renders the choice prompt without a doubled "or"' do
+        stub_stdin(nil)
+        out = capture_stdout { show(dialog) }
+        expect(out).not_to include('or or')
+        expect(out).to include('or type a short note')
       end
 
       it 'returns [FREE_TEXT, text] for a non-numeric answer' do

@@ -76,7 +76,7 @@ class Dialog
     @title   = title.to_s.strip
     @note    = note&.to_s
     @free_text = free_text ? true : false
-    @free_text_prompt = free_text_prompt&.to_s
+    @free_text_prompt = free_text_prompt.to_s.strip.sub(/\Aor\s+/, '')
     @options = options + [Option.new(title: 'Cancel', value: CANCEL_VALUE)]
   end
 
@@ -108,7 +108,7 @@ class Dialog
 
     if @free_text
       hint = @free_text_prompt.to_s.strip
-      hint = 'or type a short free-text answer' if hint.empty?
+      hint = 'type a short free-text answer' if hint.empty?
       print "             Choice (1..#{@options.size}, <number> + note, or #{hint}): "
     else
       print "             Choice (1..#{@options.size}, or <number> + short note): "

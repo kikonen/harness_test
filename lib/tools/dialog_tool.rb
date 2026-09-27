@@ -71,7 +71,7 @@ class DialogTool < Tool
           free_text_prompt: {
             type: 'string',
             description: 'Optional hint shown to the user about what kind of free-text answer is expected ' \
-                         '(only relevant when free_text is true).'
+                         '(only relevant when free_text is true). Do not start it with "or" - the prompt already includes the conjunction.'
           }
         },
         required: ['title', 'options']
