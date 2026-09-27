@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Test runner: runs rspec for the harness itself, with the same environment
+# hygiene as bin/harness (project-root Gemfile, rbenv), so tests work from
+# any directory and are not affected by a polluted parent environment.
+set -euo pipefail
+
+# This script lives in bin/; the project root (Gemfile) is its parent.
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Non-interactive shells may not have rbenv set up (no shims on PATH).
+export RBENV_DIR="$ROOT_DIR"
+if [ -d "$HOME/.rbenv/bin" ]; then
+  export PATH="$HOME/.rbenv/bin:$PATH"
+fi
+if command -v rbenv >/dev/null 2>&1; then
+  eval "$(rbenv init - bash)"
+fi
+
+# bundle exec looks for the Gemfile in the CWD; point it at the one
+# that lives in the project root so it works from any directory.
+if [ -f "$ROOT_DIR/Gemfile" ]; then
+  export BUNDLE_GEMFILE="$ROOT_DIR/Gemfile"
+fi
+
+# rspec resolves spec/ relative to the CWD; run from the project root so
+# the suite is found no matter where the script is invoked from.
+cd "$ROOT_DIR"
+exec bundle exec rspec "$@"
