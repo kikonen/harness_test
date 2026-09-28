@@ -149,6 +149,7 @@ class CLI
     begin
       loop do
         show_file_list
+        show_context_indicator
         input = get_command
         break if input.nil?
 
@@ -188,6 +189,14 @@ class CLI
       puts "Session saved as #{id} (#{harness.session_manager.sessions_dir}/#{id}.json)."
       puts "Resume it later with: #{commands.resume_command(id)}"
     end
+  end
+
+  # Always-visible context usage indicator (issue #63): printed above the
+  # prompt at turn start so the current headroom is visible even when idle.
+  # Silent when there is no conversation yet (nothing to measure).
+  def show_context_indicator
+    ctx = @harness.context_indicator
+    puts ctx if ctx
   end
 
   private

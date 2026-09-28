@@ -145,6 +145,17 @@ class Session
     { tokens: (chars / EST_CHARS_PER_TOKEN).ceil, estimated: true }
   end
 
+  # Context usage as an integer percentage of the window size (0-100,
+  # rounded). Returns nil when there is nothing to measure yet or the
+  # window size is invalid. Pure calculation, so it can be tested without
+  # touching the harness display layer.
+  def context_pct(window_size)
+    used = context_used
+    return nil if used.nil? || window_size.to_i <= 0
+
+    (used[:tokens].to_f / window_size * 100).round
+  end
+
   # True when the context usage has reached the auto-compact threshold.
   # window_size is the model's context window in tokens; threshold_pct is
   # the threshold as a percentage (0-100, or higher to disable). Returns

@@ -27,6 +27,31 @@ RSpec.describe Session do
     end
   end
 
+  describe '#context_pct' do
+    before do
+      session.add_user('hello')
+      session.add_assistant('hi')
+      session.record_stats(usage: { prompt_tokens: 60_000, total_tokens: 61_000 })
+    end
+
+    it 'returns the usage as a rounded percentage of the window' do
+      expect(session.context_pct(65_536)).to eq(92)
+    end
+
+    it 'is nil when there is no conversation yet' do
+      expect(described_class.new('sys').context_pct(65_536)).to be_nil
+    end
+
+    it 'is nil for an invalid window size' do
+      expect(session.context_pct(0)).to be_nil
+    end
+
+    it 'reports above 100% when usage exceeds the window (no clamping)' do
+      session.record_stats(usage: { prompt_tokens: 200_000, total_tokens: 200_000 })
+      expect(session.context_pct(65_536)).to eq(305)
+    end
+  end
+
   describe '#auto_compact_due?' do
     before do
       session.add_user('hello')
