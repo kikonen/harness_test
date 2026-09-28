@@ -5,7 +5,7 @@ require 'stringio'
 require 'tmpdir'
 require 'tools/file_read_tool'
 
-RSpec.describe FileReadTool do
+RSpec.describe Tools::FileReadTool do
   it 'forwards the user\'s denial note to the model' do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)

@@ -4,72 +4,75 @@ require_relative '../tool'
 require_relative '../file_list'
 require 'fileutils'
 
-class FileWriteTool < Tool
-  def initialize(file_list, options)
-    @file_list = file_list
-    @options   = options
-    super(
-      name: 'file.write',
-      description: 'Writes content to a file. ' \
-                   'Paths are relative to the harness working directory. ' \
-                   'The content must be the COMPLETE file content. ' \
-                   'If the file already exists you must also provide the sha256 digest of the file ' \
-                   'as it was when you last read it (from file.read or file.sha); it is verified to ' \
-                   'match the file on disk before writing, so the file is guaranteed to be the version ' \
-                   'you based your edit on. For a brand-new file that does not exist yet, leave sha empty. ' \
-                   'On success the NEW sha256 digest of the file is returned - use it for the next write/patch on the same file.',
-      parameters: {
-        type: 'object',
-        properties: {
-          path:    { type: 'string', description: 'Path to the file to write (relative to the working directory)' },
-          content: { type: 'string', description: 'Complete content to write to the file' },
-          sha:     { type: 'string', description: 'SHA-256 digest of the file as last read (from file.read or file.sha); must match the file on disk. Leave empty only when creating a new file that does not exist yet.' }
-        },
-        required: ['path', 'content', 'sha']
-      }
-    )
-  end
+module Tools
 
-  def execute(args)
-    path    = @file_list.resolve(args['path'])
-    shown   = @file_list.display_path(path)
-    content = args['content']
-    sha     = args['sha']
-
-    unless @file_list.writable?(path)
-      result = @file_list.grant_access(path, :w)
-      return Tool.denial_error("error: access denied for '#{shown}'", result) unless Tool.granted?(result)
+  class Tools::FileWriteTool < Tool
+    def initialize(file_list, options)
+      @file_list = file_list
+      @options   = options
+      super(
+        name: 'file.write',
+        description: 'Writes content to a file. ' \
+                     'Paths are relative to the harness working directory. ' \
+                     'The content must be the COMPLETE file content. ' \
+                     'If the file already exists you must also provide the sha256 digest of the file ' \
+                     'as it was when you last read it (from file.read or file.sha); it is verified to ' \
+                     'match the file on disk before writing, so the file is guaranteed to be the version ' \
+                     'you based your edit on. For a brand-new file that does not exist yet, leave sha empty. ' \
+                     'On success the NEW sha256 digest of the file is returned - use it for the next write/patch on the same file.',
+        parameters: {
+          type: 'object',
+          properties: {
+            path:    { type: 'string', description: 'Path to the file to write (relative to the working directory)' },
+            content: { type: 'string', description: 'Complete content to write to the file' },
+            sha:     { type: 'string', description: 'SHA-256 digest of the file as last read (from file.read or file.sha); must match the file on disk. Leave empty only when creating a new file that does not exist yet.' }
+          },
+          required: ['path', 'content', 'sha']
+        }
+      )
     end
 
-    current_sha = FileList.sha256(path)
+    def execute(args)
+      path    = @file_list.resolve(args['path'])
+      shown   = @file_list.display_path(path)
+      content = args['content']
+      sha     = args['sha']
 
-    if current_sha
-      if sha.nil? || sha.empty?
-        puts "  [file.write] ✗ #{shown} (missing sha)"
-        $stdout.flush
-        return "error: 'sha' is required for an existing file - pass the SHA-256 digest returned by file.read or file.sha"
+      unless @file_list.writable?(path)
+        result = @file_list.grant_access(path, :w)
+        return Tool.denial_error("error: access denied for '#{shown}'", result) unless Tool.granted?(result)
       end
 
-      unless current_sha == sha
-        puts "  [file.write] ✗ #{shown} (sha mismatch)"
-        $stdout.flush
-        return "error: sha mismatch for '#{shown}' - the file has changed since you read it. " \
-               "Current sha256: #{current_sha}. Re-read the file with file.read and retry."
-      end
-    end
+      current_sha = FileList.sha256(path)
 
-    if @options[:dry_run]
-      puts "  [file.write] ~ #{shown} (dry run, #{content.length} chars)"
+      if current_sha
+        if sha.nil? || sha.empty?
+          puts "  [file.write] ✗ #{shown} (missing sha)"
+          $stdout.flush
+          return "error: 'sha' is required for an existing file - pass the SHA-256 digest returned by file.read or file.sha"
+        end
+
+        unless current_sha == sha
+          puts "  [file.write] ✗ #{shown} (sha mismatch)"
+          $stdout.flush
+          return "error: sha mismatch for '#{shown}' - the file has changed since you read it. " \
+                 "Current sha256: #{current_sha}. Re-read the file with file.read and retry."
+        end
+      end
+
+      if @options[:dry_run]
+        puts "  [file.write] ~ #{shown} (dry run, #{content.length} chars)"
+        $stdout.flush
+        return "DRY RUN: would write #{content.length} chars to #{shown}"
+      end
+
+      dir = File.dirname(path)
+      FileUtils.mkdir_p(dir) unless dir == '.'
+      File.write(path, content)
+      new_sha = FileList.sha256(path)
+      puts "  [file.write] ✓ #{shown} (#{content.length} chars, sha256: #{new_sha})"
       $stdout.flush
-      return "DRY RUN: would write #{content.length} chars to #{shown}"
+      "ok: wrote #{content.length} chars to #{shown}\nsha256: #{new_sha}"
     end
-
-    dir = File.dirname(path)
-    FileUtils.mkdir_p(dir) unless dir == '.'
-    File.write(path, content)
-    new_sha = FileList.sha256(path)
-    puts "  [file.write] ✓ #{shown} (#{content.length} chars, sha256: #{new_sha})"
-    $stdout.flush
-    "ok: wrote #{content.length} chars to #{shown}\nsha256: #{new_sha}"
   end
 end

@@ -98,36 +98,36 @@ class Harness
 
   def build_tool_registry
     registry = ToolRegistry.new
-    registry.register(EchoTool.new)
-    registry.register(NotifyTool.new)
-    registry.register(DialogTool.new)
-    registry.register(GetTimeTool.new)
-    registry.register(FileListTool.new(@file_list))
-    registry.register(FileReadTool.new(@file_list))
-    registry.register(FileWriteTool.new(@file_list, @options))
-    registry.register(FileShaTool.new(@file_list))
-    registry.register(FileRenameTool.new(@file_list, @options))
-    registry.register(FileDeleteTool.new(@file_list, @options))
-    registry.register(FileSearchTool.new(@file_list))
-    registry.register(FilePatchTool.new(@file_list, @options))
-    registry.register(FileCopyTool.new(@file_list, @options))
-    registry.register(FileInfoTool.new(@file_list))
-    registry.register(DirCreateTool.new(@file_list))
-    registry.register(DirDeleteTool.new(@file_list, @options))
+    registry.register(Tools::EchoTool.new)
+    registry.register(Tools::NotifyTool.new)
+    registry.register(Tools::DialogTool.new)
+    registry.register(Tools::GetTimeTool.new)
+    registry.register(Tools::FileListTool.new(@file_list))
+    registry.register(Tools::FileReadTool.new(@file_list))
+    registry.register(Tools::FileWriteTool.new(@file_list, @options))
+    registry.register(Tools::FileShaTool.new(@file_list))
+    registry.register(Tools::FileRenameTool.new(@file_list, @options))
+    registry.register(Tools::FileDeleteTool.new(@file_list, @options))
+    registry.register(Tools::FileSearchTool.new(@file_list))
+    registry.register(Tools::FilePatchTool.new(@file_list, @options))
+    registry.register(Tools::FileCopyTool.new(@file_list, @options))
+    registry.register(Tools::FileInfoTool.new(@file_list))
+    registry.register(Tools::DirCreateTool.new(@file_list))
+    registry.register(Tools::DirDeleteTool.new(@file_list, @options))
     # Git tools (operate on the repository containing the working dir).
-    registry.register(GitDiffTool.new(@file_list))
-    registry.register(GitShowTool.new(@file_list))
-    registry.register(GitStatusTool.new(@file_list))
-    registry.register(GitLogTool.new(@file_list))
-    registry.register(GitGrepTool.new(@file_list))
-    registry.register(GitApplyTool.new(@file_list))
+    registry.register(Tools::GitDiffTool.new(@file_list))
+    registry.register(Tools::GitShowTool.new(@file_list))
+    registry.register(Tools::GitStatusTool.new(@file_list))
+    registry.register(Tools::GitLogTool.new(@file_list))
+    registry.register(Tools::GitGrepTool.new(@file_list))
+    registry.register(Tools::GitApplyTool.new(@file_list))
     # Shell execution (always requires explicit user confirmation).
-    registry.register(RunCommandTool.new(@file_list, @options))
+    registry.register(Tools::RunCommandTool.new(@file_list, @options))
     # Meta-tools (discovery): registered last so they appear at the end
     # of the sorted tool list. They take the registry itself as an
     # argument (built before the tools are instantiated).
-    registry.register(ToolsListTool.new(registry))
-    registry.register(ToolsSearchTool.new(registry))
+    registry.register(Tools::ToolsListTool.new(registry))
+    registry.register(Tools::ToolsSearchTool.new(registry))
     registry
   end
 

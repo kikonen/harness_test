@@ -6,7 +6,7 @@ require 'tmpdir'
 require 'digest'
 require 'tools/file_patch_tool'
 
-RSpec.describe FilePatchTool do
+RSpec.describe Tools::FilePatchTool do
   def sha_of(path)
     Digest::SHA256.file(path).hexdigest
   end
