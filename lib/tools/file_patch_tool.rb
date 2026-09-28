@@ -117,6 +117,9 @@ class FilePatchTool < Tool
 
     # Detect and normalize line endings so context matching works
     # regardless of whether the file uses CRLF (Windows) or LF.
+    # Also remember whether the file ends with a newline: Ruby's split
+    # drops trailing empty strings, so restore it after join.
+    trailing_nl = content.end_with?("\n")
     crlf    = content.include?("\r\n")
     content = content.gsub("\r\n", "\n") if crlf
     lines   = content.split("\n")
@@ -138,6 +141,7 @@ class FilePatchTool < Tool
     end
 
     new_content = lines.join("\n")
+    new_content += "\n" if trailing_nl
     # Restore the original line-ending style.
     new_content = new_content.gsub("\n", "\r\n") if crlf
 
