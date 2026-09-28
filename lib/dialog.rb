@@ -23,6 +23,11 @@
 # ignored on other choices (bare value returned). A plain number (no
 # note) always returns the bare value.
 #
+# An out-of-range option number (e.g. "5" when only 1..4 exist) is
+# rejected with an explanatory line and the dialog re-prompts, so a
+# mistyped choice is never silently reinterpreted as free text
+# (issue #73). Dismissing with EOF still cancels.
+#
 #   dialog = Dialog.new(
 #     title: 'Access requested (write access): lib/foo.rb',
 #     options: [
@@ -100,6 +105,9 @@ class Dialog
   # extra context on top of the selection, never a replacement for it.
   # With note_on_cancel_only (grant dialogs, issue #79) notes are kept
   # only on the cancel choice; on other choices the bare value is returned.
+  #
+  # An out-of-range option number is rejected with an explanatory line
+  # and the dialog asks again (issue #73).
   def show
     title_lines = @title.split("\n")
     puts
@@ -117,15 +125,7 @@ class Dialog
       end
     end
 
-    note_hint = @note_on_cancel_only ? 'cancel + short note' : '<number> + short note'
-    if @free_text
-      hint = @free_text_prompt.to_s.strip
-      hint = 'type a short free-text answer' if hint.empty?
-      print "             Choice (1..#{@options.size}, #{note_hint}, or #{hint}): "
-    else
-      print "             Choice (1..#{@options.size}, or #{note_hint}): "
-    end
-    $stdout.flush
+    print_choice_prompt
 
     # Skip blank lines: they are usually stale input (e.g. the user
     # pressed Enter an extra time while sending the prompt, and that
@@ -150,20 +150,49 @@ class Dialog
           return keep_note ? [value, m[2].strip] : value
         end
 
-        # Out-of-range number: not a valid choice. Free text when allowed
-        # (the whole line is the answer), cancel otherwise.
-        return @free_text ? [FREE_TEXT, answer] : CANCEL_VALUE
+        # Out-of-range number: it was clearly meant as an option
+        # selection, so reject it and re-prompt instead of silently
+        # treating it as free text (issue #73).
+        reprompt_invalid(m[1])
+        next
       end
 
       # Plain number: the option's value, unchanged.
       if answer.match?(/\A\d+\z/)
         idx = answer.to_i - 1
         return @options[idx].value if idx >= 0 && idx < @options.size
+
+        reprompt_invalid(answer)
+        next
       end
 
       # Not a valid option number: free text when allowed, cancel otherwise.
       return @free_text ? [FREE_TEXT, answer] : CANCEL_VALUE
     end
     CANCEL_VALUE
+  end
+
+  private
+
+  # Print the "Choice (...)" prompt line (shared by the first ask and
+  # re-prompts after an invalid choice).
+  def print_choice_prompt
+    note_hint = @note_on_cancel_only ? 'cancel + short note' : '<number> + short note'
+    if @free_text
+      hint = @free_text_prompt.to_s.strip
+      hint = 'type a short free-text answer' if hint.empty?
+      print "             Choice (1..#{@options.size}, #{note_hint}, or #{hint}): "
+    else
+      print "             Choice (1..#{@options.size}, or #{note_hint}): "
+    end
+    $stdout.flush
+  end
+
+  # Reject an out-of-range option number and ask again (issue #73).
+  # The user can still dismiss the dialog with EOF.
+  def reprompt_invalid(number)
+    puts
+    puts "             invalid choice #{number} (valid: 1..#{@options.size})"
+    print_choice_prompt
   end
 end
