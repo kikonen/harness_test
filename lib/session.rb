@@ -129,12 +129,22 @@ class Session
   end
 
   # Tokens currently used by the session, as reported by the last LLM
-  # response (usage.prompt_tokens). When the API did not report usage,
-  # falls back to a rough estimate of the message-chain size. Returns nil
-  # when there is no conversation yet and nothing to estimate.
+  # response. For multi-iteration turns this is the prompt_tokens of the
+  # LAST LLM call in the turn (each call's prompt already includes the full
+  # history, so it is the true current context size - summing across
+  # iterations would overcount, issue #81). Older stats without that field
+  # fall back to usage.prompt_tokens. When the API did not report usage at
+  # all, falls back to a rough estimate of the message-chain size. Returns
+  # nil when there is no conversation yet and nothing to estimate.
   def context_used
-    if @last_stats && (@last_stats[:usage] || {})[:prompt_tokens].to_i > 0
-      return { tokens: @last_stats[:usage][:prompt_tokens], estimated: false }
+    if @last_stats
+      if @last_stats[:prompt_tokens].to_i > 0
+        return { tokens: @last_stats[:prompt_tokens], estimated: false }
+      end
+      usage = @last_stats[:usage] || {}
+      if usage[:prompt_tokens].to_i > 0
+        return { tokens: usage[:prompt_tokens], estimated: false }
+      end
     end
 
     conversation = @messages[1..]

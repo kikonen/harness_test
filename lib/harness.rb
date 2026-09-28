@@ -160,6 +160,12 @@ class Harness
     loop_warning_injected = false
     loop_hard_break = false
     total_usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+    # Prompt tokens of the LAST LLM call in this turn. Each call's
+    # prompt_tokens already includes the full history (previous turns
+    # plus all earlier tool results), so the last call is the true size
+    # of the current context - summing across iterations would
+    # overcount (issue #81).
+    last_prompt_tokens = 0
     start_time = Time.now
 
     loop do
@@ -174,6 +180,7 @@ class Harness
         total_usage[:prompt_tokens]     += data[:usage][:prompt_tokens]     || 0
         total_usage[:completion_tokens] += data[:usage][:completion_tokens] || 0
         total_usage[:total_tokens]      += data[:usage][:total_tokens]      || 0
+        last_prompt_tokens              = data[:usage][:prompt_tokens].to_i
       end
 
       if message[:tool_calls]
@@ -242,7 +249,8 @@ class Harness
       stats = {
         elapsed_seconds: elapsed,
         iterations:      iteration,
-        usage:           total_usage
+        usage:           total_usage,
+        prompt_tokens:   last_prompt_tokens
       }
 
       # Commit the successful exchange to the session.

@@ -18,6 +18,19 @@ RSpec.describe Session do
       expect(session.context_used).to eq(tokens: 1234, estimated: false)
     end
 
+    it 'prefers the last-call prompt_tokens over the accumulated usage' do
+      # Multi-iteration turn: usage.prompt_tokens is the sum across calls
+      # (overcounts), stats[:prompt_tokens] is the last call only (issue #81).
+      session.add_user('hello')
+      session.add_assistant('hi')
+      session.record_stats(
+        prompt_tokens: 35_000,
+        usage: { prompt_tokens: 65_000, total_tokens: 70_000 }
+      )
+
+      expect(session.context_used).to eq(tokens: 35_000, estimated: false)
+    end
+
     it 'falls back to a rough estimate when usage is missing' do
       session.add_user('a' * 160) # 160 chars -> ~40 tokens at 4 chars/token
       result = session.context_used
