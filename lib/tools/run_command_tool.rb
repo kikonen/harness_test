@@ -85,13 +85,25 @@ module Tools
       choice = Dialog.new(
         title: "The model is requesting to run a shell command:\n" \
                "$ #{command}\ncwd: #{shown} (timeout: #{timeout}s)",
-        options: [Dialog::Option.new(title: 'Allow', value: :allow)]
+        options: [Dialog::Option.new(title: 'Allow', value: :allow)],
+        note_on_cancel_only: true
       ).show
 
       unless choice == :allow
-        puts "  [run.command] ✗ denied by user"
+        # The user may attach a short note to the CANCEL choice only
+        # ("<cancel number> <note>"); the dialog then returns
+        # [CANCEL_VALUE, note]. Unwrap it - the note is feedback on the
+        # denial (issue #79) and is forwarded to the model so it can see
+        # WHY the command was denied (issue #78).
+        note_text = choice.is_a?(Array) ? choice[1] : nil
+        if note_text
+          puts "  [run.command] ✗ denied by user (note: \"#{note_text}\")"
+        else
+          puts "  [run.command] ✗ denied by user"
+        end
         $stdout.flush
-        return "error: user denied executing the command"
+        return Tool.denial_error('error: user denied executing the command',
+                                { status: :denied, note: note_text })
       end
 
       if @options[:dry_run]
