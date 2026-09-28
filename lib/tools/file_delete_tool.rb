@@ -5,67 +5,70 @@ require_relative '../file_list'
 require_relative '../dialog'
 
 # Deletes a file from disk. The user is prompted for confirmation.
-class FileDeleteTool < Tool
-  def initialize(file_list, options)
-    @file_list = file_list
-    @options   = options
-    super(
-      name: 'file.delete',
-      description: 'Deletes a file from disk. ' \
-                   'Paths are relative to the harness working directory. ' \
-                   'The user will be prompted for confirmation before the file is deleted.',
-      parameters: {
-        type: 'object',
-        properties: {
-          path: { type: 'string', description: 'Path of the file to delete (relative to the working directory)' }
-        },
-        required: ['path']
-      }
-    )
-  end
+module Tools
 
-  def execute(args)
-    path  = @file_list.resolve(args['path'])
-    shown = @file_list.display_path(path)
-
-    if @file_list.sensitive?(path)
-      puts "  [file.delete] ✗ #{shown} (blocked: sensitive file)"
-      $stdout.flush
-      return "error: file '#{shown}' is blocked and can never be deleted"
+  class Tools::FileDeleteTool < Tool
+    def initialize(file_list, options)
+      @file_list = file_list
+      @options   = options
+      super(
+        name: 'file.delete',
+        description: 'Deletes a file from disk. ' \
+                     'Paths are relative to the harness working directory. ' \
+                     'The user will be prompted for confirmation before the file is deleted.',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Path of the file to delete (relative to the working directory)' }
+          },
+          required: ['path']
+        }
+      )
     end
 
-    # Deleting a file requires WRITE access (read alone is not enough).
-    unless @file_list.writable?(path)
-      result = @file_list.grant_access(path, :w)
-      return Tool.denial_error("error: access denied for '#{shown}'", result) unless Tool.granted?(result)
-    end
+    def execute(args)
+      path  = @file_list.resolve(args['path'])
+      shown = @file_list.display_path(path)
 
-    unless File.file?(path)
-      puts "  [file.delete] ✗ #{shown} (file does not exist)"
-      $stdout.flush
-      return "error: file '#{shown}' does not exist on disk"
-    end
+      if @file_list.sensitive?(path)
+        puts "  [file.delete] ✗ #{shown} (blocked: sensitive file)"
+        $stdout.flush
+        return "error: file '#{shown}' is blocked and can never be deleted"
+      end
 
-    if @options[:dry_run]
-      puts "  [file.delete] ~ #{shown} (dry run)"
-      $stdout.flush
-      return "DRY RUN: would delete #{shown}"
-    end
+      # Deleting a file requires WRITE access (read alone is not enough).
+      unless @file_list.writable?(path)
+        result = @file_list.grant_access(path, :w)
+        return Tool.denial_error("error: access denied for '#{shown}'", result) unless Tool.granted?(result)
+      end
 
-    choice = Dialog.new(
-      title: "The model is requesting to DELETE a file:\n#{shown}",
-      options: [Dialog::Option.new(title: 'Allow delete', value: :allow)]
-    ).show
+      unless File.file?(path)
+        puts "  [file.delete] ✗ #{shown} (file does not exist)"
+        $stdout.flush
+        return "error: file '#{shown}' does not exist on disk"
+      end
 
-    if choice == :allow
-      File.delete(path)
-      puts "  [file.delete] ✓ #{shown} (deleted)"
-      $stdout.flush
-      "ok: file '#{shown}' has been deleted"
-    else
-      puts "  [file.delete] ✗ #{shown} (denied by user)"
-      $stdout.flush
-      "error: user denied deleting file '#{shown}'"
+      if @options[:dry_run]
+        puts "  [file.delete] ~ #{shown} (dry run)"
+        $stdout.flush
+        return "DRY RUN: would delete #{shown}"
+      end
+
+      choice = Dialog.new(
+        title: "The model is requesting to DELETE a file:\n#{shown}",
+        options: [Dialog::Option.new(title: 'Allow delete', value: :allow)]
+      ).show
+
+      if choice == :allow
+        File.delete(path)
+        puts "  [file.delete] ✓ #{shown} (deleted)"
+        $stdout.flush
+        "ok: file '#{shown}' has been deleted"
+      else
+        puts "  [file.delete] ✗ #{shown} (denied by user)"
+        $stdout.flush
+        "error: user denied deleting file '#{shown}'"
+      end
     end
   end
 end

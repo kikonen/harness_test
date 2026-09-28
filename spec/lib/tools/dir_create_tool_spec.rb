@@ -5,7 +5,7 @@ require 'stringio'
 require 'tmpdir'
 require 'tools/dir_create_tool'
 
-RSpec.describe DirCreateTool do
+RSpec.describe Tools::DirCreateTool do
   it 'forwards the user\'s denial note for the new-dir grant' do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
