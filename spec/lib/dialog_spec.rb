@@ -95,6 +95,24 @@ RSpec.describe Dialog do
       end
     end
 
+    describe 'with note_on_cancel_only (grant dialogs, issue #79)' do
+      let(:dialog) do
+        described_class.new(
+          title: 't', options: options, note_on_cancel_only: true
+        )
+      end
+
+      it 'ignores a note on a non-cancel choice' do
+        stub_stdin("1 seems fine\n")
+        expect(show(dialog)).to eq(:allow)
+      end
+
+      it 'keeps the note on the cancel choice' do
+        stub_stdin("3 no, and because X\n")
+        expect(show(dialog)).to eq([Dialog::CANCEL_VALUE, 'no, and because X'])
+      end
+    end
+
     describe 'with free text enabled' do
       let(:dialog) do
         described_class.new(
@@ -116,8 +134,8 @@ RSpec.describe Dialog do
       end
 
       it 'still returns [value, note] when a number leads' do
-        stub_stdin("2 with caveat\n")
-        expect(show(dialog)).to eq([:deny, 'with caveat'])
+        stub_stdin("3 no, and because X\n")
+        expect(show(dialog)).to eq([Dialog::CANCEL_VALUE, 'no, and because X'])
       end
 
       it 'cancels on EOF' do
