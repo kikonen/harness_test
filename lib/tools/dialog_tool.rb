@@ -14,8 +14,9 @@ require_relative '../dialog'
 # short answer instead of picking an option. The typed text is returned
 # to the model as the response - good for questions that are not black/white.
 #
-# The user may also attach a short NOTE to any choice (e.g. "1 seems fine"):
-# the chosen option's value is still returned, with the note as extra context.
+# The user may also attach a short NOTE to any choice (e.g. "1 seems
+# fine"): the chosen option's value is still returned, with the note as
+# extra context on top of the selection.
 #
 # The VALUE of the selected option (or the typed free-text answer) is
 # returned to the model as the tool result; a cancelled dialog returns

@@ -12,11 +12,16 @@
 # may type their own short answer instead of picking a number, and that
 # text is returned to the caller verbatim.
 #
-# The user may always attach a short NOTE to any choice: they type the
-# option number, whitespace, then the note (e.g. "1 seems fine"). The
-# dialog returns [value, 'seems fine'] so the selection is not lost.
-# A plain number (no note) still returns the bare value, so existing
-# callers keep working unchanged.
+# The user may attach a short NOTE to a choice by typing its option
+# number, whitespace, then the note (e.g. "1 seems fine"). By default
+# the dialog accepts notes on ANY choice and returns
+# [option value, 'seems fine'] so the context is not lost. Grant-style
+# dialogs (access confirmation) pass note_on_cancel_only: true, since a
+# granted choice is final and only a denial carries meaningful feedback
+# (issue #79): there, notes are kept only on the cancel choice (e.g.
+# "3 no, and because X" -> [CANCEL_VALUE, 'no, and because X']) and
+# ignored on other choices (bare value returned). A plain number (no
+# note) always returns the bare value.
 #
 #   dialog = Dialog.new(
 #     title: 'Access requested (write access): lib/foo.rb',
@@ -64,7 +69,10 @@ class Dialog
   #            picking an option (returned as [FREE_TEXT, text]).
   # free_text_prompt: optional hint shown to the user about what kind of
   #            free-text answer is expected.
-  def initialize(title:, options:, note: nil, free_text: false, free_text_prompt: nil)
+  # note_on_cancel_only: restrict notes to the cancel choice only (grant
+  #            dialogs, issue #79). Default false: notes on any choice.
+  def initialize(title:, options:, note: nil, free_text: false, free_text_prompt: nil,
+                 note_on_cancel_only: false)
     raise ArgumentError, 'dialog title must be a non-empty string' if title.to_s.strip.empty?
     unless options.is_a?(Array) && !options.empty?
       raise ArgumentError, 'dialog requires a non-empty array of Dialog::Option'
@@ -78,6 +86,7 @@ class Dialog
     @free_text = free_text ? true : false
     @free_text_prompt = free_text_prompt.to_s.strip.sub(/\Aor\s+/, '')
     @options = options + [Option.new(title: 'Cancel', value: CANCEL_VALUE)]
+    @note_on_cancel_only = note_on_cancel_only ? true : false
   end
 
   # Render the dialog and wait for the user's choice on $stdin.
@@ -85,10 +94,12 @@ class Dialog
   # user types their own answer (free_text dialogs only), or CANCEL_VALUE
   # when the user cancels (or stdin is closed).
   #
-  # The user may attach a short note to ANY choice by typing
+  # The user may attach a short note to a choice by typing
   # "<number> <note>" (e.g. "1 seems fine"): the dialog then returns
   # [option value, 'seems fine'] instead of the bare value - the note is
   # extra context on top of the selection, never a replacement for it.
+  # With note_on_cancel_only (grant dialogs, issue #79) notes are kept
+  # only on the cancel choice; on other choices the bare value is returned.
   def show
     title_lines = @title.split("\n")
     puts
@@ -106,12 +117,13 @@ class Dialog
       end
     end
 
+    note_hint = @note_on_cancel_only ? 'cancel + short note' : '<number> + short note'
     if @free_text
       hint = @free_text_prompt.to_s.strip
       hint = 'type a short free-text answer' if hint.empty?
-      print "             Choice (1..#{@options.size}, <number> + note, or #{hint}): "
+      print "             Choice (1..#{@options.size}, #{note_hint}, or #{hint}): "
     else
-      print "             Choice (1..#{@options.size}, or <number> + short note): "
+      print "             Choice (1..#{@options.size}, or #{note_hint}): "
     end
     $stdout.flush
 
@@ -126,16 +138,21 @@ class Dialog
       answer = line.chomp.strip
       next if answer.empty?
 
-      # "<number> <note>": option selected PLUS a free note on top.
+      # "<number> <note>": an option selected PLUS a free note on top.
+      # Grant dialogs (note_on_cancel_only, issue #79) keep the note only
+      # for a denial - a grant/selection is final there.
       m = answer.match(/\A(\d+)\s+(.*)\z/m)
       if m
         idx = m[1].to_i - 1
         if idx >= 0 && idx < @options.size
-          return [@options[idx].value, m[2].strip]
+          value = @options[idx].value
+          keep_note = !@note_on_cancel_only || value == CANCEL_VALUE
+          return keep_note ? [value, m[2].strip] : value
         end
 
-        # Out-of-range number: not a valid choice. Fall through - free text
-        # when allowed (the whole line is the answer), cancel otherwise.
+        # Out-of-range number: not a valid choice. Free text when allowed
+        # (the whole line is the answer), cancel otherwise.
+        return @free_text ? [FREE_TEXT, answer] : CANCEL_VALUE
       end
 
       # Plain number: the option's value, unchanged.

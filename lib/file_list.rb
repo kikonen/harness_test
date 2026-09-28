@@ -311,12 +311,14 @@ class FileList
     choice = Dialog.new(
       title: "Access requested (#{verb}): #{shown}",
       options: options,
-      note: note
+      note: note,
+      note_on_cancel_only: true
     ).show
 
-    # The user may attach a short note to any choice ("<number> <note>");
-    # the dialog then returns [value, note]. Unwrap it - the note is just
-    # extra context, the selection itself drives the grant.
+    # The user may attach a short note to the CANCEL choice only
+    # ("<cancel number> <note>"); the dialog then returns
+    # [CANCEL_VALUE, note]. Unwrap it - the note is just feedback on the
+    # denial (issue #79), the selection itself drives the grant.
     note_text = choice.is_a?(Array) ? choice[1] : nil
     choice    = choice[0] if choice.is_a?(Array)
     case choice
