@@ -29,6 +29,11 @@ class SessionManager
       puts "  [harness.md reloaded - project rules updated]"
     end
 
+    # Auto-compact BEFORE sending: it must never run after the response,
+    # where it would race with a pending dialog (ui.dialog / grant prompt)
+    # for stdin and swallow the user's answer as a cancel (issue #64).
+    compact_if_due
+
     user_prompt = build_user_prompt(instruction)
 
     if @harness.options[:verbose]
@@ -141,9 +146,6 @@ class SessionManager
       @harness.spinner = nil
     end
 
-    # Silent auto-compaction once the context usage reaches the threshold.
-    maybe_auto_compact
-
     if @harness.options[:verbose]
       @harness.logger.info("--- reasoning ---\n#{response[:reasoning]}")
       @harness.logger.info("--- response ---\n#{response[:content]}")
@@ -153,12 +155,13 @@ class SessionManager
     @harness.print_stats(response[:stats])
   end
 
-  # Silent auto-compaction: when the context window is at/over the configured
-  # threshold, compact the session immediately (mandatory bookkeeping - no
-  # confirmation dialog). Runs best-effort: a failure here must never break
-  # the prompt flow, the next request will simply fail on the server side
-  # and the user can /compact manually.
-  def maybe_auto_compact
+  # Silent auto-compaction, run at the start of the NEXT prompt (see
+  # #run_prompt): when the context window is at/over the configured
+  # threshold, compact the session before sending. This is mandatory
+  # bookkeeping - no confirmation dialog. Runs best-effort: a failure here
+  # must never break the prompt flow, the next request will simply fail on
+  # the server side and the user can /compact manually.
+  def compact_if_due
     return unless @harness.session.auto_compact_due?(@harness.options[:num_ctx] || LLMClient::NUM_CTX, @harness.compact_auto_threshold)
 
     puts "  [context at #{threshold_pct}% of the window - auto-compacting session...]"
