@@ -87,12 +87,6 @@ RSpec.describe Dialog do
         expect(show(described_class.new(title: 't', options: options)))
           .to eq([Dialog::CANCEL_VALUE, 'no, and because X'])
       end
-
-      it 'falls back to cancel for an out-of-range number without free text' do
-        stub_stdin("9 nope\n")
-        expect(show(described_class.new(title: 't', options: options)))
-          .to eq(Dialog::CANCEL_VALUE)
-      end
     end
 
     describe 'with note_on_cancel_only (grant dialogs, issue #79)' do
@@ -141,6 +135,44 @@ RSpec.describe Dialog do
       it 'cancels on EOF' do
         stub_stdin(nil)
         expect(show(dialog)).to eq(Dialog::CANCEL_VALUE)
+      end
+    end
+
+    describe 'out-of-range option numbers (issue #73)' do
+      let(:dialog) { described_class.new(title: 't', options: options) }
+
+      it 're-prompts with an invalid message, then accepts a valid choice' do
+        stub_stdin("9\n", "1\n")
+        out = capture_stdout { expect(show(dialog)).to eq(:allow) }
+        expect(out).to include('invalid choice 9 (valid: 1..3)')
+      end
+
+      it 're-prompts on "<number> <note>" with an out-of-range number' do
+        stub_stdin("9 nope\n", "2\n")
+        out = capture_stdout { expect(show(dialog)).to eq(:deny) }
+        expect(out).to include('invalid choice 9 (valid: 1..3)')
+      end
+
+      it 'still cancels when the user dismisses with EOF' do
+        stub_stdin("9\n", nil)
+        expect(show(dialog)).to eq(Dialog::CANCEL_VALUE)
+      end
+
+      it 're-prompts even in free-text mode (no silent free text)' do
+        dialog = described_class.new(
+          title: 't', options: options, free_text: true, free_text_prompt: 'or type a short note'
+        )
+        stub_stdin("9\n", "1\n")
+        out = capture_stdout { expect(show(dialog)).to eq(:allow) }
+        expect(out).to include('invalid choice 9 (valid: 1..3)')
+      end
+
+      it 'still accepts genuine free text after an invalid number' do
+        dialog = described_class.new(
+          title: 't', options: options, free_text: true, free_text_prompt: 'or type a short note'
+        )
+        stub_stdin("9\n", "something else entirely\n")
+        expect(show(dialog)).to eq([Dialog::FREE_TEXT, 'something else entirely'])
       end
     end
   end
