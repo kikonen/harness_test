@@ -16,7 +16,7 @@ require_relative '../git_runner'
 #               (requires the blob objects to be present in the repo)
 module Tools
 
-  class Tools::GitApplyTool < GitRunner
+  class GitApplyTool < GitRunner
     def initialize(file_list)
       @file_list = file_list
       super(

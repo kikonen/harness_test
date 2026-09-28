@@ -9,7 +9,7 @@ require_relative '../file_list'
 # listed; sensitive files and files without read grants are excluded.
 module Tools
 
-  class Tools::FileListTool < Tool
+  class FileListTool < Tool
     # Safety cap so a too-broad pattern cannot flood the context.
     MAX_RESULTS = 500
 

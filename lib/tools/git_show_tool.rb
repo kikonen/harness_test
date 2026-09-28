@@ -11,7 +11,7 @@ require_relative '../git_runner'
 # A revision may be a commit hash, tag, branch name, or "HEAD~N".
 module Tools
 
-  class Tools::GitShowTool < GitRunner
+  class GitShowTool < GitRunner
     # The well-known empty tree object - used as the "before" side when
     # showing the root commit (which has no parent).
     EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'.freeze

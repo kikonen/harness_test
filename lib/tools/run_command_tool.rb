@@ -20,7 +20,7 @@ require_relative '../dialog'
 #     it goes into the LLM context window.
 module Tools
 
-  class Tools::RunCommandTool < Tool
+  class RunCommandTool < Tool
     DEFAULT_TIMEOUT = 60    # seconds
     MAX_TIMEOUT     = 300   # hard cap for the `timeout` parameter
     DEFAULT_LIMIT   = 200   # output lines

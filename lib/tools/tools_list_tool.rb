@@ -7,7 +7,7 @@ require_relative '../tool'
 # tool is instantiated, so it cannot be required at load time).
 module Tools
 
-  class Tools::ToolsListTool < Tool
+  class ToolsListTool < Tool
     def initialize(registry)
       @registry = registry
       super(

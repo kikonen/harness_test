@@ -7,7 +7,7 @@ require_relative '../git_runner'
 # a function name, or a configuration value was added or removed.
 module Tools
 
-  class Tools::GitGrepTool < GitRunner
+  class GitGrepTool < GitRunner
     # Default number of commits to scan when searching history.
     DEFAULT_MAX_COUNT = 300
 

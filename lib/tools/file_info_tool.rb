@@ -7,7 +7,7 @@ require_relative '../file_list'
 # and line count. Does not read the file contents.
 module Tools
 
-  class Tools::FileInfoTool < Tool
+  class FileInfoTool < Tool
     def initialize(file_list)
       @file_list = file_list
       super(

@@ -8,7 +8,7 @@ require 'fileutils'
 # the destination must not already exist on disk.
 module Tools
 
-  class Tools::FileCopyTool < Tool
+  class FileCopyTool < Tool
     def initialize(file_list, options)
       @file_list = file_list
       @options   = options

@@ -44,7 +44,7 @@ require_relative '../file_list'
 #   - The SHA check protects against concurrent modifications
 module Tools
 
-  class Tools::FilePatchTool < Tool
+  class FilePatchTool < Tool
     SEARCH_WINDOW = 50  # lines to search above/below the declared position
 
     def initialize(file_list, options)

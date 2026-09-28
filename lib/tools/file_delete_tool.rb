@@ -7,7 +7,7 @@ require_relative '../dialog'
 # Deletes a file from disk. The user is prompted for confirmation.
 module Tools
 
-  class Tools::FileDeleteTool < Tool
+  class FileDeleteTool < Tool
     def initialize(file_list, options)
       @file_list = file_list
       @options   = options
