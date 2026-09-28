@@ -4,7 +4,7 @@ require_relative '../tool'
 
 module Tools
 
-  class Tools::EchoTool < Tool
+  class EchoTool < Tool
     def initialize
       super(
         name: 'test.echo',

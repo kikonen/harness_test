@@ -5,7 +5,7 @@ require_relative '../file_list'
 
 module Tools
 
-  class Tools::FileReadTool < Tool
+  class FileReadTool < Tool
     def initialize(file_list)
       @file_list = file_list
       super(

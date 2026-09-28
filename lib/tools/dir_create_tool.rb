@@ -10,7 +10,7 @@ require 'fileutils'
 # no-op (success).
 module Tools
 
-  class Tools::DirCreateTool < Tool
+  class DirCreateTool < Tool
     def initialize(file_list, options = {})
       @file_list = file_list
       @options   = options

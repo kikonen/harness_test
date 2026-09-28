@@ -5,7 +5,7 @@ require 'time'
 
 module Tools
 
-  class Tools::GetTimeTool < Tool
+  class GetTimeTool < Tool
     def initialize
       super(
         name: 'time.now',

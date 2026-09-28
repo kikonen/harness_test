@@ -4,7 +4,7 @@ require_relative '../tool'
 
 module Tools
 
-  class Tools::NotifyTool < Tool
+  class NotifyTool < Tool
     def initialize
       super(
         name: 'ui.notify',

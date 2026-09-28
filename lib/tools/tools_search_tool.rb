@@ -8,7 +8,7 @@ require_relative '../tool'
 # cannot be required at load time).
 module Tools
 
-  class Tools::ToolsSearchTool < Tool
+  class ToolsSearchTool < Tool
     def initialize(registry)
       @registry = registry
       super(

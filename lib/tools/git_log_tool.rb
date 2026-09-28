@@ -8,7 +8,7 @@ require_relative '../git_runner'
 # commits), filter by file path, or include the full diff per commit.
 module Tools
 
-  class Tools::GitLogTool < GitRunner
+  class GitLogTool < GitRunner
     def initialize(file_list)
       @file_list = file_list
       super(

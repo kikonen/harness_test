@@ -9,7 +9,7 @@ require_relative '../git_runner'
 # given, the diff is against that revision instead of the working tree.
 module Tools
 
-  class Tools::GitDiffTool < GitRunner
+  class GitDiffTool < GitRunner
     def initialize(file_list)
       @file_list = file_list
       super(

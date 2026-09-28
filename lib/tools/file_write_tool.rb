@@ -6,7 +6,7 @@ require 'fileutils'
 
 module Tools
 
-  class Tools::FileWriteTool < Tool
+  class FileWriteTool < Tool
     def initialize(file_list, options)
       @file_list = file_list
       @options   = options

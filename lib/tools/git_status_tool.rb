@@ -7,7 +7,7 @@ require_relative '../git_runner'
 # status code (e.g. " M lib/foo.rb", "?? new_file.txt").
 module Tools
 
-  class Tools::GitStatusTool < GitRunner
+  class GitStatusTool < GitRunner
     def initialize(file_list)
       @file_list = file_list
       super(

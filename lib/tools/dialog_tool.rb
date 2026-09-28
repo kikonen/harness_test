@@ -22,7 +22,7 @@ require_relative '../dialog'
 # the standard value ":cancelled".
 module Tools
 
-  class Tools::DialogTool < Tool
+  class DialogTool < Tool
     MAX_OPTIONS = 10
 
     def initialize

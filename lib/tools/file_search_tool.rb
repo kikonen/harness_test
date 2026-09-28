@@ -9,7 +9,7 @@ require_relative '../file_list'
 # searched.
 module Tools
 
-  class Tools::FileSearchTool < Tool
+  class FileSearchTool < Tool
     MAX_RESULTS = 200
     MAX_FILES   = 5000
 

@@ -11,7 +11,7 @@ require_relative '../dialog'
 # the directory is deleted.
 module Tools
 
-  class Tools::DirDeleteTool < Tool
+  class DirDeleteTool < Tool
     def initialize(file_list, options)
       @file_list = file_list
       @options   = options
