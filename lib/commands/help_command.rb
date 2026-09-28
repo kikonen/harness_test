@@ -19,6 +19,7 @@ module Commands
           /session       Show a summary of the current session
           /session-clear Reset the session (drop all conversation messages)
           /compact       Compact the session (summarize conversation to free context)
+          /ctx           Show current context usage (tokens, %, headroom, auto-compact status)
           /reload        Reload harness.md (project rules) into the system prompt
           /save          Save the session (conversation + access list) to .harness/sessions/
           /resume <id>   Resume a saved session by its id (see /sessions)

@@ -278,15 +278,39 @@ class Harness
 
   # Context-usage indicator, e.g. "🧠 ctx 42133/65536 (64%)". Shown on every
   # response so the user always sees how much of the context window is used.
-  # Uses the last reported usage when available, otherwise a rough estimate.
+  # Also printed above the prompt at turn start (see CLI#run) so it is
+  # visible even when idle. Uses the last reported usage when available,
+  # otherwise a rough estimate (marked with "~"). Returns nil when there
+  # is no conversation yet (nothing to measure).
   def context_indicator
     window = options[:num_ctx] || LLMClient::NUM_CTX
     used = @session.context_used
     return nil if used.nil?
 
-    pct = (used[:tokens].to_f / window * 100).round
+    pct = @session.context_pct(window)
     label = used[:estimated] ? '~' : ''
     "🧠 ctx #{label}#{used[:tokens]}/#{window} (#{pct}%)"
+  end
+
+  # Multi-line context report for the /ctx command: usage, window size,
+  # headroom and whether auto-compaction is due at the current threshold.
+  def context_report
+    window = options[:num_ctx] || LLMClient::NUM_CTX
+    used   = @session.context_used
+    return "No conversation yet - nothing to measure." if used.nil?
+
+    pct      = @session.context_pct(window)
+    headroom = [window - used[:tokens], 0].max
+    due      = @session.auto_compact_due?(window, compact_auto_threshold)
+
+    status = due ? 'due' : 'not due'
+    lines = []
+    lines << "🧠 Context usage"
+    lines << "  Used:        #{used[:tokens]} tokens (#{pct}% of #{window})"
+    lines << "  Source:      #{used[:estimated] ? 'estimate (~4 chars/token)' : 'last LLM response'}"
+    lines << "  Headroom:    #{headroom} tokens"
+    lines << "  Auto-compact: #{status} (threshold #{compact_auto_threshold}%)"
+    lines.join("\n")
   end
 
   private
