@@ -23,9 +23,10 @@ RSpec.describe SessionManager do
         @client  = client
         @options = { num_ctx: 65_536 }
         @spinner = nil
+        @logger  = Logger.new(File::NULL)
       end
 
-      attr_reader :options
+      attr_reader :options, :logger
 
       def compact_recent_messages
         Session::COMPACT_RECENT_MESSAGES
@@ -47,6 +48,14 @@ RSpec.describe SessionManager do
 
       def print_stats(_stats)
         # no-op in specs
+      end
+
+      # Mirrors Harness#context_indicator (the real one formats the same).
+      def context_indicator
+        used = @session.context_used
+        return nil if used.nil?
+
+        "🧠 ctx #{used[:estimated] ? '~' : ''}#{used[:tokens]}/#{@options[:num_ctx]} (0%)"
       end
     end.new(session, client)
   end
@@ -110,6 +119,31 @@ RSpec.describe SessionManager do
 
       expect { manager.run_prompt('next instruction') }.not_to raise_error
       expect(client).to have_received(:chat)
+    end
+  end
+
+  describe 'resulting context size after compaction (issue #70)' do
+    it 'reports the estimated context size after compaction' do
+      session.add_user('hello')
+      session.add_assistant('hi there')
+
+      line = harness.context_indicator
+
+      expect(line).to match(/\A🧠 ctx ~\d+\/65536 \(\d+%\)\z/)
+    end
+
+    it 'is nil when there is nothing to measure' do
+      expect(harness.context_indicator).to be_nil
+    end
+
+    it 'is included in the compact_session result hash' do
+      4.times { |i| session.add_user("msg #{i}"); session.add_assistant("reply #{i}") }
+      allow(client).to receive(:chat) do
+        { choices: [{ message: { content: 'summary text' } }] }
+      end
+
+      result = manager.compact_session
+      expect(result[:context_line]).to match(/🧠 ctx ~\d+\/65536 \(\d+%\)/)
     end
   end
 end

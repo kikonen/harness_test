@@ -119,7 +119,10 @@ class SessionManager
       "session compacted: #{before} to #{after} messages " \
       "(summary: #{summary_text.length} chars, #{retained} recent retained)"
     )
-    { summary: summary_text, before: before, after: after, retained: retained }
+    # issue #70: report the resulting context size so the user can verify
+    # that compaction freed space without burning tokens on a follow-up.
+    { summary: summary_text, before: before, after: after, retained: retained,
+      context_line: @harness.context_indicator }
   end
 
   # Sends the session chain to the LLM and prints the response.
@@ -167,6 +170,7 @@ class SessionManager
     puts "  [context at #{threshold_pct}% of the window - auto-compacting session...]"
     result = compact_session
     puts "  [auto-compact done: #{result[:before]} -> #{result[:after]} messages]"
+    puts "  #{result[:context_line]}" if result[:context_line]
   rescue => e
     puts "  [auto-compact failed: #{e.message} - try /compact manually]"
   end
