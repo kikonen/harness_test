@@ -95,17 +95,20 @@ module Tools
 
       # Not in allowlist - ask the user.
       prefix = CommandAllowlist.extract_prefix(command)
+      options = [Dialog::Option.new(title: 'Allow', value: :allow)]
+      # Compound commands (operators, pipes, substitutions) are never
+      # saved as prefixes - offering "Always allow" for them would be
+      # misleading, so only show it when a prefix can actually be stored.
+      options << Dialog::Option.new(
+        title: "Always allow '#{prefix}'",
+        description: 'Future commands starting with this prefix will run without asking.',
+        value: :always_allow
+      ) unless prefix.empty?
+
       choice = Dialog.new(
         title: "The model is requesting to run a shell command:\n" \
                "$ #{command}\ncwd: #{shown} (timeout: #{timeout}s)",
-        options: [
-          Dialog::Option.new(title: 'Allow', value: :allow),
-          Dialog::Option.new(
-            title: "Always allow '#{prefix}'",
-            description: 'Future commands starting with this prefix will run without asking.',
-            value: :always_allow
-          )
-        ],
+        options: options,
         note_on_cancel_only: true
       ).show
 
