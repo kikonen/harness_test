@@ -8,6 +8,8 @@ source 'https://rubygems.org'
 gem 'logger'
 gem 'fiddle'
 
+gem 'racc'
+
 gem 'debug'
 
 group :development do
