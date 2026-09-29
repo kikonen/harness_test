@@ -457,6 +457,33 @@ RSpec.describe CommandAllowlist do
     end
   end
 
+  describe '#already_allowed?' do
+    it 'returns true for a stored prefix' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(dir)
+        list.add('tail')
+        expect(list.already_allowed?('tail')).to be true
+      end
+    end
+
+    it 'returns false for an unknown prefix' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(dir)
+        list.add('tail')
+        expect(list.already_allowed?('git log')).to be false
+      end
+    end
+
+    it 'returns false for empty input' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(dir)
+        list.add('tail')
+        expect(list.already_allowed?('')).to be false
+        expect(list.already_allowed?('   ')).to be false
+      end
+    end
+  end
+
   describe '#remove' do
     it 'removes a saved prefix' do
       Dir.mktmpdir do |dir|

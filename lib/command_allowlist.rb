@@ -160,6 +160,11 @@ class CommandAllowlist
     save
   end
 
+  # True when the exact prefix is already stored in the allowlist.
+  def already_allowed?(prefix)
+    !prefix.to_s.strip.empty? && @prefixes.include?(prefix.strip)
+  end
+
   # Remove a previously saved prefix and persist.
   def remove(prefix)
     before = @prefixes.dup

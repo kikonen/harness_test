@@ -95,6 +95,50 @@ RSpec.describe Tools::RunCommandTool do
       end
     end
 
+    it 'marks already-allowed prefixes with (*) in the option (issue #94)' do
+      Dir.mktmpdir do |dir|
+        # Pre-seed the allowlist file BEFORE the tool is built.
+        FileUtils.mkdir_p(File.join(dir, '.harness'))
+        File.write(File.join(dir, '.harness', 'allowed_commands.yml'), YAML.dump(['tail']))
+
+        list = FileList.new(workdir: dir)
+        tool = described_class.new(list, {})
+
+        allow($stdin).to receive(:gets).and_return("1\n", nil)
+
+        orig_stdout = $stdout
+        $stdout = StringIO.new
+        tool.execute('command' => 'git log --oneline | tail -5')
+        out = $stdout.string
+        $stdout = orig_stdout
+
+        # "git log" is new, "tail" is already allowed -> starred.
+        expect(out).to include("Always allow 'git log', 'tail' (*)")
+      end
+    end
+
+    it 'reports which prefixes were already allowed on save (issue #94)' do
+      Dir.mktmpdir do |dir|
+        # Pre-seed the allowlist file BEFORE the tool is built.
+        FileUtils.mkdir_p(File.join(dir, '.harness'))
+        File.write(File.join(dir, '.harness', 'allowed_commands.yml'), YAML.dump(['tail']))
+
+        list = FileList.new(workdir: dir)
+        tool = described_class.new(list, {})
+
+        allow($stdin).to receive(:gets).and_return("2\n", nil)
+
+        orig_stdout = $stdout
+        $stdout = StringIO.new
+        tool.execute('command' => 'git log --oneline | tail -5')
+        out = $stdout.string
+        $stdout = orig_stdout
+
+        expect(out).to include("always-allowed: git log (saved to allowlist)")
+        expect(out).to include('already allowed: tail')
+      end
+    end
+
     it 'notes that "Always allow" only covers simple invocations' do
       Dir.mktmpdir do |dir|
         list = FileList.new(workdir: dir)
