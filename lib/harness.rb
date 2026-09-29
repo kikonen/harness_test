@@ -257,6 +257,9 @@ class Harness
       # Commit the successful exchange to the session.
       @session.add_assistant(message[:content])
       @session.record_stats(stats)
+      # issue #98: keep the reasoning of the last response so it can be
+      # shown on demand with /reasoning (it is only logged when verbose).
+      @session.record_reasoning(message[:reasoning])
 
       return {
         reasoning: message[:reasoning],

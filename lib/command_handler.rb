@@ -15,6 +15,7 @@ require_relative 'commands/ctx_command'
 require_relative 'commands/reload_command'
 require_relative 'commands/save_command'
 require_relative 'commands/resume_command'
+require_relative 'commands/reasoning_command'
 require_relative 'commands/sessions_command'
 require_relative 'commands/tools_command'
 require_relative 'commands/models_command'
@@ -39,6 +40,7 @@ class CommandHandler
     'ctx'           => Commands::CtxCommand,
     'reload'        => Commands::ReloadCommand,
     'save'          => Commands::SaveCommand,
+    'reasoning'     => Commands::ReasoningCommand,
     'resume'        => Commands::ResumeCommand,
     'sessions'      => Commands::SessionsCommand,
     'tools'         => Commands::ToolsCommand,
