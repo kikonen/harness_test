@@ -83,6 +83,19 @@ commands. Multiline input: paste a block, or end a line with `\`.
 Keys: `Ctrl+C` cancel/interrupt, `Ctrl+D` quit (empty prompt),
 Up/Down browse history.
 
+## Regenerating the shell parser
+
+The shell command allowlist is built on a Racc grammar:
+`lib/shell_parser.y` is the source, and `lib/shell_parser.rb` is generated
+from it (do not edit the `.rb` directly). After changing the grammar,
+regenerate with:
+
+```bash
+racc -o lib/shell_parser.rb lib/shell_parser.y
+```
+
+(racc is already in the Gemfile, so `bundle install` provides it.)
+
 ## Commands
 
 | Command | Description |
@@ -99,7 +112,7 @@ Up/Down browse history.
 | `/sessions` | List saved sessions |
 | `/resume <id>` | Restore a saved session |
 | `/tools` | List available tools |
-| `/models` | List configured models (default and active marked) |
+| `/models` | Show configured models (default and active marked) |
 | `/model [name]` | Show or switch the active model |
 | `/help` | Show command help |
 | `/exit` | Quit (auto-saves the session) |
@@ -162,6 +175,8 @@ lib/llm_client.rb   # HTTP, retries, request building
 lib/session*.rb     # conversation state, save/resume/compact
 lib/file_list.rb    # access grants (read/write, files/dirs)
 lib/git_runner.rb   # safe git invocation base for the git tools
+lib/shell_tokenizer.rb  # StringScanner lexer for shell commands
+lib/shell_parser.y  # Racc grammar source (regenerate .rb with racc)
 lib/command_handler.rb + lib/commands/*.rb  # one class per /command
 lib/tools/*.rb      # one file per tool
 lib/system_prompt.txt                     # built-in system prompt
