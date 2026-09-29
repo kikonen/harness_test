@@ -16,70 +16,212 @@ require 'fileutils'
 #   - bundle exec rspec
 #
 # SECURITY MODEL:
-#   A command may be auto-approved only if it is a PIPELINE of SIMPLE
-#   commands: segments separated by `|`, each of which contains no shell
-#   operators, substitutions, redirects, or subshells. Rationale:
-#     - Pipes only connect stdout -> stdin; they do not execute extra code.
-#       `A | B` is safe iff A and B are both safe.
-#     - Chaining (`&&`, `||`, `;`), redirects (`<`/`>`), substitutions
-#       (`$(...)`, backticks), subshells (`(...)`) can run arbitrary extra
-#       commands or read/write files, so they are NEVER auto-approved and
-#       can never be saved as a prefix.
+#   A command may be auto-approved only if it can be decomposed into
+#   SIMPLE segments separated by shell operators that do not execute
+#   hidden code. Supported separators (quote-aware):
+#     |    pipe          (stdout -> stdin)
+#     &&   and-list      (next runs only if previous succeeded)
+#     ||   or-list       (next runs only if previous failed)
+#     ;    list sep      (next runs unconditionally)
+#   Each segment must be a "simple command": no file redirects,
+#   substitutions, subshells, or background operators. Rationale:
+#     - The separators above only control execution ORDER or wire
+#       stdout->stdin; they do not inject code.
+#     - File redirects (<, >), substitutions ($(, `), subshells (()),
+#       and background (&) can read/write files or run arbitrary code,
+#       so a segment containing them is NEVER auto-approved and its
+#       prefix can never be saved.
 #   Quotes are NOT in the blocklist: they only affect argument splitting,
-#   not what runs (e.g. `ls "my dir"` is still just `ls`).
+#   not what runs. Operators inside quotes are literal characters.
 #
 class CommandAllowlist
   FILENAME = 'allowed_commands.yml'
 
   # Maximum number of tokens considered for a single command's prefix.
-  # Capped at 3 so we never accidentally allow an entire command family
-  # (e.g. saving "bundle exec" would auto-approve "bundle exec rake deploy").
   MAX_PREFIX_TOKENS = 3
 
   # A token that "looks like a subcommand": lowercase alphanumeric, starts
-  # with a letter. Distinguishes subcommands (status, log, exec, pr, view)
-  # from arguments (-la, --oneline, main, 68, spec/foo_spec.rb).
+  # with a letter. Distinguishes subcommands (status, log, exec) from
+  # arguments (-la, --oneline, main, 68, spec/foo_spec.rb).
   SUBCOMMAND_TOKEN = /\A[a-z][a-z0-9]*\z/
 
-  # Shell metacharacters that make a SINGLE command unsafe to auto-approve:
-  # chaining (`&`, `;`), redirects (`<`, `>`), substitutions (`$`, backtick),
-  # subshells (`(`, `)`), escaped chars (backslash), newlines.
-  # NOTE: pipe `|` is deliberately NOT here - it is treated as a safe
-  # pipeline separator and each segment is validated on its own.
-  UNSAFE_METACHARS = /[&;<>()`$\\\n]/
-
-  # fd-to-fd redirects like `2>&1`, `1>&2`, `3>&1` are harmless: they only
-  # swap stderr/stdout within the same process, no file I/O. Stripped
-  # before the metachar check so pipelines like
-  # `bundle exec rspec 2>&1 | grep x` can be auto-approved.
+  # fd-to-fd redirects like `2>&1`, `1>&2` are harmless: they only swap
+  # stderr/stdout within the same process, no file I/O. Stripped before
+  # the safety check so pipelines like `bundle exec rspec 2>&1 | grep x`
+  # can be auto-approved.
   FD_REDIRECT = /\b\d+>&\d+\b/
 
-  # True when the command, after removing harmless fd-to-fd redirects,
-  # contains no unsafe metacharacters.
-  def self.simple_command?(command)
-    cleaned = command.to_s.gsub(FD_REDIRECT, '')
-    !UNSAFE_METACHARS.match?(cleaned)
-  end
+  # ------------------------------------------------------------------
+  # Quote-aware shell splitting
+  # ------------------------------------------------------------------
 
-  # Extract the command prefix from a single simple command string.
-  # The prefix is the leading sequence of subcommand-looking tokens, up to
-  # MAX_PREFIX_TOKENS. Stops at the first argument-looking token (flag,
-  # path, number, etc.).
+  # Split a command string into segments using quote-aware parsing.
+  # Recognized separators (only when OUTSIDE quotes):
+  #   |, ||, |&, &&, ;
+  # Returns an array of trimmed, non-empty segment strings.
   #
   # Examples:
-  #   "ls -la lib"              => "ls"
-  #   "git status"              => "git status"
-  #   "git log --oneline -5"    => "git log"
-  #   "bundle exec rspec spec/" => "bundle exec rspec"
-  #   "gh pr view 68"           => "gh pr view"
-  def self.extract_prefix(command)
-    command = command.to_s.strip
-    return '' unless simple_command?(command)
+  #   "ls | grep x"                          => ["ls", "grep x"]
+  #   "echo hi && pwd"                       => ["echo hi", "pwd"]
+  #   'grep -i "fix\\|feat"'                 => ['grep -i "fix\\|feat"]  (one segment)
+  #   'echo "a; b" && ls'                    => ['echo "a; b"', "ls"]
+  def self.split_segments(command)
+    segments = []
+    current  = +''
+    i        = 0
+    len      = command.to_s.length
 
-    # Strip harmless fd-to-fd redirects so they don't break the prefix.
-    cleaned = command.gsub(FD_REDIRECT, '')
+    while i < len
+      ch = command[i]
+
+      case ch
+      when "'"
+        # Single-quoted: consume until closing '
+        current << ch
+        i += 1
+        while i < len && command[i] != "'"
+          current << command[i]
+          i += 1
+        end
+        current << command[i] if i < len
+        i += 1
+
+      when '"'
+        # Double-quoted: consume until unescaped "
+        current << ch
+        i += 1
+        while i < len
+          if command[i] == '\\' && i + 1 < len
+            current << command[i] << command[i + 1]
+            i += 2
+          elsif command[i] == '"'
+            current << command[i]
+            i += 1
+            break
+          else
+            current << command[i]
+            i += 1
+          end
+        end
+
+      when '&'
+        if command[i, 2] == '&&'
+          segments << current
+          current = +''
+          i += 2
+        else
+          current << ch
+          i += 1
+        end
+
+      when '|'
+        # Handle ||, |&, and plain |
+        if command[i, 2] == '||' || command[i, 2] == '|&'
+          segments << current
+          current = +''
+          i += 2
+        else
+          segments << current
+          current = +''
+          i += 1
+        end
+
+      when ';'
+        segments << current
+        current = +''
+        i += 1
+
+      when '\\'
+        # Escaped char outside quotes: consume as literal (not a separator)
+        current << ch
+        i += 1
+        if i < len
+          current << command[i]
+          i += 1
+        end
+
+      else
+        current << ch
+        i += 1
+      end
+    end
+
+    segments << current
+    segments.map(&:strip).reject(&:empty?)
+  end
+
+  # ------------------------------------------------------------------
+  # Per-segment safety check (quote-aware)
+  # ------------------------------------------------------------------
+
+  # True when a single segment contains no dangerous shell constructs
+  # outside of quotes. Dangerous: file redirects (<, >), background (&),
+  # substitutions ($, backtick), subshells ((), )).
+  # fd-to-fd redirects (2>&1) are stripped first as they are harmless.
+  def self.segment_safe?(segment)
+    cleaned = segment.to_s.gsub(FD_REDIRECT, '')
+    i   = 0
+    len = cleaned.length
+
+    while i < len
+      ch = cleaned[i]
+      case ch
+      when "'"
+        i += 1
+        while i < len && cleaned[i] != "'"
+          i += 1
+        end
+        i += 1
+
+      when '"'
+        i += 1
+        while i < len
+          if cleaned[i] == '\\'
+            i += 2
+          elsif cleaned[i] == '"'
+            i += 1
+            break
+          else
+            i += 1
+          end
+        end
+
+      when '\\'
+        # Escaped char: skip both (literal, not an operator)
+        i += 2
+
+      when '<', '>', '&', '$', '`', '(', ')'
+        return false
+
+      else
+        i += 1
+      end
+    end
+
+    true
+  end
+
+  # Backward-compatible: true when the entire command is a single simple
+  # segment with no operators at all.
+  def self.simple_command?(command)
+    segments = split_segments(command)
+    segments.size == 1 && segment_safe?(segments[0])
+  end
+
+  # ------------------------------------------------------------------
+  # Prefix extraction
+  # ------------------------------------------------------------------
+
+  # Extract the command prefix from a single safe segment string.
+  # The prefix is the leading sequence of subcommand-looking tokens, up to
+  # MAX_PREFIX_TOKENS. Stops at the first argument-looking token.
+  def self.extract_prefix(segment)
+    segment = segment.to_s.strip
+    return '' unless segment_safe?(segment)
+
+    cleaned = segment.gsub(FD_REDIRECT, '')
     tokens  = cleaned.split(/\s+/).reject(&:empty?)
-    prefix = []
+    prefix  = []
     tokens.each do |tok|
       break if prefix.size >= MAX_PREFIX_TOKENS
       break unless SUBCOMMAND_TOKEN.match?(tok)
@@ -88,26 +230,29 @@ class CommandAllowlist
     prefix.join(' ')
   end
 
-  # Extract the set of command prefixes that make up a command, treating
-  # pipes as safe separators. Returns [] when ANY segment is not a simple
-  # command (chaining, redirects, substitutions, subshells) or when no
+  # Extract the set of command prefixes that make up a command.
+  # Splits on |, &&, ||, ; (quote-aware). Returns [] when ANY segment is
+  # not safe (redirects, substitutions, subshells, background) or when no
   # segment yields a prefix.
   #
   # Examples:
-  #   "bundle exec rspec | grep -B2 x | head -30" => ["bundle exec rspec", "grep", "head"]
-  #   "ls -la"                                    => ["ls"]
-  #   "echo hi && rm -rf /"                       => []
+  #   "bundle exec rspec | grep x | head -30" => ["bundle exec rspec", "grep", "head"]
+  #   "git log --oneline | grep fix && echo done" => ["git log", "grep", "echo"]
+  #   "ls > out.txt"                         => []
+  #   "echo $(whoami)"                       => []
   def self.extract_all_prefixes(command)
-    segments = command.to_s.strip.split('|')
-    return [] unless segments.all? do |seg|
-      seg = seg.strip
-      !seg.empty? && simple_command?(seg)
-    end
+    segments = split_segments(command)
+    return [] if segments.empty?
+    return [] unless segments.all? { |seg| segment_safe?(seg) }
 
     segments.map { |seg| extract_prefix(seg) }
            .uniq
            .select { |p| !p.empty? }
   end
+
+  # ------------------------------------------------------------------
+  # Persistence & matching
+  # ------------------------------------------------------------------
 
   attr_reader :prefixes
 
@@ -117,14 +262,15 @@ class CommandAllowlist
     @prefixes = load
   end
 
-  # True when every pipe-segment of the command matches a stored prefix.
-  # Commands containing unsafe metacharacters (chaining, redirects,
-  # substitutions, subshells) are never auto-approved.
+  # True when every segment of the command matches a stored prefix.
   def allowed?(command)
     return false if @prefixes.empty?
     return false if command.to_s.strip.empty?
 
-    segments = command.to_s.strip.split('|')
+    segments = self.class.split_segments(command)
+    return false if segments.empty?
+    return false unless segments.all? { |seg| self.class.segment_safe?(seg) }
+
     segments.all? { |seg| segment_allowed?(seg) }
   end
 
@@ -147,14 +293,13 @@ class CommandAllowlist
 
   private
 
-  # A single pipeline segment is allowed when it is a simple command AND
-  # its leading tokens match one of the stored prefixes.
+  # A single segment is allowed when it is safe AND its leading tokens
+  # match one of the stored prefixes.
   def segment_allowed?(segment)
     segment = segment.strip
     return false if segment.empty?
-    return false unless CommandAllowlist.simple_command?(segment)
+    return false unless self.class.segment_safe?(segment)
 
-    # Strip harmless fd-to-fd redirects so they don't break token matching.
     cleaned = segment.gsub(FD_REDIRECT, '')
     tokens  = cleaned.split(/\s+/).reject(&:empty?)
     @prefixes.any? do |prefix|
