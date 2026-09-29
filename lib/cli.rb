@@ -228,9 +228,9 @@ class CLI
     end
 
     access = @file_list.accessible_paths
-    labels = { both: 'Read + write', read: 'Read only', write: 'Write only' }
+    labels = { both: 'Read + write', read: 'Read only', write: 'Write only', delete: 'Delete' }
 
-    %i[both read write].each do |mode|
+    %i[both read write delete].each do |mode|
       section = access[mode]
       files   = section[:files]
       dirs    = section[:dirs]

@@ -66,6 +66,7 @@ module Commands
       case mode
       when :r then 'read'
       when :w then 'write'
+      when :d then 'delete'
       else 'read+write'
       end
     end

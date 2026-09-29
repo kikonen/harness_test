@@ -2,13 +2,12 @@
 
 require_relative '../tool'
 require_relative '../file_list'
-require_relative '../dialog'
 
 # Deletes an EMPTY directory from disk. Non-empty directories are rejected
 # (use file.delete to remove their contents first) - there is deliberately
 # no recursive deletion. The path must reside under the working directory
-# and must not be sensitive. The user is prompted for confirmation before
-# the directory is deleted.
+# and must not be sensitive. Requires a DELETE access grant (its own mode,
+# independent from read/write - issue #92).
 module Tools
 
   class DirDeleteTool < Tool
@@ -21,7 +20,7 @@ module Tools
                      'remove their contents first (there is no recursive deletion). ' \
                      'Paths outside the working directory require explicit user approval. ' \
                      'Paths are relative to the harness working directory. ' \
-                     'The user will be prompted for confirmation before the directory is deleted.',
+                     'Deleting requires a DELETE access grant (its own mode, independent from read/write).',
         parameters: {
           type: 'object',
           properties: {
@@ -57,15 +56,16 @@ module Tools
         return "error: directory '#{shown}' is not empty (#{entries.size} entries) - remove its contents first; recursive deletion is not supported"
       end
 
-      # Deleting a directory requires WRITE access to the PARENT directory,
-      # because an entry is removed FROM the parent - unlike dir.create, a
-      # grant on the target itself is not enough here.
+      # Deleting a directory requires a DELETE grant (its own mode, separate
+      # from read/write - issue #92). A grant on the target directory itself
+      # or on its parent (the entry is removed FROM the parent) both suffice;
+      # prefer the more granular target-first.
       parent = File.dirname(path)
-      unless @file_list.writable?(parent)
+      unless @file_list.deletable?(path) || @file_list.deletable?(parent)
         purpose = "to delete directory '#{shown}'"
-        result = @file_list.grant_access(parent, :w, purpose: purpose)
+        result  = @file_list.grant_access(path, :d, purpose: purpose)
         return Tool.denial_error(
-          "error: write access denied for '#{@file_list.display_path(parent)}'", result
+          "error: delete access denied for '#{@file_list.display_path(path)}'", result
         ) unless Tool.granted?(result)
       end
 
@@ -75,22 +75,10 @@ module Tools
         return "DRY RUN: would delete empty directory #{shown}"
       end
 
-      # Security: prompt the user for confirmation.
-      choice = Dialog.new(
-        title: "The model is requesting to DELETE an empty directory:\n#{shown}",
-        options: [Dialog::Option.new(title: 'Allow delete', value: :allow)]
-      ).show
-
-      if choice == :allow
-        Dir.rmdir(path)
-        puts "  [dir.delete] ✓ #{shown} (deleted)"
-        $stdout.flush
-        "ok: empty directory '#{shown}' has been deleted"
-      else
-        puts "  [dir.delete] ✗ #{shown} (denied by user)"
-        $stdout.flush
-        "error: user denied deleting directory '#{shown}'"
-      end
+      Dir.rmdir(path)
+      puts "  [dir.delete] ✓ #{shown} (deleted)"
+      $stdout.flush
+      "ok: empty directory '#{shown}' has been deleted"
     end
   end
 end

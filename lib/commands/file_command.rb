@@ -30,6 +30,7 @@ module Commands
       case suffix
       when 'r' then :r
       when 'w' then :w
+      when 'd' then :d
       when 'rw' then :rw
       else :rw
       end
@@ -74,6 +75,7 @@ module Commands
       case mode
       when :r then 'read'
       when :w then 'write'
+      when :d then 'delete'
       else 'read+write'
       end
     end

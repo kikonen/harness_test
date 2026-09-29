@@ -25,7 +25,9 @@ require_relative 'dialog'
 #   * writing/patching      -> write grant on the file or an ancestor dir
 #   * creating a directory  -> write grant on the PARENT directory, or on
 #                              the target directory itself
-#   * deleting/renaming     -> write grant on the affected path(s)
+#   * deleting              -> DELETE grant on the affected path (or parent
+#                              dir for dir.delete) - a separate mode, NOT
+#                              implied by read or write (issue #92)
 #
 # For dir.create the grant dialog offers the TARGET DIRECTORY ITSELF as the
 # first option (issue #54), so granting does not make existing siblings of
@@ -33,6 +35,10 @@ require_relative 'dialog'
 #
 # A write grant implies read access to the same path (writing a file
 # requires reading it back), but a read grant never implies write.
+#
+# DELETE is its own independent mode: a read or write grant does NOT imply
+# delete, and a delete grant does not imply read or write. It is granted,
+# persisted, and displayed with the same options as read/write (issue #92).
 #
 # Sensitive files/directories are always blocked, regardless of grants.
 #
@@ -43,7 +49,7 @@ class FileList
   include Enumerable
 
   # Permission modes.
-  MODES = %i[r w rw].freeze
+  MODES = %i[r w d rw].freeze
 
   def self.sensitive?(path)
     SensitiveFiles.sensitive?(path)
@@ -63,7 +69,8 @@ class FileList
     # "dirs" grants are recursive (cover every file under the directory).
     # "flat_dirs" grants are non-recursive (dir itself + direct children).
     @grants = { r: { files: [], dirs: [], flat_dirs: [] },
-                w: { files: [], dirs: [], flat_dirs: [] } }
+                w: { files: [], dirs: [], flat_dirs: [] },
+                d: { files: [], dirs: [], flat_dirs: [] } }
     initial.each { |f| add_file(f, :rw) }
   end
 
@@ -135,6 +142,20 @@ class FileList
     ancestor_granted?(@grants[:w][:dirs], path)
   end
 
+  # True if the path is deletable: a DELETE grant on the file itself or on
+  # any ancestor directory (recursive). Sensitive paths are never accessible.
+  # A read or write grant does NOT imply delete - delete is its own mode
+  # (issue #92).
+  def deletable?(path)
+    path = resolve(path)
+    return false if sensitive?(path)
+    return true  if @grants[:d][:files].include?(path)
+    return true  if @grants[:d][:flat_dirs].include?(path)
+    return true  if flat_dir_covers?(@grants[:d][:flat_dirs], path)
+
+    ancestor_granted?(@grants[:d][:dirs], path)
+  end
+
   # True if a directory can be listed: read access to the directory itself.
   def can_list_dir?(dir)
     readable?(dir)
@@ -143,7 +164,9 @@ class FileList
   # Summary of all grants, grouped by effective access. Each section is a
   # list of canonical paths; "both" (granted for read AND write) is listed
   # first and excluded from the read-only / write-only sections, so no path
-  # appears twice. Used by the CLI display, the user prompt, and /session.
+  # appears twice there. Delete is an independent section (issue #92): a
+  # path granted for delete may also appear under read/write. Used by the
+  # CLI display, the user prompt, and /session.
   def accessible_paths
     r_files = @grants[:r][:files].uniq
     w_files = @grants[:w][:files].uniq
@@ -151,6 +174,9 @@ class FileList
     w_dirs  = @grants[:w][:dirs].uniq
     r_flat  = @grants[:r][:flat_dirs].uniq
     w_flat  = @grants[:w][:flat_dirs].uniq
+    d_files = @grants[:d][:files].uniq
+    d_dirs  = @grants[:d][:dirs].uniq
+    d_flat  = @grants[:d][:flat_dirs].uniq
 
     files_both  = (r_files & w_files).sort
     dirs_both   = (r_dirs & w_dirs).sort
@@ -165,7 +191,12 @@ class FileList
     {
       both:  { files: files_both,  dirs: dirs_both,   flat_dirs: flat_both },
       read:  { files: files_read,  dirs: dirs_read,   flat_dirs: flat_read },
-      write: { files: files_write, dirs: dirs_write,  flat_dirs: flat_write }
+      write: { files: files_write, dirs: dirs_write,  flat_dirs: flat_write },
+      delete: {
+        files: d_files.sort,
+        dirs: d_dirs.sort,
+        flat_dirs: d_flat.sort
+      }
     }
   end
 
@@ -213,7 +244,7 @@ class FileList
   end
 
   # Prompt the user to grant access to a path.
-  # mode: :r (read), :w (write), or :rw (read + write; default).
+  # mode: :r (read), :w (write), :d (delete), or :rw (read + write; default).
   # purpose: optional string explaining WHY access is needed (e.g. "to create directory 'somedir'").
   # Returns :granted, :blocked, or on denial a hash
   # { status: :denied, note: <user's note or nil> } so the caller can
@@ -226,10 +257,16 @@ class FileList
     path  = resolve(path)
     shown = display_path(path)
 
-    return :granted if readable?(path) && (mode == :r || writable?(path))
+    return :granted if mode == :r && readable?(path)
+    return :granted if mode == :w && writable?(path)
+    return :granted if mode == :d && deletable?(path)
     return :blocked if sensitive?(path)
 
-    verb = mode == :r ? 'read access' : 'write access'
+    verb = case mode
+           when :r then 'read access'
+           when :d then 'delete access'
+           else 'write access'
+           end
 
     # Decide the branch on PATH LOCATION, not existence: a new file that does
     # not exist yet must still be treated as inside-workdir. Existence is only
@@ -373,10 +410,10 @@ class FileList
   def rename(old_path, new_path)
     old_path = resolve(old_path)
     new_path = resolve(new_path)
-    return :not_found unless (@grants[:r][:files] + @grants[:w][:files]).include?(old_path)
+    return :not_found unless (@grants[:r][:files] + @grants[:w][:files] + @grants[:d][:files]).include?(old_path)
     return :blocked   if sensitive?(new_path)
 
-    [:r, :w].each do |mode|
+    [:r, :w, :d].each do |mode|
       list = @grants[mode][:files]
       had_grant = list.include?(old_path)
       list.reject! { |f| f == old_path || f == new_path }
@@ -386,7 +423,7 @@ class FileList
   end
 
   def clear
-    [:r, :w].each do |mode|
+    [:r, :w, :d].each do |mode|
       @grants[mode][:files].clear
       @grants[mode][:dirs].clear
       @grants[mode][:flat_dirs].clear
@@ -394,7 +431,7 @@ class FileList
   end
 
   def empty?
-    [:r, :w].all? do |mode|
+    [:r, :w, :d].all? do |mode|
       @grants[mode][:files].empty? && @grants[mode][:dirs].empty? &&
         @grants[mode][:flat_dirs].empty?
     end
@@ -407,9 +444,10 @@ class FileList
   # Total number of distinct access grants (files + directories, across
   # both read and write modes).
   def access_grant_count
-    (@grants[:r][:files] + @grants[:w][:files] +
+    (@grants[:r][:files] + @grants[:w][:files] + @grants[:d][:files] +
      @grants[:r][:dirs] + @grants[:w][:dirs] +
-     @grants[:r][:flat_dirs] + @grants[:w][:flat_dirs]).uniq.size
+     @grants[:r][:flat_dirs] + @grants[:w][:flat_dirs] +
+     @grants[:d][:dirs] + @grants[:d][:flat_dirs]).uniq.size
   end
 
   # Grants for a mode (default :r). mode may be :r, :w, or :rw (union of both).
@@ -472,6 +510,7 @@ class FileList
     case mode
     when :r then 'read'
     when :w then 'write'
+    when :d then 'delete'
     else 'read+write'
     end
   end
@@ -485,7 +524,7 @@ class FileList
   def grant(mode, tier, path = nil, &block)
     modes = mode == :rw ? %i[r w] : [mode].flatten
     modes.each do |m|
-      next unless %i[r w].include?(m)
+      next unless %i[r w d].include?(m)
 
       list = @grants[m][tier]
       if block
@@ -500,6 +539,7 @@ class FileList
     case mode
     when :r then @grants[:r][tier].dup
     when :w then @grants[:w][tier].dup
+    when :d then @grants[:d][tier].dup
     else (@grants[:r][tier] + @grants[:w][tier]).uniq
     end
   end

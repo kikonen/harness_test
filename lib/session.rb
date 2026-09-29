@@ -224,10 +224,12 @@ class Session
       # separate read and write permissions survive a session round trip.
       # The sections are disjoint (a path granted for read AND write only
       # appears under "both"), so restore re-adds each grant exactly once.
+      # Delete is its own independent section (issue #92).
       access:        {
         both:  file_list.accessible_paths[:both],
         read:  file_list.accessible_paths[:read],
-        write: file_list.accessible_paths[:write]
+        write: file_list.accessible_paths[:write],
+        delete: file_list.accessible_paths[:delete]
       }
     }
   end
@@ -256,7 +258,7 @@ class Session
     access = data[:access] || data['access']
     if access.is_a?(Hash)
       # Section names -> FileList grant modes (:rw / :r / :w).
-      { both: :rw, read: :r, write: :w }.each do |section_key, mode|
+      { both: :rw, read: :r, write: :w, delete: :d }.each do |section_key, mode|
         section = access[section_key] || {}
         (section[:files] || []).each { |f| file_list.add_file(f, mode) }
         (section[:dirs]  || []).each { |d| file_list.add_dir(d, mode) }
