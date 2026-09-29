@@ -94,16 +94,19 @@ module Tools
       end
 
       # Not in allowlist - ask the user.
-      prefix = CommandAllowlist.extract_prefix(command)
+      prefixes = CommandAllowlist.extract_all_prefixes(command)
       options = [Dialog::Option.new(title: 'Allow', value: :allow)]
-      # Compound commands (operators, pipes, substitutions) are never
-      # saved as prefixes - offering "Always allow" for them would be
-      # misleading, so only show it when a prefix can actually be stored.
-      options << Dialog::Option.new(
-        title: "Always allow '#{prefix}'",
-        description: 'Future commands starting with this prefix will run without asking.',
-        value: :always_allow
-      ) unless prefix.empty?
+      # Pipelines of simple commands can be saved (each segment's prefix is
+      # stored). Chaining/redirects/substitutions yield no prefixes, so the
+      # option is hidden for those.
+      unless prefixes.empty?
+        label = prefixes.size == 1 ? "'#{prefixes[0]}'" : prefixes.map { |p| "'#{p}'" }.join(', ')
+        options << Dialog::Option.new(
+          title: "Always allow #{label}",
+          description: 'Future commands matching these prefixes will run without asking.',
+          value: :always_allow
+        )
+      end
 
       choice = Dialog.new(
         title: "The model is requesting to run a shell command:\n" \
@@ -130,8 +133,8 @@ module Tools
       end
 
       if value == :always_allow
-        @allowlist.add(prefix)
-        puts "  [run.command] ✓ always-allowed: '#{prefix}' (saved to allowlist)"
+        prefixes.each { |p| @allowlist.add(p) }
+        puts "  [run.command] ✓ always-allowed: #{prefixes.join(', ')} (saved to allowlist)"
         $stdout.flush
       end
 
