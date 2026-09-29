@@ -100,8 +100,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 
 | Command | Description |
 |---|---|
-| `/file <path> [r\|w\|rw]` | Allow a file (globs like `src/*.rb` work) |
-| `/dir <path> [r\|w\|rw]` | Allow a directory tree (recursively) |
+| `/grant` | Show all current grants (file/dir access + command allowlist) |
 | `/clear` | Remove all grants |
 | `/retry` | Re-send the session chain (after a failed request) |
 | `/session` | Show a summary of the current session |

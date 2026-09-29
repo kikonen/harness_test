@@ -9,10 +9,8 @@ module Commands
     def handle(_args)
       puts <<~HELP
         Available commands:
-          /file <path> [r|w|d|rw]  Add a file to the allowed list (globs like src/*.rb work).
-                                   Mode: r = read, w = write, d = delete, rw = read+write (default).
-          /dir <path> [r|w|d|rw]   Allow a directory tree (all files under it, recursively).
-                                   Mode: r = read, w = write, d = delete, rw = read+write (default).
+          /grant         Show all current grants: file/dir access (read, write,
+                         delete) and command allowlist prefixes
           /clear         Remove all grants from the list
 
           /retry         Re-send the session message chain (after a failed request)
