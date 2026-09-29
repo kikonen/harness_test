@@ -94,5 +94,45 @@ RSpec.describe Tools::RunCommandTool do
         expect(out).to start_with('exit code:')
       end
     end
+
+    it 'notes that "Always allow" only covers simple invocations' do
+      Dir.mktmpdir do |dir|
+        list = FileList.new(workdir: dir)
+        tool = described_class.new(list, {})
+        allow($stdin).to receive(:gets).and_return("1\n", nil)
+
+        orig_stdout = $stdout
+        $stdout = StringIO.new
+        tool.execute('command' => 'bundle exec rspec spec/')
+        out = $stdout.string
+        $stdout = orig_stdout
+        expect(out).to include('Simple invocations only (no redirects / $vars / &)')
+      end
+    end
+  end
+
+  context 'dangerous constructs (issue #69)' do
+    it 'hides "Always allow" and explains why in a dialog note' do
+      Dir.mktmpdir do |dir|
+        list = FileList.new(workdir: dir)
+        tool = described_class.new(list, {})
+        # "rm -rf /" is simple (gets an option); "echo hi > f" is not.
+        allow($stdin).to receive(:gets).and_return("2\n", nil)
+
+        orig_stdout = $stdout
+        $stdout = StringIO.new
+        tool.execute('command' => 'echo hi > tmpfile')
+        out = $stdout.string
+        $stdout = orig_stdout
+        # No "Always allow" option offered...
+        expect(out).not_to include("Always allow '")
+        expect(out).not_to include("2) Always allow")
+        # ...but the user is told why (redirects can't be auto-approved).
+        expect(out).to include('UNSAFE: redirects / $vars / &.')
+        # Cancel is now option 2 (Allow=1, Cancel=2), so "2" cancels.
+        expect(tool.execute('command' => 'echo hi > tmpfile'))
+          .to start_with('error: user denied executing the command')
+      end
+    end
   end
 end

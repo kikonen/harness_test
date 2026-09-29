@@ -29,6 +29,10 @@ module Tools
     DEFAULT_LIMIT   = 200   # output lines
     MAX_LIMIT       = 5000  # hard cap for the `limit` parameter
 
+    # Shown as a dialog note when no "Always allow" option is offered because
+    # the command contains constructs that can never be auto-approved.
+    UNSAFETY_NOTE = 'UNSAFE: redirects / $vars / &.'
+
     def initialize(file_list, options)
       @file_list    = file_list
       @options      = options
@@ -96,6 +100,7 @@ module Tools
       # Not in allowlist - ask the user.
       prefixes = CommandAllowlist.extract_all_prefixes(command)
       options = [Dialog::Option.new(title: 'Allow', value: :allow)]
+      note    = nil
       # Pipelines of simple commands can be saved (each segment's prefix is
       # stored). Chaining/redirects/substitutions yield no prefixes, so the
       # option is hidden for those.
@@ -103,15 +108,17 @@ module Tools
         label = prefixes.size == 1 ? "'#{prefixes[0]}'" : prefixes.map { |p| "'#{p}'" }.join(', ')
         options << Dialog::Option.new(
           title: "Always allow #{label}",
-          description: 'Future commands matching these prefixes will run without asking.',
+          description: 'Simple invocations only (no redirects / $vars / &).',
           value: :always_allow
         )
       end
+      note = UNSAFETY_NOTE if prefixes.empty?
 
       choice = Dialog.new(
         title: "The model is requesting to run a shell command:\n" \
                "$ #{command}\ncwd: #{shown} (timeout: #{timeout}s)",
         options: options,
+        note: note,
         note_on_cancel_only: true
       ).show
 
