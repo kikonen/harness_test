@@ -6,14 +6,17 @@ require 'timeout'
 
 require_relative '../tool'
 require_relative '../dialog'
+require_relative '../command_allowlist'
 
 # Executes a shell command in the harness working directory.
 #
 # SAFETY MODEL:
 #   - The FULL command string is displayed to the user before anything runs.
 #   - The user must explicitly select "Allow" at an interactive dialog;
-#     any other choice denies execution. There is no auto-approval and no
-#     "always allow" memory - every invocation is confirmed individually.
+#     any other choice denies execution.
+#   - "Always allow <prefix>" saves the command prefix to the user's
+#     allowlist (.harness/allowed_commands.yml) so future commands with
+#     the same prefix skip the dialog (issue #69).
 #   - Commands run under a timeout (default 60 s, hard cap 300 s) so a
 #     hung process can never block the session indefinitely.
 #   - Output is truncated to a line limit (default 200, max 5000) because
@@ -27,23 +30,24 @@ module Tools
     MAX_LIMIT       = 5000  # hard cap for the `limit` parameter
 
     def initialize(file_list, options)
-      @file_list = file_list
-      @options   = options
+      @file_list    = file_list
+      @options      = options
+      @allowlist    = CommandAllowlist.new(file_list.workdir)
       super(
         name: 'run.command',
         description: 'Executes a shell command in the harness working directory. ' \
-                     'The full command is shown to the user and they must ' \
-                     'explicitly confirm ("Allow") before it runs; otherwise ' \
-                     'it is denied. Use this for tasks no dedicated tool ' \
-                     'covers (running tests, build steps, one-off scripts). ' \
-                     'Output is captured and returned with the exit code.',
+                     'Most commands require explicit user confirmation ("Allow") ' \
+                     'before they run; previously approved command prefixes are ' \
+                     'auto-approved. Use this for tasks no dedicated tool covers ' \
+                     '(running tests, build steps, one-off scripts). Output is ' \
+                     'captured and returned with the exit code.',
         parameters: {
           type: 'object',
           properties: {
             command: {
               type: 'string',
               description: 'The full shell command to execute (e.g. "bundle exec rspec spec/foo_spec.rb"). ' \
-                           'It will be shown verbatim to the user for confirmation.'
+                           'Shown verbatim to the user for confirmation unless its prefix is already approved.'
             },
             cwd: {
               type: 'string',
@@ -82,30 +86,60 @@ module Tools
       limit   = DEFAULT_LIMIT if limit <= 0
       limit   = [limit, MAX_LIMIT].min
 
+      # Auto-approve when the command prefix is in the user's allowlist.
+      if @allowlist.allowed?(command)
+        puts "  [run.command] ✓ auto-approved (allowlist): #{command}"
+        $stdout.flush
+        return run_command(command, dir, shown, timeout, limit)
+      end
+
+      # Not in allowlist - ask the user.
+      prefix = CommandAllowlist.extract_prefix(command)
       choice = Dialog.new(
         title: "The model is requesting to run a shell command:\n" \
                "$ #{command}\ncwd: #{shown} (timeout: #{timeout}s)",
-        options: [Dialog::Option.new(title: 'Allow', value: :allow)],
+        options: [
+          Dialog::Option.new(title: 'Allow', value: :allow),
+          Dialog::Option.new(
+            title: "Always allow '#{prefix}'",
+            description: 'Future commands starting with this prefix will run without asking.',
+            value: :always_allow
+          )
+        ],
         note_on_cancel_only: true
       ).show
 
-      unless choice == :allow
-        # The user may attach a short note to the CANCEL choice only
-        # ("<cancel number> <note>"); the dialog then returns
-        # [CANCEL_VALUE, note]. Unwrap it - the note is feedback on the
-        # denial (issue #79) and is forwarded to the model so it can see
-        # WHY the command was denied (issue #78).
-        note_text = choice.is_a?(Array) ? choice[1] : nil
-        if note_text
-          puts "  [run.command] ✗ denied by user (note: \"#{note_text}\")"
+      # Dialog returns: bare value, or [value, note] when a note is attached.
+      # With note_on_cancel_only, notes only appear on the cancel choice.
+      value = choice.is_a?(Array) ? choice[0] : choice
+      note  = choice.is_a?(Array) ? choice[1] : nil
+
+      if value == Dialog::CANCEL_VALUE
+        # Cancel - may carry a note (issue #79/#78).
+        if note
+          puts "  [run.command] ✗ denied by user (note: \"#{note}\")"
         else
           puts "  [run.command] ✗ denied by user"
         end
         $stdout.flush
         return Tool.denial_error('error: user denied executing the command',
-                                { status: :denied, note: note_text })
+                                { status: :denied, note: note })
       end
 
+      if value == :always_allow
+        @allowlist.add(prefix)
+        puts "  [run.command] ✓ always-allowed: '#{prefix}' (saved to allowlist)"
+        $stdout.flush
+      end
+
+      run_command(command, dir, shown, timeout, limit)
+    end
+
+    private
+
+    # Runs the command (after any required confirmation) and formats the
+    # result. Raises Timeout::Error when the command exceeds its timeout.
+    def run_command(command, dir, shown, timeout, limit)
       if @options[:dry_run]
         puts "  [run.command] ~ #{command} (dry run)"
         $stdout.flush
@@ -137,8 +171,6 @@ module Tools
       $stdout.flush
       "error: command timed out after #{timeout}s"
     end
-
-    private
 
     # Runs the command in a shell with the inherited bundler env stripped
     # (Bundler.with_unbundled_env). The harness may have been started from a
