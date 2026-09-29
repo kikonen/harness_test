@@ -64,4 +64,50 @@ RSpec.describe FileList do
       end
     end
   end
+
+  describe '#deletable? (issue #92)' do
+    it 'is independent of read and write grants' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        list.add_file('a.txt', :rw)
+        expect(list.readable?('a.txt')).to be(true)
+        expect(list.writable?('a.txt')).to be(true)
+        expect(list.deletable?('a.txt')).to be(false)
+      end
+    end
+
+    it 'grants delete on a file and does not imply read/write' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        list.add_file('a.txt', :d)
+        expect(list.deletable?('a.txt')).to be(true)
+        expect(list.readable?('a.txt')).to be(false)
+        expect(list.writable?('a.txt')).to be(false)
+      end
+    end
+
+    it 'honours recursive and flat directory delete grants' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        list.add_dir('sub', :d)
+        expect(list.deletable?('sub/nested/x.txt')).to be(true)
+
+        flat = described_class.new(workdir: dir)
+        flat.add_flat_dir('sub', :d)
+        expect(flat.deletable?('sub/top.txt')).to be(true)
+        expect(flat.deletable?('sub/nested/x.txt')).to be(false)
+      end
+    end
+
+    it 'exposes delete grants in accessible_paths under a delete section' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        list.add_file('a.txt', :d)
+        access = list.accessible_paths
+        expect(access[:delete][:files]).to include(list.resolve('a.txt'))
+        expect(access[:both][:files] + access[:read][:files] + access[:write][:files])
+          .not_to include(list.resolve('a.txt'))
+      end
+    end
+  end
 end

@@ -315,7 +315,7 @@ class SessionManager
 
     if any_grants
       sections = []
-      %i[both read write].each do |mode|
+      %i[both read write delete].each do |mode|
         section = access[mode]
         lines = []
         lines += section[:files].map { |f| @file_list.display_path(f) }
@@ -326,6 +326,7 @@ class SessionManager
         label = case mode
                 when :both then 'Read + write'
                 when :read then 'Read only'
+               when :delete then 'Delete'
                 else 'Write only'
                 end
         sections << "#{label}:\n#{lines.join("\n")}"

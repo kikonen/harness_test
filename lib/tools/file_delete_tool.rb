@@ -2,9 +2,9 @@
 
 require_relative '../tool'
 require_relative '../file_list'
-require_relative '../dialog'
 
-# Deletes a file from disk. The user is prompted for confirmation.
+# Deletes a file from disk. Requires a DELETE access grant (its own mode,
+# independent from read/write - issue #92).
 module Tools
 
   class FileDeleteTool < Tool
@@ -15,7 +15,7 @@ module Tools
         name: 'file.delete',
         description: 'Deletes a file from disk. ' \
                      'Paths are relative to the harness working directory. ' \
-                     'The user will be prompted for confirmation before the file is deleted.',
+                     'Deleting requires a DELETE access grant (its own mode, independent from read/write).',
         parameters: {
           type: 'object',
           properties: {
@@ -36,9 +36,10 @@ module Tools
         return "error: file '#{shown}' is blocked and can never be deleted"
       end
 
-      # Deleting a file requires WRITE access (read alone is not enough).
-      unless @file_list.writable?(path)
-        result = @file_list.grant_access(path, :w)
+      # Deleting a file requires a DELETE grant - its own mode, independent
+      # of read/write (issue #92). A read or write grant is not enough.
+      unless @file_list.deletable?(path)
+        result = @file_list.grant_access(path, :d)
         return Tool.denial_error("error: access denied for '#{shown}'", result) unless Tool.granted?(result)
       end
 
@@ -54,21 +55,10 @@ module Tools
         return "DRY RUN: would delete #{shown}"
       end
 
-      choice = Dialog.new(
-        title: "The model is requesting to DELETE a file:\n#{shown}",
-        options: [Dialog::Option.new(title: 'Allow delete', value: :allow)]
-      ).show
-
-      if choice == :allow
-        File.delete(path)
-        puts "  [file.delete] ✓ #{shown} (deleted)"
-        $stdout.flush
-        "ok: file '#{shown}' has been deleted"
-      else
-        puts "  [file.delete] ✗ #{shown} (denied by user)"
-        $stdout.flush
-        "error: user denied deleting file '#{shown}'"
-      end
+      File.delete(path)
+      puts "  [file.delete] ✓ #{shown} (deleted)"
+      $stdout.flush
+      "ok: file '#{shown}' has been deleted"
     end
   end
 end

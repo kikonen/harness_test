@@ -9,10 +9,10 @@ module Commands
     def handle(_args)
       puts <<~HELP
         Available commands:
-          /file <path> [r|w|rw]  Add a file to the allowed list (globs like src/*.rb work).
-                                 Mode: r = read only, w = write only, rw = both (default).
-          /dir <path> [r|w|rw]   Allow a directory tree (all files under it, recursively).
-                                 Mode: r = read only, w = write only, rw = both (default).
+          /file <path> [r|w|d|rw]  Add a file to the allowed list (globs like src/*.rb work).
+                                   Mode: r = read, w = write, d = delete, rw = read+write (default).
+          /dir <path> [r|w|d|rw]   Allow a directory tree (all files under it, recursively).
+                                   Mode: r = read, w = write, d = delete, rw = read+write (default).
           /clear         Remove all grants from the list
 
           /retry         Re-send the session message chain (after a failed request)
@@ -31,8 +31,9 @@ module Commands
           /help          Show this help
           /exit          Exit the harness
 
-        Read and write access are tracked separately. A read grant never implies
-        write access, but a write grant implies read access to the same path.
+        Read, write, and delete access are tracked separately. A read grant
+        never implies write, and a write grant implies read access to the same
+        path. Delete is its own mode - neither read nor write implies it.
 
         Direct prompt:
           Type any text (not starting with /) to send it directly to the model.
