@@ -77,6 +77,33 @@ RSpec.describe ShellTokenizer do
       ])
     end
 
+    it 'treats redirect to /dev/null (>) as a word' do
+      tokens = tokenize('grep foo > /dev/null')
+      expect(tokens).to eq([
+        [:word, 'grep'], [:word, 'foo'], [:word, '> /dev/null']
+      ])
+    end
+
+    it 'treats fd redirect to /dev/null (2>/dev/null) as a word' do
+      tokens = tokenize('bundle exec rspec 2>/dev/null')
+      expect(tokens).to eq([
+        [:word, 'bundle'], [:word, 'exec'],
+        [:word, 'rspec'],  [:word, '2>/dev/null']
+      ])
+    end
+
+    it 'treats append redirect to /dev/null (>>) as a word' do
+      expect(kinds('cmd >> /dev/null')).to eq(%i[word word])
+    end
+
+    it 'still emits :danger for redirect to a real file' do
+      expect(kinds('ls > out.txt')).to include(:danger)
+    end
+
+    it 'still emits :danger for redirect to /dev/null-like but different path' do
+      expect(kinds('cmd > /dev/zero')).to include(:danger)
+    end
+
     it 'treats operators inside single quotes as literal words' do
       tokens = tokenize("grep 'a|b'")
       expect(tokens).to eq([[:word, 'grep'], [:word, "'a|b'"]])
