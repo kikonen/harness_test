@@ -39,7 +39,7 @@ class Session
   # Rough chars-per-token ratio used only for fallback context estimates.
   EST_CHARS_PER_TOKEN = 4
 
-  attr_reader :messages, :created_at, :system_prompt, :session_id
+  attr_reader :messages, :created_at, :system_prompt, :session_id, :last_reasoning
 
   def initialize(system_prompt)
     @system_prompt = system_prompt
@@ -47,6 +47,7 @@ class Session
     @session_id    = SecureRandom.uuid
     @user_prompts  = 0
     @last_stats    = nil
+    @last_reasoning = nil
     @messages      = [system_message]
   end
 
@@ -76,11 +77,20 @@ class Session
     @last_stats = stats
   end
 
+  # Store the reasoning text of the last LLM response (issue #98), so it
+  # can be shown on demand with /reasoning. nil when the model did not
+  # return any reasoning for that response.
+  def record_reasoning(reasoning)
+    @last_reasoning = reasoning.to_s.strip.empty? ? nil : reasoning
+    self
+  end
+
   # Reset the session: drop all conversation messages, keep the system prompt.
   def clear
     @messages     = [system_message]
     @user_prompts = 0
     @last_stats   = nil
+    @last_reasoning = nil
     @created_at   = Time.now
     self
   end
@@ -125,6 +135,7 @@ class Session
     ]
     @messages.concat(recent) if recent && !recent.empty?
     @last_stats = nil
+    @last_reasoning = nil
     self
   end
 
