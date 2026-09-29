@@ -22,7 +22,8 @@ require 'strscan'
 #   :semi       - `;`
 #   :pipe_and   - `|&`  (pipe with stderr)
 #   :danger     - any construct that must NEVER be auto-approved:
-#                   <, >, >> (file redirects)
+#                   <, >, >> (file redirects - EXCEPT to /dev/null, which
+#                            only discards output and is safe, see below)
 #                   &        (background)
 #                   $        (substitution / variable expansion)
 #                   `        (command substitution)
@@ -35,6 +36,11 @@ require 'strscan'
 #     stderr/stdout within the same process. The tokenizer treats them as
 #     a single :word token (e.g. "2>&1") so that pipelines such as
 #     `bundle exec rspec 2>&1 | grep x` can be auto-approved.
+#   * Redirects TO /dev/null (`>/dev/null`, `2>/dev/null`, `>>/dev/null`)
+#     are NOT dangerous either - they only discard output, creating or
+#     modifying no file. The tokenizer treats them as a single :word token
+#     (e.g. ">/dev/null", "2>/dev/null") so such commands can be
+#     auto-approved. Any other redirect target is still :danger.
 #   * Operators inside quotes are literal characters, never separators.
 #   * Backslash-escaped operators outside quotes become part of the
 #     surrounding word (e.g. `echo a\|b` -> one word "a\|b").
@@ -45,6 +51,10 @@ require 'strscan'
 class ShellTokenizer
   # Characters that always produce a :danger token when seen outside quotes.
   DANGER_CHARS = '<>&$`()'.freeze
+
+  # A redirect whose target is this path only discards output (no file is
+  # created or modified), so it is safe to auto-approve - like `2>&1`.
+  DEVNULL = '/dev/null'.freeze
 
   # ------------------------------------------------------------------
   # Public API
@@ -185,7 +195,8 @@ class ShellTokenizer
   end
 
   # `>` dispatch: either a file redirect (danger) or part of a fd-to-fd
-  # redirect (`2>&1`). The latter is safe and becomes one word token.
+  # redirect (`2>&1`) or a redirect to /dev/null. The latter two are safe
+  # (no hidden execution, no file created/modified) and become one word.
   def scan_gt
     # Check for fd-to-fd redirect: digit + `>&` + optional digit.
     if @scanner.check('>&') && word_buf_ends_with_digit?
@@ -200,9 +211,19 @@ class ShellTokenizer
       end
       emit(:word, text)
     else
-      # File redirect: danger.
-      flush_word
-      emit(:danger, scan_redirect)
+      # Redirect to /dev/null: safe (only discards output, creates or
+      # modifies no file) - becomes one word token, gluing any preceding
+      # fd digit (e.g. "2" + ">/dev/null" -> "2>/dev/null").
+      devnull = @scanner.scan(Regexp.new(">+\\s*#{Regexp.escape(DEVNULL)}(?![\\w./-])"))
+      if devnull
+        prefix  = @word_buf.dup
+        @word_buf.clear
+        emit(:word, prefix + devnull)
+      else
+        # Any other file redirect: danger.
+        flush_word
+        emit(:danger, scan_redirect)
+      end
     end
   end
 

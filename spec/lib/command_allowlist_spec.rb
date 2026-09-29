@@ -69,6 +69,12 @@ RSpec.describe CommandAllowlist do
       expect(described_class.segment_safe?('bundle exec rspec 2>&1')).to be true
     end
 
+    it 'accepts redirects to /dev/null (they only discard output)' do
+      expect(described_class.segment_safe?('grep foo > /dev/null')).to be true
+      expect(described_class.segment_safe?('bundle exec rspec 2>/dev/null')).to be true
+      expect(described_class.segment_safe?('cmd >> /dev/null')).to be true
+    end
+
     it 'rejects file redirects' do
       expect(described_class.segment_safe?('ls > out.txt')).to be false
       expect(described_class.segment_safe?('cat < input.txt')).to be false
@@ -201,6 +207,13 @@ RSpec.describe CommandAllowlist do
       )
     end
 
+    it 'ignores harmless /dev/null redirects when extracting' do
+      cmd = 'bundle exec rspec 2>/dev/null | grep x | head -30'
+      expect(described_class.extract_all_prefixes(cmd)).to eq(
+        ['bundle exec rspec', 'grep x', 'head']
+      )
+    end
+
     it 'does NOT split on pipe inside quotes' do
       cmd = 'grep -i "fix\\|feat" | head -5'
       expect(described_class.extract_all_prefixes(cmd)).to eq(['grep', 'head'])
@@ -263,6 +276,17 @@ RSpec.describe CommandAllowlist do
         list.add('grep')
         list.add('head')
         cmd = 'bundle exec rspec 2>&1 | grep -B2 -A8 "Failure/Error" | head -30'
+        expect(list.allowed?(cmd)).to be true
+      end
+    end
+
+    it 'auto-approves a pipeline that includes /dev/null redirects' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(dir)
+        list.add('bundle exec rspec')
+        list.add('grep')
+        list.add('head')
+        cmd = 'bundle exec rspec 2>/dev/null | grep -B2 -A8 "Failure/Error" | head -30'
         expect(list.allowed?(cmd)).to be true
       end
     end
