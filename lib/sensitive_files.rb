@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 # Central guard for files that must NEVER be added to the allowed file list,
-# regardless of the method used (CLI -f / positional args, the /file command,
-# or the dir.allow tool).
+# regardless of the method used (grant dialogs, the model's access requests,
+# or session restore).
 #
 # To block additional sensitive files later, just append more glob patterns
 # to SENSITIVE_PATTERNS (e.g. 'id_rsa', '*.pem', 'credentials.json').

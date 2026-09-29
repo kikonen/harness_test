@@ -148,7 +148,6 @@ class CLI
 
     begin
       loop do
-        show_file_list
         show_context_indicator
         input = get_command
         break if input.nil?
@@ -219,43 +218,6 @@ class CLI
   rescue StandardError => e
     puts "  [warning] could not auto-save session: #{e.message}"
     nil
-  end
-
-  def show_file_list
-    if @file_list.empty?
-      puts "(no access granted)"
-      return
-    end
-
-    access = @file_list.accessible_paths
-    labels = { both: 'Read + write', read: 'Read only', write: 'Write only', delete: 'Delete' }
-
-    %i[both read write delete].each do |mode|
-      section = access[mode]
-      files   = section[:files]
-      dirs    = section[:dirs]
-      flats   = section[:flat_dirs] || []
-      next if files.empty? && dirs.empty? && flats.empty?
-
-      puts "#{labels[mode]}:"
-      unless files.empty?
-        files.each_with_index do |f, i|
-          puts "  #{i + 1}. #{@file_list.display_path(f)}"
-        end
-      end
-      idx = files.size + 1
-      unless dirs.empty?
-        dirs.each_with_index do |d, i|
-          puts "  #{idx + i}. #{@file_list.display_path(d)}/ (recursive)"
-        end
-      end
-      idx += dirs.size
-      unless flats.empty?
-        flats.each_with_index do |d, i|
-          puts "  #{idx + i}. #{@file_list.display_path(d)}/ (dir only)"
-        end
-      end
-    end
   end
 
   # Reads a full command from stdin using Reline (the same library IRB uses).

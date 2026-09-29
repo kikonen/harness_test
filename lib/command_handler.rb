@@ -4,8 +4,7 @@ require_relative 'harness'
 require_relative 'file_list'
 
 # Individual command classes.
-require_relative 'commands/file_command'
-require_relative 'commands/dir_command'
+require_relative 'commands/grant_command'
 require_relative 'commands/clear_command'
 require_relative 'commands/retry_command'
 require_relative 'commands/session_command'
@@ -30,8 +29,7 @@ class CommandHandler
 
   # Registry: command name (without slash) -> class
   COMMANDS = {
-    'file'          => Commands::FileCommand,
-    'dir'           => Commands::DirCommand,
+    'grant'         => Commands::GrantCommand,
     'clear'         => Commands::ClearCommand,
     'retry'         => Commands::RetryCommand,
     'session'       => Commands::SessionCommand,
