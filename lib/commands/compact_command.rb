@@ -12,9 +12,10 @@ module Commands
       retained = result[:retained]
       puts "Session compacted: #{result[:before]} messages -> " \
            "#{result[:after]} messages (#{retained} recent retained)."
-      # issue #70: report the resulting context size so the user can verify
-      # that compaction freed space without burning tokens on a follow-up.
-      puts result[:context_line] if result[:context_line]
+      # issue #70 / #93: report the context size before and after so the
+      # user can see how much space was freed (message count alone is
+      # misleading - tool calls and long outputs inflate token usage).
+      puts "  #{result[:context_before]} -> #{result[:context_line]}" if result[:context_before] && result[:context_line]
       puts
       puts "Summary:"
       puts result[:summary]

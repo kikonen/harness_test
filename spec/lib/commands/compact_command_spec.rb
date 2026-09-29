@@ -14,6 +14,7 @@ RSpec.describe Commands::CompactCommand do
       before: 10,
       after: 4,
       retained: 2,
+      context_before: '🧠 ctx ~62100/65536 (95%)',
       context_line: '🧠 ctx ~523/65536 (1%)'
     }
   end
@@ -47,12 +48,17 @@ RSpec.describe Commands::CompactCommand do
     out = run_command
 
     expect(out).to match(
-      /Session compacted: 10 messages -> 4 messages \(2 recent retained\)\.\n🧠 ctx ~523\/65536 \(1%\)\n\nSummary:\nsummary text\n/
+      /Session compacted: 10 messages -> 4 messages \(2 recent retained\)\.\n  🧠 ctx ~62100\/65536 \(95%\) -> 🧠 ctx ~523\/65536 \(1%\)\n\nSummary:\nsummary text\n/
     )
   end
 
-  it 'omits the context line when the manager could not measure usage' do
-    result[:context_line] = nil
+  it 'omits the context line when before or after is missing' do
+    result[:context_before] = nil
+
+    expect(run_command).not_to match(/🧠 ctx/)
+
+    result[:context_before] = '🧠 ctx ~62100/65536 (95%)'
+    result[:context_line]   = nil
 
     expect(run_command).not_to match(/🧠 ctx/)
   end

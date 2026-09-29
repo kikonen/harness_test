@@ -65,6 +65,9 @@ class SessionManager
       puts "  [context over threshold - compacting before retry...]"
       result = compact_session
       puts "  [compact done: #{result[:before]} -> #{result[:after]} messages]"
+      if result[:context_before] && result[:context_line]
+        puts "  #{result[:context_before]} -> #{result[:context_line]}"
+      end
     end
 
     @harness.logger.info("--- retry: re-sending session chain (#{@harness.session.messages.size} messages) ---")
@@ -77,6 +80,9 @@ class SessionManager
   # The last N recent messages are retained verbatim after the summary.
   def compact_session
     before = @harness.session.messages.size
+    # issue #93: capture context BEFORE compaction so callers can show
+    # the token reduction (message count alone is misleading).
+    context_before = @harness.context_indicator
 
     if @harness.session.conversation_size < 4
       raise HarnessError, 'session too small to compact (need at least 4 conversation messages)'
@@ -122,7 +128,7 @@ class SessionManager
     # issue #70: report the resulting context size so the user can verify
     # that compaction freed space without burning tokens on a follow-up.
     { summary: summary_text, before: before, after: after, retained: retained,
-      context_line: @harness.context_indicator }
+      context_before: context_before, context_line: @harness.context_indicator }
   end
 
   # Sends the session chain to the LLM and prints the response.
@@ -143,6 +149,9 @@ class SessionManager
       puts "  [context window exceeded - compacting and re-sending...]"
       result = compact_session
       puts "  [compact done: #{result[:before]} -> #{result[:after]} messages, retrying...]"
+      if result[:context_before] && result[:context_line]
+        puts "  #{result[:context_before]} -> #{result[:context_line]}"
+      end
       response = @harness.call_llm
     ensure
       spinner.stop
@@ -170,7 +179,9 @@ class SessionManager
     puts "  [context at #{threshold_pct}% of the window - auto-compacting session...]"
     result = compact_session
     puts "  [auto-compact done: #{result[:before]} -> #{result[:after]} messages]"
-    puts "  #{result[:context_line]}" if result[:context_line]
+    if result[:context_before] && result[:context_line]
+      puts "  #{result[:context_before]} -> #{result[:context_line]}"
+    end
   rescue => e
     puts "  [auto-compact failed: #{e.message} - try /compact manually]"
   end
