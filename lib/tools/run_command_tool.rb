@@ -105,7 +105,10 @@ module Tools
       # stored). Chaining/redirects/substitutions yield no prefixes, so the
       # option is hidden for those.
       unless prefixes.empty?
-        label = prefixes.size == 1 ? "'#{prefixes[0]}'" : prefixes.map { |p| "'#{p}'" }.join(', ')
+        # Prefixes already stored in the allowlist are marked with (*) so the
+        # user can see which of them are redundant (issue #94).
+        marked = prefixes.map { |p| @allowlist.already_allowed?(p) ? "'#{p}' (*)" : "'#{p}'" }
+        label = marked.size == 1 ? marked[0] : marked.join(', ')
         options << Dialog::Option.new(
           title: "Always allow #{label}",
           description: 'Simple invocations only (no redirects / $vars / &).',
@@ -140,8 +143,12 @@ module Tools
       end
 
       if value == :always_allow
+        existing = prefixes.select { |p| @allowlist.already_allowed?(p) }
+        new      = prefixes - existing
         prefixes.each { |p| @allowlist.add(p) }
-        puts "  [run.command] ✓ always-allowed: #{prefixes.join(', ')} (saved to allowlist)"
+        msg = "  [run.command] ✓ always-allowed: #{new.join(', ')} (saved to allowlist)"
+        msg += ", already allowed: #{existing.join(', ')}" unless existing.empty?
+        puts msg
         $stdout.flush
       end
 
