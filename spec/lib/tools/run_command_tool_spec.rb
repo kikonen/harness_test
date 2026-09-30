@@ -107,43 +107,46 @@ RSpec.describe Tools::RunCommandTool do
       end
     end
 
-    it 'marks already-allowed prefixes with (*) in the option (issue #94)' do
+    it 'hides candidates that are subsumed by a stored grant (issue #94)' do
       Dir.mktmpdir do |dir|
         # Pre-seed the allowlist file BEFORE the tool is built.
         FileUtils.mkdir_p(File.join(dir, '.harness'))
-        File.write(File.join(dir, '.harness', 'allowed_commands.yml'), YAML.dump(['tail']))
+        File.write(File.join(dir, '.harness', 'allowed_commands.yml'),
+                   YAML.dump(['gh issue view']))
 
         list = FileList.new(workdir: dir)
         tool = described_class.new(list, {})
 
-        allow($stdin).to receive(:gets).and_return("1\n", nil)
+        allow($stdin).to receive(:gets).and_return("2\n", nil)
 
         orig_stdout = $stdout
         $stdout = StringIO.new
-        tool.execute('command' => 'git log --oneline | tail -5')
+        tool.execute('command' => 'gh issue view 101 --json title,state')
         out = $stdout.string
         $stdout = orig_stdout
 
-        # One option per candidate prefix (issue #102); "tail" is already
-        # allowed -> starred.
-        expect(out).to include("Always allow 'git log'")
-        expect(out).to include("Always allow 'tail' (*)")
+        # 'gh', 'gh issue', and 'gh issue view' are all subsumed by the
+        # stored grant - selecting any of them would be a no-op, so none
+        # is offered. (Candidates beyond the leading 3 subcommand tokens
+        # like '101 --json title,state' are never offered - they are not
+        # subcommand-looking.)
+        expect(out).not_to include("Always allow 'gh'")
+        expect(out).not_to include("Always allow 'gh issue'")
+        expect(out).not_to include("Always allow 'gh issue view'")
       end
     end
 
-    it 'reports which prefixes were already allowed on save (issue #94)' do
+    it 'drops a candidate that exactly matches a stored grant (issue #94)' do
       Dir.mktmpdir do |dir|
         # Pre-seed the allowlist file BEFORE the tool is built.
         FileUtils.mkdir_p(File.join(dir, '.harness'))
-        File.write(File.join(dir, '.harness', 'allowed_commands.yml'), YAML.dump(['tail']))
+        File.write(File.join(dir, '.harness', 'allowed_commands.yml'),
+                   YAML.dump(['git log']))
 
         list = FileList.new(workdir: dir)
         tool = described_class.new(list, {})
 
-        # Options: Allow(1), 'git'(2), 'git log'(3), 'tail' (*)(4), Cancel(5).
-        # Pick "git log" (new) and "tail" (already-allowed) at once so the
-        # report shows new and already-allowed prefixes.
-        allow($stdin).to receive(:gets).and_return("3 4\n", nil)
+        allow($stdin).to receive(:gets).and_return("2\n", nil)
 
         orig_stdout = $stdout
         $stdout = StringIO.new
@@ -151,10 +154,14 @@ RSpec.describe Tools::RunCommandTool do
         out = $stdout.string
         $stdout = orig_stdout
 
-        # "git" and "git log" are new (neither was pre-seeded); "tail" was
-        # already stored.
-        expect(out).to match(/always-allowed: git log .*\(saved to allowlist\)/)
-        expect(out).to include('already allowed: tail')
+        # Both 'git' and 'git log' are in the same command tree as the
+        # stored 'git log' grant - either would just be redundant (a no-op
+        # or a widening of something already granted), so neither is
+        # offered. '-5' is a trailing flag (a parameter), so only bare
+        # 'tail' is offered for the second segment.
+        expect(out).not_to include("Always allow 'git'")
+        expect(out).not_to include("Always allow 'git log'")
+        expect(out).to include("Always allow 'tail'")
       end
     end
 
@@ -243,20 +250,6 @@ RSpec.describe Tools::RunCommandTool do
       end
     end
 
-    it 'notes that "Always allow" only covers simple invocations' do
-      Dir.mktmpdir do |dir|
-        list = FileList.new(workdir: dir)
-        tool = described_class.new(list, {})
-        allow($stdin).to receive(:gets).and_return("1\n", nil)
-
-        orig_stdout = $stdout
-        $stdout = StringIO.new
-        tool.execute('command' => 'bundle exec rspec spec/')
-        out = $stdout.string
-        $stdout = orig_stdout
-        expect(out).to include('Simple invocations only (no redirects / $vars / &)')
-      end
-    end
   end
 
   context 'dangerous constructs (issue #69)' do

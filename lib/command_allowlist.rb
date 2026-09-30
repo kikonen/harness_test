@@ -242,9 +242,39 @@ class CommandAllowlist
     save
   end
 
-  # True when the exact prefix is already stored in the allowlist.
-  def already_allowed?(prefix)
-    !prefix.to_s.strip.empty? && @prefixes.include?(prefix.strip)
+  # Filter a list of candidate prefixes down to those that add value over
+  # the stored allowlist (issue #94, issue #102). A candidate is DROPPED
+  # when its tokens overlap with any stored prefix's leading run - i.e.
+  # when some stored grant P and the candidate share a common leading
+  # token sequence of at least one token. This catches:
+  #   - exact duplicates (e.g. stored 'tail', candidate 'tail'),
+  #   - candidates subsumed by a broader grant (stored 'gh issue view',
+  #     candidate 'gh' or 'gh issue' - the existing grant already covers
+  #     them, so offering them is redundant),
+  #   - candidates that subsume a narrower grant (stored 'git status',
+  #     candidate 'git' - 'git' already covers 'git status', so a new
+  #     grant of 'git' would just make the stored one redundant).
+  # Candidates with NO overlap (different command tree) are kept.
+  def filter_uncovered(candidates)
+    (candidates || []).reject do |cand|
+      cand = cand.to_s.strip
+      # An empty candidate would match any stored prefix at index 0 via
+      # the overlap rule below - but reject it explicitly to be safe.
+      next true if cand.empty?
+
+      c_tokens = cand.split(/\s+/)
+      @prefixes.any? do |p|
+        p_tokens = p.to_s.strip.split(/\s+/)
+        # Overlap: at least one leading token position where both lists
+        # have an equal token, AND the shared run does not extend beyond
+        # either list's length. In practice this means "some stored
+        # prefix starts with the same word(s)" - enough to consider the
+        # candidate redundant.
+        min_len = [p_tokens.size, c_tokens.size].min
+        (0...min_len).any? { |i| p_tokens[i] == c_tokens[i] } &&
+          p_tokens.first == c_tokens.first
+      end
+    end
   end
 
   # Remove a previously saved prefix and persist.
