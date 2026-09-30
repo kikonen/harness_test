@@ -499,29 +499,71 @@ RSpec.describe CommandAllowlist do
     end
   end
 
-  describe '#already_allowed?' do
-    it 'returns true for a stored prefix' do
+  describe '#filter_uncovered' do
+    it 'keeps every candidate when nothing is stored yet' do
       Dir.mktmpdir do |dir|
         list = described_class.new(dir)
-        list.add('tail')
-        expect(list.already_allowed?('tail')).to be true
+        expect(list.filter_uncovered(['ls', 'ls -la'])).to eq(['ls', 'ls -la'])
       end
     end
 
-    it 'returns false for an unknown prefix' do
+    it 'drops a candidate that exactly matches a stored grant' do
       Dir.mktmpdir do |dir|
         list = described_class.new(dir)
         list.add('tail')
-        expect(list.already_allowed?('git log')).to be false
+        expect(list.filter_uncovered(['tail', 'git log'])).to eq(['git log'])
       end
     end
 
-    it 'returns false for empty input' do
+    it 'drops candidates narrower than a stored grant (issue #94)' do
       Dir.mktmpdir do |dir|
         list = described_class.new(dir)
-        list.add('tail')
-        expect(list.already_allowed?('')).to be false
-        expect(list.already_allowed?('   ')).to be false
+        list.add('gh issue view')
+        # 'gh' and 'gh issue' are subsumed by the stored grant - selecting
+        # either would be a no-op, so they must not be offered.
+        expect(list.filter_uncovered(['gh', 'gh issue', 'gh issue view']))
+          .to eq([])
+      end
+    end
+
+    it 'drops every candidate that shares the leading token of a stored grant' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(dir)
+        list.add('git status')
+        # 'git log' shares its leading token with the stored 'git status' -
+        # the whole command tree is considered covered, so it is not offered.
+        # Only genuinely different trees (e.g. 'ls') stay.
+        expect(list.filter_uncovered(['git log', 'ls'])).to eq(['ls'])
+      end
+    end
+
+    it 'drops a candidate broader than a stored grant' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(dir)
+        list.add('git status')
+        # Even a broader candidate ('git' would cover 'git status') is in
+        # the same command tree, so offering it adds no new behaviour.
+        expect(list.filter_uncovered(['git'])).to eq([])
+      end
+    end
+
+    it 'handles empty / blank candidates safely' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(dir)
+        expect(list.filter_uncovered(['', '  '])).to eq([])
+        expect(list.filter_uncovered(nil)).to eq([])
+      end
+    end
+
+    it 'handles multiple stored grants' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(dir)
+        list.add('ls')
+        list.add('git status')
+        # Both 'ls' and every 'git ...' candidate are covered by the
+        # stored grants; a fresh tree like 'bundle exec rspec' stays.
+        expect(list.filter_uncovered(['ls', 'git status', 'git log']))
+          .to eq([])
       end
     end
   end

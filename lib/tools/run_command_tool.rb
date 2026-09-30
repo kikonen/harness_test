@@ -100,31 +100,30 @@ module Tools
         return run_command(command, dir, shown, timeout, limit)
       end
 
-      # Not in allowlist - ask the user.
-      # One candidate per prefix length of each segment (issue #102):
-      # "cd C:/work/x && ruby -c lib/cli.rb" offers 'cd C:/work/x',
-      # 'ruby' and 'ruby -c' separately, so the user grants exactly as
-      # much (or little) as they want.
-      prefixes = CommandAllowlist.extract_prefix_options(command)
-      options = [Dialog::Option.new(title: 'Allow', value: :allow)]
+      # Not in allowlist - ask the user. One "Always allow" option per
+      # candidate prefix length of each segment (issue #102); candidates
+      # already subsumed by a stored grant are filtered out up front so
+      # the dialog only shows prefixes that would actually change
+      # behaviour when saved (issue #94).
+      all_candidates = CommandAllowlist.extract_prefix_options(command)
+      prefixes       = @allowlist.filter_uncovered(all_candidates)
+      options        = [Dialog::Option.new(title: 'Allow', value: :allow)]
       # Simple segments yield one "Always allow" option per candidate
       # prefix; commands with unsafe constructs (redirects, substitutions,
       # subshells, background) yield none, so no saving is offered.
-      unless prefixes.empty?
-        # Prefixes already stored in the allowlist are marked with (*) so the
-        # user can see which of them are redundant (issue #94).
-        prefixes.each do |p|
-          suffix = @allowlist.already_allowed?(p) ? ' (*)' : ''
-          options << Dialog::Option.new(
-            title: "Always allow '#{p}'#{suffix}",
-            description: 'Simple invocations only (no redirects / $vars / &).',
-            # Unique per prefix so a multi-select answer maps back to the
-            # exact prefixes chosen (issue #102).
-            value: { always_allow: p }
-          )
-        end
+      prefixes.each do |p|
+        options << Dialog::Option.new(
+          title: "Always allow '#{p}'",
+          # Unique per prefix so a multi-select answer maps back to the
+          # exact prefixes chosen (issue #102).
+          value: { always_allow: p }
+        )
       end
-      note = UNSAFETY_NOTE if prefixes.empty?
+      # UNSAFETY_NOTE only when the command itself contains unsafe
+      # constructs (all_candidates empty). If candidates existed but were
+      # all filtered out because a stored grant already covers them, the
+      # command is fine - no scary note.
+      note = UNSAFETY_NOTE if all_candidates.empty?
 
       choice = Dialog.new(
         title: "The model is requesting to run a shell command:\n" \
@@ -141,13 +140,9 @@ module Tools
       result = handle_choice(choice)
       return result[:denial] if result[:denied]
 
-      if result[:saved]
-        existing = result[:saved].select { |p| @allowlist.already_allowed?(p) }
-        new      = result[:saved] - existing
+      if result[:saved] && !result[:saved].empty?
         result[:saved].each { |p| @allowlist.add(p) }
-        msg = "  [run.command] ✓ always-allowed: #{new.join(', ')} (saved to allowlist)"
-        msg += ", already allowed: #{existing.join(', ')}" unless existing.empty?
-        puts msg
+        puts "  [run.command] ✓ always-allowed: #{result[:saved].join(', ')} (saved to allowlist)"
         $stdout.flush
       end
 
