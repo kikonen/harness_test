@@ -14,9 +14,12 @@ require_relative '../command_allowlist'
 #   - The FULL command string is displayed to the user before anything runs.
 #   - The user must explicitly select "Allow" at an interactive dialog;
 #     any other choice denies execution.
-#   - "Always allow <prefix>" saves the command prefix to the user's
+#   - "Always allow <prefix>" saves a command prefix to the user's
 #     allowlist (.harness/allowed_commands.yml) so future commands with
-#     the same prefix skip the dialog (issue #69).
+#     that prefix skip the dialog (issue #69). One option is offered per
+#     candidate prefix length, and several can be saved in one line -
+#     the user grants exactly as much as they want, never more
+#     (issue #102).
 #   - Commands run under a timeout (default 60 s, hard cap 300 s) so a
 #     hung process can never block the session indefinitely.
 #   - Output is truncated to a line limit (default 200, max 5000) because
@@ -98,22 +101,28 @@ module Tools
       end
 
       # Not in allowlist - ask the user.
-      prefixes = CommandAllowlist.extract_all_prefixes(command)
+      # One candidate per prefix length of each segment (issue #102):
+      # "cd C:/work/x && ruby -c lib/cli.rb" offers 'cd C:/work/x',
+      # 'ruby' and 'ruby -c' separately, so the user grants exactly as
+      # much (or little) as they want.
+      prefixes = CommandAllowlist.extract_prefix_options(command)
       options = [Dialog::Option.new(title: 'Allow', value: :allow)]
-      note    = nil
-      # Pipelines of simple commands can be saved (each segment's prefix is
-      # stored). Chaining/redirects/substitutions yield no prefixes, so the
-      # option is hidden for those.
+      # Simple segments yield one "Always allow" option per candidate
+      # prefix; commands with unsafe constructs (redirects, substitutions,
+      # subshells, background) yield none, so no saving is offered.
       unless prefixes.empty?
         # Prefixes already stored in the allowlist are marked with (*) so the
         # user can see which of them are redundant (issue #94).
-        marked = prefixes.map { |p| @allowlist.already_allowed?(p) ? "'#{p}' (*)" : "'#{p}'" }
-        label = marked.size == 1 ? marked[0] : marked.join(', ')
-        options << Dialog::Option.new(
-          title: "Always allow #{label}",
-          description: 'Simple invocations only (no redirects / $vars / &).',
-          value: :always_allow
-        )
+        prefixes.each do |p|
+          suffix = @allowlist.already_allowed?(p) ? ' (*)' : ''
+          options << Dialog::Option.new(
+            title: "Always allow '#{p}'#{suffix}",
+            description: 'Simple invocations only (no redirects / $vars / &).',
+            # Unique per prefix so a multi-select answer maps back to the
+            # exact prefixes chosen (issue #102).
+            value: { always_allow: p }
+          )
+        end
       end
       note = UNSAFETY_NOTE if prefixes.empty?
 
@@ -122,30 +131,20 @@ module Tools
                "$ #{command}\ncwd: #{shown} (timeout: #{timeout}s)",
         options: options,
         note: note,
-        note_on_cancel_only: true
+        note_on_cancel_only: true,
+        # Multi-select lets the user save several prefixes in one line
+        # (e.g. "2 4") - issue #102. Only meaningful when there is at
+        # least one grantable prefix.
+        multi_select: !prefixes.empty?
       ).show
 
-      # Dialog returns: bare value, or [value, note] when a note is attached.
-      # With note_on_cancel_only, notes only appear on the cancel choice.
-      value = choice.is_a?(Array) ? choice[0] : choice
-      note  = choice.is_a?(Array) ? choice[1] : nil
+      result = handle_choice(choice)
+      return result[:denial] if result[:denied]
 
-      if value == Dialog::CANCEL_VALUE
-        # Cancel - may carry a note (issue #79/#78).
-        if note
-          puts "  [run.command] ✗ denied by user (note: \"#{note}\")"
-        else
-          puts "  [run.command] ✗ denied by user"
-        end
-        $stdout.flush
-        return Tool.denial_error('error: user denied executing the command',
-                                { status: :denied, note: note })
-      end
-
-      if value == :always_allow
-        existing = prefixes.select { |p| @allowlist.already_allowed?(p) }
-        new      = prefixes - existing
-        prefixes.each { |p| @allowlist.add(p) }
+      if result[:saved]
+        existing = result[:saved].select { |p| @allowlist.already_allowed?(p) }
+        new      = result[:saved] - existing
+        result[:saved].each { |p| @allowlist.add(p) }
         msg = "  [run.command] ✓ always-allowed: #{new.join(', ')} (saved to allowlist)"
         msg += ", already allowed: #{existing.join(', ')}" unless existing.empty?
         puts msg
@@ -156,6 +155,55 @@ module Tools
     end
 
     private
+
+    # Interpret the raw dialog answer. Returns a hash with :denied and
+    # :denial (the error string to return) when the user cancelled, and
+    # :saved (array of prefixes to persist) when one or more "Always
+    # allow" options were picked. A bare :allow - including one mixed
+    # into a multi-select line, which is contradictory - runs the command
+    # without saving anything.
+    def handle_choice(choice)
+      # A [value, note] pair (note is a String) means the user attached
+      # a note; with note_on_cancel_only it only survives on cancel.
+      if choice.is_a?(Array) && choice.size == 2 && choice[1].is_a?(String)
+        # [value, note]: a note was attached; with note_on_cancel_only it
+        # only survives on the cancel choice (issue #79).
+        return denial('user denied executing the command', note: choice[1]) \
+               if choice[0] == Dialog::CANCEL_VALUE
+        return {}
+      end
+
+      # Multi-select returns an array of values (e.g. [hash1, hash2]).
+      # Single selection returns the bare value.
+      values = choice.is_a?(Array) ? choice : [choice]
+      return denial('user denied executing the command') \
+             if values.include?(Dialog::CANCEL_VALUE)
+
+      # A mix of plain "Allow" with one or more grants is ambiguous: the
+      # user wants to run the command now, so we honor the Allow and save
+      # nothing (a bare grant selection saves those prefixes). Only
+      # hash-valued options carry a prefix to persist.
+      if values.include?(:allow)
+        return { saved: [] }
+      end
+
+      saved = values.select { |v| v.is_a?(Hash) && v[:always_allow] }
+                  .map { |v| v[:always_allow] }
+      { saved: saved }
+    end
+
+    # Build the standard denial error string and log it to the console.
+    def denial(message, note: nil)
+      if note
+        puts "  [run.command] ✗ denied by user (note: \"#{note}\")"
+      else
+        puts "  [run.command] ✗ denied by user"
+      end
+      $stdout.flush
+      { denied: true,
+        denial: Tool.denial_error("error: #{message}",
+                                 { status: :denied, note: note }) }
+    end
 
     # Runs the command (after any required confirmation) and formats the
     # result. Raises Timeout::Error when the command exceeds its timeout.

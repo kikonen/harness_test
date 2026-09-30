@@ -23,6 +23,13 @@
 # ignored on other choices (bare value returned). A plain number (no
 # note) always returns the bare value.
 #
+# Multi-select dialogs (multi_select: true) accept several
+# option numbers in one line, separated by spaces and/or commas (e.g.
+# "1 3" or "1,3"). One selection returns the bare value; two or more
+# return an ARRAY of the selected values in the order typed. In
+# multi-select mode a note is only kept on the cancel choice; any other
+# "<number> <text>" line cancels. EOF still cancels the whole dialog.
+#
 # An out-of-range option number (e.g. "5" when only 1..4 exist) is
 # rejected with an explanatory line and the dialog re-prompts, so a
 # mistyped choice is never silently reinterpreted as free text
@@ -76,8 +83,12 @@ class Dialog
   #            free-text answer is expected.
   # note_on_cancel_only: restrict notes to the cancel choice only (grant
   #            dialogs, issue #79). Default false: notes on any choice.
+  # multi_select: allow selecting several options in one line by typing
+  #            their numbers separated by spaces and/or commas (e.g.
+  #            "1 3" or "1,3"). One selection returns the bare value;
+  #            two or more return an array of values.
   def initialize(title:, options:, note: nil, free_text: false, free_text_prompt: nil,
-                 note_on_cancel_only: false)
+                 note_on_cancel_only: false, multi_select: false)
     raise ArgumentError, 'dialog title must be a non-empty string' if title.to_s.strip.empty?
     unless options.is_a?(Array) && !options.empty?
       raise ArgumentError, 'dialog requires a non-empty array of Dialog::Option'
@@ -92,6 +103,7 @@ class Dialog
     @free_text_prompt = free_text_prompt.to_s.strip.sub(/\Aor\s+/, '')
     @options = options + [Option.new(title: 'Cancel', value: CANCEL_VALUE)]
     @note_on_cancel_only = note_on_cancel_only ? true : false
+    @multi_select = multi_select ? true : false
   end
 
   # Render the dialog and wait for the user's choice on $stdin.
@@ -105,6 +117,9 @@ class Dialog
   # extra context on top of the selection, never a replacement for it.
   # With note_on_cancel_only (grant dialogs, issue #79) notes are kept
   # only on the cancel choice; on other choices the bare value is returned.
+  # Multi-select dialogs accept several numbers in one line: "1 3" or
+  # "1,3" - one selection returns the bare value, two or more return an
+  # array of the selected values in the order typed.
   #
   # An out-of-range option number is rejected with an explanatory line
   # and the dialog asks again (issue #73).
@@ -138,6 +153,15 @@ class Dialog
       answer = line.chomp.strip
       next if answer.empty?
 
+      # Multi-select: "1 3", "1,3" or "1 3, 5" - several option numbers
+      # in one line. Returns nil when the line was invalid
+      # and the dialog re-prompted.
+      if @multi_select && answer.match?(/\A\d+(?:[,\s]+\d+)+\z/)
+        chosen = handle_multi_select(answer)
+        next if chosen.nil?
+        return chosen
+      end
+
       # "<number> <note>": an option selected PLUS a free note on top.
       # Grant dialogs (note_on_cancel_only, issue #79) keep the note only
       # for a denial - a grant/selection is final there.
@@ -146,6 +170,9 @@ class Dialog
         idx = m[1].to_i - 1
         if idx >= 0 && idx < @options.size
           value = @options[idx].value
+          # Multi-select mode: notes are only meaningful on the cancel
+          # choice; any other selection-with-text cancels.
+          return CANCEL_VALUE if @multi_select && value != CANCEL_VALUE
           keep_note = !@note_on_cancel_only || value == CANCEL_VALUE
           return keep_note ? [value, m[2].strip] : value
         end
@@ -172,18 +199,38 @@ class Dialog
     CANCEL_VALUE
   end
 
+  # Resolve a multi-select answer ("1 3", "1,3") to the selected values.
+  # One selection returns the bare value; two or more return an array in
+  # the order typed. Any out-of-range number rejects the whole line.
+  def handle_multi_select(answer)
+    numbers = answer.split(/\s*,\s*|\s+/).map(&:to_i)
+    if numbers.any? { |n| n < 1 || n > @options.size }
+      bad = numbers.reject { |n| (1..@options.size).cover?(n) }
+      reprompt_invalid(bad.join(', '))
+      return nil
+    end
+
+    values = numbers.map { |n| @options[n - 1].value }
+    if values.include?(CANCEL_VALUE)
+      CANCEL_VALUE
+    else
+      values.size == 1 ? values.first : values
+    end
+  end
+
   private
 
   # Print the "Choice (...)" prompt line (shared by the first ask and
   # re-prompts after an invalid choice).
   def print_choice_prompt
     note_hint = @note_on_cancel_only ? 'cancel + short note' : '<number> + short note'
+    multi_hint = @multi_select ? 'or several numbers like "1 3" to select many' : ''
     if @free_text
       hint = @free_text_prompt.to_s.strip
       hint = 'type a short free-text answer' if hint.empty?
-      print "             Choice (1..#{@options.size}, #{note_hint}, or #{hint}): "
+      print "             Choice (1..#{@options.size},#{multi_hint} #{note_hint}, or #{hint}): "
     else
-      print "             Choice (1..#{@options.size}, or #{note_hint}): "
+      print "             Choice (1..#{@options.size},#{multi_hint} or #{note_hint}): "
     end
     $stdout.flush
   end

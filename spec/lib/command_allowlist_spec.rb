@@ -241,6 +241,48 @@ RSpec.describe CommandAllowlist do
     end
   end
 
+  describe '.extract_prefix_options' do
+    it 'offers every subcommand prefix length of a segment' do
+      expect(described_class.extract_prefix_options('bundle exec rspec spec/'))
+        .to eq(['bundle', 'bundle exec', 'bundle exec rspec'])
+    end
+
+    it 'offers the full invocation for path-like arguments (issue #102)' do
+      # A path is not a subcommand, so only "cd C:/work/x" is offered -
+      # never a bare "cd".
+      expect(described_class.extract_prefix_options('cd C:/work/own/projects/ai/harness_test'))
+        .to eq(['cd C:/work/own/projects/ai/harness_test'])
+    end
+
+    it 'offers both lengths for flag-like arguments (issue #102)' do
+      expect(described_class.extract_prefix_options('ruby -c lib/cli.rb'))
+        .to eq(['ruby', 'ruby -c'])
+    end
+
+    it 'combines candidates from every segment and dedupes' do
+      cmd = 'cd C:/work/x && ruby -c lib/cli.rb && ruby -c lib/cli.rb'
+      expect(described_class.extract_prefix_options(cmd)).to eq(
+        ['cd C:/work/x', 'ruby', 'ruby -c']
+      )
+    end
+
+    it 'offers only the first MAX_PREFIX_TOKENS subcommands for long chains' do
+      expect(described_class.extract_prefix_options('a b c d e'))
+        .to eq(['a', 'a b', 'a b c', 'a b c d e'])
+    end
+
+    it 'returns [] when any segment is unsafe' do
+      expect(described_class.extract_prefix_options('ls > out.txt && echo done')).to eq([])
+      expect(described_class.extract_prefix_options('echo $(whoami) | head')).to eq([])
+      expect(described_class.extract_prefix_options('sleep 10 & echo done')).to eq([])
+    end
+
+    it 'returns [] for empty input' do
+      expect(described_class.extract_prefix_options('')).to eq([])
+      expect(described_class.extract_prefix_options('   ')).to eq([])
+    end
+  end
+
   describe '#allowed?' do
     it 'returns false when no prefixes are saved' do
       Dir.mktmpdir do |dir|
