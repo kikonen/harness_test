@@ -10,8 +10,12 @@ require_relative 'shell_parser'
 #
 # Persists user-approved command prefixes in .harness/allowed_commands.yml.
 # When the user picks "Always allow" in the run.command dialog, the
-# extracted prefix(es) are saved here. Subsequent commands whose leading
+# candidate prefix(es) are saved here. Subsequent commands whose leading
 # tokens match a stored prefix are auto-approved without a dialog.
+#
+# Prefix lengths (issue #102): the run.command dialog offers one option
+# per prefix length of each segment (e.g. 'ruby', 'ruby -c') so the user
+# can grant exactly as much as they want - never more.
 #
 # File format is a simple YAML array of strings:
 #   - ls
@@ -124,6 +128,84 @@ class CommandAllowlist
     segments.map { |seg| extract_prefix(seg) }
            .uniq
            .select { |p| !p.empty? }
+  end
+
+  # Extract the candidate prefixes for a command: one per prefix length
+  # of each segment, bounded by the first flag (issue #102). For a
+  # segment "ruby -c lib/cli.rb" the candidates are ["ruby", "ruby -c"];
+  # for "cd C:/work/x" only the full invocation is offered (a path is
+  # never a subcommand, and granting a bare "cd" would cover every
+  # directory). Segments that yield no candidate (no leading word) are
+  # skipped. Returns [] when ANY segment is unsafe.
+  #
+  # Examples:
+  #   "cd C:/work/x && ruby -c lib/cli.rb"
+  #     => ["cd C:/work/x", "ruby", "ruby -c"]
+  #   "bundle exec rspec spec/" => ["bundle", "bundle exec", "bundle exec rspec"]
+  def self.extract_prefix_options(command)
+    segments = split_segments(command)
+    return [] if segments.empty?
+    return [] unless segments.all? { |seg| segment_safe?(seg) }
+
+    segments.map { |seg| prefix_lengths(seg) }
+           .flatten
+           .uniq
+  end
+
+  # The candidate prefixes for a single safe segment: every leading run
+  # of subcommand-looking tokens (1..MAX_PREFIX_TOKENS), plus - when the
+  # segment has flag-like arguments (e.g. "-c") - the invocation up to
+  # and including the first flag IF that flag is followed by an argument
+  # (e.g. "ruby -c lib/cli.rb" offers ["ruby", "ruby -c"]), but NOT when
+  # the flag is trailing (e.g. "tail -5" offers only ["tail"] - "-5" is
+  # a parameter, not a subcommand). When the subcommand run is just one
+  # token and the rest are arguments/paths (e.g. "cd C:/work/x"), only
+  # the full invocation is offered - a bare "cd" would grant every
+  # directory. When the run hit the MAX_PREFIX_TOKENS cap and the next
+  # token is also a subcommand, the full invocation is appended as an
+  # exact-match option (e.g. "a b c d e" offers "a", "a b", "a b c",
+  # "a b c d e").
+  def self.prefix_lengths(segment)
+    segment = segment.to_s.strip
+    return [] unless segment_safe?(segment)
+
+    tokens = ShellTokenizer.tokenize(segment)
+    words  = tokens.select { |kind, _t| kind == :word }.map { |_k, t| t }
+    return [] if words.empty?
+
+    flag_idx = words.index { |w| w.start_with?('-') }
+
+    # Collect the leading run of subcommand-looking tokens.
+    lengths = []
+    (1..MAX_PREFIX_TOKENS).each do |n|
+      break if n > words.size
+      break unless words[0...n].all? { |w| SUBCOMMAND_TOKEN.match?(w) }
+      lengths << words[0...n].join(' ')
+    end
+
+    # Single subcommand + non-subcommand args (e.g. "cd C:/work/x"):
+    # a bare "cd" would grant every directory - too broad. Offer only
+    # the full invocation so the user grants exactly what they typed.
+    return [words.join(' ')] if lengths.size == 1 && flag_idx.nil? && words.size > 1
+
+    # When the first flag is followed by an argument, include it in the
+    # prefix: "ruby -c" is a different grant than bare "ruby". A trailing
+    # flag (e.g. "tail -5") is just a parameter - don't offer it.
+    if flag_idx && flag_idx < words.size - 1
+      with_flag = words[0..flag_idx].join(' ')
+      lengths << with_flag unless lengths.include?(with_flag)
+    end
+
+    # The subcommand run hit the MAX_PREFIX_TOKENS cap and the next
+    # token is also a subcommand: append the full invocation as an
+    # exact-match option (e.g. "a b c d e" -> add "a b c d e").
+    if lengths.size == MAX_PREFIX_TOKENS && flag_idx.nil? &&
+       words.size > MAX_PREFIX_TOKENS &&
+       SUBCOMMAND_TOKEN.match?(words[MAX_PREFIX_TOKENS])
+      full = words.join(' ')
+      lengths << full unless lengths.include?(full)
+    end
+    lengths
   end
 
   # ------------------------------------------------------------------

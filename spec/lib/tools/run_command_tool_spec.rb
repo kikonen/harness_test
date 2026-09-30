@@ -10,9 +10,10 @@ RSpec.describe Tools::RunCommandTool do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
       tool = described_class.new(list, {})
-      # Options are now: Allow(1), Always allow(2), Cancel(3)
+      # "rm -rf /" offers 'rm' and 'rm -rf', so:
+      # Allow(1), 'rm'(2), 'rm -rf'(3), Cancel(4).
       allow($stdin).to receive(:gets)
-        .and_return("3 this command is too broad, narrow it\n", nil)
+        .and_return("4 this command is too broad, narrow it\n", nil)
 
       out = tool.execute('command' => 'rm -rf /')
       expect(out).to start_with('error: user denied executing the command')
@@ -24,7 +25,8 @@ RSpec.describe Tools::RunCommandTool do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
       tool = described_class.new(list, {})
-      allow($stdin).to receive(:gets).and_return("3\n", nil)
+      # Allow(1), 'rm'(2), 'rm -rf'(3), Cancel(4).
+      allow($stdin).to receive(:gets).and_return("4\n", nil)
 
       out = tool.execute('command' => 'rm -rf /')
       expect(out).to eq('error: user denied executing the command')
@@ -48,8 +50,10 @@ RSpec.describe Tools::RunCommandTool do
         list = FileList.new(workdir: dir)
         tool = described_class.new(list, {})
 
-        # First time: user picks "Always allow" (option 2).
-        allow($stdin).to receive(:gets).and_return("2\n", nil)
+        # First time: options are Allow(1), 'bundle'(2), 'bundle exec'(3),
+        # 'bundle exec rspec'(4), Cancel(5). User picks the longest
+        # (most specific) prefix.
+        allow($stdin).to receive(:gets).and_return("4\n", nil)
         out1 = tool.execute('command' => 'bundle exec rspec spec/')
         expect(out1).to start_with('exit code:')
 
@@ -70,12 +74,20 @@ RSpec.describe Tools::RunCommandTool do
         list = FileList.new(workdir: dir)
         tool = described_class.new(list, {})
 
-        allow($stdin).to receive(:gets).and_return("2\n", nil)
-        tool.execute('command' => 'bundle exec rspec spec/')
+        # Options for "bundle exec rspec spec/": Allow(1), 'bundle'(2),
+        # 'bundle exec'(3), 'bundle exec rspec'(4), Cancel(5). Save only
+        # the specific 'bundle exec rspec' prefix (option 4), not the
+        # broader 'bundle' or 'bundle exec'.
+        allow($stdin).to receive(:gets).and_return("4\n", nil)
+        out1 = tool.execute('command' => 'bundle exec rspec spec/')
+        expect(out1).to start_with('exit code:')
 
         # Different prefix (bundle exec rake) is NOT covered by the saved
         # "bundle exec rspec" prefix, so it must ask again.
-        allow($stdin).to receive(:gets).and_return("3\n", nil)
+        # Options for "bundle exec rake test": Allow(1), 'bundle'(2),
+        # 'bundle exec'(3), 'bundle exec rake'(4),
+        # 'bundle exec rake test'(5), Cancel(6).
+        allow($stdin).to receive(:gets).and_return("6\n", nil)
         out = tool.execute('command' => 'bundle exec rake test')
         expect(out).to start_with('error: user denied executing the command')
       end
@@ -112,8 +124,10 @@ RSpec.describe Tools::RunCommandTool do
         out = $stdout.string
         $stdout = orig_stdout
 
-        # "git log" is new, "tail" is already allowed -> starred.
-        expect(out).to include("Always allow 'git log', 'tail' (*)")
+        # One option per candidate prefix (issue #102); "tail" is already
+        # allowed -> starred.
+        expect(out).to include("Always allow 'git log'")
+        expect(out).to include("Always allow 'tail' (*)")
       end
     end
 
@@ -126,7 +140,10 @@ RSpec.describe Tools::RunCommandTool do
         list = FileList.new(workdir: dir)
         tool = described_class.new(list, {})
 
-        allow($stdin).to receive(:gets).and_return("2\n", nil)
+        # Options: Allow(1), 'git'(2), 'git log'(3), 'tail' (*)(4), Cancel(5).
+        # Pick "git log" (new) and "tail" (already-allowed) at once so the
+        # report shows new and already-allowed prefixes.
+        allow($stdin).to receive(:gets).and_return("3 4\n", nil)
 
         orig_stdout = $stdout
         $stdout = StringIO.new
@@ -134,8 +151,95 @@ RSpec.describe Tools::RunCommandTool do
         out = $stdout.string
         $stdout = orig_stdout
 
-        expect(out).to include("always-allowed: git log (saved to allowlist)")
+        # "git" and "git log" are new (neither was pre-seeded); "tail" was
+        # already stored.
+        expect(out).to match(/always-allowed: git log .*\(saved to allowlist\)/)
         expect(out).to include('already allowed: tail')
+      end
+    end
+
+    context 'per-prefix options with multi-select (issue #102)' do
+      it 'offers one option per candidate prefix length' do
+        Dir.mktmpdir do |dir|
+          list = FileList.new(workdir: dir)
+          tool = described_class.new(list, {})
+          allow($stdin).to receive(:gets).and_return("1\n", nil)
+
+          orig_stdout = $stdout
+          $stdout = StringIO.new
+          tool.execute('command' => 'cd C:/work/x && ruby -c lib/cli.rb')
+          out = $stdout.string
+          $stdout = orig_stdout
+
+          # "cd C:/work/x" is granted as a full invocation (a path is not a
+          # subcommand, so no shorter prefix), "ruby" and "ruby -c" are
+          # offered as separate choices.
+          expect(out).to include("Always allow 'cd C:/work/x'")
+          expect(out).to include("Always allow 'ruby'")
+          expect(out).to include("Always allow 'ruby -c'")
+        end
+      end
+
+      it 'saves only the selected prefixes when several are picked at once' do
+        Dir.mktmpdir do |dir|
+          list = FileList.new(workdir: dir)
+          tool = described_class.new(list, {})
+          # Options: 1 Allow, 2 'cd C:/work/x', 3 'ruby', 4 'ruby -c'.
+          allow($stdin).to receive(:gets).and_return("3 4\n", nil)
+
+          out = tool.execute('command' => 'cd C:/work/x && ruby -c lib/cli.rb')
+          expect(out).to start_with('exit code:')
+
+          yml = File.join(dir, '.harness', 'allowed_commands.yml')
+          saved = YAML.safe_load(File.read(yml))
+          expect(saved).to include('ruby')
+          expect(saved).to include('ruby -c')
+          expect(saved).not_to include('cd C:/work/x')
+        end
+      end
+
+      it 'saves a single picked prefix (bare value, not an array)' do
+        Dir.mktmpdir do |dir|
+          list = FileList.new(workdir: dir)
+          tool = described_class.new(list, {})
+          # Option 2 is 'cd C:/work/x'.
+          allow($stdin).to receive(:gets).and_return("2\n", nil)
+
+          out = tool.execute('command' => 'cd C:/work/x && ruby -c lib/cli.rb')
+          expect(out).to start_with('exit code:')
+
+          yml = File.join(dir, '.harness', 'allowed_commands.yml')
+          saved = YAML.safe_load(File.read(yml))
+          expect(saved).to eq(['cd C:/work/x'])
+        end
+      end
+
+      it 'runs the command without saving when only "Allow" is picked' do
+        Dir.mktmpdir do |dir|
+          list = FileList.new(workdir: dir)
+          tool = described_class.new(list, {})
+          allow($stdin).to receive(:gets).and_return("1\n", nil)
+
+          out = tool.execute('command' => 'bundle exec rspec spec/')
+          expect(out).to start_with('exit code:')
+          expect(File.file?(File.join(dir, '.harness', 'allowed_commands.yml'))).to be false
+        end
+      end
+
+      it 'runs the command without saving when Allow is mixed into a multi-select' do
+        Dir.mktmpdir do |dir|
+          list = FileList.new(workdir: dir)
+          tool = described_class.new(list, {})
+          # Options: Allow(1), 'bundle'(2), 'bundle exec'(3),
+          # 'bundle exec rspec'(4), Cancel(5). "1 2" = Allow + save 'bundle'
+          # - ambiguous (user wants to run now); the command runs and
+          # nothing is saved.
+          allow($stdin).to receive(:gets).and_return("1 2\n", nil)
+
+          out = tool.execute('command' => 'bundle exec rspec spec/')
+          expect(out).to start_with('exit code:')
+          expect(File.file?(File.join(dir, '.harness', 'allowed_commands.yml'))).to be false
+        end
       end
     end
 

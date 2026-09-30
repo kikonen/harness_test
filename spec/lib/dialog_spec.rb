@@ -175,5 +175,57 @@ RSpec.describe Dialog do
         expect(show(dialog)).to eq([Dialog::FREE_TEXT, 'something else entirely'])
       end
     end
+
+    describe 'with multi_select' do
+      let(:dialog) { described_class.new(title: 't', options: options, multi_select: true) }
+      # Options: Allow(1), Deny(2), Cancel(3).
+
+      it 'returns an array of values in the order typed for "n m"' do
+        stub_stdin("1 2\n")
+        expect(show(dialog)).to eq([:allow, :deny])
+      end
+
+      it 'accepts comma-separated numbers' do
+        stub_stdin("1,2\n")
+        expect(show(dialog)).to eq([:allow, :deny])
+      end
+
+      it 'returns the bare value for a single number' do
+        stub_stdin("1\n")
+        expect(show(dialog)).to eq(:allow)
+      end
+
+      it 'returns CANCEL_VALUE when cancel is part of the selection' do
+        stub_stdin("1 3\n")
+        expect(show(dialog)).to eq(Dialog::CANCEL_VALUE)
+      end
+
+      it 'cancels on "<number> <note>" for a non-cancel choice' do
+        stub_stdin("1 seems fine\n")
+        expect(show(dialog)).to eq(Dialog::CANCEL_VALUE)
+      end
+
+      it 'keeps the note on the cancel choice' do
+        stub_stdin("3 no, and because X\n")
+        expect(show(dialog)).to eq([Dialog::CANCEL_VALUE, 'no, and because X'])
+      end
+
+      it 're-prompts when any number is out of range, then accepts a valid line' do
+        stub_stdin("1 9\n", "2\n")
+        out = capture_stdout { expect(show(dialog)).to eq(:deny) }
+        expect(out).to include('invalid choice 9 (valid: 1..3)')
+      end
+
+      it 'still cancels on EOF' do
+        stub_stdin(nil)
+        expect(show(dialog)).to eq(Dialog::CANCEL_VALUE)
+      end
+
+      it 'shows a multi-select hint in the choice prompt' do
+        stub_stdin(nil)
+        out = capture_stdout { show(dialog) }
+        expect(out).to include('several numbers like "1 3"')
+      end
+    end
   end
 end
