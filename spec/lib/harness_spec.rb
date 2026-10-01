@@ -102,4 +102,34 @@ RSpec.describe Harness do
       expect(File.exist?(File.join(workdir, Harness::HARNESS_DIR, 'harness.log'))).to be false
     end
   end
+
+  describe '#rebind_logger (issue #113)' do
+    it 'points the logger at the CURRENT session id after a resume swaps it in' do
+      harness = build_harness
+      resumed_id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+
+      # Simulate resume: the session id changes but the logger was still
+      # bound to the fresh id created at startup.
+      harness.session.instance_variable_set(:@session_id, resumed_id)
+
+      expect(harness.session_log_path).to include(resumed_id)
+
+      old_logger = harness.logger
+      new_logger = harness.rebind_logger
+
+      expect(new_logger).not_to equal(old_logger)
+      expect(File.file?(File.join(workdir, Harness::HARNESS_DIR, 'sessions', resumed_id, 'harness.log'))).to be true
+    end
+
+    it 're-points the LLM client so HTTP logging follows the new session' do
+      harness = build_harness
+      old_client_logger = harness.client.instance_variable_get(:@logger)
+
+      harness.session.instance_variable_set(:@session_id, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+      harness.rebind_logger
+
+      expect(harness.client.instance_variable_get(:@logger)).to equal(harness.logger)
+      expect(harness.client.instance_variable_get(:@logger)).not_to equal(old_client_logger)
+    end
+  end
 end

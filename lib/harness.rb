@@ -94,8 +94,9 @@ class Harness
   # issue #113: each session logs to its own file inside its session dir
   # (.harness/sessions/<session-id>/), so concurrent sessions in the same
   # workdir do not interleave in one shared log. The session id is stable
-  # for the whole process (assigned at start, restored on resume), so the
-  # path is stable too - no logger switching needed at runtime.
+  # within a run, EXCEPT that resume/continue swaps in a saved session with
+  # a different id; that re-points the logger via #rebind_logger (see
+  # SessionManager#resume_session).
   def session_log_path
     File.join(@file_list.workdir, HARNESS_DIR, 'sessions', @session.session_id, SESSION_LOG_FILE)
   end
@@ -108,6 +109,18 @@ class Harness
       "#{datetime.strftime('%Y-%m-%d %H:%M:%S')} [#{severity}] #{msg}\n"
     }
     logger
+  end
+
+  # issue #113: rebuild the logger for the CURRENT session id. The logger is
+  # created in #initialize for a fresh (random) session id; when a saved
+  # session is resumed/continued the id changes, so the log must follow it or
+  # it would land in the throwaway fresh-id directory. Closes the old logger
+  # and re-points the LLM client, which holds its own reference.
+  def rebind_logger
+    @logger.close if @logger.respond_to?(:close)
+    @logger = build_logger
+    @client.logger = @logger if @client.respond_to?(:logger=)
+    @logger
   end
 
   def build_tool_registry

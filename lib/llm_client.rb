@@ -67,6 +67,11 @@ class LLMClient
     @logger  = logger
   end
 
+  # issue #113: re-point the logger after a session resume swaps in a
+  # different session id (the log path is per-session). KeepAliveHTTP reads
+  # this on every request, so updating it here is enough.
+  attr_writer :logger
+
   # Sends one chat completion request. Returns the parsed response hash
   # (symbolized keys). Raises LLMError when all attempts fail.
   def chat(messages, tools: nil, timeout: DEFAULT_READ_TIMEOUT)

@@ -229,6 +229,28 @@ RSpec.describe SessionManager do
       end
     end
   end
+
+  describe '#resume_session (issue #113)' do
+    it 're-points the logger at the resumed session id' do
+      Dir.mktmpdir do |dir|
+        sessions = File.join(dir, '.harness/sessions')
+        FileUtils.mkdir_p(sessions)
+        sid = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+        saved = session.to_h(file_list)
+        saved[:session_id] = sid # the file on disk carries the resumed id
+        File.write(File.join(sessions, "#{sid}.json"), JSON.generate(saved))
+
+        file_list = FileList.new([], workdir: dir)
+        manager   = described_class.new(harness, file_list)
+        expect(harness).to receive(:rebind_logger)
+
+        manager.resume_session(sid)
+
+        # The session id must have been swapped to the resumed one.
+        expect(session.session_id).to eq(sid)
+      end
+    end
+  end
 end
 
 RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
