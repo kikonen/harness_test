@@ -173,6 +173,18 @@ class Harness
       iteration += 1
       raise ToolLoopError, "exceeded max tool iterations (#{MAX_TOOL_ITERATIONS})" if iteration > MAX_TOOL_ITERATIONS
 
+      # issue #108: in-loop compaction. The context window may already be
+      # exhausted by the LAST call's prompt_tokens; compact now rather than
+      # letting the NEXT request fail server-side mid-turn. Only relevant
+      # after at least one tool round (iteration 1 has nothing to summarize).
+      if iteration > 1 && last_prompt_tokens > 0 &&
+         @session_manager.check_inloop_compaction(messages, last_prompt_tokens)
+        # Compaction rewrote the chain - any loop-detection state built on
+        # the pre-compaction tool calls is stale and must be reset.
+        consecutive_tool_calls = 0
+        loop_warning_injected = false
+      end
+
       data    = @client.chat(messages, tools: tools)
       message = data[:choices][0][:message]
 

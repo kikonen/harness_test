@@ -230,3 +230,117 @@ RSpec.describe SessionManager do
     end
   end
 end
+
+RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
+  let(:session) { Session.new('system prompt') }
+  let(:file_list) { FileList.new([], workdir: Dir.pwd) }
+  let(:client) { double('client', chat: nil) }
+  let(:harness) do
+    Class.new do
+      attr_accessor :session, :client, :spinner
+
+      def initialize(session, client)
+        @session = session
+        @client  = client
+        @options = { num_ctx: 1000, auto_save: false }
+        @logger  = Logger.new(File::NULL)
+      end
+
+      attr_reader :options, :logger
+
+      def compact_max_size
+        nil
+      end
+
+      def compact_auto_threshold
+        88
+      end
+
+      def context_indicator
+        nil
+      end
+    end.new(session, client)
+  end
+  let(:manager) { described_class.new(harness, file_list) }
+
+  # A local working chain as it looks mid tool-loop: system + prompt + a
+  # completed assistant/tool round (the part NOT yet in session.messages).
+  def inloop_messages
+    [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: '## Instruction\n\nimplement feature X' },
+      { role: 'assistant', content: nil,
+        tool_calls: [{ id: 'call_1', function: { name: 'file.read', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'call_1', content: 'sha256: abc\n---\nline 1' },
+      { role: 'assistant', content: nil,
+        tool_calls: [{ id: 'call_2', function: { name: 'file.patch', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'call_2', content: 'ok: applied 1 hunk(s)' }
+    ]
+  end
+
+  def allow_summary_response(text = 'Goal: implement feature X. Steps done: read and patch foo.rb. Next: run specs.')
+    allow(client).to receive(:chat) { { choices: [{ message: { content: text } }] } }
+  end
+
+  it 'does nothing when the last prompt_tokens are below the threshold' do
+    messages = inloop_messages
+    expect(manager.check_inloop_compaction(messages, 400)).to be(false)
+    expect(client).not_to have_received(:chat)
+    expect(session.messages.size).to eq(1)
+    expect(messages.size).to eq(6)
+  end
+
+  it 'does nothing when there is no real work to summarize yet' do
+    small = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'hi' }
+    ]
+    expect(manager.check_inloop_compaction(small, 1000)).to be(false)
+    expect(client).not_to have_received(:chat)
+  end
+
+  it 'summarizes the FULL chain, drops the verbatim tail, and syncs the session' do
+    allow_summary_response
+    messages = inloop_messages
+
+    captured = nil
+    allow(client).to receive(:chat) do |msgs|
+      captured = msgs
+      { choices: [{ message: { content: 'HANDOFF' } }] }
+    end
+
+    result = manager.check_inloop_compaction(messages, 1000)
+    expect(result).to be(true)
+
+    # The summarization call must see the ENTIRE local working chain (minus
+    # the system message, plus the instruction prompt) - including the
+    # mid-turn tool trail that does not exist in session.messages yet.
+    expect(captured.size).to eq(inloop_messages.size - 1 + 1)
+    expect(captured.last[:content]).to match(/Keep it under \d+ words/)
+    # The local working chain is replaced with a compacted form - the tail
+    # (last N messages) is deliberately NOT retained, because retaining it
+    # here would drop the rest of the work trail from both the live chain
+    # and the persisted session (issue #107).
+    expect(messages.map { |m| m[:role] }).to eq(%w[system user assistant user])
+  end
+
+  it 'replaces the local working chain with [system, summary, ack, continue]' do
+    allow_summary_response('HANDOFF TEXT')
+    messages = inloop_messages
+
+    # Record the pre-compaction stats so we can verify reset_stats was called.
+    session.record_stats(prompt_tokens: 1000, usage: {})
+
+    expect(manager.check_inloop_compaction(messages, 1000)).to be(true)
+
+    expect(messages.map { |m| m[:role] }).to eq(%w[system user assistant user])
+    expect(messages[1][:content]).to include('HANDOFF TEXT')
+    expect(messages.last[:content]).to match(/do not repeat/i)
+    # The session must hold the exact same compacted chain (in place).
+    expect(session.messages).to eq(messages)
+    # Stale pre-compaction stats must be cleared, otherwise auto_compact_due?
+    # would immediately trip again on the very tokens that caused compaction.
+    expect(session.instance_variable_get(:@last_stats)).to be_nil
+  end
+end

@@ -104,6 +104,38 @@ class SessionManager
       puts "  [warning] auto-save failed: #{e.message}"
     end
   end
+  # issue #108: in-loop compaction instruction - mid-turn, there is no verbatim
+  # tail to carry detail, so the summary must be a complete hand-off of the
+  # work state (including tool results) for continuing the task in progress.
+  INLOOP_SUMMARY_INSTRUCTION = 'Summarize the ENTIRE conversation and tool work above as a ' \
+                               'hand-off for continuing an in-progress task. Include: ' \
+                               '(1) the original goal, (2) every step already completed with its ' \
+                               'concrete results (file paths, SHAs, command outputs when available), ' \
+                               '(3) key decisions made, (4) files modified or created and their ' \
+                               'current state, (5) the exact next step to take. '
+
+  # issue #108: ask the LLM for a summary of an arbitrary message chain.
+  # conversation is expected WITHOUT the system message. Returns the
+  # stripped summary text. Used by both #compact_session (end-of-turn, with a
+  # retained tail) and Harness#check_inloop_compaction (mid-turn, no tail).
+  def generate_compact_summary(conversation, instruction)
+    max_words = @harness.compact_max_size || 500
+    messages = conversation + [
+      {
+        role: 'user',
+        content: "#{instruction} " \
+                 "Keep it under #{max_words} words. " \
+                 'Do NOT include the summarization instruction itself.'
+      }
+    ]
+
+    data = @harness.client.chat(messages)
+    text = data[:choices][0][:message][:content]
+    raise HarnessError, 'LLM returned empty summary' if text.nil? || text.strip.empty?
+
+    text.strip
+  end
+
   # Compact the session: ask the LLM to summarize the conversation, then
   # replace the full message chain with the summary. This frees up context
   # window space while preserving the essential information.
@@ -119,34 +151,21 @@ class SessionManager
     end
 
     conversation = @harness.session.messages[1..] # skip the system message
-    max_words = @harness.compact_max_size || 500
-    messages = conversation + [
-      {
-        role: 'user',
-        content: 'Summarize the entire conversation above in a concise, structured format. ' \
-                 'Include: (1) what was being worked on, (2) key decisions made, ' \
-                 'files that were modified or created, (4) any pending tasks or ' \
-                 'unresolved issues, (5) important context needed to continue. ' \
-                 "Keep it under #{max_words} words. Do NOT include the summarization instruction itself."
-      }
-    ]
+    end_instruction = 'Summarize the entire conversation above in a concise, structured format. ' \
+                      'Include: (1) what was being worked on, (2) key decisions made, ' \
+                      '(3) files that were modified or created, (4) any pending tasks or ' \
+                      'unresolved issues, (5) important context needed to continue. '
 
     spinner = Spinner.new("Compacting session (#{before} messages to summary)")
     @harness.spinner = spinner
     spinner.start
 
-    summary_text = nil
     begin
-      data = @harness.client.chat(messages)
-      summary_text = data[:choices][0][:message][:content]
+      summary_text = generate_compact_summary(conversation, end_instruction)
     ensure
       spinner.stop
       @harness.spinner = nil
     end
-
-    raise HarnessError, 'LLM returned empty summary' if summary_text.nil? || summary_text.strip.empty?
-
-    summary_text = summary_text.strip
     @harness.session.compact(summary_text, recent_count: @harness.compact_recent_messages)
     after = @harness.session.messages.size
     retained = [after - 3, 0].max
@@ -159,6 +178,76 @@ class SessionManager
     # that compaction freed space without burning tokens on a follow-up.
     { summary: summary_text, before: before, after: after, retained: retained,
       context_before: context_before, context_line: @harness.context_indicator }
+  end
+
+  # issue #108: in-loop compaction. Called at the top of each tool-loop
+  # iteration (from Harness#call_llm) when the LAST call's prompt_tokens have
+  # reached the auto-compact threshold: instead of letting the next request
+  # hit the server-side context limit mid-turn and abort the whole work, the
+  # full local working chain (which contains the mid-turn tool trail not yet
+  # in @harness.session) is summarized into a single hand-off summary.
+  #
+  # Design notes:
+  # - NO verbatim tail is retained: keeping only the last N messages would
+  #   drop the rest of the work trail, which is exactly what auto-save and
+  #   --continue (issue #107) exist to protect. The
+  #   summary therefore carries the whole chain's state.
+  # - The compacted chain is synced back into @harness.session IN PLACE and
+  #   immediately persisted, so a crash mid-loop resumes with the complete
+  #   (summarized) history, not a partial one.
+  # Returns true when compaction ran (the caller must drop any
+  # loop-specific state such as the 'loop_warning_injected' flag), false
+  # otherwise (not due yet, too small to compact, or the summary call
+  # failed - the turn then simply continues with the existing chain).
+  def check_inloop_compaction(messages, last_prompt_tokens)
+    window = @harness.options[:num_ctx] || LLMClient::NUM_CTX
+    threshold = @harness.compact_auto_threshold
+    return false unless last_prompt_tokens.to_i >= (window * (threshold.to_f / 100.0)).ceil
+
+    # Only compact when there is real work to summarize: a single short
+    # exchange never reaches the threshold anyway, but guard against an
+    # absurdly small window combined with a huge system prompt.
+    conversation = messages.size > 1 ? messages[1..] : []
+    return false if conversation.size < 4
+
+    puts "  [context at #{(last_prompt_tokens.to_f / window * 100).round}% of the window - in-loop compaction...]"
+
+    spinner = Spinner.new('Compacting session mid-task (summarizing full work trail)')
+    @harness.spinner = spinner
+    begin
+      summary_text = generate_compact_summary(conversation, INLOOP_SUMMARY_INSTRUCTION)
+    ensure
+      spinner.stop
+      @harness.spinner = nil
+    end
+
+    new_chain = [
+      { role: 'system', content: @harness.session.system_prompt },
+      { role: 'user', content: "This is a summary of our previous conversation:\n\n#{summary_text}" },
+      { role: 'assistant', content: 'Understood. I have the context from our previous conversation. How can I help you continue?' },
+      { role: 'user', content: 'Continuing the in-progress task from the summary above. ' \
+                               'Do not repeat steps that are already completed - pick up where it left off.' }
+    ]
+    before = messages.size # captured BEFORE the replace below
+
+    # Sync back into the session (in place) and persist immediately, so a
+    # crash mid-loop resumes with the complete summarized history.
+    @harness.session.messages.replace(new_chain)
+    @harness.session.reset_stats
+    messages.replace(new_chain)
+
+    @harness.logger.info(
+      "in-loop compaction: #{before} -> #{messages.size} messages " \
+      "(summary: #{summary_text.length} chars)"
+    )
+    maybe_auto_save('in-loop compact')
+    true
+  rescue StandardError => e
+    # Best-effort: a failed compaction must not abort an otherwise healthy
+    # turn - the next request will simply hit the server-side limit and the
+    # existing context-exceeded recovery path applies.
+    puts "  [in-loop compaction failed: #{e.message} - continuing with the existing chain]"
+    false
   end
 
   # Sends the session chain to the LLM and prints the response.
