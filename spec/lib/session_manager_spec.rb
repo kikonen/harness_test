@@ -60,6 +60,12 @@ RSpec.describe SessionManager do
 
         "🧠 ctx #{used[:estimated] ? '~' : ''}#{used[:tokens]}/#{@options[:num_ctx]} (0%)"
       end
+
+      # Mirrors Harness#context_indicator_live (issue #126): estimates the
+      # current chain. The spinner calls this every frame, so it must exist.
+      def context_indicator_live(_messages = nil)
+        "🧠 ctx ~1/65536 (0%)"
+      end
     end.new(session, client)
   end
 
@@ -280,6 +286,11 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
 
       def context_indicator
         nil
+      end
+
+      # issue #126: the spinner calls this every frame (with the local chain).
+      def context_indicator_live(_messages = nil)
+        "🧠 ctx ~1/1000 (0%)"
       end
     end.new(session, client)
   end

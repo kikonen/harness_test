@@ -171,9 +171,28 @@ class Session
     conversation = @messages[1..]
     return nil if conversation.nil? || conversation.empty?
 
-    chars = @system_prompt.to_s.length +
-            conversation.sum { |m| m[:content].to_s.length }
-    { tokens: (chars / EST_CHARS_PER_TOKEN).ceil, estimated: true }
+    context_estimate
+  end
+
+  # Rough token estimate of the CURRENT message chain, independent of any
+  # reported stats. This is what the spinner shows so it always reflects the
+  # chain being sent NOW rather than the previous response's number (issue
+  # #126) - including mid-turn tool results that are not yet in last_stats.
+  # Returns nil when there is no conversation yet and nothing to estimate.
+  def context_estimate
+    conversation = @messages[1..]
+    return nil if conversation.nil? || conversation.empty?
+
+    { tokens: estimate_tokens(@messages), estimated: true }
+  end
+
+  # Pure rough token estimate for an explicit message chain (system message
+  # included). Used by the live spinner indicator, which may need to measure
+  # a local working chain that is not yet part of this session (issue #126,
+  # in-loop compaction). Returns an integer token count.
+  def estimate_tokens(messages)
+    chars = messages.sum { |m| m[:content].to_s.length }
+    (chars / EST_CHARS_PER_TOKEN).ceil
   end
 
   # Context usage as an integer percentage of the window size (0-100,
