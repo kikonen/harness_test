@@ -497,6 +497,10 @@ class SessionManager
 
     data = JSON.parse(File.read(path), symbolize_names: true)
     @harness.session.restore(data, @file_list)
+    # issue #113: the log path is per-session, and resume swaps in a saved
+    # session with a different id than the fresh one built at startup -
+    # re-point the logger so it follows the resumed session.
+    @harness.rebind_logger
     restore_session_model(data[:active_model])
     reset_rules_mtime
     @harness.logger.info("session resumed: #{File.basename(path, '.json')} (#{path})")
