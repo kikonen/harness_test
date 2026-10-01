@@ -19,7 +19,8 @@ module Commands
           /compact       Compact the session (summarize conversation to free context)
           /ctx           Show current context usage (tokens, %, headroom, auto-compact status)
           /reasoning     Show the reasoning text of the last response (the model's
-                         extended thinking; normally only visible in .harness/harness.log)
+                         extended thinking; normally only visible in
+                         .harness/sessions/<session-id>/harness.log)
           /reload        Reload harness.md (project rules) into the system prompt
           /save          Save the session (conversation + access list) to .harness/sessions/
           /resume <id>   Resume a saved session by its id (see /sessions)

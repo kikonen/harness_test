@@ -40,6 +40,7 @@ require_relative 'tools/tools_list_tool'
 require_relative 'tools/tools_search_tool'
 require_relative 'tool_registry'
 require_relative 'session_manager'
+require_relative 'state_migrator'
 
 # -- Harness --------------------------------------------------------------
 
@@ -57,8 +58,8 @@ class Harness
   # git with a single entry (.harness/).
   HARNESS_DIR = '.harness'
 
-  # Log file name (inside HARNESS_DIR).
-  LOG_FILE = 'harness.log'
+  # Log file name (inside the session's own directory, see #session_log_path).
+  SESSION_LOG_FILE = 'harness.log'
 
   attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager, :client
   attr_accessor :spinner
@@ -66,10 +67,14 @@ class Harness
   def initialize(options, file_list)
     @options       = options
     @file_list     = file_list
+    @session       = Session.new(build_system_prompt)
+    # issue #113: move the legacy shared harness.log into this session's own
+    # directory. Runs before build_logger so the logger writes to the new,
+    # per-session location from the first line onward.
+    StateMigrator.run(@file_list.workdir, HARNESS_DIR, @session.session_id)
     @logger        = build_logger
     @tool_registry = build_tool_registry
     @client        = LLMClient.new(options, @logger)
-    @session       = Session.new(build_system_prompt)
     @session_manager = SessionManager.new(self, file_list)
     @spinner       = nil
   end
@@ -86,8 +91,17 @@ class Harness
     base
   end
 
+  # issue #113: each session logs to its own file inside its session dir
+  # (.harness/sessions/<session-id>/), so concurrent sessions in the same
+  # workdir do not interleave in one shared log. The session id is stable
+  # for the whole process (assigned at start, restored on resume), so the
+  # path is stable too - no logger switching needed at runtime.
+  def session_log_path
+    File.join(@file_list.workdir, HARNESS_DIR, 'sessions', @session.session_id, SESSION_LOG_FILE)
+  end
+
   def build_logger
-    log_file = File.join(@file_list.workdir, HARNESS_DIR, LOG_FILE)
+    log_file = session_log_path
     FileUtils.mkdir_p(File.dirname(log_file))
     logger = Logger.new(log_file)
     logger.formatter = proc { |severity, datetime, _progname, msg|

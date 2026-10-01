@@ -78,4 +78,28 @@ RSpec.describe Harness do
       expect(harness.context_report).to include('due (threshold 88%)')
     end
   end
+
+  describe '#session_log_path (issue #113)' do
+    it 'resolves to .harness/sessions/<session-id>/harness.log' do
+      harness = build_harness
+
+      expected = File.join(workdir, Harness::HARNESS_DIR,
+                           'sessions', harness.session.session_id,
+                           Harness::SESSION_LOG_FILE)
+      expect(harness.session_log_path).to eq(expected)
+    end
+
+    it 'creates the log file at the per-session path' do
+      harness = build_harness
+
+      expect(File.directory?(File.dirname(harness.session_log_path))).to be true
+      expect(File.file?(harness.session_log_path)).to be true
+    end
+
+    it 'does not write to the legacy shared .harness/harness.log' do
+      harness = build_harness
+
+      expect(File.exist?(File.join(workdir, Harness::HARNESS_DIR, 'harness.log'))).to be false
+    end
+  end
 end
