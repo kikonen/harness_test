@@ -365,4 +365,39 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
     # would immediately trip again on the very tokens that caused compaction.
     expect(session.instance_variable_get(:@last_stats)).to be_nil
   end
+  # issue #116: in-loop compaction runs from INSIDE Harness#call_llm, so the
+  # send_session spinner is still animating. The old code created a second
+  # spinner on top of it and then only stopped the inner one - orphaning the
+  # outer animation thread, which kept printing its frame forever and
+  # interleaved with every subsequent tool line.
+  describe 'outer spinner handling (issue #116)' do
+    it 'pauses the send spinner during compaction and resumes it afterwards' do
+      allow_summary_response
+      messages = inloop_messages
+
+      outer = Spinner.new('Sending to gpt-x', nil)
+      outer.start
+      harness.spinner = outer
+
+      expect(outer).to receive(:pause).ordered
+      expect(outer).to receive(:resume).ordered
+
+      result = manager.check_inloop_compaction(messages, 1000)
+
+      expect(result).to be(true)
+      # The outer spinner must be restored and still animating - the turn is
+      # still in flight and must keep its spinner.
+      expect(harness.spinner).to be(outer)
+      expect(outer.running?).to be(true)
+      outer.stop
+    end
+
+    it 'still compacts (and leaves no spinner) when there is no outer spinner' do
+      allow_summary_response
+      messages = inloop_messages
+
+      expect(manager.check_inloop_compaction(messages, 1000)).to be(true)
+      expect(harness.spinner).to be_nil
+    end
+  end
 end
