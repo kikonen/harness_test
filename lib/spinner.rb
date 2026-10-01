@@ -9,15 +9,17 @@ class Spinner
   # e.g. the current context-usage estimate). nil/empty shows only the
   # message, as before.
   def initialize(message = 'Working', suffix = nil)
-    @message = message
-    @suffix  = suffix.to_s.strip
-    @running = false
-    @thread  = nil
+    @message   = message
+    @suffix    = suffix.to_s.strip
+    @running   = false # animation thread is live right now
+    @resumable = false # started and not yet stopped (survives a pause)
+    @thread    = nil
   end
 
   def start
-    @running = true
-    @thread = Thread.new do
+    @running   = true
+    @resumable = true
+    @thread    = Thread.new do
       i = 0
       while @running
         frame = FRAMES[i % FRAMES.size]
@@ -27,6 +29,13 @@ class Spinner
         sleep 0.1
       end
     end
+  end
+
+  # True while the animation thread is live (between #start and the next
+  # #pause/#stop). Callers use this to decide whether to resume after they
+  # pause it (issue #116).
+  def running?
+    @running
   end
 
   # Pause the animation and clear the spinner line so that any
@@ -40,15 +49,18 @@ class Spinner
     clear_line
   end
 
-  # Resume the animation after a pause (no-op if not started).
+  # Resume the animation after a pause. No-op for a spinner that was never
+  # started or was already stopped - only a paused spinner may be restarted,
+  # so a caller can never resurrect a spinner it does not own (issue #116).
   def resume
-    return if @thread
+    return unless @resumable && !@running
 
     start
   end
 
   def stop
-    @running = false
+    @running   = false
+    @resumable = false
     @thread&.join
     @thread = nil
     clear_line

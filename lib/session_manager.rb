@@ -213,6 +213,18 @@ class SessionManager
 
     puts "  [context at #{(last_prompt_tokens.to_f / window * 100).round}% of the window - in-loop compaction...]"
 
+    # issue #116: the send_session spinner is still animating here (this runs
+    # from inside Harness#call_llm). It must be PAUSED for the duration of
+    # the summarization call and RESUMED afterwards - creating a second
+    # spinner on top of it and then only stopping the inner one left the
+    # outer animation thread orphaned, so it kept printing its frame forever
+    # and interleaved with every tool line.
+    outer_spinner = @harness.spinner
+    # Track whether WE paused it: if it was already paused (nested call),
+    # we must not resume it - the outer owner will do that.
+    outer_paused_by_us = !outer_spinner.nil? && outer_spinner.running?
+    outer_spinner&.pause
+
     # issue #115: show the current context usage next to the spinner.
     spinner = Spinner.new('Compacting session mid-task (summarizing full work trail)', @harness.context_indicator)
     @harness.spinner = spinner
@@ -220,7 +232,10 @@ class SessionManager
       summary_text = generate_compact_summary(conversation, INLOOP_SUMMARY_INSTRUCTION)
     ensure
       spinner.stop
-      @harness.spinner = nil
+      # Restore the outer spinner (issue #116): it was paused, not stopped
+      # - the turn is still in flight and must keep animating.
+      @harness.spinner = outer_spinner
+      outer_spinner&.resume if outer_paused_by_us
     end
 
     new_chain = [

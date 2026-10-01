@@ -87,6 +87,32 @@ RSpec.describe Spinner do
       expect(out).to include('Working... ctx 1/2 (50%)')
     end
 
+    it 'reports running? only while the animation thread is live' do
+      spinner = described_class.new
+      expect(spinner.running?).to be(false)
+      capture_stdout do
+        spinner.start
+        expect(spinner.running?).to be(true)
+        spinner.pause
+        expect(spinner.running?).to be(false)
+        spinner.resume
+        expect(spinner.running?).to be(true)
+        spinner.stop
+        expect(spinner.running?).to be(false)
+      end
+    end
+
+    it 'does not resume a stopped spinner (issue #116)' do
+      spinner = described_class.new
+      capture_stdout do
+        spinner.start
+        sleep 0.15
+        spinner.stop
+        spinner.resume
+        expect(spinner.running?).to be(false)
+      end
+    end
+
     it 'does not raise when stop is called without start' do
       spinner = described_class.new
       capture_stdout { spinner.stop }
