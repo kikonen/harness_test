@@ -58,10 +58,14 @@ module Commands
 
         Saving / resuming sessions:
           The session (conversation history AND the access list) is
-          auto-saved to .harness/sessions/ inside the working directory when
-          the harness exits. /save stores it manually at any time.
+          auto-saved to .harness/sessions/ inside the working directory at
+          every prompt boundary (before each send and after each reply) and
+          again on exit, so a crash loses at most one in-flight request.
+          /save stores it manually at any time. Disable auto-save with the
+          --no-auto-save flag or 'auto_save: false' in the config.
           /sessions lists all saved sessions; /resume <id> restores the
-          conversation and access list.
+          conversation and access list. To pick up the newest saved session
+          in a new run, start the harness with --continue.
 
         Multiline input:
           * Paste: paste a multiline block directly at the prompt.

@@ -35,6 +35,7 @@ require_relative 'harness_error'
 #     recent_messages: 3        # messages retained verbatim after /compact
 #     auto_threshold: 88        # auto-compact when context usage reaches this % of the window
 #     max_size: 500             # max length (words) of the compaction summary
+#   auto_save: true             # auto-save the session at every prompt boundary (issue #107)
 #   retry:
 #     count: 3                  # total attempts for transient network errors
 #     delay: 2                  # base delay (seconds) between retries
@@ -78,6 +79,9 @@ class HarnessConfig
       auto_threshold: 88       # auto-compact when context usage reaches this % of the window
       max_size: 500            # max length (words) of the compaction summary
 
+    # Auto-save the session at every prompt boundary (crash-proof, issue #107).
+    auto_save: true
+
     # Automatic retries for transient network errors.
     retry:
       count: 3                 # total attempts (1 initial + N-1 retries)
@@ -97,6 +101,7 @@ class HarnessConfig
     @models       = normalize_models(Array(data['models']))
     @default_model = nonblank(data['default_model'])
     @system       = nonblank(data['system'])
+    @auto_save    = data['auto_save'].nil? ? true : data['auto_save']
     @compact      = {
       recent_messages: int_or_nil(data.dig('compact', 'recent_messages')),
       auto_threshold:  float_or_nil(data.dig('compact', 'auto_threshold')),
@@ -168,6 +173,11 @@ class HarnessConfig
   # True when at least one model profile is configured.
   def models_configured?
     !@models.empty?
+  end
+
+  # Whether the session is auto-saved at every prompt boundary (default true).
+  def auto_save_enabled
+    @auto_save == true
   end
 
   # Number of recent messages retained verbatim after compaction (or nil).

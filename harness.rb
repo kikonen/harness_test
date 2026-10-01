@@ -9,6 +9,7 @@
 #   ruby harness.rb -m my-model -f src/app.rb -f lib/util.rb
 #   ruby harness.rb -m my-model -d /path/to/project -f src/app.rb
 #   ruby harness.rb -m my-model --resume ab12cd34
+#   ruby harness.rb --continue          # resume the newest saved session here
 #   ruby harness.rb --list-sessions
 #   HARNESS_TOKEN=sk-abc123 ruby harness.rb -m gpt-4o
 #
@@ -16,8 +17,9 @@
 # history files) is relative to the working directory (-d / --workdir,
 # default: the current directory).
 #
-# The session (conversation + file list) is auto-saved to .sessions/ on
-# exit; the resume command is printed. Resume it with -r / --resume <id>.
+# The session (conversation + file list) is auto-saved to .harness/sessions/
+# at every prompt boundary and on exit. Resume it with -r / --resume <id>,
+# or pick up the newest one with --continue.
 # List saved sessions without starting the harness: --list-sessions.
 
 LOG_FILE = ENV['HARNESS_LOG_FILE'] || 'harness.log'

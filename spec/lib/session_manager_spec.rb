@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'logger'
 require 'spinner'
 require 'session_manager'
+require 'fileutils'
+require 'tmpdir'
 
 # Regression coverage for issue #64: auto-compact must run BEFORE the LLM
 # call (at the start of the next prompt), never after the response, where it
@@ -21,7 +24,7 @@ RSpec.describe SessionManager do
       def initialize(session, client)
         @session = session
         @client  = client
-        @options = { num_ctx: 65_536 }
+        @options = { num_ctx: 65_536, auto_save: false }
         @spinner = nil
         @logger  = Logger.new(File::NULL)
       end
@@ -144,6 +147,86 @@ RSpec.describe SessionManager do
 
       result = manager.compact_session
       expect(result[:context_line]).to match(/🧠 ctx ~\d+\/65536 \(\d+%\)/)
+    end
+  end
+
+  describe 'auto-save at prompt boundaries (issue #107)' do
+    # Each spec builds its own manager bound to a tmp workdir so the auto-
+    # save writes land in an isolated .harness/sessions/ and never in the
+    # real project state.
+    def with_tmp_manager(auto_save: true)
+      Dir.mktmpdir do |dir|
+        file_list = FileList.new([], workdir: dir)
+        manager   = described_class.new(harness, file_list)
+        harness.options[:auto_save] = auto_save
+        yield manager, file_list, dir
+      end
+    end
+
+    it 'does not save when auto_save is disabled' do
+      with_tmp_manager(auto_save: false) do |manager, _, _|
+        session.add_user('hello')
+        expect(manager).not_to receive(:save_session)
+        manager.maybe_auto_save('test')
+      end
+    end
+
+    it 'does not save when the session is still empty' do
+      with_tmp_manager do |manager, _, _|
+        expect(manager).not_to receive(:save_session)
+        manager.maybe_auto_save('test')
+      end
+    end
+
+    it 'persists the session when auto_save is on and there is content' do
+      with_tmp_manager do |manager, _, dir|
+        session.add_user('hello')
+        sessions = File.join(dir, '.harness/sessions')
+        FileUtils.mkdir_p(sessions)
+        expect(manager).to receive(:save_session).and_call_original
+        expect { manager.maybe_auto_save('test') }
+          .to change { Dir.children(sessions).size }.from(0).to(1)
+      end
+    end
+
+    it 'de-duplicates saves within AUTOSAVE_MIN_INTERVAL' do
+      with_tmp_manager do |manager, _, _|
+        session.add_user('hello')
+        expect(manager).to receive(:save_session).once.and_call_original
+        manager.maybe_auto_save('first')
+        manager.maybe_auto_save('second')
+      end
+    end
+
+    it 'warns and continues when the save fails' do
+      with_tmp_manager do |manager, _, _|
+        session.add_user('hello')
+        allow(manager).to receive(:save_session)
+          .and_raise(Errno::EACCES, 'read-only file system')
+        expect { manager.maybe_auto_save('test') }.not_to raise_error
+      end
+    end
+
+    describe '#newest_session_path' do
+      it 'is nil when the sessions dir does not exist' do
+        with_tmp_manager do |manager, _, _|
+          expect(manager.newest_session_path).to be_nil
+        end
+      end
+
+      it 'returns the most recently modified session file' do
+        with_tmp_manager do |manager, _, dir|
+          sessions = File.join(dir, '.harness/sessions')
+          FileUtils.mkdir_p(sessions)
+          older = File.join(sessions, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.json')
+          newer = File.join(sessions, 'ffffffff-0000-1111-2222-333333333333.json')
+          File.write(older, '{}')
+          File.write(newer, '{}')
+          # Force distinct mtimes: put the "older" one clearly in the past.
+          File.utime(Time.now - 120, Time.now - 120, older)
+          expect(manager.newest_session_path).to eq(newer)
+        end
+      end
     end
   end
 end

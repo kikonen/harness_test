@@ -28,6 +28,7 @@ class CLI
     StateMigrator.run(@file_list.workdir)
     list_sessions_and_exit if @options[:list_sessions]
     resume_from_cli if @options[:resume]
+    continue_from_cli if @options[:continue]
   end
 
   def parse_options
@@ -52,9 +53,19 @@ class CLI
       end
       o.on('-r ID', '--resume ID',
            'Resume a saved session by id (see /sessions)') { |v| opts[:resume] = v }
+      o.on('--continue',
+           'Resume the newest saved session for this workdir (issue #107). ' \
+           'Equivalent to --resume <id> with the most recent id.') do
+        opts[:continue] = true
+      end
       o.on('--list-sessions',
            'List saved sessions and exit (no model needed)') do
         opts[:list_sessions] = true
+      end
+      o.on('--no-auto-save',
+           'Disable periodic auto-save of the session at prompt boundaries ' \
+           '(issue #107). Overrides the config \'auto_save\' key.') do
+        opts[:no_auto_save] = true
       end
       o.on('-v', '--verbose',
            'Show full prompt and raw response') { |v| opts[:verbose] = true }
@@ -115,6 +126,10 @@ class CLI
     opts[:compact_recent]   ||= config.compact_recent_messages
     opts[:compact_auto_threshold] = config.compact_auto_threshold
     opts[:compact_max_size] = config.compact_max_size
+
+    # issue #107: auto-save at every prompt boundary. Default true; the
+    # --no-auto-save flag or config 'auto_save: false' disables it.
+    opts[:auto_save] = !opts[:no_auto_save] && config.auto_save_enabled
 
     # Retry settings come from the config file (retry: count/delay).
     # Missing values fall back to the built-in defaults in harness.rb.
@@ -207,6 +222,17 @@ class CLI
     path = @harness.session_manager.resume_session(id)
     name = File.basename(path, '.json')
     puts "Resumed session #{name} (conversation and file list restored - see /session)."
+  end
+
+  # issue #107: resume the most recently saved session in this workdir's
+  # .harness/sessions/. Equivalent to --resume <id> with the newest id.
+  def continue_from_cli
+    path = @harness.session_manager.newest_session_path
+    raise HarnessError, 'no saved sessions in this workdir to continue (use /sessions to list any)' unless path
+
+    name = File.basename(path, '.json')
+    @harness.session_manager.resume_session(name)
+    puts "Continued session #{name} (the newest saved in #{@file_list.workdir}/.harness/sessions/)."
   end
 
   # Auto-save the session on exit (best-effort). Returns the session id,
