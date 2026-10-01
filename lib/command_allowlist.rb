@@ -85,6 +85,35 @@ class CommandAllowlist
     tokens.none? { |kind, _text| kind == :danger }
   end
 
+  # Classify the first dangerous token of a command (if any) into a short
+  # human-readable description for the "UNSAFE" dialog note. Returns nil
+  # when the command is safe (no :danger tokens), or an English phrase
+  # naming the specific construct and, when possible, its target
+  # (e.g. "redirect to file ('> out.txt')"). Used so the user sees WHY
+  # a particular command cannot be auto-approved rather than a generic
+  # list of all unsafe construct kinds (issue #102).
+  def self.classify_unsafe(command)
+    ShellTokenizer.tokenize(command.to_s).each do |kind, text|
+      return danger_label(text) if kind == :danger
+    end
+    nil
+  end
+
+  def self.danger_label(text)
+    t = text.to_s
+    case t
+    when /\A&>>?\s/   then "combined stdout+stderr redirect (#{t.inspect})"
+    when /\A&>?\s/    then "redirect (#{t.inspect})"
+    when /\A>+\s/     then "redirect to file (#{t.inspect})"
+    when /\A<\s/      then "input redirect (#{t.inspect})"
+    when '&'          then 'background operator (&)'
+    when /\A\$/       then "substitution or variable expansion (#{t.inspect})"
+    when '`'          then 'command substitution (`...`)'
+    when '('          then 'subshell open ( )'
+    when ')'          then 'subshell close ( )'
+    else "unsafe construct (#{t.inspect})"
+    end
+  end
   # True when the entire command is a single simple segment with no
   # operators at all.
   def self.simple_command?(command)

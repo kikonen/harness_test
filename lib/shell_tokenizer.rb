@@ -24,6 +24,8 @@ require 'strscan'
 #   :danger     - any construct that must NEVER be auto-approved:
 #                   <, >, >> (file redirects - EXCEPT to /dev/null, which
 #                            only discards output and is safe, see below)
+#                   &>, &>> (combined stdout+stderr redirect; same
+#                            /dev/null exemption as above)
 #                   &        (background)
 #                   $        (substitution / variable expansion)
 #                   `        (command substitution)
@@ -41,6 +43,8 @@ require 'strscan'
 #     modifying no file. The tokenizer treats them as a single :word token
 #     (e.g. ">/dev/null", "2>/dev/null") so such commands can be
 #     auto-approved. Any other redirect target is still :danger.
+#   * Combined stdout+stderr redirects (`&>`, `&>>`) follow the same rules:
+#     safe only when targeting /dev/null.
 #   * Operators inside quotes are literal characters, never separators.
 #   * Backslash-escaped operators outside quotes become part of the
 #     surrounding word (e.g. `echo a\|b` -> one word "a\|b").
@@ -170,6 +174,15 @@ class ShellTokenizer
       flush_word
       @scanner.skip('&&')
       emit(:and, '&&')
+    elsif !word_buf_ends_with_digit? && @scanner.check('&>')
+      # Combined stdout+stderr redirect (bash/zsh &> operator). Treated
+      # like a file redirect: safe only when targeting /dev/null.
+      if (dn = scan_devnull_redirect('&>'))
+        emit(:word, dn)
+      else
+        flush_word
+        emit(:danger, scan_combined_redirect)
+      end
     else
       flush_word
       emit(:danger, '&')
@@ -214,17 +227,30 @@ class ShellTokenizer
       # Redirect to /dev/null: safe (only discards output, creates or
       # modifies no file) - becomes one word token, gluing any preceding
       # fd digit (e.g. "2" + ">/dev/null" -> "2>/dev/null").
-      devnull = @scanner.scan(Regexp.new(">+\\s*#{Regexp.escape(DEVNULL)}(?![\\w./-])"))
-      if devnull
-        prefix  = @word_buf.dup
-        @word_buf.clear
-        emit(:word, prefix + devnull)
+      if (dn = scan_devnull_redirect('>'))
+        emit(:word, dn)
       else
         # Any other file redirect: danger.
         flush_word
         emit(:danger, scan_redirect)
       end
     end
+  end
+
+  # Match a /dev/null redirect for the given operator ('>' or '&>'),
+  # gluing any preceding word buffer (e.g. an fd digit). Returns the
+  # combined text when it matches (safe - output is only discarded), or
+  # nil leaving the scanner positioned so a danger-redirect scan can run.
+  def scan_devnull_redirect(operator)
+    # '+': allow one or more of the operator's trailing '>' so both
+    # '>/dev/null' and '>>/dev/null' (and '&>', '&>>') match.
+    re = Regexp.new("#{Regexp.escape(operator[0..-2])}(>+)\\s*#{Regexp.escape(DEVNULL)}(?![\\w./-])")
+    return unless @scanner.check(re)
+
+    devnull = @scanner.scan(re)
+    prefix  = @word_buf.dup
+    @word_buf.clear
+    prefix + devnull
   end
 
   # `<` or `>`: consume the full redirect lexeme (e.g. `>>`, `> file`)
@@ -234,12 +260,37 @@ class ShellTokenizer
     if @scanner.check(buf.last) && buf.last == '>'
       buf << @scanner.getch # >>
     end
-    # Consume a following word (the redirect target) so the danger token
-    # names the whole construct.
-    if @scanner.check(/[^\s|;&<>$`()]+/)
-      target = @scanner.scan(/[^\s|;&<>$`()]+/)
-      buf << ' ' << target
+    buf << scan_target  # include the target (e.g. "file") in the label
+    buf.join
+  end
+
+  # Consume an optional whitespace-separated redirect target and return it
+  # prefixed by a single space (e.g. " tmpfile"), or '' when the operator
+  # is immediately followed by whitespace/EOS. Lets danger-token labels name
+  # the whole construct ("&> build.log") instead of just the operator.
+  def scan_target
+    return '' unless @scanner.check(/\s*[^\s|;&<>$`()\n]/)
+
+    @scanner.scan(/\s*/)  # eat any separating whitespace (discarded)
+    target = @scanner.scan(/[^\s|;&<>$`()\n]+/)
+    " #{target}" if target
+  end
+
+  # `&>` or `&>>`: consume the full combined-redirect lexeme (e.g. `&> log`)
+  # and return it as a string for the :danger token, so error/note messages
+  # name the whole construct rather than just `>`.
+  def scan_combined_redirect
+    buf = ['&']
+    @scanner.getch
+    if @scanner.check('>')
+      buf << '>'
+      @scanner.getch
+      if @scanner.check('>')
+        buf << '>'
+        @scanner.getch
+      end
     end
+    buf << scan_target  # include the target in the label (e.g. " log")
     buf.join
   end
 

