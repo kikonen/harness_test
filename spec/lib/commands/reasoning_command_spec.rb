@@ -5,7 +5,7 @@ require 'stringio'
 require 'commands/reasoning_command'
 
 # issue #98: /reasoning shows the reasoning text of the last response, which
-# is otherwise only visible in .harness/harness.log.
+# is otherwise only visible in .harness/sessions/<session-id>/harness.log.
 RSpec.describe Commands::ReasoningCommand do
   let(:session) { Session.new('system prompt') }
 
