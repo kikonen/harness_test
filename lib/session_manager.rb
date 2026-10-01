@@ -12,11 +12,15 @@ class SessionManager
   HARNESS_DIR  = '.harness'
   SESSIONS_DIR = File.join(HARNESS_DIR, 'sessions')
   RULES_FILE   = 'harness.md'
+  # Minimum seconds between two auto-saves inside the same run_prompt cycle
+  # (de-dups the pre-send and post-turn saves when the round trip is fast).
+  AUTOSAVE_MIN_INTERVAL = 0.5
 
   def initialize(harness, file_list)
     @harness     = harness
     @file_list   = file_list
     @rules_mtime = current_rules_mtime
+    @last_autosave = 0
   end
 
   # -- Prompt flow ---------------------------------------------------------
@@ -43,6 +47,9 @@ class SessionManager
     end
 
     @harness.session.add_user(user_prompt)
+    # issue #107: persist BEFORE sending so the in-flight prompt is on disk
+    # and can be /retry'd from a fresh process if this one dies mid-turn.
+    maybe_auto_save('pre-send')
     send_session
   end
 
@@ -74,6 +81,29 @@ class SessionManager
     send_session
   end
 
+  # -- Auto-save -----------------------------------------------------------
+
+  # issue #107: auto-save the session at every prompt boundary (before send
+  # and after a successful turn), so a crash / kill mid-session loses at most
+  # the in-flight LLM call rather than the whole conversation. Best-effort:
+  # a save failure never breaks the prompt flow (it only warns). Silent on
+  # success - these saves are routine bookkeeping, not a user action.
+  # De-duplicated within a fast round trip via AUTOSAVE_MIN_INTERVAL.
+  def maybe_auto_save(tag)
+    return unless @harness.options[:auto_save]
+    return if @harness.session.empty?
+
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    return if now - @last_autosave < AUTOSAVE_MIN_INTERVAL
+
+    @last_autosave = now
+    begin
+      save_session
+      @harness.logger.info("auto-save (#{tag})")
+    rescue StandardError => e
+      puts "  [warning] auto-save failed: #{e.message}"
+    end
+  end
   # Compact the session: ask the LLM to summarize the conversation, then
   # replace the full message chain with the summary. This frees up context
   # window space while preserving the essential information.
@@ -165,6 +195,13 @@ class SessionManager
 
     puts response[:content]
     @harness.print_stats(response[:stats])
+
+    # issue #107: persist the completed turn. The pre-send save already
+    # captured the pending prompt; this snapshot makes sure the model's
+    # reply is on disk too, so a crash right after the response loses
+    # nothing (de-duplicated by AUTOSAVE_MIN_INTERVAL when the round trip
+    # was very fast).
+    maybe_auto_save('post-turn')
   end
 
   # Silent auto-compaction, run at the start of the NEXT prompt (see
@@ -375,6 +412,15 @@ class SessionManager
     reset_rules_mtime
     @harness.logger.info("session resumed: #{File.basename(path, '.json')} (#{path})")
     path
+  end
+
+  # issue #107: find the most recently saved session in this workdir's
+  # sessions dir (returns a full path). Used by --continue. Returns nil
+  # when no sessions exist yet.
+  def newest_session_path
+    return nil unless File.directory?(sessions_dir)
+
+    Dir.glob(File.join(sessions_dir, '*.json')).max_by { |p| File.mtime(p) }
   end
 
   # List saved sessions, newest first.

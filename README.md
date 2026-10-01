@@ -20,7 +20,9 @@ scoped to a working directory you choose.
   full command before running it and requires an explicit "Allow" every
   single time.
 - **Sessions** - the conversation plus the access list is auto-saved to
-  `.harness/sessions/` on exit; resume any saved session later.
+  `.harness/sessions/` at every prompt boundary (before each send and after
+  each reply) and again on exit; resume any saved session later, or pick up
+  the newest one with `--continue`.
 - **Multi-model config** - named model profiles in one YAML file, switch
   between them at runtime with `/model`.
 - **Project rules** - a `harness.md` in the working directory is appended
@@ -72,6 +74,8 @@ bin/harness -m other                   # pick another configured profile
 bin/harness -d /path/to/project        # set the working directory
 bin/harness --list-sessions            # list saved sessions and exit
 bin/harness -r <id>                    # resume a saved session
+bin/harness --continue                 # resume the newest saved session in this workdir
+bin/harness --no-auto-save             # disable periodic auto-save at prompt boundaries
 bin/harness --system-file my.md        # override the system prompt
 bin/harness -v                         # (already on by default) verbose logging
 ```
