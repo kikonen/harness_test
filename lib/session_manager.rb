@@ -155,9 +155,10 @@ class SessionManager
                       'Include: (1) what was being worked on, (2) key decisions made, ' \
                       '(3) files that were modified or created, (4) any pending tasks or ' \
                       'unresolved issues, (5) important context needed to continue. '
-    # issue #115: show the current context usage next to the spinner so
-    # the user sees how full the window is while compaction runs.
-    spinner = Spinner.new("Compacting session (#{before} messages to summary)", context_before)
+    # issue #115 / #126: show the LIVE context usage next to the spinner.
+    # A callable is re-evaluated every frame so it reflects the current
+    # value, not the "before" snapshot (already visible above).
+    spinner = Spinner.new("Compacting session (#{before} messages to summary)", -> { @harness.context_indicator })
     @harness.spinner = spinner
     spinner.start
 
@@ -225,8 +226,8 @@ class SessionManager
     outer_paused_by_us = !outer_spinner.nil? && outer_spinner.running?
     outer_spinner&.pause
 
-    # issue #115: show the current context usage next to the spinner.
-    spinner = Spinner.new('Compacting session mid-task (summarizing full work trail)', @harness.context_indicator)
+    # issue #115 / #126: show the LIVE context usage next to the spinner.
+    spinner = Spinner.new('Compacting session mid-task (summarizing full work trail)', -> { @harness.context_indicator })
     @harness.spinner = spinner
     begin
       summary_text = generate_compact_summary(conversation, INLOOP_SUMMARY_INSTRUCTION)
@@ -269,9 +270,9 @@ class SessionManager
 
   # Sends the session chain to the LLM and prints the response.
   def send_session
-    # issue #115: show the current context usage estimate next to the
-    # spinner so the user sees how full the window is while waiting.
-    spinner = Spinner.new("Sending to #{@harness.options[:model]}", @harness.context_indicator)
+    # issue #115 / #126: show the LIVE context usage estimate next to the
+    # spinner (callable re-evaluated each frame, not a stale snapshot).
+    spinner = Spinner.new("Sending to #{@harness.options[:model]}", -> { @harness.context_indicator })
     @harness.spinner = spinner
     spinner.start
 
