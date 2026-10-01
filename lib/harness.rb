@@ -72,7 +72,11 @@ class Harness
     # the .harness directory. Best-effort: failures are reported but never
     # block startup (issue #120).
     StateMigrator.run(@file_list.workdir, HARNESS_DIR)
-    @logger        = build_logger
+    # The logger is DEFERRED: it is only created on first use
+    # (#rebind_logger), so a startup that resumes a saved session never
+    # leaves a throwaway log directory behind for the fresh random id
+    # (issue #123).
+    @logger        = nil
     @tool_registry = build_tool_registry
     @client        = LLMClient.new(options, @logger)
     @session_manager = SessionManager.new(self, file_list)
@@ -111,16 +115,23 @@ class Harness
     logger
   end
 
-  # issue #113: rebuild the logger for the CURRENT session id. The logger is
-  # created in #initialize for a fresh (random) session id; when a saved
-  # session is resumed/continued the id changes, so the log must follow it or
-  # it would land in the throwaway fresh-id directory. Closes the old logger
-  # and re-points the LLM client, which holds its own reference.
+  # issue #113 / #123: create (or rebuild) the logger for the CURRENT
+  # session id. Deferred from #initialize so a fresh random id never gets a
+  # throwaway log directory when the run resumes a saved session instead.
+  # When the session id changes (resume/continue), closes the old logger and
+  # re-points the LLM client, which holds its own reference.
   def rebind_logger
     @logger.close if @logger.respond_to?(:close)
     @logger = build_logger
     @client.logger = @logger if @client.respond_to?(:logger=)
     @logger
+  end
+
+  # Lazy accessor: the logger is created on first use (issue #123), so code
+  # that logs before any rebind still gets a working logger for the current
+  # session id.
+  def logger
+    @logger ||= rebind_logger
   end
 
   def build_tool_registry
@@ -156,7 +167,6 @@ class Harness
     # argument (built before the tools are instantiated).
     registry.register(Tools::ToolsListTool.new(registry))
     registry.register(Tools::ToolsSearchTool.new(registry))
-    registry
   end
 
   def compact_recent_messages

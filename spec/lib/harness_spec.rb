@@ -89,47 +89,75 @@ RSpec.describe Harness do
       expect(harness.session_log_path).to eq(expected)
     end
 
-    it 'creates the log file at the per-session path' do
+    it 'creates the log file at the per-session path on first use' do
       harness = build_harness
 
-      expect(File.directory?(File.dirname(harness.session_log_path))).to be true
-      expect(File.file?(harness.session_log_path)).to be true
+      # The logger is deferred (issue #123): touching it creates the file.
+      expect { harness.logger }.to change { File.file?(harness.session_log_path) }.from(false).to(true)
     end
 
     it 'does not write to the legacy shared .harness/harness.log' do
       harness = build_harness
+      harness.logger # force creation via the lazy accessor
 
       expect(File.exist?(File.join(workdir, Harness::HARNESS_DIR, 'harness.log'))).to be false
     end
   end
 
-  describe '#rebind_logger (issue #113)' do
+  describe '#initialize logger deferral (issue #123)' do
+    it 'does NOT create a log directory for the fresh random id' do
+      harness = build_harness
+
+      expect(harness.instance_variable_get(:@logger)).to be_nil
+      expect(File.directory?(File.dirname(harness.session_log_path))).to be false
+    end
+
+    it 'creates no session dir at all when nothing logs before a resume' do
+      build_harness
+
+      sessions_dir = File.join(workdir, Harness::HARNESS_DIR, 'sessions')
+      expect(Dir.exist?(sessions_dir) ? Dir.children(sessions_dir) : []).to be_empty
+    end
+  end
+
+  describe '#rebind_logger (issue #113 / #123)' do
     it 'points the logger at the CURRENT session id after a resume swaps it in' do
       harness = build_harness
       resumed_id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
 
       # Simulate resume: the session id changes but the logger was still
-      # bound to the fresh id created at startup.
+      # bound to the fresh id created at startup (or not created at all).
       harness.session.instance_variable_set(:@session_id, resumed_id)
 
       expect(harness.session_log_path).to include(resumed_id)
 
-      old_logger = harness.logger
       new_logger = harness.rebind_logger
 
-      expect(new_logger).not_to equal(old_logger)
+      expect(new_logger).to be_a(Logger)
       expect(File.file?(File.join(workdir, Harness::HARNESS_DIR, 'sessions', resumed_id, 'harness.log'))).to be true
+    end
+
+    it 'closes the old logger when re-binding after a late id change' do
+      harness = build_harness
+      fresh_id = harness.session.session_id
+      harness.logger # force creation for the fresh id
+
+      old_logger = harness.instance_variable_get(:@logger)
+      expect(old_logger).not_to be_nil
+
+      harness.session.instance_variable_set(:@session_id, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+      harness.rebind_logger
+
+      expect(harness.instance_variable_get(:@logger)).not_to equal(old_logger)
     end
 
     it 're-points the LLM client so HTTP logging follows the new session' do
       harness = build_harness
-      old_client_logger = harness.client.instance_variable_get(:@logger)
 
       harness.session.instance_variable_set(:@session_id, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
       harness.rebind_logger
 
       expect(harness.client.instance_variable_get(:@logger)).to equal(harness.logger)
-      expect(harness.client.instance_variable_get(:@logger)).not_to equal(old_client_logger)
     end
   end
 end
