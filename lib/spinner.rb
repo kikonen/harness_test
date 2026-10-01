@@ -5,8 +5,12 @@
 class Spinner
   FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
-  def initialize(message = 'Working')
+  # suffix is optional extra text appended after the message (issue #115,
+  # e.g. the current context-usage estimate). nil/empty shows only the
+  # message, as before.
+  def initialize(message = 'Working', suffix = nil)
     @message = message
+    @suffix  = suffix.to_s.strip
     @running = false
     @thread  = nil
   end
@@ -17,7 +21,7 @@ class Spinner
       i = 0
       while @running
         frame = FRAMES[i % FRAMES.size]
-        print "\r#{frame} #{@message}..."
+        print "\r#{frame} #{@message}...#{render_suffix}"
         $stdout.flush
         i += 1
         sleep 0.1
@@ -52,8 +56,18 @@ class Spinner
 
   private
 
+  def render_suffix
+    @suffix.empty? ? '' : " #{@suffix}"
+  end
+
   def clear_line
-    print "\r" + ' ' * (@message.length + 5) + "\r"
+    print "\r" + ' ' * (line_length) + "\r"
     $stdout.flush
+  end
+
+  # Length of one rendered spinner line (frame + message + optional
+  # suffix), used to blank the line on pause/stop.
+  def line_length
+    @message.length + 5 + render_suffix.length
   end
 end
