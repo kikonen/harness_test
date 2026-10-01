@@ -68,10 +68,10 @@ class Harness
     @options       = options
     @file_list     = file_list
     @session       = Session.new(build_system_prompt)
-    # issue #113: move the legacy shared harness.log into this session's own
-    # directory. Runs before build_logger so the logger writes to the new,
-    # per-session location from the first line onward.
-    StateMigrator.run(@file_list.workdir, HARNESS_DIR, @session.session_id)
+    # One-time migration of legacy state (.sessions/, .harness_history) into
+    # the .harness directory. Best-effort: failures are reported but never
+    # block startup (issue #120).
+    StateMigrator.run(@file_list.workdir, HARNESS_DIR)
     @logger        = build_logger
     @tool_registry = build_tool_registry
     @client        = LLMClient.new(options, @logger)

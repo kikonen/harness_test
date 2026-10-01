@@ -8,7 +8,6 @@ require_relative 'harness_config'
 require_relative 'harness'
 require_relative 'file_list'
 require_relative 'history_manager'
-require_relative 'state_migrator'
 require_relative 'command_handler'
 
 # -- CLI ------------------------------------------------------------------
@@ -25,7 +24,6 @@ class CLI
     @harness   = Harness.new(@options, @file_list)
     @commands  = CommandHandler.new(@harness, @file_list, @options)
     @history   = HistoryManager.new(@file_list.workdir)
-    StateMigrator.run(@file_list.workdir)
     list_sessions_and_exit if @options[:list_sessions]
     resume_from_cli if @options[:resume]
     continue_from_cli if @options[:continue]
