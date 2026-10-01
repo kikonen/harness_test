@@ -249,7 +249,6 @@ RSpec.describe Tools::RunCommandTool do
         end
       end
     end
-
   end
 
   context 'dangerous constructs (issue #69)' do
@@ -268,11 +267,29 @@ RSpec.describe Tools::RunCommandTool do
         # No "Always allow" option offered...
         expect(out).not_to include("Always allow '")
         expect(out).not_to include("2) Always allow")
-        # ...but the user is told why (redirects can't be auto-approved).
-        expect(out).to include('UNSAFE: redirects / $vars / &.')
+        # ...but the user is told why (redirects can't be auto-approved),
+        # naming the specific offending construct (issue #102).
+        expect(out).to include('UNSAFE: redirect to file ("> tmpfile")')
         # Cancel is now option 2 (Allow=1, Cancel=2), so "2" cancels.
         expect(tool.execute('command' => 'echo hi > tmpfile'))
           .to start_with('error: user denied executing the command')
+      end
+    end
+
+    it 'names a combined &> redirect in the note (issue #102)' do
+      Dir.mktmpdir do |dir|
+        list = FileList.new(workdir: dir)
+        tool = described_class.new(list, {})
+        allow($stdin).to receive(:gets).and_return("2\n", nil)
+
+        orig_stdout = $stdout
+        $stdout = StringIO.new
+        tool.execute('command' => 'run test &> build.log')
+        out = $stdout.string
+        $stdout = orig_stdout
+
+        expect(out).not_to include("Always allow '")
+        expect(out).to include('UNSAFE: combined stdout+stderr redirect')
       end
     end
   end

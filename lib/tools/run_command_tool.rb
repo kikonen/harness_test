@@ -34,7 +34,9 @@ module Tools
 
     # Shown as a dialog note when no "Always allow" option is offered because
     # the command contains constructs that can never be auto-approved.
-    UNSAFETY_NOTE = 'UNSAFE: redirects / $vars / &.'
+    # Kept only as a last-resort fallback; normally replaced by a
+    # tailored note naming the specific unsafe construct (issue #102).
+    UNSAFETY_NOTE = 'UNSAFE: contains shell constructs that cannot be auto-approved.'
 
     def initialize(file_list, options)
       @file_list    = file_list
@@ -122,8 +124,12 @@ module Tools
       # UNSAFETY_NOTE only when the command itself contains unsafe
       # constructs (all_candidates empty). If candidates existed but were
       # all filtered out because a stored grant already covers them, the
-      # command is fine - no scary note.
-      note = UNSAFETY_NOTE if all_candidates.empty?
+      # command is fine - no scary note. When unsafe, name the specific
+      # construct instead of a generic list (issue #102).
+      if all_candidates.empty?
+        label = CommandAllowlist.classify_unsafe(command)
+        note  = label ? "UNSAFE: #{label} cannot be auto-approved" : UNSAFETY_NOTE
+      end
 
       choice = Dialog.new(
         title: "The model is requesting to run a shell command:\n" \

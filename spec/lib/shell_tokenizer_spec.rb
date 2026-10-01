@@ -96,6 +96,39 @@ RSpec.describe ShellTokenizer do
       expect(kinds('cmd >> /dev/null')).to eq(%i[word word])
     end
 
+    it 'emits :danger for combined &> redirect naming the full construct' do
+      tokens = tokenize('run test &> build.log')
+      expect(tokens).to include([:danger, '&> build.log'])
+    end
+
+    it 'emits :danger for combined &>> append redirect' do
+      expect(kinds('run test &>> build.log')).to include(:danger)
+    end
+
+    it 'treats &> /dev/null as a word (output only discarded)' do
+      tokens = tokenize('grep foo &> /dev/null')
+      expect(tokens).to eq(
+        [[:word, 'grep'], [:word, 'foo'], [:word, '&> /dev/null']]
+      )
+    end
+
+    it 'still emits :danger for background &' do
+      expect(kinds('sleep 10 &')).to include(:danger)
+    end
+
+    it 'keeps && as and-list, not a redirect' do
+      expect(kinds('ls && pwd')).to eq(%i[word and word])
+    end
+
+    it 'does not confuse fd-redirect 2>&1 with &> (digit guard)' do
+      # "2" + ">&1" must still glue to the word "2>&1"; the & branch must
+      # not misfire when a digit precedes the operator.
+      tokens = tokenize('bundle exec rspec 2>&1')
+      expect(tokens).to eq([
+        [:word, 'bundle'], [:word, 'exec'],
+        [:word, 'rspec'],   [:word, '2>&1']
+      ])
+    end
     it 'still emits :danger for redirect to a real file' do
       expect(kinds('ls > out.txt')).to include(:danger)
     end
