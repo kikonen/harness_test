@@ -53,6 +53,34 @@ RSpec.describe Harness do
     end
   end
 
+  describe '#context_indicator_live (issue #126)' do
+    it 'is nil when there is no conversation yet' do
+      expect(build_harness.context_indicator_live).to be_nil
+    end
+
+    it 'shows EXACT usage (no ~) when the last response reported it' do
+      harness = build_harness
+      seed_usage(harness, 5_915)
+
+      expect(harness.context_indicator_live).to eq('🧠 ctx 5915/65536 (9%)')
+    end
+
+    it 'marks estimates with ~ when no usage was reported yet' do
+      harness = build_harness
+      harness.session.add_user('a' * 160)
+
+      expect(harness.context_indicator_live).to include('~')
+    end
+
+    it 'always estimates an explicit chain (mid-turn / in-loop compaction)' do
+      harness = build_harness
+      seed_usage(harness, 5_915)
+      chain = [{ role: 'user', content: 'a' * 400 }]
+
+      expect(harness.context_indicator_live(chain)).to include('~')
+    end
+  end
+
   describe '#context_report' do
     it 'reports "nothing to measure" for an empty session' do
       expect(build_harness.context_report)
