@@ -40,6 +40,28 @@ RSpec.describe Session do
     end
   end
 
+  describe '#context_estimate (issue #126)' do
+    it 'returns nil when there is no conversation yet' do
+      expect(session.context_estimate).to be_nil
+    end
+
+    it 'estimates the CURRENT chain even when last_stats reports a smaller number' do
+      session.add_user('a' * 160)
+      session.add_assistant('b' * 160)
+      # A stale, small reported usage must NOT mask the larger live chain.
+      session.record_stats(usage: { prompt_tokens: 5, total_tokens: 9 })
+
+      expect(session.context_estimate[:tokens]).to be > 5
+    end
+
+    it 'grows as the chain grows (live, not a frozen snapshot)' do
+      session.add_user('a' * 40)
+      small = session.context_estimate[:tokens]
+      session.add_assistant('b' * 400)
+      expect(session.context_estimate[:tokens]).to be > small
+    end
+  end
+
   describe '#reset_stats (issue #108)' do
     it 'clears the last stats and reasoning' do
       session.add_user('hello')

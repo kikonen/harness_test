@@ -353,6 +353,24 @@ class Harness
     "🧠 ctx #{label}#{used[:tokens]}/#{window} (#{pct}%)"
   end
 
+  # Live context indicator for the spinner (issue #126): unlike
+  # #context_indicator, which reports the LAST response's number, this
+  # estimates the CURRENT message chain, so it reflects the chain being sent
+  # right now - including mid-turn tool results not yet in last_stats.
+  # Always an estimate (marked "~"). nil when there is nothing to measure.
+  #
+  # messages: optional explicit chain to estimate from (the in-loop compaction
+  # operates on a local working chain that is not yet in @session). Defaults
+  # to the session's own chain.
+  def context_indicator_live(messages = nil)
+    window = options[:num_ctx] || LLMClient::NUM_CTX
+    used   = messages ? @session.estimate_tokens(messages) : @session.context_estimate&.fetch(:tokens)
+    return nil if used.nil?
+
+    pct = (used.to_f / window * 100).round
+    "🧠 ctx ~#{used}/#{window} (#{pct}%)"
+  end
+
   # Multi-line context report for the /ctx command: usage, window size,
   # headroom and whether auto-compaction is due at the current threshold.
   def context_report
