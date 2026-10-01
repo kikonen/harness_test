@@ -40,6 +40,20 @@ RSpec.describe Session do
     end
   end
 
+  describe '#reset_stats (issue #108)' do
+    it 'clears the last stats and reasoning' do
+      session.add_user('hello')
+      session.add_assistant('hi')
+      session.record_stats(prompt_tokens: 9000, usage: {})
+      session.record_reasoning('some thinking')
+
+      session.reset_stats
+
+      expect(session.instance_variable_get(:@last_stats)).to be_nil
+      expect(session.last_reasoning).to be_nil
+    end
+  end
+
   describe '#context_pct' do
     before do
       session.add_user('hello')

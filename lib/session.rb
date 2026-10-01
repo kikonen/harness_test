@@ -85,6 +85,16 @@ class Session
     self
   end
 
+  # issue #108: drop the stale stats / reasoning after an in-loop compaction,
+  # so auto_compact_due? can re-evaluate from the (much smaller) compacted
+  # chain instead of tripping on the pre-compaction prompt_tokens that just
+  # caused the compaction.
+  def reset_stats
+    @last_stats     = nil
+    @last_reasoning = nil
+    self
+  end
+
   # Reset the session: drop all conversation messages, keep the system prompt.
   def clear
     @messages     = [system_message]
