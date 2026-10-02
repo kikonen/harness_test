@@ -1,1 +1,5 @@
-HARNESS_CONFIG=.harness/config.yml
+#!/usr/bin/env bash
+
+export HARNESS_CONFIG=.harness/config.yml
+#export HARNESS_SPINNER=print
+#export HARNESS_STEP_DISPLAY=off
