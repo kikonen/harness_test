@@ -8,7 +8,7 @@ require 'digest'
 require 'fileutils'
 
 require_relative 'harness_error'
-require_relative 'spinner'
+require_relative 'ui'
 require_relative 'tool'
 require_relative 'llm_client'
 require_relative 'file_list'

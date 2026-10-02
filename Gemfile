@@ -12,6 +12,10 @@ gem 'racc'
 
 gem 'debug'
 
+# Terminal UI (issue #74 / #13): inline TUI primitives for the spinner
+# and, later, the dialogs.
+gem 'ratatui_ruby'
+
 group :development do
   gem 'rspec'
 end

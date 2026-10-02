@@ -1,9 +1,34 @@
 # frozen_string_literal: true
 
-require 'spinner'
+require 'ui'
 require 'stringio'
 
-RSpec.describe Spinner do
+# The Spinner suite (issue #74): the class lives in the `UI` namespace.
+# Behavior is asserted IDENTICALLY to the pre-migration top-level Spinner
+# (frame/message/suffix rendering, callable suffix re-evaluation, pause/
+# resume, running? gating, stop-without-start, and the width-independent ANSI
+# line clear), plus a group pinning the renderer-selection gate (the TUI
+# renderer must only be used on an interactive terminal / never in CI) and a
+# group for the backward-compatible `Spinner` alias.
+RSpec.describe UI::Spinner do
+  OVERRIDE = UI::Spinner::ENV_OVERRIDE
+
+  # Force the ANSI renderer for ALL examples: they must be deterministic and
+  # must never touch a real terminal or load the ratatui native extension
+  # (which would not render into captured $stdout). Restored after the suite.
+  before(:context) do
+    @original_override = ENV[OVERRIDE]
+    ENV[OVERRIDE] = 'print'
+  end
+
+  after(:context) do
+    if @original_override.nil?
+      ENV.delete(OVERRIDE)
+    else
+      ENV[OVERRIDE] = @original_override
+    end
+  end
+
   # Capture everything written to $stdout while the block runs. The
   # animation thread writes via print, so it goes to $stdout too.
   def capture_stdout
@@ -152,6 +177,71 @@ RSpec.describe Spinner do
         spinner.stop
       end
       expect(out).to include("\e[2K")
+    end
+  end
+
+  # Renderer-selection gate: exercise the ENV override directly, restoring the
+  # suite's 'print' default after each case so it works regardless of the
+  # actual terminal. The tty branch is stubbed (a fake IO would otherwise
+  # make interactive_tty? report false on real runs).
+  describe 'renderer selection (issue #74)' do
+    def with_override(value)
+      if value.nil?
+        ENV.delete(OVERRIDE)
+      else
+        ENV[OVERRIDE] = value
+      end
+      yield
+    ensure
+      ENV[OVERRIDE] = 'print' # restore the suite default for the next example
+    end
+
+    it 'is forced to the ANSI spinner when HARNESS_SPINNER=print (case-insensitive)' do
+      with_override('PRINT') { expect(described_class.new.forced_print?).to be(true) }
+    end
+
+    it 'is NOT forced by an unrelated override value' do
+      with_override('tui') { expect(described_class.new.forced_print?).to be(false) }
+    end
+
+    it 'prefers the TUI renderer on an interactive terminal when not forced' do
+      spinner = described_class.new
+      with_override(nil) do
+        allow(spinner).to receive(:interactive_tty?).and_return(true)
+        expect(spinner.tui_preferred?).to be(true)
+      end
+    end
+
+    it 'never uses the TUI renderer when output is not an interactive terminal (CI / pipes)' do
+      spinner = described_class.new
+      with_override(nil) do
+        allow(spinner).to receive(:interactive_tty?).and_return(false)
+        expect(spinner.tui_preferred?).to be(false)
+      end
+    end
+
+    it 'stays on the ANSI path even when a TTY is present but the user pinned print' do
+      spinner = described_class.new
+      with_override('print') do
+        allow(spinner).to receive(:interactive_tty?).and_return(true)
+        expect(spinner.tui_preferred?).to be(false)
+      end
+    end
+  end
+
+  describe 'backward-compatible top-level alias' do
+    it 'exposes the namespaced Spinner as the legacy top-level Spinner' do
+      expect(Spinner).to be(UI::Spinner)
+    end
+
+    it 'is constructible through the legacy alias with identical behavior' do
+      spinner = Spinner.new('Working', 'ctx 1/2 (50%)')
+      out = capture_stdout do
+        spinner.start
+        sleep 0.25
+        spinner.stop
+      end
+      expect(out).to include('Working... ctx 1/2 (50%)')
     end
   end
 end
