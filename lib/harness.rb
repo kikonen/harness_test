@@ -62,7 +62,7 @@ class Harness
   SESSION_LOG_FILE = 'harness.log'
 
   attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager, :client
-  attr_accessor :spinner
+  attr_accessor :spinner, :history
 
   def initialize(options, file_list)
     @options       = options
