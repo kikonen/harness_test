@@ -56,8 +56,20 @@ class HistoryManager
   end
 
   # Persist current Reline history to disk (best-effort).
+  # issue #135: Reline::HISTORY is GLOBAL to the process. When a run
+  # resumes a saved session, the /resume command itself is already in it -
+  # so "is the buffer empty?" cannot tell us whether this NEW random
+  # session id has any history of its own. The guard must compare against
+  # what THIS session id has already persisted: if every entry in the
+  # buffer is already present in this session's file, writing would only
+  # leave a dummy dir behind (a fresh process per resume gets a new random
+  # id, and that dir would just hold the loaded other-session entries).
+  # If even one entry is new to this session, the whole buffer is saved so
+  # later arrow-key navigation in the same run stays complete.
   def save
     file = @history_file
+    return unless has_new_entry?(file)
+
     FileUtils.mkdir_p(File.dirname(file))
     File.open(file, 'w') do |f|
       Reline::HISTORY.each do |entry|
@@ -71,6 +83,23 @@ class HistoryManager
   end
 
   private
+
+  # True when the Reline buffer holds at least one entry that this
+  # session id has not persisted yet (issue #135). The file contents are
+  # compared in escaped form, exactly as they are written by #save.
+  def has_new_entry?(file)
+    existing = existing_entries(file)
+    Reline::HISTORY.any? { |entry| !existing.include?(escape(entry)) }
+  end
+
+  # The entries this session id already has persisted (one escaped line
+  # each), or an empty list when the file does not exist yet.
+  def existing_entries(file)
+    return [] unless File.file?(file)
+
+    File.foreach(file).map { |line| line.chomp }
+          .reject(&:empty?)
+  end
 
   # The per-session file for the current id, or the legacy shared file
   # when no session has been bound yet (e.g. --list-sessions at startup).
