@@ -20,6 +20,16 @@ RSpec.describe Harness do
     described_class.new(opts, file_list)
   end
 
+  # Capture everything written to $stdout while the block runs.
+  def capture_stdout
+    old = $stdout
+    $stdout = StringIO.new
+    yield
+    $stdout.string
+  ensure
+    $stdout = old
+  end
+
   def seed_usage(harness, prompt_tokens)
     harness.session.add_user('hello')
     harness.session.add_assistant('hi')
@@ -186,6 +196,58 @@ RSpec.describe Harness do
       harness.rebind_logger
 
       expect(harness.client.instance_variable_get(:@logger)).to equal(harness.logger)
+    end
+  end
+
+  describe '#print_step_display (issue #131)' do
+    let(:harness) { build_harness }
+
+    let(:message) do
+      {
+        reasoning: 'First I will inspect the spinner, then run the specs.',
+        tool_calls: [
+          { id: 'c1', function: { name: 'file.read', arguments: '{"path":"lib/ui/spinner.rb"}' } },
+          { id: 'c2', function: { name: 'run.command', arguments: '{"command":"bundle exec rspec"}' } }
+        ]
+      }
+    end
+
+    it 'prints the step number, a digest of the reasoning and the tools called' do
+      out = capture_stdout { harness.send(:print_step_display, 3, message) }
+
+      expect(out).to include('[step 3 - First I will inspect the spinner, then run the specs.]')
+      expect(out).to include('-> file.read, run.command')
+    end
+
+    it 'falls back to message content when there is no reasoning' do
+      msg = { reasoning: nil, content: 'checking the test suite', tool_calls: [{ id: 'c1', function: { name: 'run.command' } }] }
+
+      out = capture_stdout { harness.send(:print_step_display, 2, msg) }
+
+      expect(out).to include('[step 2 - checking the test suite]')
+      expect(out).to include('-> run.command')
+    end
+
+    it 'prints only the tool line when there is no reasoning text at all' do
+      msg = { reasoning: nil, content: nil, tool_calls: [{ id: 'c1', function: { name: 'file.search' } }] }
+
+      out = capture_stdout { harness.send(:print_step_display, 4, msg) }
+
+      expect(out).not_to include('step 4')
+      expect(out).to eq("    -> file.search\n")
+    end
+
+    it 'prints nothing when disabled via HARNESS_STEP_DISPLAY=off' do
+      original = ENV['HARNESS_STEP_DISPLAY']
+      ENV['HARNESS_STEP_DISPLAY'] = 'off'
+
+      begin
+        out = capture_stdout { harness.send(:print_step_display, 1, message) }
+
+        expect(out).to be_empty
+      ensure
+        ENV['HARNESS_STEP_DISPLAY'] = original
+      end
     end
   end
 end
