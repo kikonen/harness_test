@@ -108,7 +108,32 @@ module UI
       $stdout.respond_to?(:tty?) && $stdout.tty?
     end
 
+    # One spinner frame: frame glyph, message, and the (possibly live) suffix.
+    # Public so tests can assert the exact frame text shared by both renderers.
+    def line(i)
+      "#{FRAMES[i % FRAMES.size]} #{@message}...#{render_suffix}"
+    end
+
+    # Draw ONE TUI frame (index i) into the viewport, then drain the event
+    # queue with a short timeout. Public so headless tests can drive a single
+    # deterministic frame through ratatui's test terminal (issue #74).
+    def draw_tui_frame(tui, i)
+      tui.draw { |frame| frame.render_widget(tui.paragraph(text: line(i)), frame.area) }
+      tui.poll_event(timeout: 0.05)
+    end
+
     private
+
+    # Animation loop on the TUI renderer: one frame per iteration until
+    # @running is cleared by #pause/#stop. RatatuiRuby.run's own teardown
+    # restores the terminal afterwards (run_tui_session).
+    def render_tui(tui)
+      i = 0
+      while @running
+        draw_tui_frame(tui, i)
+        i += 1
+      end
+    end
 
     # Rich renderer: an inline single-row viewport (preserves scrollback) run
     # in the animation thread so the main thread stays free to work. Any
@@ -130,19 +155,6 @@ module UI
        ' - using ANSI fallback'
     end
 
-    # Draw one frame per iteration; poll with a short timeout to pace the
-    # animation (~20 fps) and keep the event queue drained. The loop ends as
-    # soon as @running is cleared by #pause/#stop, and RatatuiRuby.run's own
-    # teardown restores the terminal afterwards.
-    def render_tui(tui)
-      i = 0
-      while @running
-        tui.draw { |frame| frame.render_widget(tui.paragraph(text: line(i)), frame.area) }
-        i += 1
-        tui.poll_event(timeout: 0.05)
-      end
-    end
-
     # Proven renderer: the ANSI single-line spinner on $stdout. The clear on
     # #pause/#stop uses an erase-entire-line escape so double-width glyphs
     # (the 🧠 emoji) do not leave trailing trash (issue #125).
@@ -154,11 +166,6 @@ module UI
         i += 1
         sleep 0.1
       end
-    end
-
-    # One spinner frame: frame glyph, message, and the (possibly live) suffix.
-    def line(i)
-      "#{FRAMES[i % FRAMES.size]} #{@message}...#{render_suffix}"
     end
 
     # Resolve the suffix to the text for this frame. A callable is invoked

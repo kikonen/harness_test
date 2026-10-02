@@ -3,7 +3,11 @@
 require 'spec_helper'
 require 'stringio'
 
-RSpec.describe Dialog do
+# The Dialog suite (issue #74): the class lives in the `UI` namespace.
+# Behavior is asserted IDENTICALLY to the pre-migration top-level Dialog
+# (option handling, notes, free text, multi-select, out-of-range re-prompt),
+# plus a group for the backward-compatible `Dialog` alias.
+RSpec.describe UI::Dialog do
   let(:options) do
     [
       described_class::Option.new(title: 'Allow', value: :allow),
@@ -61,7 +65,7 @@ RSpec.describe Dialog do
     it 'returns CANCEL_VALUE when the cancel option is picked' do
       stub_stdin("3\n")
       result = show(described_class.new(title: 't', options: options))
-      expect(result).to eq(Dialog::CANCEL_VALUE)
+      expect(result).to eq(UI::Dialog::CANCEL_VALUE)
     end
 
     it 'skips stale blank lines before a valid answer' do
@@ -72,7 +76,7 @@ RSpec.describe Dialog do
     it 'cancels on EOF without an answer' do
       stub_stdin(nil)
       expect(show(described_class.new(title: 't', options: options)))
-        .to eq(Dialog::CANCEL_VALUE)
+        .to eq(UI::Dialog::CANCEL_VALUE)
     end
 
     describe 'with a note attached to the choice' do
@@ -85,7 +89,7 @@ RSpec.describe Dialog do
       it 'allows a note on the cancel option too' do
         stub_stdin("3 no, and because X\n")
         expect(show(described_class.new(title: 't', options: options)))
-          .to eq([Dialog::CANCEL_VALUE, 'no, and because X'])
+          .to eq([UI::Dialog::CANCEL_VALUE, 'no, and because X'])
       end
     end
 
@@ -103,7 +107,7 @@ RSpec.describe Dialog do
 
       it 'keeps the note on the cancel choice' do
         stub_stdin("3 no, and because X\n")
-        expect(show(dialog)).to eq([Dialog::CANCEL_VALUE, 'no, and because X'])
+        expect(show(dialog)).to eq([UI::Dialog::CANCEL_VALUE, 'no, and because X'])
       end
     end
 
@@ -124,17 +128,17 @@ RSpec.describe Dialog do
 
       it 'returns [FREE_TEXT, text] for a non-numeric answer' do
         stub_stdin("looks good to me\n")
-        expect(show(dialog)).to eq([Dialog::FREE_TEXT, 'looks good to me'])
+        expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'looks good to me'])
       end
 
       it 'still returns [value, note] when a number leads' do
         stub_stdin("3 no, and because X\n")
-        expect(show(dialog)).to eq([Dialog::CANCEL_VALUE, 'no, and because X'])
+        expect(show(dialog)).to eq([UI::Dialog::CANCEL_VALUE, 'no, and because X'])
       end
 
       it 'cancels on EOF' do
         stub_stdin(nil)
-        expect(show(dialog)).to eq(Dialog::CANCEL_VALUE)
+        expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
       end
     end
 
@@ -155,7 +159,7 @@ RSpec.describe Dialog do
 
       it 'still cancels when the user dismisses with EOF' do
         stub_stdin("9\n", nil)
-        expect(show(dialog)).to eq(Dialog::CANCEL_VALUE)
+        expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
       end
 
       it 're-prompts even in free-text mode (no silent free text)' do
@@ -172,7 +176,7 @@ RSpec.describe Dialog do
           title: 't', options: options, free_text: true, free_text_prompt: 'or type a short note'
         )
         stub_stdin("9\n", "something else entirely\n")
-        expect(show(dialog)).to eq([Dialog::FREE_TEXT, 'something else entirely'])
+        expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'something else entirely'])
       end
     end
 
@@ -197,17 +201,17 @@ RSpec.describe Dialog do
 
       it 'returns CANCEL_VALUE when cancel is part of the selection' do
         stub_stdin("1 3\n")
-        expect(show(dialog)).to eq(Dialog::CANCEL_VALUE)
+        expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
       end
 
       it 'cancels on "<number> <note>" for a non-cancel choice' do
         stub_stdin("1 seems fine\n")
-        expect(show(dialog)).to eq(Dialog::CANCEL_VALUE)
+        expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
       end
 
       it 'keeps the note on the cancel choice' do
         stub_stdin("3 no, and because X\n")
-        expect(show(dialog)).to eq([Dialog::CANCEL_VALUE, 'no, and because X'])
+        expect(show(dialog)).to eq([UI::Dialog::CANCEL_VALUE, 'no, and because X'])
       end
 
       it 're-prompts when any number is out of range, then accepts a valid line' do
@@ -218,7 +222,7 @@ RSpec.describe Dialog do
 
       it 'still cancels on EOF' do
         stub_stdin(nil)
-        expect(show(dialog)).to eq(Dialog::CANCEL_VALUE)
+        expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
       end
 
       it 'shows a multi-select hint in the choice prompt' do
@@ -226,6 +230,26 @@ RSpec.describe Dialog do
         out = capture_stdout { show(dialog) }
         expect(out).to include('several numbers like "1 3"')
       end
+    end
+  end
+
+  describe 'backward-compatible top-level alias' do
+    it 'exposes the namespaced Dialog as the legacy top-level Dialog' do
+      expect(Dialog).to be(UI::Dialog)
+    end
+
+    it 'shares its constants with the namespaced class' do
+      expect(Dialog::CANCEL_VALUE).to eq(UI::Dialog::CANCEL_VALUE)
+      expect(Dialog::FREE_TEXT).to eq(UI::Dialog::FREE_TEXT)
+    end
+
+    it 'is constructible through the legacy alias with identical behavior' do
+      stub_stdin("1 seems fine\n")
+      dialog = Dialog.new(
+        title: 't',
+        options: [Dialog::Option.new(title: 'Allow', value: :allow)]
+      )
+      expect(dialog.show).to eq([:allow, 'seems fine'])
     end
   end
 end
