@@ -225,6 +225,12 @@ class Harness
       data    = @client.chat(messages, tools: tools)
       message = data[:choices][0][:message]
 
+      # issue #131: show reasoning in each step - surface what the model is
+      # thinking on this iteration so the user can follow the work live.
+      # Full text stays in harness.log and /reasoning. Disabled with
+      # HARNESS_STEP_DISPLAY=off.
+      print_step_display(iteration, message) if message[:tool_calls]
+
       # Accumulate usage stats
       if data[:usage]
         total_usage[:prompt_tokens]     += data[:usage][:prompt_tokens]     || 0
@@ -402,6 +408,25 @@ class Harness
   end
 
   private
+
+  # issue #131: one-line per-iteration display for tool-loop steps.
+  # Prints the model's step reasoning (first non-empty of reasoning/content)
+  # plus the tools it is about to call, e.g.:
+  #   [step 3 - checking existing spinner API]
+  #     -> file.search, file.read
+  def print_step_display(iteration, message)
+    return if step_display_disabled?
+
+    reason = [message[:reasoning], message[:content]].map { |m| m.to_s.strip }.reject(&:empty?).first
+    tools  = message[:tool_calls].map { |tc| tc[:function][:name] }
+    puts "  [step #{iteration} - #{reason}]" if reason
+    puts "    -> #{tools.join(', ')}"
+    $stdout.flush
+  end
+
+  def step_display_disabled?
+    ENV.fetch('HARNESS_STEP_DISPLAY', '') == 'off' || options[:step_display] == false
+  end
 
   def execute_tool_call(tool_call)
     func_name = tool_call[:function][:name]
