@@ -19,6 +19,15 @@ GEM
     prettyprint (0.2.0)
     prism (1.9.0)
     racc (1.8.1)
+    rake-compiler-dock (1.12.0)
+    ratatui_ruby (1.5.0-x64-mingw-ucrt)
+      rb_sys (~> 0.9)
+      rexml (~> 3.4)
+    ratatui_ruby (1.5.0-x86_64-linux)
+      rb_sys (~> 0.9)
+      rexml (~> 3.4)
+    rb_sys (0.9.130)
+      rake-compiler-dock (= 1.12.0)
     rbs (4.2.0)
       logger
       prism (>= 1.6.0)
@@ -30,6 +39,7 @@ GEM
       tsort
     reline (0.7.0)
       io-console (~> 0.5)
+    rexml (3.4.4)
     rspec (3.13.2)
       rspec-core (~> 3.13.0)
       rspec-expectations (~> 3.13.0)
@@ -54,6 +64,7 @@ DEPENDENCIES
   fiddle
   logger
   racc
+  ratatui_ruby
   rspec
 
 BUNDLED WITH
