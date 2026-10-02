@@ -313,7 +313,8 @@ class Harness
       @session.add_assistant(message[:content])
       @session.record_stats(stats)
       # issue #98: keep the reasoning of the last response so it can be
-      # shown on demand with /reasoning (it is only logged when verbose).
+      # shown on demand with /reasoning. The full text goes to harness.log
+      # always (see SessionManager#send_session, issue #131).
       @session.record_reasoning(message[:reasoning])
 
       return {

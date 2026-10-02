@@ -460,3 +460,26 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
     end
   end
 end
+
+# issue #131: the full reasoning and content of EVERY LLM response go to
+# harness.log unconditionally (not gated on --verbose) - the log is the
+# authoritative record of what the model said. Empty sections are labeled
+# "(none)" instead of leaving blank "--- reasoning ---" blocks.
+RSpec.describe SessionManager, '#log_response (issue #131)' do
+  let(:harness) { double('harness', logger: Logger.new(File::NULL)) }
+  let(:manager) { described_class.new(harness, FileList.new([], workdir: Dir.pwd)) }
+
+  it 'logs the reasoning and content sections to harness.log' do
+    expect(harness.logger).to receive(:info).with("--- reasoning ---\nlet me think...")
+    expect(harness.logger).to receive(:info).with("--- response ---\nall done")
+
+    manager.log_response(reasoning: 'let me think...', content: 'all done')
+  end
+
+  it 'labels empty sections as (none)' do
+    expect(harness.logger).to receive(:info).with("--- reasoning ---\n(none)")
+    expect(harness.logger).to receive(:info).with("--- response ---\nfinal answer")
+
+    manager.log_response(reasoning: nil, content: 'final answer')
+  end
+end

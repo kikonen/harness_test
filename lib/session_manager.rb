@@ -297,10 +297,11 @@ class SessionManager
       @harness.spinner = nil
     end
 
-    if @harness.options[:verbose]
-      @harness.logger.info("--- reasoning ---\n#{response[:reasoning]}")
-      @harness.logger.info("--- response ---\n#{response[:content]}")
-    end
+    # issue #131: the full reasoning and content of every response go to
+    # harness.log ALWAYS (not gated on --verbose): the log is the
+    # authoritative record of what the model said, independent of console
+    # output. Empty fields are labeled "(none)" to avoid blank sections.
+    log_response(reasoning: response[:reasoning], content: response[:content])
 
     puts response[:content]
     @harness.print_stats(response[:stats])
@@ -335,6 +336,20 @@ class SessionManager
   # The configured auto-compact threshold as a percentage.
   def threshold_pct
     @harness.compact_auto_threshold
+  end
+
+  # issue #131: log the full text of a response (reasoning + content) to
+  # harness.log unconditionally (see #send_session). Empty sections are
+  # labeled "(none)" so responses without reasoning don't leave blank
+  # "--- reasoning ---" blocks.
+  def log_response(reasoning:, content:)
+    @harness.logger.info("--- reasoning ---\n#{log_text_or_none(reasoning)}")
+    @harness.logger.info("--- response ---\n#{log_text_or_none(content)}")
+  end
+
+  def log_text_or_none(text)
+    s = text.to_s.strip
+    s.empty? ? '(none)' : text.to_s
   end
 
   # -- Rules file (harness.md) ---------------------------------------------
