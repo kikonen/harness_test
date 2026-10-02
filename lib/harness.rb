@@ -418,9 +418,16 @@ class Harness
   def print_step_display(iteration, message)
     return if step_display_disabled?
 
-    reason = [message[:reasoning], message[:content]].map { |m| m.to_s.strip }.reject(&:empty?).first
+    @spinner.pause
+    @session_manager.log_response(reasoning: message[:reasoning], content: message[:content])
+
+    reason = [message[:reasoning]].map { |m| m.to_s.strip }.reject(&:empty?).first
+    content = [message[:content]].map { |m| m.to_s.strip }.reject(&:empty?).first
+
     tools  = message[:tool_calls].map { |tc| tc[:function][:name] }
-    puts "  [step #{iteration} - #{reason}]" if reason
+    puts ">>> [step #{iteration} - #{reason}] <<<" if reason
+    puts "|| #{content}" if content
+
     puts "    -> #{tools.join(', ')}"
     $stdout.flush
   end

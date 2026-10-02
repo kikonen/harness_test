@@ -303,6 +303,9 @@ class SessionManager
     # output. Empty fields are labeled "(none)" to avoid blank sections.
     log_response(reasoning: response[:reasoning], content: response[:content])
 
+    reason = [response[:reasoning]].map { |m| m.to_s.strip }.reject(&:empty?).first
+    puts ">>> [#{reason}] <<<" if reason
+
     puts response[:content]
     @harness.print_stats(response[:stats])
 
