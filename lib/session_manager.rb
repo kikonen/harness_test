@@ -521,6 +521,9 @@ class SessionManager
     # session with a different id than the fresh one built at startup -
     # re-point the logger so it follows the resumed session.
     @harness.rebind_logger
+    # issue #119: command history is per session too - re-point the history
+    # manager so up/down arrows and the saved file follow the new session.
+    @harness.history&.bind_session(@harness.session.session_id)
     restore_session_model(data[:active_model])
     reset_rules_mtime
     @harness.logger.info("session resumed: #{File.basename(path, '.json')} (#{path})")

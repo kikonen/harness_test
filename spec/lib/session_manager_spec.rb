@@ -19,17 +19,23 @@ RSpec.describe SessionManager do
   # A minimal stand-in for Harness providing only what SessionManager uses.
   let(:harness) do
     Class.new do
-      attr_accessor :session, :client, :spinner
+      attr_accessor :session, :client, :spinner, :history
 
       def initialize(session, client)
         @session = session
         @client  = client
         @options = { num_ctx: 65_536, auto_save: false }
         @spinner = nil
+        @history = nil
         @logger  = Logger.new(File::NULL)
       end
 
       attr_reader :options, :logger
+
+      # issue #113: resume re-points the logger; no-op in the stub.
+      def rebind_logger
+        @logger
+      end
 
       def compact_recent_messages
         Session::COMPACT_RECENT_MESSAGES
@@ -257,6 +263,48 @@ RSpec.describe SessionManager do
       end
     end
   end
+
+  # issue #119: command history is per session - resume must re-point the
+  # history manager at the new session id so up/down arrows (and the saved
+  # file) follow the resumed session instead of mixing entries across ids.
+  describe '#resume_session (issue #119)' do
+    it 're-binds the history manager to the resumed session id' do
+      Dir.mktmpdir do |dir|
+        sessions = File.join(dir, '.harness/sessions')
+        FileUtils.mkdir_p(sessions)
+        sid = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+        saved = session.to_h(file_list)
+        saved[:session_id] = sid
+        File.write(File.join(sessions, "#{sid}.json"), JSON.generate(saved))
+
+        file_list = FileList.new([], workdir: dir)
+        manager   = described_class.new(harness, file_list)
+        history   = double('history')
+        harness.history = history
+
+        expect(history).to receive(:bind_session).with(sid)
+
+        manager.resume_session(sid)
+      end
+    end
+
+    it 'does not break resume when no history manager is attached' do
+      Dir.mktmpdir do |dir|
+        sessions = File.join(dir, '.harness/sessions')
+        FileUtils.mkdir_p(sessions)
+        sid = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+        saved = session.to_h(file_list)
+        saved[:session_id] = sid
+        File.write(File.join(sessions, "#{sid}.json"), JSON.generate(saved))
+
+        file_list = FileList.new([], workdir: dir)
+        manager   = described_class.new(harness, file_list)
+        harness.history = nil
+
+        expect { manager.resume_session(sid) }.not_to raise_error
+      end
+    end
+  end
 end
 
 RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
@@ -265,7 +313,7 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
   let(:client) { double('client', chat: nil) }
   let(:harness) do
     Class.new do
-      attr_accessor :session, :client, :spinner
+      attr_accessor :session, :client, :spinner, :history
 
       def initialize(session, client)
         @session = session

@@ -24,6 +24,10 @@ class CLI
     @harness   = Harness.new(@options, @file_list)
     @commands  = CommandHandler.new(@harness, @file_list, @options)
     @history   = HistoryManager.new(@file_list.workdir)
+    # issue #119: command history is per session - bind it to the session
+    # id BEFORE resume/continue swaps in a saved session, so the history
+    # file always follows the active session.
+    @history.bind_session(@harness.session.session_id)
     list_sessions_and_exit if @options[:list_sessions]
     resume_from_cli if @options[:resume]
     continue_from_cli if @options[:continue]
