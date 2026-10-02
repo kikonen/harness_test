@@ -304,7 +304,7 @@ class SessionManager
     log_response(reasoning: response[:reasoning], content: response[:content])
 
     reason = [response[:reasoning]].map { |m| m.to_s.strip }.reject(&:empty?).first
-    puts ">>> [#{reason}] <<<" if reason
+    puts ">>> #{reason} <<<" if reason
 
     puts response[:content]
     @harness.print_stats(response[:stats])

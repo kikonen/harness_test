@@ -418,15 +418,21 @@ class Harness
   def print_step_display(iteration, message)
     return if step_display_disabled?
 
-    @spinner.pause
+    # Pause the send_session spinner while printing (best-effort: there is
+    # no active spinner when called outside a live send_session).
+    @spinner&.pause
     @session_manager.log_response(reasoning: message[:reasoning], content: message[:content])
 
-    reason = [message[:reasoning]].map { |m| m.to_s.strip }.reject(&:empty?).first
-    content = [message[:content]].map { |m| m.to_s.strip }.reject(&:empty?).first
+    first_line = ->(key) { [message[key]].map { |m| m.to_s.strip }.reject(&:empty?).first }
+    reason  = first_line.call(:reasoning)
+    content = first_line.call(:content)
 
     tools  = message[:tool_calls].map { |tc| tc[:function][:name] }
-    puts ">>> [step #{iteration} - #{reason}] <<<" if reason
-    puts "|| #{content}" if content
+    # The step header uses the reasoning when present, otherwise the
+    # content (a response with no reasoning still shows a readable step).
+    puts "[step #{iteration}]"
+    puts ">>> #{reason} <<<" if reason
+    puts "||| #{content} |||" if content
 
     puts "    -> #{tools.join(', ')}"
     $stdout.flush

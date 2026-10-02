@@ -215,7 +215,8 @@ RSpec.describe Harness do
     it 'prints the step number, a digest of the reasoning and the tools called' do
       out = capture_stdout { harness.send(:print_step_display, 3, message) }
 
-      expect(out).to include('[step 3 - First I will inspect the spinner, then run the specs.]')
+      expect(out).to include('[step 3]')
+      expect(out).to include('>>> First I will inspect the spinner, then run the specs. <<<')
       expect(out).to include('-> file.read, run.command')
     end
 
@@ -224,7 +225,8 @@ RSpec.describe Harness do
 
       out = capture_stdout { harness.send(:print_step_display, 2, msg) }
 
-      expect(out).to include('[step 2 - checking the test suite]')
+      expect(out).to include('[step 2]')
+      expect(out).to include('||| checking the test suite |||')
       expect(out).to include('-> run.command')
     end
 
@@ -233,8 +235,8 @@ RSpec.describe Harness do
 
       out = capture_stdout { harness.send(:print_step_display, 4, msg) }
 
-      expect(out).not_to include('step 4')
-      expect(out).to eq("    -> file.search\n")
+      expect(out).to include('[step 4]')
+      expect(out).to include("    -> file.search\n")
     end
 
     it 'prints nothing when disabled via HARNESS_STEP_DISPLAY=off' do
