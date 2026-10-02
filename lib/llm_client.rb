@@ -117,9 +117,15 @@ class LLMClient
         raise LLMError, "LLM error (HTTP #{resp.code}):\n#{resp.body}"
       end
 
-      @logger.info("=" * 50)
-      @logger.info(resp.body)
-      @logger.info("=" * 50)
+      # issue #131: the raw API response body is troubleshooting-only - it
+      # goes to harness.log with --verbose, while the parsed reasoning/
+      # content sections (SessionManager#log_response) are ALWAYS logged so
+      # the log can be followed without the flag.
+      if @options[:verbose]
+        @logger.info("=" * 50)
+        @logger.info(resp.body)
+        @logger.info("=" * 50)
+      end
 
       begin
         return JSON.parse(resp.body, symbolize_names: true)
