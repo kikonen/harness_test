@@ -24,13 +24,22 @@ class CLI
     @harness   = Harness.new(@options, @file_list)
     @commands  = CommandHandler.new(@harness, @file_list, @options)
     @history   = HistoryManager.new(@file_list.workdir)
-    # issue #119: command history is per session - bind it to the session
-    # id BEFORE resume/continue swaps in a saved session, so the history
-    # file always follows the active session.
-    @history.bind_session(@harness.session.session_id)
+    # issue #135: share the manager with the harness (it declares
+    # attr_accessor :history) so SessionManager#resume_session can rebind it
+    # to the resumed session id. Before this wiring @harness.history was nil,
+    # so the `@harness.history&.bind_session(...)` in resume_session no-opped
+    # and a save at close wrote into a throwaway .harness/sessions/<fresh-id>/
+    # dir - the dummy-dir-on-every-resume symptom.
+    @harness.history = @history
     list_sessions_and_exit if @options[:list_sessions]
     resume_from_cli if @options[:resume]
     continue_from_cli if @options[:continue]
+    # issue #119: command history is per session - bind it to the active
+    # session id AFTER resume/continue (if any) swapped in a saved session,
+    # so a fresh run binds its own id and a resumed run keeps following the
+    # resumed one. Binding here (not before resume) means the fresh random id
+    # is never persisted as a throwaway directory.
+    @history.bind_session(@harness.session.session_id)
   end
 
   def parse_options
