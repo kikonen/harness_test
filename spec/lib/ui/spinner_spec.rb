@@ -3,19 +3,17 @@
 require 'ui'
 require 'stringio'
 
-# The Spinner suite (issue #74): the class lives in the `UI` namespace.
-# Behavior is asserted IDENTICALLY to the pre-migration top-level Spinner
-# (frame/message/suffix rendering, callable suffix re-evaluation, pause/
-# resume, running? gating, stop-without-start, and the width-independent ANSI
-# line clear), plus a group pinning the renderer-selection gate (the TUI
-# renderer must only be used on an interactive terminal / never in CI) and a
-# group for the backward-compatible `Spinner` alias.
+# The Spinner suite (issue #74 / #40): the class lives in the `UI` namespace.
+# Single-thread I/O model (issue #40): start/stop/pause/resume are pure state
+# changes (no background thread). render! advances one animation frame and
+# writes it to $stdout. The main thread calls render! on each drain tick.
+# Tests assert the frame text via capture_stdout + render!, not via sleep-based
+# thread observation.
 RSpec.describe UI::Spinner do
   OVERRIDE = UI::Spinner::ENV_OVERRIDE
 
   # Force the ANSI renderer for ALL examples: they must be deterministic and
-  # must never touch a real terminal or load the ratatui native extension
-  # (which would not render into captured $stdout). Restored after the suite.
+  # must never touch a real terminal or load the ratatui native extension.
   before(:context) do
     @original_override = ENV[OVERRIDE]
     ENV[OVERRIDE] = 'print'
@@ -29,8 +27,7 @@ RSpec.describe UI::Spinner do
     end
   end
 
-  # Capture everything written to $stdout while the block runs. The
-  # animation thread writes via print, so it goes to $stdout too.
+  # Capture everything written to $stdout while the block runs.
   def capture_stdout
     old = $stdout
     $stdout = StringIO.new
@@ -60,12 +57,12 @@ RSpec.describe UI::Spinner do
     end
   end
 
-  describe '#start / #stop rendering' do
+  describe '#render! and frame advancement' do
     it 'renders the frame, message and a string suffix on one line' do
       spinner = described_class.new('Sending to gpt-x', '🧠 ctx 42133/65536 (64%)')
       out = capture_stdout do
         spinner.start
-        sleep 0.25 # let at least two frames render
+        spinner.render!
         spinner.stop
       end
       expect(out).to include('Sending to gpt-x... 🧠 ctx 42133/65536 (64%)')
@@ -75,7 +72,7 @@ RSpec.describe UI::Spinner do
       spinner = described_class.new('Working')
       out = capture_stdout do
         spinner.start
-        sleep 0.25
+        spinner.render!
         spinner.stop
       end
       expect(out).to include('Working...')
@@ -87,7 +84,7 @@ RSpec.describe UI::Spinner do
       spinner = described_class.new('Working', '  ctx 1/2 (50%)  ')
       out = capture_stdout do
         spinner.start
-        sleep 0.25
+        spinner.render!
         spinner.stop
       end
       expect(out).to include('Working... ctx 1/2 (50%)')
@@ -98,10 +95,10 @@ RSpec.describe UI::Spinner do
       spinner = described_class.new('Sending to gpt-x', -> { value })
       out = capture_stdout do
         spinner.start
-        sleep 0.15
-        # The "current" value changes mid-animation; the suffix must follow it.
+        spinner.render!
+        # The "current" value changes; the next frame must show the new value.
         value = 'ctx 9/10 (90%)'
-        sleep 0.25
+        spinner.render!
         spinner.stop
       end
       expect(out).to include('Sending to gpt-x... ctx 1/10 (10%)')
@@ -112,51 +109,70 @@ RSpec.describe UI::Spinner do
       spinner = described_class.new('Working', -> { raise 'boom' })
       out = capture_stdout do
         spinner.start
-        sleep 0.25
+        spinner.render!
         spinner.stop
       end
       expect(out).to include('Working...')
       expect(out).not_to include('Working... ')
     end
 
-    it 'pause clears the line and resume restarts the animation' do
-      spinner = described_class.new('Working', 'ctx 1/2 (50%)')
+    it 'advances through frames sequentially' do
+      spinner = described_class.new('Working')
       out = capture_stdout do
         spinner.start
-        sleep 0.25
-        spinner.pause
-        expect(spinner.instance_variable_get(:@thread)).to be_nil
-        spinner.resume
-        sleep 0.25
+        3.times { spinner.render! }
         spinner.stop
       end
-      expect(out).to include('Working... ctx 1/2 (50%)')
+      # Each frame uses the next glyph from FRAMES
+      expect(out).to include(UI::Spinner::FRAMES[0])
+      expect(out).to include(UI::Spinner::FRAMES[1])
+      expect(out).to include(UI::Spinner::FRAMES[2])
     end
+  end
 
-    it 'reports running? only while the animation thread is live' do
+  describe '#pause / #resume state management' do
+    it 'reports running? only when active and not paused' do
       spinner = described_class.new
       expect(spinner.running?).to be(false)
-      capture_stdout do
-        spinner.start
-        expect(spinner.running?).to be(true)
-        spinner.pause
-        expect(spinner.running?).to be(false)
-        spinner.resume
-        expect(spinner.running?).to be(true)
-        spinner.stop
-        expect(spinner.running?).to be(false)
-      end
+      spinner.start
+      expect(spinner.running?).to be(true)
+      spinner.pause
+      expect(spinner.running?).to be(false)
+      spinner.resume
+      expect(spinner.running?).to be(true)
+      spinner.stop
+      expect(spinner.running?).to be(false)
     end
 
     it 'does not resume a stopped spinner (issue #116)' do
       spinner = described_class.new
-      capture_stdout do
+      spinner.start
+      spinner.stop
+      spinner.resume
+      expect(spinner.running?).to be(false)
+    end
+
+    it 'pause prevents render! from writing' do
+      spinner = described_class.new('Working', 'ctx 1/2 (50%)')
+      out = capture_stdout do
         spinner.start
-        sleep 0.15
+        spinner.pause
+        spinner.render! # should be no-op
         spinner.stop
-        spinner.resume
-        expect(spinner.running?).to be(false)
       end
+      expect(out).to eq('')
+    end
+
+    it 'resume restores rendering after pause' do
+      spinner = described_class.new('Working', 'ctx 1/2 (50%)')
+      out = capture_stdout do
+        spinner.start
+        spinner.pause
+        spinner.resume
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include('Working... ctx 1/2 (50%)')
     end
 
     it 'does not raise when stop is called without start' do
@@ -165,7 +181,7 @@ RSpec.describe UI::Spinner do
     end
   end
 
-  describe 'line clearing (issue #125)' do
+  describe '#clear_line (issue #125)' do
     it 'clears the line with an ANSI erase escape, independent of glyph width' do
       # A double-width emoji in the suffix used to make the blank-space clear
       # one column short, leaving a stray ")" on the next line. The ANSI
@@ -173,10 +189,23 @@ RSpec.describe UI::Spinner do
       spinner = described_class.new('Sending to gpt-x', '🧠 ctx 42133/65536 (64%)')
       out = capture_stdout do
         spinner.start
-        sleep 0.25
+        spinner.render!
+        spinner.clear_line
         spinner.stop
       end
       expect(out).to include("\e[2K")
+    end
+  end
+
+  describe '#line (deterministic frame text)' do
+    it 'returns the correct frame string for a given index' do
+      spinner = described_class.new('Working', 'ctx 1/2 (50%)')
+      expect(spinner.line(0)).to eq("#{UI::Spinner::FRAMES[0]} Working... ctx 1/2 (50%)")
+    end
+
+    it 'wraps around the FRAMES array' do
+      spinner = described_class.new('Working')
+      expect(spinner.line(UI::Spinner::FRAMES.size)).to eq("#{UI::Spinner::FRAMES[0]} Working...")
     end
   end
 
@@ -238,7 +267,7 @@ RSpec.describe UI::Spinner do
       spinner = Spinner.new('Working', 'ctx 1/2 (50%)')
       out = capture_stdout do
         spinner.start
-        sleep 0.25
+        spinner.render!
         spinner.stop
       end
       expect(out).to include('Working... ctx 1/2 (50%)')
