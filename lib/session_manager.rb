@@ -30,7 +30,7 @@ class SessionManager
   # be re-sent with #retry.
   def run_prompt(instruction)
     if check_rules_reload
-      puts "  [harness.md reloaded - project rules updated]"
+      Task.puts "  [harness.md reloaded - project rules updated]"
     end
 
     # Auto-compact BEFORE sending: it must never run after the response,
@@ -69,11 +69,11 @@ class SessionManager
     # The previous attempt may have failed because the context was full:
     # compact first, then re-send.
     if @harness.session.auto_compact_due?(@harness.options[:num_ctx] || LLMClient::NUM_CTX, @harness.compact_auto_threshold)
-      puts "  [context over threshold - compacting before retry...]"
+      Task.puts "  [context over threshold - compacting before retry...]"
       result = compact_session
-      puts "  [compact done: #{result[:before]} -> #{result[:after]} messages]"
+      Task.puts "  [compact done: #{result[:before]} -> #{result[:after]} messages]"
       if result[:context_before] && result[:context_line]
-        puts "  #{result[:context_before]} -> #{result[:context_line]}"
+        Task.puts "  #{result[:context_before]} -> #{result[:context_line]}"
       end
     end
 
@@ -101,7 +101,7 @@ class SessionManager
       save_session
       @harness.logger.info("auto-save (#{tag})")
     rescue StandardError => e
-      puts "  [warning] auto-save failed: #{e.message}"
+      Task.puts "  [warning] auto-save failed: #{e.message}"
     end
   end
   # issue #108: in-loop compaction instruction - mid-turn, there is no verbatim
@@ -212,7 +212,7 @@ class SessionManager
     conversation = messages.size > 1 ? messages[1..] : []
     return false if conversation.size < 4
 
-    puts "  [context at #{(last_prompt_tokens.to_f / window * 100).round}% of the window - in-loop compaction...]"
+    Task.puts "  [context at #{(last_prompt_tokens.to_f / window * 100).round}% of the window - in-loop compaction...]"
 
     # issue #116: the send_session spinner is still animating here (this runs
     # from inside Harness#call_llm). It must be PAUSED for the duration of
@@ -264,7 +264,7 @@ class SessionManager
     # Best-effort: a failed compaction must not abort an otherwise healthy
     # turn - the next request will simply hit the server-side limit and the
     # existing context-exceeded recovery path applies.
-    puts "  [in-loop compaction failed: #{e.message} - continuing with the existing chain]"
+    Task.puts "  [in-loop compaction failed: #{e.message} - continuing with the existing chain]"
     false
   end
 
@@ -285,11 +285,11 @@ class SessionManager
       # the session). Anything else is re-raised for the caller to handle.
       raise unless context_exceeded_error?(e.message) && @harness.session.conversation_size >= 4
 
-      puts "  [context window exceeded - compacting and re-sending...]"
+      Task.puts "  [context window exceeded - compacting and re-sending...]"
       result = compact_session
-      puts "  [compact done: #{result[:before]} -> #{result[:after]} messages, retrying...]"
+      Task.puts "  [compact done: #{result[:before]} -> #{result[:after]} messages, retrying...]"
       if result[:context_before] && result[:context_line]
-        puts "  #{result[:context_before]} -> #{result[:context_line]}"
+        Task.puts "  #{result[:context_before]} -> #{result[:context_line]}"
       end
       response = @harness.call_llm
     ensure
@@ -304,9 +304,12 @@ class SessionManager
     log_response(reasoning: response[:reasoning], content: response[:content])
 
     reason = [response[:reasoning]].map { |m| m.to_s.strip }.reject(&:empty?).first
-    puts ">>> #{reason} <<<" if reason
+    Task.puts(">>> #{reason} <<<") if reason
 
-    puts response[:content]
+    Task.puts "=" * 80
+    Task.puts response[:content]
+    Task.puts "-" * 80
+
     @harness.print_stats(response[:stats])
 
     # issue #107: persist the completed turn. The pre-send save already
@@ -326,14 +329,14 @@ class SessionManager
   def compact_if_due
     return unless @harness.session.auto_compact_due?(@harness.options[:num_ctx] || LLMClient::NUM_CTX, @harness.compact_auto_threshold)
 
-    puts "  [context at #{threshold_pct}% of the window - auto-compacting session...]"
+    Task.puts "  [context at #{threshold_pct}% of the window - auto-compacting session...]"
     result = compact_session
-    puts "  [auto-compact done: #{result[:before]} -> #{result[:after]} messages]"
+    Task.puts "  [auto-compact done: #{result[:before]} -> #{result[:after]} messages]"
     if result[:context_before] && result[:context_line]
-      puts "  #{result[:context_before]} -> #{result[:context_line]}"
+      Task.puts "  #{result[:context_before]} -> #{result[:context_line]}"
     end
   rescue => e
-    puts "  [auto-compact failed: #{e.message} - try /compact manually]"
+    Task.puts "  [auto-compact failed: #{e.message} - try /compact manually]"
   end
 
   # The configured auto-compact threshold as a percentage.
@@ -583,7 +586,7 @@ class SessionManager
   def restore_session_model(name)
     restore_active_model(name)
   rescue HarnessError => e
-    puts "  [error] #{e.message}"
+    Task.puts "  [error] #{e.message}"
     default = default_model_name
     raise HarnessError, "#{e.message} - and no default model is configured either" unless default
 
