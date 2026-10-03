@@ -39,6 +39,12 @@
 # mistyped choice is never silently reinterpreted as free text
 # (issue #73). Dismissing with EOF still cancels.
 #
+# Single-thread I/O rule (issue #40): when called from within a Task
+# thread, `show` routes the entire dialog interaction through the task's
+# request/response protocol so that $stdin/$stdout are used only on the
+# main thread. When no Task is active (tests, direct CLI commands), it
+# performs the I/O directly as before.
+#
 #   dialog = UI::Dialog.new(
 #     title: 'Access requested (write access): lib/foo.rb',
 #     options: [
@@ -116,19 +122,26 @@ module UI
     # user types their own answer (free_text dialogs only), or CANCEL_VALUE
     # when the user cancels (or stdin is closed).
     #
-    # The user may attach a short note to a choice by typing
-    # "<number> <note>" (e.g. "1 seems fine"): the dialog then returns
-    # [option value, 'seems fine'] instead of the bare value - the note is
-    # extra context on top of the selection, never a replacement for it.
-    # With note_on_cancel_only (grant dialogs, issue #79) notes are kept
-    # only on the cancel choice; on other choices the bare value is returned.
-    # Multi-select dialogs accept several numbers in one line: "1 3" or
-    # "1,3" - one selection returns the bare value, two or more return an
-    # array of the selected values in the order typed.
-    #
-    # An out-of-range option number is rejected with an explanatory line
-    # and the dialog asks again (issue #73).
+    # Single-thread I/O rule (issue #40): when called from within a Task
+    # thread (Thread.current[:harness_task] is set), this routes through
+    # the task's request/response protocol so that all $stdin/$stdout I/O
+    # happens on the main thread. Otherwise, performs the I/O directly
+    # (tests, /grant commands, etc.).
     def show
+      task = Thread.current[:harness_task]
+      if task
+        # Route through the main thread: post a request and block until
+        # the main thread processes the dialog and responds.
+        task.request(:dialog, dialog: self)
+      else
+        perform_direct
+      end
+    end
+
+    # Perform the dialog I/O directly on $stdin/$stdout (the original
+    # implementation). Called either by `show` when no Task is active, or
+    # by the main thread when servicing a :dialog request from a task.
+    def perform_direct
       title_lines = @title.split("\n")
       puts
       puts "  [dialog] ⚠  #{title_lines.first}"

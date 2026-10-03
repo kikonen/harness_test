@@ -2,6 +2,7 @@
 
 require_relative 'harness'
 require_relative 'file_list'
+require_relative 'task'
 
 # Individual command classes.
 require_relative 'commands/grant_command'
@@ -98,9 +99,16 @@ class CommandHandler
 
   private
 
+  # issue #40: direct prompts run on a Task thread. All console I/O is
+  # serialized through the main thread via the drain loop (single-thread
+  # I/O rule). The task thread's $stdout is a StdoutProxy that captures
+  # puts/print and routes them through the outbox queue to the main thread.
   def run_direct_prompt(text)
     puts
-    @harness.session_manager.run_prompt(text)
+    error, _task = Task.run(harness: @harness) do |_t|
+      @harness.session_manager.run_prompt(text)
+    end
+    puts "  [task error] #{error}" if error
     puts
   end
 end
