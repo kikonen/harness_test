@@ -30,9 +30,8 @@ class SessionManager
   # be re-sent with #retry.
   def run_prompt(instruction)
     if check_rules_reload
-      # issue #40 follow-up: structured output sink (no direct puts).
-      @harness.output_buffer.put(type: :system, origin: :session_manager,
-                                content: '  [harness.md reloaded - project rules updated]')
+      Task.emit(:system, origin: :session_manager,
+                content: '  [harness.md reloaded - project rules updated]')
     end
 
     # Auto-compact BEFORE sending: it must never run after the response,
@@ -71,15 +70,14 @@ class SessionManager
     # The previous attempt may have failed because the context was full:
     # compact first, then re-send.
     if @harness.session.auto_compact_due?(@harness.options[:num_ctx] || LLMClient::NUM_CTX, @harness.compact_auto_threshold)
-      # issue #40 follow-up: structured output sink (no direct puts).
-      @harness.output_buffer.put(type: :compact, origin: :session_manager,
-                                 content: '  [context over threshold - compacting before retry...]')
+      Task.emit(:compact, origin: :session_manager,
+                content: '  [context over threshold - compacting before retry...]')
       result = compact_session
-      @harness.output_buffer.put(type: :compact, origin: :session_manager,
-                                 content: "  [compact done: #{result[:before]} -> #{result[:after]} messages]")
+      Task.emit(:compact, origin: :session_manager,
+                content: "  [compact done: #{result[:before]} -> #{result[:after]} messages]")
       if result[:context_before] && result[:context_line]
-        @harness.output_buffer.put(type: :compact, origin: :session_manager,
-                                   content: "  #{result[:context_before]} -> #{result[:context_line]}")
+        Task.emit(:compact, origin: :session_manager,
+                  content: "  #{result[:context_before]} -> #{result[:context_line]}")
       end
     end
 
@@ -107,8 +105,8 @@ class SessionManager
       save_session
       @harness.logger.info("auto-save (#{tag})")
     rescue StandardError => e
-      @harness.output_buffer.put(type: :error, origin: :session_manager,
-                                 content: "  [warning] auto-save failed: #{e.message}")
+      Task.emit(:error, origin: :session_manager,
+                content: "  [warning] auto-save failed: #{e.message}")
     end
   end
   # issue #108: in-loop compaction instruction - mid-turn, there is no verbatim
@@ -163,17 +161,17 @@ class SessionManager
                       '(3) files that were modified or created, (4) any pending tasks or ' \
                       'unresolved issues, (5) important context needed to continue. '
     # issue #115 / #126: show the LIVE context usage next to the spinner.
-    # A callable is re-evaluated every frame from the CURRENT chain, not the
-    # "before" snapshot (already visible above).
-    spinner = Spinner.new("Compacting session (#{before} messages to summary)", -> { @harness.context_indicator_live })
-    @harness.spinner = spinner
-    spinner.start
+    # A callable suffix is re-evaluated every frame from the CURRENT chain,
+    # not the "before" snapshot (already visible above). The Task drain loop
+    # owns the actual animation - we only describe the state change.
+    Task.emit(:progress_start, origin: :session_manager,
+              content: { message: "Compacting session (#{before} messages to summary)",
+                         suffix: -> { @harness.context_indicator_live } })
 
     begin
       summary_text = generate_compact_summary(conversation, end_instruction)
     ensure
-      spinner.stop
-      @harness.spinner = nil
+      Task.emit(:progress_stop, origin: :session_manager)
     end
     @harness.session.compact(summary_text, recent_count: @harness.compact_recent_messages)
     after = @harness.session.messages.size
@@ -219,32 +217,23 @@ class SessionManager
     conversation = messages.size > 1 ? messages[1..] : []
     return false if conversation.size < 4
 
-    @harness.output_buffer.put(type: :compact, origin: :session_manager,
-                                content: "  [context at #{(last_prompt_tokens.to_f / window * 100).round}% of the window - in-loop compaction...]")
+    Task.emit(:compact, origin: :session_manager,
+              content: "  [context at #{(last_prompt_tokens.to_f / window * 100).round}% of the window - in-loop compaction...]")
 
     # issue #116: the send_session spinner is still animating here (this runs
-    # from inside Harness#call_llm). It must be PAUSED for the duration of
-    # the summarization call and RESUMED afterwards - creating a second
-    # spinner on top of it and then only stopping the inner one left the
-    # outer animation thread orphaned, so it kept printing its frame forever
-    # and interleaved with every tool line.
-    outer_spinner = @harness.spinner
-    # Track whether WE paused it: if it was already paused (nested call),
-    # we must not resume it - the outer owner will do that.
-    outer_paused_by_us = !outer_spinner.nil? && outer_spinner.running?
-    outer_spinner&.pause
+    # from inside Harness#call_llm). The Task's LIFO spinner stack handles
+    # nesting for free: we push OUR compaction spinner on top, the drain loop
+    # draws only the topmost running one (so the outer send line goes quiet
+    # while ours is up), and when we pop it falls back to the outer again.
+    # No pause/resume needed - visibility follows the stack automatically.
 
-    # issue #115 / #126: show the LIVE context usage of the local working chain.
-    spinner = Spinner.new('Compacting session mid-task (summarizing full work trail)', -> { @harness.context_indicator_live(messages) })
-    @harness.spinner = spinner
+    Task.emit(:progress_start, origin: :session_manager,
+              content: { message: 'Compacting session mid-task (summarizing full work trail)',
+                         suffix: -> { @harness.context_indicator_live(messages) } })
     begin
       summary_text = generate_compact_summary(conversation, INLOOP_SUMMARY_INSTRUCTION)
     ensure
-      spinner.stop
-      # Restore the outer spinner (issue #116): it was paused, not stopped
-      # - the turn is still in flight and must keep animating.
-      @harness.spinner = outer_spinner
-      outer_spinner&.resume if outer_paused_by_us
+      Task.emit(:progress_stop, origin: :session_manager)
     end
 
     new_chain = [
@@ -272,8 +261,8 @@ class SessionManager
     # Best-effort: a failed compaction must not abort an otherwise healthy
     # turn - the next request will simply hit the server-side limit and the
     # existing context-exceeded recovery path applies.
-    @harness.output_buffer.put(type: :error, origin: :session_manager,
-                                content: "  [in-loop compaction failed: #{e.message} - continuing with the existing chain]")
+    Task.emit(:error, origin: :session_manager,
+              content: "  [in-loop compaction failed: #{e.message} - continuing with the existing chain]")
     false
   end
 
@@ -281,9 +270,10 @@ class SessionManager
   def send_session
     # issue #115 / #126: show the LIVE context usage estimate next to the
     # spinner (re-evaluated each frame from the current chain, not a snapshot).
-    spinner = Spinner.new("Sending to #{@harness.options[:model]}", -> { @harness.context_indicator_live })
-    @harness.spinner = spinner
-    spinner.start
+    # The Task drain loop owns the animation - we only describe the state.
+    Task.emit(:progress_start, origin: :session_manager,
+              content: { message: "Sending to #{@harness.options[:model]}",
+                         suffix: -> { @harness.context_indicator_live } })
 
     response = nil
     begin
@@ -294,20 +284,18 @@ class SessionManager
       # the session). Anything else is re-raised for the caller to handle.
       raise unless context_exceeded_error?(e.message) && @harness.session.conversation_size >= 4
 
-      # issue #40 follow-up: structured output sink (no direct puts).
-      @harness.output_buffer.put(type: :compact, origin: :session_manager,
-                                 content: '  [context window exceeded - compacting and re-sending...]')
+      Task.emit(:compact, origin: :session_manager,
+                content: '  [context window exceeded - compacting and re-sending...]')
       result = compact_session
-      @harness.output_buffer.put(type: :compact, origin: :session_manager,
-                                 content: "  [compact done: #{result[:before]} -> #{result[:after]} messages, retrying...]")
+      Task.emit(:compact, origin: :session_manager,
+                content: "  [compact done: #{result[:before]} -> #{result[:after]} messages, retrying...]")
       if result[:context_before] && result[:context_line]
-        @harness.output_buffer.put(type: :compact, origin: :session_manager,
-                                   content: "  #{result[:context_before]} -> #{result[:context_line]}")
+        Task.emit(:compact, origin: :session_manager,
+                  content: "  #{result[:context_before]} -> #{result[:context_line]}")
       end
       response = @harness.call_llm
     ensure
-      spinner.stop
-      @harness.spinner = nil
+      Task.emit(:progress_stop, origin: :session_manager)
     end
 
     # issue #131: the full reasoning and content of every response go to
@@ -317,13 +305,12 @@ class SessionManager
     log_response(reasoning: response[:reasoning], content: response[:content])
 
     reason = [response[:reasoning]].map { |m| m.to_s.strip }.reject(&:empty?).first
-    @harness.output_buffer.put(type: :response, origin: :session_manager,
-                                content: ">>> #{reason} <<<") if reason
+    Task.emit(:response, origin: :session_manager,
+              content: ">>> #{reason} <<<") if reason
 
-    @harness.output_buffer.put(type: :response, origin: :session_manager, content: '=' * 80)
-    @harness.output_buffer.put(type: :response, origin: :session_manager,
-                                content: response[:content].to_s)
-    @harness.output_buffer.put(type: :response, origin: :session_manager, content: '-' * 80)
+    Task.emit(:response, origin: :session_manager, content: '=' * 80)
+    Task.emit(:response, origin: :session_manager, content: response[:content].to_s)
+    Task.emit(:response, origin: :session_manager, content: '-' * 80)
 
     @harness.print_stats(response[:stats])
 
@@ -344,19 +331,18 @@ class SessionManager
   def compact_if_due
     return unless @harness.session.auto_compact_due?(@harness.options[:num_ctx] || LLMClient::NUM_CTX, @harness.compact_auto_threshold)
 
-    # issue #40 follow-up: structured output sink (no direct puts).
-    @harness.output_buffer.put(type: :compact, origin: :session_manager,
-                                content: "  [context at #{threshold_pct}% of the window - auto-compacting session...]")
+    Task.emit(:compact, origin: :session_manager,
+              content: "  [context at #{threshold_pct}% of the window - auto-compacting session...]")
     result = compact_session
-    @harness.output_buffer.put(type: :compact, origin: :session_manager,
-                                content: "  [auto-compact done: #{result[:before]} -> #{result[:after]} messages]")
+    Task.emit(:compact, origin: :session_manager,
+              content: "  [auto-compact done: #{result[:before]} -> #{result[:after]} messages]")
     if result[:context_before] && result[:context_line]
-      @harness.output_buffer.put(type: :compact, origin: :session_manager,
-                                  content: "  #{result[:context_before]} -> #{result[:context_line]}")
+      Task.emit(:compact, origin: :session_manager,
+                content: "  #{result[:context_before]} -> #{result[:context_line]}")
     end
   rescue => e
-    @harness.output_buffer.put(type: :error, origin: :session_manager,
-                                content: "  [auto-compact failed: #{e.message} - try /compact manually]")
+    Task.emit(:error, origin: :session_manager,
+              content: "  [auto-compact failed: #{e.message} - try /compact manually]")
   end
 
   # The configured auto-compact threshold as a percentage.
@@ -428,7 +414,7 @@ class SessionManager
     @harness.options[:default_model]
   end
 
-  # Name (or id) of the currently active model.
+  # Name (or id) of the currently active model, or nil.
   def active_model_name
     @harness.options[:active_model] || @harness.options[:model]
   end
@@ -606,8 +592,7 @@ class SessionManager
   def restore_session_model(name)
     restore_active_model(name)
   rescue HarnessError => e
-    @harness.output_buffer.put(type: :error, origin: :session_manager,
-                                content: "  [error] #{e.message}")
+    Task.emit(:error, origin: :session_manager, content: "  [error] #{e.message}")
     default = default_model_name
     raise HarnessError, "#{e.message} - and no default model is configured either" unless default
 

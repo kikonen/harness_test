@@ -18,22 +18,25 @@ RSpec.describe SessionManager do
   let(:logger) { Logger.new(File::NULL) }
 
   # A minimal stand-in for Harness providing only what SessionManager uses.
+  # NOTE: in the post-refactor design the harness no longer owns a spinner
+  # or an output buffer - both are owned by the running Task (see
+  # lib/task.rb). SessionManager talks to them via `Task.emit`, which is a
+  # thread-local accessor. Specs that assert on emitted entries set
+  # `Task.output_buffer` in a before hook; specs that drive the real drain
+  # loop go through `Task.run`.
   let(:harness) do
     Class.new do
-      attr_accessor :session, :client, :spinner, :history
+      attr_accessor :session, :client, :history
 
       def initialize(session, client)
         @session = session
         @client  = client
         @options = { num_ctx: 65_536, auto_save: false }
-        @spinner = nil
         @history = nil
         @logger  = Logger.new(File::NULL)
-        # issue #40 follow-up: structured output sink (SessionManager writes here).
-        @output_buffer = OutputBuffer.new
       end
 
-      attr_reader :options, :logger, :output_buffer
+      attr_reader :options, :logger
 
       # issue #113: resume re-points the logger; no-op in the stub.
       def rebind_logger
@@ -316,18 +319,16 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
   let(:client) { double('client', chat: nil) }
   let(:harness) do
     Class.new do
-      attr_accessor :session, :client, :spinner, :history
+      attr_accessor :session, :client
 
       def initialize(session, client)
         @session = session
         @client  = client
         @options = { num_ctx: 1000, auto_save: false }
         @logger  = Logger.new(File::NULL)
-        # issue #40 follow-up: structured output sink (SessionManager writes here).
-        @output_buffer = OutputBuffer.new
       end
 
-      attr_reader :options, :logger, :output_buffer
+      attr_reader :options, :logger
 
       def compact_max_size
         nil
@@ -430,38 +431,64 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
     expect(session.instance_variable_get(:@last_stats)).to be_nil
   end
   # issue #116: in-loop compaction runs from INSIDE Harness#call_llm, so the
-  # send_session spinner is still animating. The old code created a second
-  # spinner on top of it and then only stopped the inner one - orphaning the
-  # outer animation thread, which kept printing its frame forever and
-  # interleaved with every subsequent tool line.
-  describe 'outer spinner handling (issue #116)' do
-    it 'pauses the send spinner during compaction and resumes it afterwards' do
+  # send_session spinner is still animating. In the current design the Task
+  # owns the spinner stack and interprets :progress_* events against it:
+  # SessionManager simply emits progress_start (compaction) / progress_stop
+  # around the summary call. The drain loop pushes the compaction spinner on
+  # TOP of the outer one (LIFO) and pops it on stop, so the outer resumes by
+  # construction - no pause/resume events needed for in-loop compaction.
+  describe 'outer spinner handling (issue #116, LIFO push/pop)' do
+    it 'emits progress_start (compact) / progress_stop without touching the outer spinner' do
       allow_summary_response
       messages = inloop_messages
 
-      outer = Spinner.new('Sending to gpt-x', nil)
+      # Set up a Task-owned spinner stack so Task.current.visible_spinner is
+      # non-nil (the outer send_session spinner that is still animating).
+      task = Task.new { } # not started - we only want its buffer + stack
+      Task.output_buffer = task.buffer
+      outer = UI::Spinner.new('Sending to gpt-x', nil)
       outer.start
-      harness.spinner = outer
+      task.push_spinner(outer)
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
 
-      expect(outer).to receive(:pause).ordered
-      expect(outer).to receive(:resume).ordered
+      begin
+        result = manager.check_inloop_compaction(messages, 1000)
+        types = task.buffer.drain.map(&:type)
 
-      result = manager.check_inloop_compaction(messages, 1000)
-
-      expect(result).to be(true)
-      # The outer spinner must be restored and still animating - the turn is
-      # still in flight and must keep its spinner.
-      expect(harness.spinner).to be(outer)
-      expect(outer.running?).to be(true)
-      outer.stop
+        expect(result).to be(true)
+        # One info line, then exactly one start/stop pair for the compact
+        # spinner - and NO pause/resume: the LIFO stack handles nesting.
+        expect(types).to eq(%i[compact progress_start progress_stop])
+        # The outer spinner was never touched by the compaction path.
+        expect(task.visible_spinner).to be(outer)
+        expect(outer.running?).to be(true)
+        outer.stop
+      ensure
+        Thread.current[:harness_task] = old_current
+        Task.output_buffer = nil
+      end
     end
 
-    it 'still compacts (and leaves no spinner) when there is no outer spinner' do
+    it 'emits the same start/stop pair when no outer spinner is running' do
       allow_summary_response
       messages = inloop_messages
 
-      expect(manager.check_inloop_compaction(messages, 1000)).to be(true)
-      expect(harness.spinner).to be_nil
+      task = Task.new { }
+      Task.output_buffer = task.buffer
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+      begin
+        result = manager.check_inloop_compaction(messages, 1000)
+        types = task.buffer.drain.map(&:type)
+
+        expect(result).to be(true)
+        expect(types).to eq(%i[compact progress_start progress_stop])
+        expect(task.visible_spinner).to be_nil
+      ensure
+        Thread.current[:harness_task] = old_current
+        Task.output_buffer = nil
+      end
     end
   end
 end
