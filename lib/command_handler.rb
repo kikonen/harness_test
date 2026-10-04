@@ -26,7 +26,11 @@ require_relative 'commands/exit_command'
 # Thin dispatcher: checks if input starts with "/", extracts the first word,
 # looks up the command class in a registry map, and delegates.
 class CommandHandler
-  attr_reader :harness, :file_list, :options
+  attr_reader :harness,
+    :file_list,
+    :stdout,
+    :stdin,
+    :options
 
   # Registry: command name (without slash) -> class
   COMMANDS = {
@@ -49,11 +53,18 @@ class CommandHandler
     'exit'          => Commands::ExitCommand,
   }.freeze
 
-  def initialize(harness, file_list, options)
+  def initialize(
+    harness:,
+    file_list:,
+    options:,
+    stdout:,
+    stdin:)
     @harness   = harness
     @file_list = file_list
     @options   = options
     @exiting   = false
+    @stdout = stdout
+    @stdin = stdin
   end
 
   def exiting?
@@ -93,7 +104,7 @@ class CommandHandler
       cmd.handle(args)
       @exiting = true if cmd.respond_to?(:exited?) && cmd.exited?
     else
-      puts "Unknown command: /#{name}.\n----\nType /help for available commands."
+      stdout.puts "Unknown command: /#{name}.\n----\nType /help for available commands."
     end
   end
 
@@ -105,11 +116,11 @@ class CommandHandler
   # Task.emit (or posts blocking requests for dialogs), and the drain loop
   # renders everything on the main thread - including spinner frames.
   def run_direct_prompt(text)
-    puts
-    error, _task = Task.run(harness: @harness, stdout: $stdout, stdin: $stdin) do |_t|
+    stdout.puts
+    error, _task = Task.run(harness:, stdout:, stdin:) do |_t|
       @harness.session_manager.run_prompt(text)
     end
-    puts "  [task error] #{error}" if error
-    puts
+    stdout.puts "  [task error] #{error}" if error
+    stdout.puts
   end
 end
