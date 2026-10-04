@@ -65,8 +65,9 @@ class Task
     @inbox         = Thread::Queue.new   # main -> task (responses, stop)
     @outbox        = Thread::Queue.new   # task -> main (SINGLE event queue)
     @buffer        = OutputBuffer.new    # structured log (runner fills it)
-    # LIFO spinner stack owned by the runner.
-    @spinner_stack = []
+    # The ONE spinner owned by the runner (nil until the drain loop creates
+    # it). :spinner_detail events only re-point its message/suffix.
+    @spinner       = nil
     # The drain loop sets this when it must hide the spinner to print text
     # or handle a dialog; cleared at the start of every tick.
     @spinner_hidden = false
@@ -192,32 +193,21 @@ class Task
     nil
   end
 
-  # -- Spinner stack (main-thread-only mutation via drain loop) --------------
+  # -- The ONE spinner (main-thread-only access via the drain loop) ----------
 
-  def push_spinner(spinner)
-    @spinner_stack.push(spinner)
-  end
+  # The task's single spinner (set by the drain loop; nil before first tick).
+  attr_reader :spinner
+  def spinner=(sp); @spinner = sp; end
 
-  def pop_spinner
-    @spinner_stack.pop
-  end
-
-  def top_spinner
-    @spinner_stack.last
-  end
-
-  # Topmost running spinner (nil when the stack is empty or the top entry
-  # is not running).
+  # The spinner while it is animating (nil when stopped).
   def visible_spinner
-    sp = @spinner_stack.last
-    sp if sp && sp.running?
+    @spinner if @spinner&.running?
   end
 
-  # Stop every pushed spinner and empty the stack - called by the drain
-  # loop when the wait ends (:done/:error).
+  # Stop the spinner - called by the drain loop when the wait ends
+  # (:done/:error).
   def clear_all_spinners
-    @spinner_stack.each { |sp| sp.stop }
-    @spinner_stack.clear
+    @spinner&.stop
     @spinner_hidden = false
   end
 
@@ -231,7 +221,7 @@ class Task
   #      - Output events: stores into the OutputBuffer (structured log) AND
   #        renders to stdout in order.
   #      - Control events (:done, :error, :__request__): handled directly.
-  #   3. Exits on :done or :error; all spinners are cleared.
+  #   3. Exits on :done or :error; the spinner is cleared.
   #
   # Returns [error_msg, task] where error_msg is nil on success.
   def self.run(harness:, &block) # rubocop:disable Lint/UnusedMethodArgument
@@ -308,7 +298,7 @@ class Task
 
     spinner = UI::Spinner.new(DEFAULT_SPINNER_MESSAGE)
     spinner.start
-    task.push_spinner(spinner)
+    task.spinner = spinner
   end
 
   # Handle a :__request__ control event on the main thread.
@@ -332,14 +322,9 @@ class Task
     case msg[:type]
     when :spinner_detail
       payload = msg[:content].is_a?(Hash) ? msg[:content] : { message: msg[:content].to_s }
-      visible = task.visible_spinner
-      if visible
-        visible.update_detail(**payload)
-      else
-        spinner = UI::Spinner.new(payload[:message].to_s, payload[:suffix])
-        spinner.start
-        task.push_spinner(spinner)
-      end
+      # The drain loop always ensures the single spinner is running before
+      # dispatching events - just re-point it.
+      task.visible_spinner&.update_detail(**payload)
     when :text
       content = msg[:content].to_s
       if msg[:terminal] == false

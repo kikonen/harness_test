@@ -215,11 +215,10 @@ class SessionManager
     Task.emit(:compact, origin: :session_manager,
               content: "  [context at #{(last_prompt_tokens.to_f / window * 100).round}% of the window - in-loop compaction...]")
 
-    # issue #116: the send_session spinner is still animating here (this runs
-    # from inside Harness#call_llm). The Task's LIFO spinner stack handles
-    # nesting for free: we push OUR compaction spinner on top, the drain loop
-    # draws only the topmost running one (so the outer send line goes quiet
-    # while ours is up).
+    # issue #116: the send_session spinner is still animating here (this
+    # runs from inside Harness#call_llm). The task has exactly ONE spinner;
+    # our :spinner_detail simply re-points its message/suffix for the rest
+    # of the wait (the "Sending to ..." line becomes our compaction line).
 
     Task.emit(:spinner_detail, origin: :session_manager,
               content: { message: 'Compacting session mid-task (summarizing full work trail)',
