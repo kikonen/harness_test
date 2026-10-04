@@ -13,7 +13,11 @@ require_relative 'command_handler'
 # -- CLI ------------------------------------------------------------------
 
 class CLI
-  attr_reader :options, :harness, :file_list, :commands, :history
+  attr_reader :options,
+    :harness,
+    :file_list,
+    :commands,
+    :history
 
   # Default API base URL (used when neither the CLI nor the config provides one).
   DEFAULT_BASE_URL = 'http://localhost:11434/v1'
@@ -22,7 +26,14 @@ class CLI
     @options   = parse_options
     @file_list = FileList.new([], workdir: @options[:workdir])
     @harness   = Harness.new(@options, @file_list)
-    @commands  = CommandHandler.new(@harness, @file_list, @options)
+
+    @commands  = CommandHandler.new(
+      harness: @harness,
+      file_list: @file_list,
+      options: @options,
+      stdout: $stdout,
+      stdin: $stdin)
+
     @history   = HistoryManager.new(@file_list.workdir)
     # issue #135: share the manager with the harness (it declares
     # attr_accessor :history) so SessionManager#resume_session can rebind it
