@@ -2,40 +2,54 @@
 
 # -- Task --------------------------------------------------------------------
 #
-# Runs a block on a background thread and exposes a message-passing protocol
-# (two Thread::Queues, no mutexes) so that ALL console I/O stays on the main
-# thread (issue #40 - single-thread I/O rule).
+# Runs a block on a background thread and owns ALL console I/O for that turn
+# (issue #40 - single-thread I/O rule). The task thread NEVER writes to an
+# IO stream. Instead it emits typed entries into the Task-owned OutputBuffer
+# (or, for legacy unmigrated tools, into the Capture outbox); the main
+# thread's drain loop advances the buffer's waterline and renders whatever
+# is new - including spinner frames.
 #
 # Protocol:
-#   Task thread  -> Main thread: emit(type, **payload)      [fire-and-forget]
-#   Task thread  -> Main thread: request(type, **payload)   [blocking]
-#   Main thread  -> Task thread: respond(value)             [unblocks request]
-#   Main thread  -> Main thread: poll(timeout:)             [reads outbox]
+#   Task thread -> Main thread: emit(type, origin:, content:)  [fire-and-forget]
+#   Task thread -> Main thread: request(type, **payload)       [blocking]
+#   Main thread -> Task thread: respond(value)                 [unblocks request]
+#   Main thread -> Main thread: poll(timeout:)                 [reads outbox]
 #
 # Single-thread I/O enforcement (issue #40):
 #   Ruby's `$stdout` is a SHARED GLOBAL - reassigning it in the task thread
 #   would corrupt the main thread's stream, so we do NOT use it for capture.
-#   Instead the task publishes a restricted Capture object on
-#   `Thread.current[:harness_task_capture]`; any code executing in the task
-#   thread (session flow, tools) writes via `Task.puts` / `Task.print` /
-#   `Task.capture.puts`, which route through the Capture's outbox queue. The
-#   main thread's drain loop reads the queue and writes to the REAL stdout
-#   in order. When no Task is active (tests, direct CLI commands), the same
-#   helpers fall back to the real `$stdout` so existing bare `puts` call-
-#   sites in main-thread-only code keep working.
+#   Legacy code still runs in the task thread uses a restricted Capture object
+#   published on `Thread.current[:harness_task_capture]`; writes route through
+#   the outbox queue and are rendered by the drain loop on the main thread.
+#   Newly migrated code calls `Task.emit(...)` which appends typed entries to
+#   the Task's OutputBuffer; the same drain loop renders them. Both paths are
+#   ordered by construction (single writer, single reader).
 #
-#   Structured sink (issue #40 follow-up): harness-owned code (Harness itself,
-#   SessionManager, and soon the tools) no longer writes to the Capture at
-#   all - it appends typed {type, origin, content} entries to the harness's
-#   OutputBuffer instead. The drain loop (#drain_output_buffer below) is the
-#   single place that turns those entries into screen output: each tick it
-#   advances the buffer's read waterline and renders whatever is new. This is
-#   the "waterline" the CLI/renderer polls to know there is more output, and
-#   the same loop will hand entries to a TUI later - no puts anywhere.
+# Structured sink (issue #40 follow-up):
+#   The OutputBuffer is owned by THIS task instance (not the harness), so the
+#   code that renders it and the code that appends to it live in the same
+#   object - no shared mutable state across components. Harness-side code
+#   (Harness itself, SessionManager, tools) reaches the buffer through
+#   `Task.output_buffer` (a thread-local accessor set inside #start). When
+#   no task is active (main-thread-only code, tests), `Task.emit` falls back
+#   to a bare Kernel.puts so call-sites stay safe everywhere.
 #
-#   Dialogs use a different mechanism: UI::Dialog#show checks
-#   `Thread.current[:harness_task]` and routes via request/response, so
-#   $stdin reads happen on the main thread as well.
+# Spinner visibility is OWNED BY THE TASK: the drain loop suppresses the
+# spinner whenever it prints text or handles a dialog (the user must see the
+# line cleanly), and re-shows it on the next tick if the topmost spinner is
+# still running. Harness-side code never touches the spinner - it just emits
+# :progress_start / :progress_stop to start/stop one, and :spinner_detail to
+# change the visible spinner's extra label (e.g. "file.read" while a tool is
+# running). Nested progress is handled by a LIFO stack: a second
+# :progress_start pushes on top of the first, and its :progress_stop pops it
+# off, exposing the outer one again.
+#
+# Dialogs use a different mechanism: UI::Dialog#show checks
+# `Thread.current[:harness_task]` and routes via request/response, so
+# $stdin reads happen on the main thread as well.
+
+require_relative 'output_buffer'
+require_relative 'ui/spinner'
 
 class Task
   # Sentinel pushed to inbox when #stop is called, to unblock a pending
@@ -45,23 +59,35 @@ class Task
   # Timeout (seconds) for polling the outbox in the drain loop.
   DEFAULT_POLL_TIMEOUT = 0.1
 
-  attr_reader :thread
+  attr_reader :thread, :buffer
 
   def initialize(&block)
-    @block    = block
-    @inbox    = Thread::Queue.new   # main -> task (responses to requests, stop)
-    @outbox   = Thread::Queue.new   # task -> main (events: output, dialog, done, error)
-    @capture  = Capture.new(self)
-    @thread   = nil
+    @block           = block
+    @inbox           = Thread::Queue.new   # main -> task (responses, stop)
+    @outbox          = Thread::Queue.new   # task -> main (output, dialog, done, error)
+    @capture         = Capture.new(self)
+    @buffer          = OutputBuffer.new
+    # LIFO spinner stack: the topmost entry is what gets rendered. Nested
+    # progress (send_session -> in-loop compaction -> back to send) is
+    # modeled as push/pop, so a :progress_stop of the inner one restores the
+    # outer spinner's visibility without the caller knowing about it.
+    @spinner_stack   = []
+    # The drain loop sets this when it must hide the spinner to print text
+    # or handle a dialog; cleared at the start of every tick. Harness code
+    # does NOT touch this - the runner owns spinner visibility entirely.
+    @spinner_hidden  = false
+    @thread          = nil
   end
 
   # Spawn the task thread and start running the block. The capture object
-  # is published on Thread.current so nested code in the task can find it
-  # without re-binding $stdout (which is a shared global - see module docs).
+  # and the output buffer are published on Thread.current so nested code in
+  # the task can find them without re-binding $stdout (which is a shared
+  # global - see module docs).
   def start
     @thread = Thread.new do
-      Thread.current[:harness_task]         = self
-      Thread.current[:harness_task_capture] = @capture
+      Thread.current[:harness_task]          = self
+      Thread.current[:harness_task_capture]  = @capture
+      Thread.current[:harness_output_buffer] = @buffer
 
       begin
         @block.call(self)
@@ -129,7 +155,7 @@ class Task
   # does NOT model a full stream (no fileno, no seek, no binary mode); it
   # just funnels text into the task's outbox queue so the drain loop can
   # order and serialize writes on the main thread. This is the LEGACY path
-  # still used by tools that have not been migrated to the OutputBuffer yet.
+  # still used by tools that have not been migrated to Task.emit yet.
   class Capture
     def initialize(task)
       @task = task
@@ -182,6 +208,41 @@ class Task
     Thread.current[:harness_task_capture]
   end
 
+  # The Task running on the current thread (set by #start), or nil. Exposed
+  # so task-thread code can introspect the runner's own state (e.g. the
+  # spinner stack) without going through the harness - the runner owns
+  # that state.
+  def self.current
+    Thread.current[:harness_task]
+  end
+
+  # The OutputBuffer for the current thread's Task, or nil when no task is
+  # active. Main-thread code (e.g. specs) may set this directly to capture
+  # entries without spinning up a real Task.
+  def self.output_buffer
+    Thread.current[:harness_output_buffer]
+  end
+
+  def self.output_buffer=(buf)
+    Thread.current[:harness_output_buffer] = buf
+  end
+
+  # Emit ONE typed entry to the active task's buffer. Falls back to a bare
+  # Kernel.puts for text content when no task is active, so call-sites in
+  # main-thread-only code keep working (e.g. CLI banner, direct specs).
+  # Progress events are ignored in fallback mode - a main thread has no
+  # drain loop to drive animation for.
+  def self.emit(type, origin:, content: nil)
+    buf = output_buffer
+    if buf
+      buf.put(type: type, origin: origin, content: content)
+    elsif %i[progress_start progress_stop spinner_detail].include?(type.to_sym)
+      nil
+    elsif content
+      Kernel.puts(content.to_s)
+    end
+  end
+
   # Write a line, respecting the task's capture when active (routes via the
   # outbox so the drain loop can order it with spinner frames and dialog
   # I/O on the main thread). Falls back to the real $stdout when no task
@@ -208,65 +269,81 @@ class Task
     end
   end
 
-  # -- Structured sink rendering (issue #40 follow-up) ----------------------
+  # -- Spinner stack (main-thread-only mutation via drain loop) --------------
+  #
+  # The Task OWNS the spinner: harness/session_manager code never touches it
+  # directly. Instead it emits :progress_start / :progress_stop /
+  # :spinner_detail entries; the drain loop interprets them against this
+  # LIFO stack. Topmost entry is what gets drawn (suppression handled by
+  # @spinner_hidden).
 
-  # Render ONE structured OutputBuffer::Entry to the given stream. For now
-  # every type is printed as a plain line; this is the extension point where
-  # a future TUI will style entries by `type`/`origin` instead of dumping raw
-  # text. Kept dumb and main-thread-only so it can never race task writes.
-  def self.render_entry(entry, stdout)
-    stdout.puts(entry.content)
+  def push_spinner(spinner)
+    @spinner_stack.push(spinner)
   end
 
-  # Drain the harness's OutputBuffer (the structured output sink owned by
-  # the harness) and render whatever is new onto `stdout`. This is the
-  # "waterline" read: each tick the main thread advances the buffer's read
-  # index and dumps the new entries to the screen, in order. No-op when the
-  # harness exposes no buffer (e.g. a bare double in tests). Runs on the
-  # MAIN thread only - the single-thread I/O rule (issue #40).
-  def self.drain_output_buffer(harness, stdout)
-    buffer = harness.respond_to?(:output_buffer) ? harness.output_buffer : nil
-    return unless buffer
+  def pop_spinner
+    @spinner_stack.pop
+  end
 
-    entries = buffer.drain
-    return if entries.empty?
+  def top_spinner
+    @spinner_stack.last
+  end
 
-    entries.each { |entry| render_entry(entry, stdout) }
-    stdout.flush
+  # Topmost running spinner (nil when the stack is empty or the top entry
+  # is not running). Paused entries are not supported anymore: the drain
+  # loop hides and re-shows the spinner itself via @spinner_hidden.
+  def visible_spinner
+    sp = @spinner_stack.last
+    sp if sp && sp.running?
+  end
+
+  def clear_all_spinners
+    @spinner_stack.each { |sp| sp.stop }
+    @spinner_stack.clear
+    @spinner_hidden = false
   end
 
   # -- Drain loop (called from the MAIN thread) ------------------------------
   #
   # Spawns the task, then blocks in a poll loop that:
-  #   1. Renders the spinner frame (if active) - main thread I/O.
-  #   2. Drains the harness OutputBuffer and renders new entries (waterline).
+  #   1. Renders the active spinner frame (topmost running in the stack),
+  #      UNLESS it is suppressed (a text line or dialog was just printed).
+  #   2. Drains the Task-owned OutputBuffer and renders new entries -
+  #      :progress_start/:progress_stop mutate the spinner stack,
+  #      :spinner_detail updates the topmost suffix, other types print.
   #   3. Reads the next message from the outbox (or times out) - the legacy
-  #      :output channel and :dialog requests still work as before.
+  #      :output channel and :dialog requests still work as before. Printing
+  #      a text line or servicing a dialog suppresses the spinner for that
+  #      tick so it does not interleave with the content; on the next tick
+  #      (with no new suppression) the spinner re-appears automatically if
+  #      the topmost entry is still running.
   #   4. Exits on :done or :error.
   #
   # Returns [error_msg, task] where error_msg is nil on success.
-  def self.run(harness:, &block)
+  def self.run(harness:, &block) # rubocop:disable Lint/UnusedMethodArgument
     task = Task.new(&block)
     real_stdout = $stdout  # main thread's real stdout (never re-bound)
-    spinner_was_rendering = false
-    error_msg = nil
+    last_rendered = nil
+    error_msg     = nil
 
     begin
       task.start
 
       loop do
-        # 1. Render spinner frame (main thread only - single-thread I/O rule).
-        spinner = harness.spinner
-        if spinner&.running?
-          spinner.render!
-          spinner_was_rendering = true
-        elsif spinner_was_rendering
-          spinner&.clear_line
-          spinner_was_rendering = false
+        task.clear_spinner_hidden
+
+        # 1. Spinner frame: draw the topmost running one (main thread I/O).
+        visible = task.visible_spinner
+        if visible && !task.spinner_hidden?
+          visible.render!
+          last_rendered = visible
+        elsif last_rendered
+          last_rendered.clear_line
+          last_rendered = nil
         end
 
-        # 2. Drain + render the harness OutputBuffer (structured sink).
-        drain_output_buffer(harness, real_stdout)
+        # 2. Drain + render the Task-owned OutputBuffer (structured sink).
+        task.buffer.drain.each { |entry| render_entry(task, entry, real_stdout) }
 
         # 3. Poll the outbox (non-blocking, DEFAULT_POLL_TIMEOUT).
         msg = task.poll
@@ -274,11 +351,17 @@ class Task
         if msg
           case msg[:type]
           when :output
+            # Text output: suppress the spinner for this tick so the line
+            # prints cleanly on its own; the next tick re-shows it if the
+            # topmost spinner is still running.
+            task.suppress_spinner!
             real_stdout.write(msg[:text])
             real_stdout.flush
           when :__request__
             if msg[:kind] == :dialog
               dialog = msg[:dialog]
+              # Same suppression rule: a dialog needs its own lines.
+              task.suppress_spinner!
               answer = dialog.perform_direct
               task.respond(answer)
             else
@@ -292,17 +375,64 @@ class Task
         end
       end
 
-      # Final drain: the in-loop order is drain-then-poll, so one window
-      # remains where an entry appended just before :done was enqueued could
-      # slip past the last in-loop drain. After :done no more appends occur
-      # (the task block has finished), so one more drain here is complete and
-      # idempotent (returns [] when nothing is pending).
-      drain_output_buffer(harness, real_stdout)
+      # Final drain: one last pass so an entry appended in the same window
+      # as the :done message is not lost. After :done the task block has
+      # finished, so no more appends occur - this is complete and idempotent.
+      task.buffer.drain.each { |entry| render_entry(task, entry, real_stdout) }
     ensure
-      sp = harness.spinner
-      sp.clear_line if spinner_was_rendering && sp
+      sp = last_rendered || task.visible_spinner
+      sp&.clear_line if sp
+      task.clear_all_spinners
     end
 
     [error_msg, task]
+  end
+
+  # Render ONE structured OutputBuffer::Entry on the MAIN thread. Progress
+  # events mutate the task's spinner stack; :spinner_detail updates the
+  # visible spinner's suffix; everything else is printed to the given stream
+  # in order. Kept main-thread-only so it can never race the task thread's
+  # appends.
+  def self.render_entry(task, entry, stdout)
+    case entry.type
+    when :progress_start
+      payload = entry.content.is_a?(Hash) ? entry.content : { message: entry.content.to_s }
+      spinner = UI::Spinner.new(payload[:message].to_s, payload[:suffix])
+      spinner.start
+      task.push_spinner(spinner)
+    when :progress_stop
+      popped = task.pop_spinner
+      popped&.stop
+      # If the stack is now empty, the drain loop's next tick will clear the
+      # line itself; nothing to do here (render! is a no-op on a stopped
+      # spinner).
+    when :spinner_detail
+      # Update the extra label on the currently visible spinner. The value
+      # may be a String (plain) or a callable (re-evaluated each frame,
+      # matching UI::Spinner's suffix contract). No visible spinner: ignore.
+      sp = task.visible_spinner
+      sp&.update_suffix(entry.content)
+    else
+      stdout.puts(entry.content.to_s) if entry.content
+    end
+  end
+
+  # -- Spinner visibility (drain loop only) ----------------------------------
+  #
+  # The runner hides the spinner whenever it prints text or services a
+  # dialog, so that line is not broken by an animation frame; the next tick
+  # re-shows the spinner if its topmost entry is still running. Harness
+  # code does NOT use these - they are internal to the drain loop.
+
+  def suppress_spinner!
+    @spinner_hidden = true
+  end
+
+  def clear_spinner_hidden
+    @spinner_hidden = false
+  end
+
+  def spinner_hidden?
+    @spinner_hidden
   end
 end
