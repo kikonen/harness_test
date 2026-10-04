@@ -34,8 +34,7 @@ module Tools
       end
 
       text, _truncated = truncate_output(result[:stdout], limit)
-      puts "  [git.status] ✓ (#{text.lines.size} line(s))"
-      $stdout.flush
+      Tool.puts "  [git.status] ✓ (#{text.lines.size} line(s))"
       text.strip.empty? ? 'working tree is clean' : text
     end
   end

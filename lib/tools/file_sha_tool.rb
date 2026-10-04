@@ -34,14 +34,12 @@ module Tools
       end
 
       unless File.file?(path)
-        puts "  [file.sha] ✗ #{shown} (not found)"
-        $stdout.flush
+        Tool.puts "  [file.sha] ✗ #{shown} (not found)"
         return "error: file not found: #{shown}"
       end
 
       sha = FileList.sha256(path)
-      puts "  [file.sha] ✓ #{shown} (sha256: #{sha})"
-      $stdout.flush
+      Tool.puts "  [file.sha] ✓ #{shown} (sha256: #{sha})"
       "sha256: #{sha}"
     end
   end

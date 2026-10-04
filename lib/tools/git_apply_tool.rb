@@ -60,8 +60,7 @@ module Tools
       end
 
       if files.any?
-        puts "  [git.apply] #{dry_run ? 'would patch' : 'patching'}: #{files.join(', ')}"
-        $stdout.flush
+        Tool.puts "  [git.apply] #{dry_run ? 'would patch' : 'patching'}: #{files.join(', ')}"
       end
 
       Tempfile.create(['harness_git_apply', '.diff']) do |tmp|
@@ -81,17 +80,15 @@ module Tools
           detail = result[:stderr].strip.empty? ? result[:stdout].strip : result[:stderr].strip
           msg = "error: git apply failed (exit #{result[:status]}): #{detail.lines.first&.strip || 'no error message'}"
           msg += '. The patch does not match the working tree - check the context lines and retry, or use file.patch per file.'
-          puts "  [git.apply] ✗ #{msg}"
-          $stdout.flush
+          Tool.puts "  [git.apply] ✗ #{msg}"
           return "#{msg}\nfiles: #{files.join(', ')}" if files.any?
           msg
         end
 
         applied = result[:stdout].strip
         label   = dry_run ? 'validated (dry run)' : 'applied'
-        puts "  [git.apply] ✓ #{label} (#{files.join(', ')})" if files.any?
-        puts "  [git.apply] ✓ #{label}" unless files.any?
-        $stdout.flush
+        Tool.puts "  [git.apply] ✓ #{label} (#{files.join(', ')})" if files.any?
+        Tool.puts "  [git.apply] ✓ #{label}" unless files.any?
         note = applied.empty? ? '' : "\n#{applied}"
         files_note = files.any? ? " [#{files.join(', ')}]" : ''
         dry_run ? "ok: patch is valid (dry run, nothing changed)#{files_note}#{note}" \

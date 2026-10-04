@@ -35,8 +35,7 @@ module Tools
       end
 
       unless File.file?(path)
-        puts "  [file.info] ✗ #{shown} (not found)"
-        $stdout.flush
+        Tool.puts "  [file.info] ✗ #{shown} (not found)"
         return "error: file not found: #{shown}"
       end
 
@@ -52,8 +51,7 @@ module Tools
              "permissions: #{perms}\n" \
              "lines: #{lines}"
 
-      puts "  [file.info] ✓ #{shown} (#{human_size(size)}, #{lines} lines)"
-      $stdout.flush
+      Tool.puts "  [file.info] ✓ #{shown} (#{human_size(size)}, #{lines} lines)"
       info
     end
 

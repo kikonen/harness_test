@@ -28,6 +28,23 @@ class Tool
     raise NotImplementedError, "#{self.class}#execute not implemented"
   end
 
+  # Print a status line to the console. Tools run INSIDE the active task's
+  # thread, so this pushes a :text event onto that task's outbox and the
+  # drain loop renders it in order with the rest of the turn's output.
+  # It NEVER writes to $stdout directly - doing so would bypass the single
+  # event queue and corrupt the output. When no task is active (unit tests,
+  # one-off use) it falls back to Kernel.puts.
+  def self.puts(*args)
+    task = defined?(Task) ? Task.current : nil
+    if task
+      args = [''] if args.empty?
+      task.push_event(type: :text, origin: :tool, content: args.map(&:to_s).join(' '))
+      return nil
+    end
+
+    Kernel.puts(*args)
+  end
+
   # True if a FileList#grant_access result means access was granted.
   def self.granted?(result)
     result == :granted

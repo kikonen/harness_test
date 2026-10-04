@@ -34,8 +34,7 @@ module Tools
       end
 
       unless File.file?(path)
-        puts "  [file.read] ✗ #{shown} (not found)"
-        $stdout.flush
+        Tool.puts "  [file.read] ✗ #{shown} (not found)"
         return "error: file not found: #{shown}"
       end
 
@@ -45,8 +44,7 @@ module Tools
       # Normalize CRLF to LF so the LLM always sees clean line endings.
       content = content.gsub("\r\n", "\n")
 
-      puts "  [file.read] ✓ #{shown} (sha256: #{sha})"
-      $stdout.flush
+      Tool.puts "  [file.read] ✓ #{shown} (sha256: #{sha})"
 
       "sha256: #{sha}\n---\n#{content}"
     end

@@ -36,20 +36,17 @@ module Tools
 
       # Security: sensitive paths (e.g. inside .git or .harness) are blocked.
       if @file_list.sensitive?(path)
-        puts "  [dir.create] ✗ #{shown} (blocked: sensitive path)"
-        $stdout.flush
+        Tool.puts "  [dir.create] ✗ #{shown} (blocked: sensitive path)"
         return "error: path '#{shown}' is blocked and can never be created"
       end
 
       if File.directory?(path)
-        puts "  [dir.create] = #{shown} (already exists)"
-        $stdout.flush
+        Tool.puts "  [dir.create] = #{shown} (already exists)"
         return "ok: directory '#{shown}' already exists"
       end
 
       if File.file?(path)
-        puts "  [dir.create] ✗ #{shown} (a file with this name exists)"
-        $stdout.flush
+        Tool.puts "  [dir.create] ✗ #{shown} (a file with this name exists)"
         return "error: '#{shown}' already exists and is a file, not a directory"
       end
 
@@ -69,8 +66,7 @@ module Tools
 
       FileUtils.mkdir_p(path)
 
-      puts "  [dir.create] ✓ #{shown}"
-      $stdout.flush
+      Tool.puts "  [dir.create] ✓ #{shown}"
       "ok: created directory '#{shown}'"
     end
   end

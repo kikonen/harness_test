@@ -83,35 +83,30 @@ module Tools
       end
 
       unless File.file?(path)
-        puts "  [file.patch] ✗ #{shown} (file does not exist)"
-        $stdout.flush
+        Tool.puts "  [file.patch] ✗ #{shown} (file does not exist)"
         return "error: file '#{shown}' does not exist on disk"
       end
 
       current_sha = FileList.sha256(path)
 
       if sha.empty?
-        puts "  [file.patch] ✗ #{shown} (missing sha)"
-        $stdout.flush
+        Tool.puts "  [file.patch] ✗ #{shown} (missing sha)"
         return "error: 'sha' is required - pass the SHA-256 digest returned by file.read or file.sha"
       end
 
       unless current_sha == sha
-        puts "  [file.patch] ✗ #{shown} (sha mismatch)"
-        $stdout.flush
+        Tool.puts "  [file.patch] ✗ #{shown} (sha mismatch)"
         return "error: sha mismatch for '#{shown}' - the file has changed since you read it. " \
                "Current sha256: #{current_sha}. Re-read the file with file.read and retry."
       end
 
       hunks = parse_unified_diff(diff)
       if hunks.nil?
-        puts "  [file.patch] ✗ #{shown} (invalid diff format)"
-        $stdout.flush
+        Tool.puts "  [file.patch] ✗ #{shown} (invalid diff format)"
         return "error: could not parse the diff - expected unified diff format with @@ hunks"
       end
       if hunks.empty?
-        puts "  [file.patch] ✗ #{shown} (no hunks in diff)"
-        $stdout.flush
+        Tool.puts "  [file.patch] ✗ #{shown} (no hunks in diff)"
         return "error: the diff contains no hunks (no @@ ... @@ sections)"
       end
 
@@ -133,8 +128,7 @@ module Tools
         result = apply_hunk(lines, hunk)
         if result.nil?
           diag = diagnose(lines, hunk)
-          puts "  [file.patch] ✗ #{shown} (hunk at line #{hunk[:old_start]} did not apply)"
-          $stdout.flush
+          Tool.puts "  [file.patch] ✗ #{shown} (hunk at line #{hunk[:old_start]} did not apply)"
           return "error: hunk at old-line #{hunk[:old_start]} did not apply cleanly. #{diag} " \
                  "Re-read the file with file.read and adjust the diff so its context lines match exactly."
         end
@@ -148,15 +142,13 @@ module Tools
       new_content = new_content.gsub("\n", "\r\n") if crlf
 
       if @options[:dry_run]
-        puts "  [file.patch] ~ #{shown} (dry run, #{applied} hunk(s) applied)"
-        $stdout.flush
+        Tool.puts "  [file.patch] ~ #{shown} (dry run, #{applied} hunk(s) applied)"
         return "DRY RUN: would apply #{applied} hunk(s) to #{shown}"
       end
 
       File.write(path, new_content)
       new_sha = FileList.sha256(path)
-      puts "  [file.patch] ✓ #{shown} (#{applied} hunk(s) applied, sha256: #{new_sha})"
-      $stdout.flush
+      Tool.puts "  [file.patch] ✓ #{shown} (#{applied} hunk(s) applied, sha256: #{new_sha})"
       "ok: applied #{applied} hunk(s) to #{shown}\nsha256: #{new_sha}"
     end
 

@@ -59,8 +59,7 @@ module Tools
         end
 
         text, _truncated = truncate_output(result[:stdout], limit)
-        puts "  [git.log] ✓ #{shown} (#{text.lines.size} line(s))"
-        $stdout.flush
+        Tool.puts "  [git.log] ✓ #{shown} (#{text.lines.size} line(s))"
         return text.empty? ? "no commits touching #{shown}" : text
       end
 
@@ -70,8 +69,7 @@ module Tools
       end
 
       text, _truncated = truncate_output(result[:stdout], limit)
-      puts "  [git.log] ✓ (#{text.lines.size} line(s))"
-      $stdout.flush
+      Tool.puts "  [git.log] ✓ (#{text.lines.size} line(s))"
       text.empty? ? 'no commits found' : text
     end
   end

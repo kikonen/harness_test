@@ -47,22 +47,19 @@ module Tools
 
       if current_sha
         if sha.nil? || sha.empty?
-          puts "  [file.write] ✗ #{shown} (missing sha)"
-          $stdout.flush
+          Tool.puts "  [file.write] ✗ #{shown} (missing sha)"
           return "error: 'sha' is required for an existing file - pass the SHA-256 digest returned by file.read or file.sha"
         end
 
         unless current_sha == sha
-          puts "  [file.write] ✗ #{shown} (sha mismatch)"
-          $stdout.flush
+          Tool.puts "  [file.write] ✗ #{shown} (sha mismatch)"
           return "error: sha mismatch for '#{shown}' - the file has changed since you read it. " \
                  "Current sha256: #{current_sha}. Re-read the file with file.read and retry."
         end
       end
 
       if @options[:dry_run]
-        puts "  [file.write] ~ #{shown} (dry run, #{content.length} chars)"
-        $stdout.flush
+        Tool.puts "  [file.write] ~ #{shown} (dry run, #{content.length} chars)"
         return "DRY RUN: would write #{content.length} chars to #{shown}"
       end
 
@@ -70,8 +67,7 @@ module Tools
       FileUtils.mkdir_p(dir) unless dir == '.'
       File.write(path, content)
       new_sha = FileList.sha256(path)
-      puts "  [file.write] ✓ #{shown} (#{content.length} chars, sha256: #{new_sha})"
-      $stdout.flush
+      Tool.puts "  [file.write] ✓ #{shown} (#{content.length} chars, sha256: #{new_sha})"
       "ok: wrote #{content.length} chars to #{shown}\nsha256: #{new_sha}"
     end
   end

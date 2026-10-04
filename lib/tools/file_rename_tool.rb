@@ -40,8 +40,7 @@ module Tools
       end
 
       if @file_list.sensitive?(new_path)
-        puts "  [file.rename] ✗ #{new_shown} (blocked: sensitive file)"
-        $stdout.flush
+        Tool.puts "  [file.rename] ✗ #{new_shown} (blocked: sensitive file)"
         return "error: new path '#{new_shown}' is blocked and can never be written"
       end
 
@@ -52,20 +51,17 @@ module Tools
       end
 
       unless File.file?(old_path)
-        puts "  [file.rename] ✗ #{old_shown} (file does not exist)"
-        $stdout.flush
+        Tool.puts "  [file.rename] ✗ #{old_shown} (file does not exist)"
         return "error: file '#{old_shown}' does not exist on disk"
       end
 
       if File.exist?(new_path)
-        puts "  [file.rename] ✗ #{new_shown} (destination already exists)"
-        $stdout.flush
+        Tool.puts "  [file.rename] ✗ #{new_shown} (destination already exists)"
         return "error: destination '#{new_shown}' already exists - choose a different new path"
       end
 
       if @options[:dry_run]
-        puts "  [file.rename] ~ #{old_shown} → #{new_shown} (dry run)"
-        $stdout.flush
+        Tool.puts "  [file.rename] ~ #{old_shown} → #{new_shown} (dry run)"
         return "DRY RUN: would rename #{old_shown} to #{new_shown}"
       end
 
@@ -73,8 +69,7 @@ module Tools
       FileUtils.mkdir_p(dir) unless dir == '.'
       FileUtils.mv(old_path, new_path)
 
-      puts "  [file.rename] ✓ #{old_shown} → #{new_shown}"
-      $stdout.flush
+      Tool.puts "  [file.rename] ✓ #{old_shown} → #{new_shown}"
       "ok: renamed #{old_shown} to #{new_shown}"
     end
   end
