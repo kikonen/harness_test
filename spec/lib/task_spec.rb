@@ -281,7 +281,10 @@ RSpec.describe Task do
 
   describe 'Task.run (drain loop, issue #40)' do
     it 'runs the block and drains all output' do
-      error, task = described_class.run(harness: nil) do |_t|
+      io_out = StringIO.new
+      io_in = StringIO.new
+
+      error, task = described_class.run(harness: nil, stdout: io_out, stdin: io_in) do |_t|
         Task.puts 'greeting'
       end
 
@@ -290,7 +293,10 @@ RSpec.describe Task do
     end
 
     it 'captures an exception in the task as the return error' do
-      error, _task = described_class.run(harness: nil) do |_t|
+      io_out = StringIO.new
+      io_in = StringIO.new
+
+      error, _task = described_class.run(harness: nil, stdout: io_out, stdin: io_in) do |_t|
         raise 'boom'
       end
 
@@ -299,49 +305,42 @@ RSpec.describe Task do
     end
 
     it 'shows a spinner automatically while waiting on the task thread' do
-      old_stdout = $stdout
-      $stdout = StringIO.new
+      io_out = StringIO.new
+      io_in = StringIO.new
 
-      described_class.run(harness: nil) do |_t|
+      described_class.run(harness: nil, stdout: io_out, stdin: io_in) do |_t|
         sleep 0.3 # let the drain loop render a few default frames
       end
 
-      captured = $stdout.string
-      $stdout = old_stdout
-
-      expect(captured).to include('Working...')
+      expect(io_out.string).to include('Working...')
     end
 
     it 're-points the spinner from :spinner_detail events' do
-      old_stdout = $stdout
-      $stdout = StringIO.new
+      io_out = StringIO.new
+      io_in = StringIO.new
 
-      described_class.run(harness: nil) do |_t|
+      described_class.run(harness: nil, stdout: io_out, stdin: io_in) do |_t|
         Task.emit(:spinner_detail, origin: :session_manager,
                   content: { message: 'Sending', suffix: 'ctx 12%' })
         sleep 0.3 # let the drain loop render the re-pointed frames
       end
 
-      captured = $stdout.string
-      $stdout = old_stdout
-
-      expect(captured).to include('Sending...')
-      expect(captured).to include('ctx 12%')
+      expect(io_out.string).to include('Sending...')
+      expect(io_out.string).to include('ctx 12%')
     end
 
     it 'prints text events from the outbox in order (and keeps the spinner going after)' do
-      old_stdout = $stdout
-      $stdout = StringIO.new
+      io_out = StringIO.new
+      io_in = StringIO.new
 
-      described_class.run(harness: nil) do |_t|
+      described_class.run(harness: nil, stdout: io_out, stdin: io_in) do |_t|
         Task.puts '[step 1] first'
         sleep 0.1 # let the text line render and the spinner re-appear
         Task.puts '[step 2] second'
         sleep 0.2
       end
 
-      captured = $stdout.string
-      $stdout = old_stdout
+      captured = io_out.string
 
       expect(captured).to include('[step 1] first')
       expect(captured).to include('[step 2] second')
@@ -349,16 +348,11 @@ RSpec.describe Task do
     end
 
     it 'handles a dialog request from the task thread on the main thread' do
-      # Stub $stdin to return "1\n" (select first option)
-      old_stdin = $stdin
-      $stdin = StringIO.new("1\n")
-
-      # Capture the dialog render output
-      old_stdout = $stdout
-      $stdout = StringIO.new
+      io_out = StringIO.new
+      io_in = StringIO.new("1\n") # "1" selects the first option
 
       choice = nil
-      described_class.run(harness: nil) do |t|
+      described_class.run(harness: nil, stdout: io_out, stdin: io_in) do |t|
         dialog = UI::Dialog.new(
           title: 'Test dialog',
           options: [UI::Dialog::Option.new(title: 'Yes', value: :yes)]
@@ -366,9 +360,7 @@ RSpec.describe Task do
         choice = t.request(:dialog, dialog: dialog)
       end
 
-      $stdin = old_stdin
-      captured = $stdout.string
-      $stdout = old_stdout
+      captured = io_out.string
 
       expect(choice).to eq(:yes)
       expect(captured).to include('Test dialog')

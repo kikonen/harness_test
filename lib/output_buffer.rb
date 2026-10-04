@@ -8,7 +8,7 @@
 # The key idea: task-thread code NEVER writes to an IO stream. Instead it
 # appends a typed, origin-tagged entry to this buffer. The main thread (the
 # CLI drain loop, and later the TUI) advances a read waterline (#drain) and
-# renders whatever is new. This replaces the fire-and-forget "puts to $stdout"
+# renders whatever is new. This replaces the fire-and-forget "puts to stdout"
 # model with a durable, inspectable log of {type, origin, content} blobs:
 #
 #   * type    - what KIND of output this is (:response, :stats, :step,

@@ -106,7 +106,7 @@ class CommandHandler
   # renders everything on the main thread - including spinner frames.
   def run_direct_prompt(text)
     puts
-    error, _task = Task.run(harness: @harness) do |_t|
+    error, _task = Task.run(harness: @harness, stdout: $stdout, stdin: $stdin) do |_t|
       @harness.session_manager.run_prompt(text)
     end
     puts "  [task error] #{error}" if error

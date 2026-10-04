@@ -40,6 +40,12 @@
 #   all) and is done. Tool execution renders output, it does not wait, so it
 #   never re-points the spinner.
 #
+# Stdout injection:
+#   Task.run REQUIRES a `stdout:`. The same
+#   stream is used for spinner frames, text output, and dialog prompts so
+#   tests can capture everything through a single StringIO. The stream is
+#   published on the task instance and passed explicitly to every I/O call.
+#
 # Ctrl+C:
 #   While Task.run is draining, SIGINT is trapped so an interrupt targets
 #   the drain loop, not a random thread. The task thread is force-stopped
@@ -67,18 +73,29 @@ class Task
   # ([:__request__], answered on the main thread).
   CONTROL_EVENTS = %i[error_ctrl __request__].freeze
 
-  attr_reader :thread, :buffer
+  attr_reader :thread, :buffer, :stdout, :stdin
 
   def initialize(&block)
-    @block  = block
-    @inbox  = Thread::Queue.new   # main -> task (responses, stop)
-    @outbox = Thread::Queue.new   # task -> main (SINGLE event queue)
-    @buffer = OutputBuffer.new    # structured log (runner fills it)
-    # The ONE spinner owned by the runner (nil until the drain loop creates
-    # it). :spinner_detail events only re-point its message/suffix.
+    @block   = block
+    @inbox   = Thread::Queue.new   # main -> task (responses, stop)
+    @outbox  = Thread::Queue.new   # task -> main (SINGLE event queue)
+    @buffer  = OutputBuffer.new    # structured log (runner fills it)
     @spinner = nil
     @thread  = nil
+    @stdout  = nil                 # set by Task.run before start
+    @dialog_open = false           # true while perform_direct is on stdin
   end
+
+  attr_writer :stdout, :stdin
+
+  # True while the main thread is inside a dialog's perform_direct
+  # (stdin read + prompt print) - store_and_render must not clear any
+  # output line in that window, so the Choice prompt survives.
+  def dialog_open?
+    @dialog_open
+  end
+
+  # -- Lifecycle ---------------------------------------------------------------
 
   # Spawn the task thread and start running the block. The task reference is
   # published on Thread.current so nested code in the task can find it via
@@ -160,7 +177,7 @@ class Task
   # -- Task-thread output helpers --------------------------------------------
   #
   # These find the current task via Thread.current and push events onto
-  # ITS outbox (the single event queue). They NEVER write to $stdout and
+  # ITS outbox (the single event queue). They NEVER write to stdout and
   # NEVER touch the buffer. When no task is active (main-thread CLI
   # startup/shutdown), they fall back to Kernel since there is no drain
   # loop to render events for.
@@ -199,20 +216,22 @@ class Task
   attr_reader :spinner
   def spinner=(sp); @spinner = sp; end
 
-  # True while the main thread is inside a dialog's perform_direct
-  # (stdin read + prompt print) - store_and_render must not clear any
-  # output line in that window, so the Choice prompt survives.
-  attr_writer :dialog_open
-
   # The spinner while it is animating (nil when stopped).
   def visible_spinner
     @spinner if @spinner&.running?
   end
 
-  # Stop the spinner - called by the drain loop when data arrives, when
-  # the wait ends (:done/:error), or on Ctrl+C (ensure).
+  # Stop the spinner and clear its line on the task's stdout stream.
+  # Called by the drain loop when data arrives, when the wait ends
+  # (:done/:error), or on Ctrl+C (ensure).
   def clear_all_spinners
-    @spinner&.stop
+    return unless @spinner
+    # In production stdout is always set by Task.run; in unit tests it may
+    # be nil - just stop without clearing.
+    if @stdout && @spinner.running?
+      @spinner.clear_line(@stdout)
+    end
+    @spinner.stop
     @spinner = nil
   end
 
@@ -230,15 +249,25 @@ class Task
   #      message (the wait continues); every other batch has already
   #      cleared the spinner line inside store_and_render before printing.
   #
+  # The required `stdout:` argument is the single stream used for
+  # ALL output - spinner frames, text lines, dialog prompts. Tests can pass
+  # a StringIO to capture everything deterministically.
+  #
   # Ctrl+C: SIGINT is trapped for the duration of this call, so an interrupt
   # always hits the drain loop (which then force-stops the task thread - a
   # task must NEVER keep working in the background) and re-raises Interrupt
   # for the caller's cleanup path.
   #
   # Returns [error_msg, task] where error_msg is nil on success.
-  def self.run(harness:, &block) # rubocop:disable Lint/UnusedMethodArgument
-    task        = Task.new(&block)
-    real_stdout = $stdout
+  def self.run(
+    harness:,
+    stdout:,
+    stdin:,
+    &block
+  )
+    task = Task.new(&block)
+    task.stdout = stdout
+    task.stdin = stdin
     error_msg   = nil
     old_trap    = trap('INT') { raise Interrupt }
 
@@ -254,15 +283,14 @@ class Task
         msg = task.poll
         next unless msg  # timeout expired, loop again (spinner re-renders)
 
-        if spinner = task.spinner
-          spinner.stop
-          spinner.clear_line
-        end
+        # Clear the spinner line BEFORE rendering any output so a stale
+        # spin frame never survives above real text.
+        task.clear_all_spinners if task.visible_spinner
 
         # Process this event and any that arrived in the same window
         # (batch-drain so we render one spinner frame per batch, not
         # one per event).
-        finished   = false
+        finished = false
         loop do
           case msg[:type]
           when :done
@@ -273,13 +301,13 @@ class Task
           when :__request__
             handle_request(task, msg)
           when :spinner_detail
-            # Handled inside store_and_render (re-points the spinner).
+            # Re-points the spinner (keeps it alive for the next tick).
           end
 
           # Control events are handled above and must not be rendered; only
           # output events (text, spinner_detail, ...) go to buffer + stdout.
           unless CONTROL_EVENTS.include?(msg[:type])
-            store_and_render(task, msg, real_stdout)
+            store_and_render(task, msg)
           end
 
           msg = task.poll(0)  # non-blocking: grab next if available
@@ -292,7 +320,7 @@ class Task
       # Final drain: one last pass so an event pushed in the same window
       # as :done is not lost. After :done the task block has finished, so
       # no more pushes occur - this is complete and idempotent.
-      drain_remaining(task, real_stdout)
+      drain_remaining(task)
       [error_msg, task]
     rescue Interrupt
       # Ctrl+C: kill the task thread (it must NOT keep working in the
@@ -321,47 +349,57 @@ class Task
     return unless task.outbox_empty?
 
     ensure_spinner_running(task)
-    task.visible_spinner&.render!
+    task.visible_spinner&.render!(task.stdout)
   end
 
   # Handle a :__request__ control event on the main thread.
   def self.handle_request(task, msg)
     if msg[:kind] == :dialog
       dialog = msg[:dialog]
-      answer = dialog.perform_direct
-      task.respond(answer)
+      task.instance_variable_set(:@dialog_open, true)
+      begin
+        answer = dialog.perform_direct(stdout: task.stdout, stdin: task.stdin)
+        task.respond(answer)
+      ensure
+        task.instance_variable_set(:@dialog_open, false)
+      end
     else
       task.respond(nil)
     end
   end
 
   # Store one output event into the OutputBuffer (structured log) and render
-  # it to stdout. The buffer is the durable record; stdout is what the user
-  # sees right now. Both happen on the main thread, in outbox order.
-  def self.store_and_render(task, msg, stdout)
-    task.buffer.put(type: msg[:type], origin: msg[:origin] || :task, content: msg[:content])
+  # it to the task's stdout stream. The buffer is the durable record; stdout
+  # is what the user sees right now. Both happen on the main thread, in
+  # outbox order.
+  def self.store_and_render(task, msg)
+    stdout = task.stdout
 
     case msg[:type]
     when :spinner_detail
       payload = msg[:content].is_a?(Hash) ? msg[:content] : { message: msg[:content].to_s }
-      # The drain loop always ensures the single spinner is running before
-      # dispatching events - just re-point it.
+      # Ensure the spinner is alive for this re-point (it may have been
+      # cleared if the previous batch was non-spinner output).
+      ensure_spinner_running(task) unless task.visible_spinner
       task.visible_spinner&.update_detail(**payload)
+      task.buffer.put(type: :spinner_detail, origin: msg[:origin] || :task, content: msg[:content])
     when :text
       stdout.puts(msg[:content].to_s)
+      task.buffer.put(type: :text, origin: msg[:origin] || :task, content: msg[:content])
     else
       stdout.puts(msg[:content].to_s) if msg[:content]
+      task.buffer.put(type: msg[:type], origin: msg[:origin] || :task, content: msg[:content])
     end
   end
 
   # After :done, drain any remaining events from the outbox and render them.
-  def self.drain_remaining(task, stdout)
+  def self.drain_remaining(task)
     loop do
       msg = task.poll(0)
       break unless msg
       next if msg[:type] == :done || msg[:type] == :error_ctrl
 
-      store_and_render(task, msg, stdout)
+      store_and_render(task, msg)
     end
   end
 end
