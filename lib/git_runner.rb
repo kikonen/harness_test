@@ -98,8 +98,9 @@ class GitRunner < Tool
     detail = result[:stderr].strip.empty? ? result[:stdout].strip : result[:stderr].strip
     msg = "error: git #{tag} failed (exit #{result[:status]}): #{detail.lines.first&.strip || 'no error message'}"
     msg += ". #{hint}" if hint
-    puts "  [#{tag}] ✗ #{msg}"
-    $stdout.flush
+    # issue #40 single-thread I/O rule: tools run on the task thread, so
+    # route through Tool.puts (event queue), never bare puts / stdout.
+    Tool.puts("  [#{tag}] ✗ #{msg}")
     msg
   end
 end

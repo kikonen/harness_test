@@ -41,7 +41,7 @@
 #
 # Single-thread I/O rule (issue #40): when called from within a Task
 # thread, `show` routes the entire dialog interaction through the task's
-# request/response protocol so that $stdin/$stdout are used only on the
+# request/response protocol so that stdin/stdout are used only on the
 # main thread. When no Task is active (tests, direct CLI commands), it
 # performs the I/O directly as before.
 #
@@ -117,14 +117,14 @@ module UI
       @multi_select = multi_select ? true : false
     end
 
-    # Render the dialog and wait for the user's choice on $stdin.
+    # Render the dialog and wait for the user's choice on stdin.
     # Returns the VALUE of the selected option, [FREE_TEXT, text] when the
     # user types their own answer (free_text dialogs only), or CANCEL_VALUE
     # when the user cancels (or stdin is closed).
     #
     # Single-thread I/O rule (issue #40): when called from within a Task
     # thread (Thread.current[:harness_task] is set), this routes through
-    # the task's request/response protocol so that all $stdin/$stdout I/O
+    # the task's request/response protocol so that all stdin/stdout I/O
     # happens on the main thread. Otherwise, performs the I/O directly
     # (tests, /grant commands, etc.).
     def show
@@ -134,38 +134,41 @@ module UI
         # the main thread processes the dialog and responds.
         task.request(:dialog, dialog: self)
       else
-        perform_direct
+        # TODO KI GOTCHA! how these are suppoed to come here?!?
+        perform_direct(stdout: $stdout, stdin: $stdin)
       end
     end
 
-    # Perform the dialog I/O directly on $stdin/$stdout (the original
-    # implementation). Called either by `show` when no Task is active, or
-    # by the main thread when servicing a :dialog request from a task.
-    def perform_direct
+    # Perform the dialog I/O directly on the given streams (the original
+    # implementation). Called either by `show` when no Task is active
+    # (stdin/stdout), or by the main thread when servicing a :dialog
+    # request from a task (the task's injected streams, so output lands on
+    # the SAME stream the drain loop renders to - no stdout default).
+    def perform_direct(stdout:, stdin:)
       title_lines = @title.split("\n")
-      puts
-      puts "  [dialog] ⚠  #{title_lines.first}"
-      title_lines[1..].each { |line| puts "             #{line}" }
+      stdout.puts
+      stdout.puts "  [dialog] ⚠  #{title_lines.first}"
+      title_lines[1..].each { |line| stdout.puts "             #{line}" }
 
       if @note && !@note.strip.empty?
-        @note.split("\n").each { |line| puts "                #{line}" }
+        @note.split("\n").each { |line| stdout.puts "                #{line}" }
       end
 
       @options.each_with_index do |opt, i|
-        puts "             #{i + 1}) #{opt.title}"
+        stdout.puts "             #{i + 1}) #{opt.title}"
         if opt.description && !opt.description.strip.empty?
-          puts "                #{opt.description}"
+          stdout.puts "                #{opt.description}"
         end
       end
 
-      print_choice_prompt
+      print_choice_prompt(stdout)
 
       # Skip blank lines: they are usually stale input (e.g. the user
       # pressed Enter an extra time while sending the prompt, and that
       # newline is still sitting in stdin). Only a real EOF dismisses the
       # dialog without an answer.
       loop do
-        line = $stdin.gets
+        line = stdin.gets
         break if line.nil?
 
         answer = line.chomp.strip
@@ -175,7 +178,7 @@ module UI
         # in one line. Returns nil when the line was invalid
         # and the dialog re-prompted.
         if @multi_select && answer.match?(/\A\d+(?:[,\s]+\d+)+\z/)
-          chosen = handle_multi_select(answer)
+          chosen = handle_multi_select(answer, stdout)
           next if chosen.nil?
           return chosen
         end
@@ -198,7 +201,7 @@ module UI
           # Out-of-range number: it was clearly meant as an option
           # selection, so reject it and re-prompt instead of silently
           # treating it as free text (issue #73).
-          reprompt_invalid(m[1])
+          reprompt_invalid(m[1], stdout)
           next
         end
 
@@ -207,7 +210,7 @@ module UI
           idx = answer.to_i - 1
           return @options[idx].value if idx >= 0 && idx < @options.size
 
-          reprompt_invalid(answer)
+          reprompt_invalid(answer, stdout)
           next
         end
 
@@ -220,11 +223,11 @@ module UI
     # Resolve a multi-select answer ("1 3", "1,3") to the selected values.
     # One selection returns the bare value; two or more return an array in
     # the order typed. Any out-of-range number rejects the whole line.
-    def handle_multi_select(answer)
+    def handle_multi_select(answer, stdout)
       numbers = answer.split(/\s*,\s*|\s+/).map(&:to_i)
       if numbers.any? { |n| n < 1 || n > @options.size }
         bad = numbers.reject { |n| (1..@options.size).cover?(n) }
-        reprompt_invalid(bad.join(', '))
+        reprompt_invalid(bad.join(', '), stdout)
         return nil
       end
 
@@ -239,26 +242,27 @@ module UI
     private
 
     # Print the "Choice (...)" prompt line (shared by the first ask and
-    # re-prompts after an invalid choice).
-    def print_choice_prompt
+    # re-prompts after an invalid choice). stdout is passed explicitly -
+    # there is deliberately no stdout default.
+    def print_choice_prompt(stdout)
       note_hint = @note_on_cancel_only ? 'cancel + short note' : '<number> + short note'
       multi_hint = @multi_select ? 'or several numbers like "1 3" to select many' : ''
       if @free_text
         hint = @free_text_prompt.to_s.strip
         hint = 'type a short free-text answer' if hint.empty?
-        print "             Choice (1..#{@options.size},#{multi_hint} #{note_hint}, or #{hint}): "
+        stdout.print "             Choice (1..#{@options.size},#{multi_hint} #{note_hint}, or #{hint}): "
       else
-        print "             Choice (1..#{@options.size},#{multi_hint} or #{note_hint}): "
+        stdout.print "             Choice (1..#{@options.size},#{multi_hint} or #{note_hint}): "
       end
-      $stdout.flush
+      stdout.flush
     end
 
     # Reject an out-of-range option number and ask again (issue #73).
     # The user can still dismiss the dialog with EOF.
-    def reprompt_invalid(number)
-      puts
-      puts "             invalid choice #{number} (valid: 1..#{@options.size})"
-      print_choice_prompt
+    def reprompt_invalid(number, stdout)
+      stdout.puts
+      stdout.puts "             invalid choice #{number} (valid: 1..#{@options.size})"
+      print_choice_prompt(stdout)
     end
   end
 end

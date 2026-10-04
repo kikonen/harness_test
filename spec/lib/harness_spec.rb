@@ -313,15 +313,13 @@ RSpec.describe Harness do
       end.new(name: 'ui.notify', description: 'fake', parameters: {})
     end
 
-    it 'emits :spinner_detail with the tool name before execution' do
+    it 'does NOT emit :spinner_detail for a tool being executed' do
       harness.tool_registry.register(fake_tool)
       call  = { id: 'c1', function: { name: 'ui.notify', arguments: '{}' } }
 
       expect(harness.send(:execute_tool_call, call)).to eq('ok')
 
-      detail = drain_outbox(task).find { |m| m[:type] == :spinner_detail }
-      expect(detail).not_to be_nil
-      expect(detail[:content]).to eq('ui.notify')
+      expect(drain_outbox(task).map { |m| m[:type] }).not_to include(:spinner_detail)
     end
 
     it 'does not emit spinner_detail for an unknown tool' do

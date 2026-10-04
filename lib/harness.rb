@@ -451,11 +451,6 @@ class Harness
       return "error: unknown tool '#{func_name}'"
     end
 
-    # Update the visible spinner's extra label to the tool being executed,
-    # so the user can see what is happening while it runs. The drain loop
-    # suppresses the spinner automatically when any text/dialog I/O happens,
-    # and re-shows it on the next tick - we only update the label here.
-    Task.emit(:spinner_detail, origin: :harness, content: func_name)
     begin
       result = tool.execute(args)
       logger.info("tool #{func_name} → #{result}")
