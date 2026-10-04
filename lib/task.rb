@@ -11,13 +11,13 @@
 #
 # SINGLE EVENT QUEUE (issue #40 follow-up):
 #   The outbox (Thread::Queue) is the ONLY task→main channel. Both output
-#   events (:text, :step, :spinner_detail, etc.) AND control events (:done,
-#   :error, :__request__) travel on it. The drain loop pops one message at a
-#   time and dispatches by type. This guarantees total ordering of all
+#   events (:text, :spinner_detail, etc.) AND control events (:done,
+#   :error_ctrl, :__request__) travel on it. The drain loop pops one message
+#   at a time and dispatches by type. This guarantees total ordering of all
 #   visible output because every event flows through exactly one FIFO.
 #
 # Protocol:
-#   Task thread -> Main thread: push_event(type, origin:, content:)  [outbox]
+#   Task thread -> Main thread: push_event(type:, origin:, content:) [outbox]
 #   Task thread -> Main thread: request(type, **payload)             [outbox, blocking]
 #   Main thread -> Task thread: task.respond(value)                  [inbox]
 #   Main thread (drain loop):    poll outbox, dispatch by type
@@ -28,19 +28,20 @@
 #   touches the buffer directly. A future TUI can read the buffer as a
 #   durable, inspectable record of everything shown to the user.
 #
-# Spinner ownership - the RUNNER decides, not the harness code:
-#   The drain loop knows automatically when to show a spinner: as long as
-#   it is still waiting for the task thread to finish, one is visible. It
-#   is suppressed for the tick that prints text or services a dialog (so
-#   that line shows cleanly), and re-appears on the next tick. The only
-#   protocol entry that affects the spinner is :spinner_detail - it
-#   describes what the current wait looks like (message + optional suffix).
-#   Harness code never starts or stops spinners - it just emits
+# Spinner ownership - the RUNNER decides, trivially:
+#   The drain loop shows the spinner while the outbox is EMPTY (the task is
+#   silently working). A :spinner_detail event re-points what the current
+#   wait looks like (message + optional suffix) and keeps the spinner alive
+#   across that batch. Any OTHER data clears it - we are rendering output,
+#   not waiting. It comes back on the next tick only if the outbox is empty
+#   again. Harness code never starts or stops spinners - it just emits
 #   :spinner_detail (or nothing at all) and is done.
 #
-# Dialogs use the outbox as well: task.request(:dialog, dialog:) pushes a
-# __request__ event; the drain loop performs the dialog on the main thread
-# and calls task.respond(answer).
+# Ctrl+C:
+#   While Task.run is draining, SIGINT is trapped so an interrupt targets
+#   the drain loop, not a random thread. The task thread is force-stopped
+#   (no background work survives the turn) and the Interrupt is re-raised
+#   for the CLI's cleanup path.
 
 require_relative 'output_buffer'
 require_relative 'ui/spinner'
@@ -58,20 +59,22 @@ class Task
   # Timeout (seconds) for polling the outbox in the drain loop.
   DEFAULT_POLL_TIMEOUT = 0.1
 
+  # Event types handled by the drain loop as control flow (never stored or
+  # rendered): the task finished ([:done]) and a pending user request
+  # ([:__request__], answered on the main thread).
+  CONTROL_EVENTS = %i[error_ctrl __request__].freeze
+
   attr_reader :thread, :buffer
 
   def initialize(&block)
-    @block         = block
-    @inbox         = Thread::Queue.new   # main -> task (responses, stop)
-    @outbox        = Thread::Queue.new   # task -> main (SINGLE event queue)
-    @buffer        = OutputBuffer.new    # structured log (runner fills it)
+    @block  = block
+    @inbox  = Thread::Queue.new   # main -> task (responses, stop)
+    @outbox = Thread::Queue.new   # task -> main (SINGLE event queue)
+    @buffer = OutputBuffer.new    # structured log (runner fills it)
     # The ONE spinner owned by the runner (nil until the drain loop creates
     # it). :spinner_detail events only re-point its message/suffix.
-    @spinner       = nil
-    # The drain loop sets this when it must hide the spinner to print text
-    # or handle a dialog; cleared at the start of every tick.
-    @spinner_hidden = false
-    @thread        = nil
+    @spinner = nil
+    @thread  = nil
   end
 
   # Spawn the task thread and start running the block. The task reference is
@@ -100,6 +103,12 @@ class Task
     @outbox.pop(false, timeout: timeout)
   rescue ThreadError
     nil
+  end
+
+  # True when no events are waiting in the outbox (used by the drain loop
+  # to decide whether to show the spinner).
+  def outbox_empty?
+    @outbox.empty?
   end
 
   # Reply to a pending request (called from the main thread). Unblocks the
@@ -147,10 +156,10 @@ class Task
 
   # -- Task-thread output helpers --------------------------------------------
   #
-  # All of these find the current task via Thread.current and push events
-  # onto ITS outbox (the single event queue). They NEVER write to $stdout,
-  # NEVER write to the buffer directly. When no task is active (main-thread
-  # CLI startup/shutdown), they fall back to Kernel since there is no drain
+  # These find the current task via Thread.current and push events onto
+  # ITS outbox (the single event queue). They NEVER write to $stdout and
+  # NEVER touch the buffer. When no task is active (main-thread CLI
+  # startup/shutdown), they fall back to Kernel since there is no drain
   # loop to render events for.
 
   # The Task running on the current thread (set by #start), or nil.
@@ -181,18 +190,6 @@ class Task
     nil
   end
 
-  # Non-terminated variant of Task.puts. Single event with all parts joined
-  # (no trailing newline). Falls back to Kernel.print when no task is active.
-  def self.print(*args)
-    task = current
-    if task
-      task.push_event(type: :text, origin: :task, content: args.map(&:to_s).join, terminal: false)
-    else
-      Kernel.print(*args)
-    end
-    nil
-  end
-
   # -- The ONE spinner (main-thread-only access via the drain loop) ----------
 
   # The task's single spinner (set by the drain loop; nil before first tick).
@@ -204,61 +201,56 @@ class Task
     @spinner if @spinner&.running?
   end
 
-  # Stop the spinner - called by the drain loop when the wait ends
-  # (:done/:error).
+  # Stop the spinner - called by the drain loop when data arrives, when
+  # the wait ends (:done/:error), or on Ctrl+C (ensure).
   def clear_all_spinners
     @spinner&.stop
-    @spinner_hidden = false
+    @spinner = nil
   end
 
   # -- Drain loop (called from the MAIN thread) ------------------------------
   #
   # Spawns the task, then blocks in a poll loop that:
-  #   1. Ensures a spinner is visible (the runner knows it is waiting by
-  #      construction). Suppressed when text or a dialog was just rendered.
-  #      Renders one animation frame.
+  #   1. Shows the spinner ONLY while the outbox is empty (the task is
+  #      silently working).
   #   2. Polls the SINGLE event queue (the outbox) one message at a time.
-  #      - Output events: stores into the OutputBuffer (structured log) AND
-  #        renders to stdout in order.
-  #      - Control events (:done, :error, :__request__): handled directly.
-  #   3. Exits on :done or :error; the spinner is cleared.
+  #      - Output events: stored into the OutputBuffer (structured log) AND
+  #        rendered to stdout in order.
+  #      - Control events (:done, :error_ctrl, :__request__): handled directly.
+  #   3. After each batch: clear the spinner UNLESS the batch contained a
+  #      :spinner_detail (the wait is re-pointed, keep animating). Exits on
+  #      :done or :error_ctrl.
+  #
+  # Ctrl+C: SIGINT is trapped for the duration of this call, so an interrupt
+  # always hits the drain loop (which then force-stops the task thread - a
+  # task must NEVER keep working in the background) and re-raises Interrupt
+  # for the caller's cleanup path.
   #
   # Returns [error_msg, task] where error_msg is nil on success.
   def self.run(harness:, &block) # rubocop:disable Lint/UnusedMethodArgument
-    task = Task.new(&block)
+    task        = Task.new(&block)
     real_stdout = $stdout
-    last_rendered = nil
-    error_msg     = nil
+    error_msg   = nil
+    old_trap    = trap('INT') { raise Interrupt }
 
     begin
       task.start
 
       loop do
-        task.clear_spinner_hidden
+        # Spinner visible only while waiting on an EMPTY outbox. No data
+        # means the task is silently working => animate.
+        show_spinner_if_waiting(task)
 
-        # While this loop is still waiting on the task thread, a spinner is
-        # visible - that is all there is to it. The first tick creates the
-        # default one; subsequent :spinner_detail events re-point it.
-        ensure_spinner_running(task)
-
-        # 1. Spinner frame: draw the current one (main thread I/O).
-        visible = task.visible_spinner
-        if visible && !task.spinner_hidden?
-          visible.render!
-          last_rendered = visible
-        elsif last_rendered
-          last_rendered.clear_line
-          last_rendered = nil
-        end
-
-        # 2. Wait for the next event on the SINGLE queue (blocks up to timeout).
+        # Wait for the next event on the SINGLE queue (blocks up to timeout).
         msg = task.poll
         next unless msg  # timeout expired, loop again (spinner re-renders)
 
-        # 3. Process this event and any that arrived in the same window
-        #    (batch-drain so we render one spinner frame per batch, not
-        #    one per event).
-        finished = false
+        # Process this event and any that arrived in the same window
+        # (batch-drain so we render one spinner frame per batch, not
+        # one per event). detail_hit remembers whether a :spinner_detail
+        # re-pointed the wait in this batch.
+        finished   = false
+        detail_hit = false
         loop do
           case msg[:type]
           when :done
@@ -268,13 +260,29 @@ class Task
             error_msg = msg[:content]
           when :__request__
             handle_request(task, msg)
-          else
+          when :spinner_detail
+            detail_hit = true
+          end
+
+          # Control events are handled above and must not be rendered; only
+          # output events (text, spinner_detail, ...) go to buffer + stdout.
+          unless CONTROL_EVENTS.include?(msg[:type])
             store_and_render(task, msg, real_stdout)
           end
 
           msg = task.poll(0)  # non-blocking: grab next if available
           break unless msg
         end
+
+        # Data arrived: clear the spinner line - EXCEPT when a
+        # :spinner_detail re-pointed the wait, in which case the spinner
+        # must stay alive to show its new message. It comes back on the
+        # next tick only if the outbox is still empty (task working).
+        unless detail_hit
+          task.visible_spinner&.clear_line
+          task.clear_all_spinners
+        end
+
         break if finished
       end
 
@@ -282,17 +290,20 @@ class Task
       # as :done is not lost. After :done the task block has finished, so
       # no more pushes occur - this is complete and idempotent.
       drain_remaining(task, real_stdout)
+      [error_msg, task]
+    rescue Interrupt
+      # Ctrl+C: kill the task thread (it must NOT keep working in the
+      # background) and hand the interrupt back to the caller (CLI cleanup).
+      task.stop
+      raise
     ensure
-      sp = last_rendered || task.visible_spinner
-      sp&.clear_line if sp
+      # Clean up the spinner and restore the pre-existing SIGINT handler.
       task.clear_all_spinners
+      trap('INT', old_trap)
     end
-
-    [error_msg, task]
   end
 
-  # While the drain loop is still waiting on the task thread, a spinner must
-  # be visible - create the default one when none is running.
+  # Create the runner's single spinner when none is running.
   def self.ensure_spinner_running(task)
     return if task.visible_spinner
 
@@ -301,11 +312,19 @@ class Task
     task.spinner = spinner
   end
 
+  # Spinner frame for this tick: visible only while waiting on an EMPTY
+  # outbox. No data => the task is silently working => animate.
+  def self.show_spinner_if_waiting(task)
+    return unless task.outbox_empty?
+
+    ensure_spinner_running(task)
+    task.visible_spinner&.render!
+  end
+
   # Handle a :__request__ control event on the main thread.
   def self.handle_request(task, msg)
     if msg[:kind] == :dialog
       dialog = msg[:dialog]
-      task.suppress_spinner!
       answer = dialog.perform_direct
       task.respond(answer)
     else
@@ -326,12 +345,7 @@ class Task
       # dispatching events - just re-point it.
       task.visible_spinner&.update_detail(**payload)
     when :text
-      content = msg[:content].to_s
-      if msg[:terminal] == false
-        stdout.print(content)
-      else
-        stdout.puts(content)
-      end
+      stdout.puts(msg[:content].to_s)
     else
       stdout.puts(msg[:content].to_s) if msg[:content]
     end
@@ -346,19 +360,5 @@ class Task
 
       store_and_render(task, msg, stdout)
     end
-  end
-
-  # -- Spinner visibility (drain loop only) ----------------------------------
-
-  def suppress_spinner!
-    @spinner_hidden = true
-  end
-
-  def clear_spinner_hidden
-    @spinner_hidden = false
-  end
-
-  def spinner_hidden?
-    @spinner_hidden
   end
 end

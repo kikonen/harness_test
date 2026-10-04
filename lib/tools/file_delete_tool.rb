@@ -31,8 +31,7 @@ module Tools
       shown = @file_list.display_path(path)
 
       if @file_list.sensitive?(path)
-        puts "  [file.delete] ✗ #{shown} (blocked: sensitive file)"
-        $stdout.flush
+        Tool.puts "  [file.delete] ✗ #{shown} (blocked: sensitive file)"
         return "error: file '#{shown}' is blocked and can never be deleted"
       end
 
@@ -44,20 +43,17 @@ module Tools
       end
 
       unless File.file?(path)
-        puts "  [file.delete] ✗ #{shown} (file does not exist)"
-        $stdout.flush
+        Tool.puts "  [file.delete] ✗ #{shown} (file does not exist)"
         return "error: file '#{shown}' does not exist on disk"
       end
 
       if @options[:dry_run]
-        puts "  [file.delete] ~ #{shown} (dry run)"
-        $stdout.flush
+        Tool.puts "  [file.delete] ~ #{shown} (dry run)"
         return "DRY RUN: would delete #{shown}"
       end
 
       File.delete(path)
-      puts "  [file.delete] ✓ #{shown} (deleted)"
-      $stdout.flush
+      Tool.puts "  [file.delete] ✓ #{shown} (deleted)"
       "ok: file '#{shown}' has been deleted"
     end
   end

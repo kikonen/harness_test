@@ -27,8 +27,7 @@ module Tools
       lines = @registry.sorted_tools.map do |t|
         "#{t.name} - #{t.description}"
       end
-      puts "  [tools.list] #{lines.size} tool(s)"
-      $stdout.flush
+      Tool.puts "  [tools.list] #{lines.size} tool(s)"
       lines.join("\n")
     end
   end

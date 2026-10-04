@@ -21,8 +21,7 @@ module Tools
 
     def execute(args)
       msg = args['message'] || ''
-      puts "  [ui.notify] #{msg}"
-      $stdout.flush
+      Tool.puts "  [ui.notify] #{msg}"
       'ok'
     end
   end

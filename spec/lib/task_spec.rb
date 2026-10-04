@@ -125,7 +125,7 @@ RSpec.describe Task do
     end
   end
 
-  describe 'Task.puts / Task.print (single event queue)' do
+  describe 'Task.puts (single event queue)' do
     it 'pushes :text events onto the active task outbox' do
       task = described_class.new { }
       old_current = Thread.current[:harness_task]
@@ -144,23 +144,6 @@ RSpec.describe Task do
       expect(events[1][:content]).to eq('second line')
     end
 
-    it 'Task.print pushes a single :text event with terminal: false' do
-      task = described_class.new { }
-      old_current = Thread.current[:harness_task]
-      Thread.current[:harness_task] = task
-
-      begin
-        Task.print 'raw text'
-      ensure
-        Thread.current[:harness_task] = old_current
-      end
-
-      events = drain_outbox(task)
-      expect(events.map { |m| m[:type] }).to eq([:text])
-      expect(events[0][:content]).to eq('raw text')
-      expect(events[0][:terminal]).to be(false)
-    end
-
     it 'falls back to Kernel.puts when no task is active' do
       old_stdout = $stdout
       $stdout = StringIO.new
@@ -171,14 +154,33 @@ RSpec.describe Task do
     ensure
       $stdout = old_stdout
     end
+  end
 
-    it 'falls back to Kernel.print when no task is active' do
+  describe 'Tool.puts (tools push onto the active task outbox)' do
+    it 'pushes a :text event with origin :tool' do
+      task = described_class.new { }
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+
+      begin
+        Tool.puts "  [test.tool] ok"
+      ensure
+        Thread.current[:harness_task] = old_current
+      end
+
+      events = drain_outbox(task)
+      expect(events[0][:type]).to eq(:text)
+      expect(events[0][:origin]).to eq(:tool)
+      expect(events[0][:content]).to eq("  [test.tool] ok")
+    end
+
+    it 'falls back to Kernel.puts when no task is active' do
       old_stdout = $stdout
       $stdout = StringIO.new
 
-      Task.print 'no task around'
+      Tool.puts "  [test.tool] ok"
 
-      expect($stdout.string).to eq('no task around')
+      expect($stdout.string).to eq("  [test.tool] ok\n")
     ensure
       $stdout = old_stdout
     end
@@ -325,25 +327,6 @@ RSpec.describe Task do
 
       expect(captured).to include('Sending...')
       expect(captured).to include('ctx 12%')
-    end
-
-    it 're-points suffix only when the detail provides one' do
-      old_stdout = $stdout
-      $stdout = StringIO.new
-
-      described_class.run(harness: nil) do |_t|
-        Task.emit(:spinner_detail, origin: :harness, content: { message: 'Running tool' })
-        sleep 0.2
-        # A later detail that only sets the suffix keeps the current message.
-        Task.emit(:spinner_detail, origin: :harness, content: { suffix: 'file.read' })
-        sleep 0.2
-      end
-
-      captured = $stdout.string
-      $stdout = old_stdout
-
-      expect(captured).to include('Running tool...')
-      expect(captured).to include('file.read')
     end
 
     it 'prints text events from the outbox in order (and keeps the spinner going after)' do

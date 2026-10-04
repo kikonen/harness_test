@@ -37,22 +37,19 @@ module Tools
 
       # Security: sensitive paths (e.g. inside .git or .harness) are blocked.
       if @file_list.sensitive?(path)
-        puts "  [dir.delete] ✗ #{shown} (blocked: sensitive path)"
-        $stdout.flush
+        Tool.puts "  [dir.delete] ✗ #{shown} (blocked: sensitive path)"
         return "error: path '#{shown}' is blocked and can never be deleted"
       end
 
       unless File.directory?(path)
-        puts "  [dir.delete] ✗ #{shown} (not a directory)"
-        $stdout.flush
+        Tool.puts "  [dir.delete] ✗ #{shown} (not a directory)"
         return "error: '#{shown}' does not exist or is not a directory"
       end
 
       # Safety: only empty directories may be deleted.
       entries = Dir.children(path)
       unless entries.empty?
-        puts "  [dir.delete] ✗ #{shown} (not empty: #{entries.size} entr#{entries.size == 1 ? 'y' : 'ies'})"
-        $stdout.flush
+        Tool.puts "  [dir.delete] ✗ #{shown} (not empty: #{entries.size} entr#{entries.size == 1 ? 'y' : 'ies'})"
         return "error: directory '#{shown}' is not empty (#{entries.size} entries) - remove its contents first; recursive deletion is not supported"
       end
 
@@ -70,14 +67,12 @@ module Tools
       end
 
       if @options[:dry_run]
-        puts "  [dir.delete] ~ #{shown} (dry run)"
-        $stdout.flush
+        Tool.puts "  [dir.delete] ~ #{shown} (dry run)"
         return "DRY RUN: would delete empty directory #{shown}"
       end
 
       Dir.rmdir(path)
-      puts "  [dir.delete] ✓ #{shown} (deleted)"
-      $stdout.flush
+      Tool.puts "  [dir.delete] ✓ #{shown} (deleted)"
       "ok: empty directory '#{shown}' has been deleted"
     end
   end

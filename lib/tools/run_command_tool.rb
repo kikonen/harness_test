@@ -97,8 +97,7 @@ module Tools
 
       # Auto-approve when the command prefix is in the user's allowlist.
       if @allowlist.allowed?(command)
-        puts "  [run.command] ✓ auto-approved (allowlist): #{command}"
-        $stdout.flush
+        Tool.puts "  [run.command] ✓ auto-approved (allowlist): #{command}"
         return run_command(command, dir, shown, timeout, limit)
       end
 
@@ -148,8 +147,7 @@ module Tools
 
       if result[:saved] && !result[:saved].empty?
         result[:saved].each { |p| @allowlist.add(p) }
-        puts "  [run.command] ✓ always-allowed: #{result[:saved].join(', ')} (saved to allowlist)"
-        $stdout.flush
+        Tool.puts "  [run.command] ✓ always-allowed: #{result[:saved].join(', ')} (saved to allowlist)"
       end
 
       run_command(command, dir, shown, timeout, limit)
@@ -196,11 +194,10 @@ module Tools
     # Build the standard denial error string and log it to the console.
     def denial(message, note: nil)
       if note
-        puts "  [run.command] ✗ denied by user (note: \"#{note}\")"
+        Tool.puts "  [run.command] ✗ denied by user (note: \"#{note}\")"
       else
-        puts "  [run.command] ✗ denied by user"
+        Tool.puts "  [run.command] ✗ denied by user"
       end
-      $stdout.flush
       { denied: true,
         denial: Tool.denial_error("error: #{message}",
                                  { status: :denied, note: note }) }
@@ -210,8 +207,7 @@ module Tools
     # result. Raises Timeout::Error when the command exceeds its timeout.
     def run_command(command, dir, shown, timeout, limit)
       if @options[:dry_run]
-        puts "  [run.command] ~ #{command} (dry run)"
-        $stdout.flush
+        Tool.puts "  [run.command] ~ #{command} (dry run)"
         return "DRY RUN: would execute '#{command}' in #{shown}"
       end
 
@@ -224,11 +220,10 @@ module Tools
       err            = truncate(stderr, limit)[0] unless stderr.strip.empty?
 
       if code.zero?
-        puts "  [run.command] ✓ #{command} (exit 0, #{elapsed}s)"
+        Tool.puts "  [run.command] ✓ #{command} (exit 0, #{elapsed}s)"
       else
-        puts "  [run.command] ✗ #{command} (exit #{code}, #{elapsed}s)"
+        Tool.puts "  [run.command] ✗ #{command} (exit #{code}, #{elapsed}s)"
       end
-      $stdout.flush
 
       msg = "exit code: #{code} (#{elapsed}s)\n"
       msg += "--- stdout ---\n#{out}\n" if out.strip != ''
@@ -236,8 +231,7 @@ module Tools
       msg += "\n(output truncated to #{limit} lines)" if truncated
       msg
     rescue Timeout::Error
-      puts "  [run.command] ✗ #{command} (timed out after #{timeout}s)"
-      $stdout.flush
+      Tool.puts "  [run.command] ✗ #{command} (timed out after #{timeout}s)"
       "error: command timed out after #{timeout}s"
     end
 
