@@ -6,14 +6,26 @@ require 'tmpdir'
 require 'tools/dir_create_tool'
 
 RSpec.describe Tools::DirCreateTool do
+  # Drive the grant dialog without any real I/O: intercept Dialog#show (the
+  # tool calls it with stdout: nil, stdin: nil because tools run on the Task
+  # thread) and perform the interaction directly on a StringIO. Returns the
+  # dialog's rendered output for assertions.
+  def drive_dialog(*lines)
+    stdin  = StringIO.new(lines.join("\n"))
+    stdout = StringIO.new
+    allow_any_instance_of(UI::Dialog).to receive(:show) do |dialog|
+      dialog.perform_direct(stdout: stdout, stdin: stdin)
+    end
+    stdout
+  end
+
   it 'forwards the user\'s denial note for the new-dir grant' do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
       tool = described_class.new(list, {})
-      allow($stdin).to receive(:gets)
-        .and_return("4 nope, use a different layout\n", nil)
-        # target-first prompt (issue #54): 1=target, 2=parent flat,
-        # 3=parent recursive, 4=cancel
+      # target-first prompt (issue #54): 1=target, 2=parent flat,
+      # 3=parent recursive, 4=cancel
+      drive_dialog("4 nope, use a different layout\n")
 
       out = tool.execute('path' => 'newdir')
       expect(out).to start_with('error: write access denied')
@@ -25,7 +37,7 @@ RSpec.describe Tools::DirCreateTool do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
       tool = described_class.new(list, {})
-      allow($stdin).to receive(:gets).and_return("1\n", nil)
+      drive_dialog("1\n")
 
       out = tool.execute('path' => 'newdir')
       expect(out).to eq("ok: created directory 'newdir'")
@@ -41,7 +53,6 @@ RSpec.describe Tools::DirCreateTool do
       list = FileList.new(workdir: dir)
       list.add_file('newdir', :w) # grant on the target itself
       tool = described_class.new(list, {})
-      allow($stdin).to receive(:gets) # must NOT be called
 
       out = tool.execute('path' => 'newdir')
       expect(out).to eq("ok: created directory 'newdir'")
@@ -54,7 +65,6 @@ RSpec.describe Tools::DirCreateTool do
       list = FileList.new(workdir: dir)
       list.add_flat_dir('.', :w)
       tool = described_class.new(list, {})
-      allow($stdin).to receive(:gets) # must NOT be called
 
       out = tool.execute('path' => 'newdir')
       expect(out).to eq("ok: created directory 'newdir'")

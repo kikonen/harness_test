@@ -6,12 +6,22 @@ require 'tmpdir'
 require 'tools/file_read_tool'
 
 RSpec.describe Tools::FileReadTool do
+  # Drive the grant dialog without any real I/O: intercept Dialog#show (the
+  # tool calls it with stdout: nil, stdin: nil because tools run on the Task
+  # thread) and perform the interaction directly on a StringIO.
+  def drive_dialog(*lines)
+    stdin  = StringIO.new(lines.join("\n"))
+    stdout = StringIO.new
+    allow_any_instance_of(UI::Dialog).to receive(:show) do |dialog|
+      dialog.perform_direct(stdout: stdout, stdin: stdin)
+    end
+  end
+
   it 'forwards the user\'s denial note to the model' do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
       tool = described_class.new(list)
-      allow($stdin).to receive(:gets)
-        .and_return("4 put tests under lib, not spec\n", nil)
+      drive_dialog("4 put tests under lib, not spec\n")
 
       out = tool.execute('path' => 'secret.txt')
       expect(out).to start_with('error: access denied for')
@@ -23,7 +33,7 @@ RSpec.describe Tools::FileReadTool do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
       tool = described_class.new(list)
-      allow($stdin).to receive(:gets).and_return("4\n", nil)
+      drive_dialog("4\n")
 
       out = tool.execute('path' => 'secret.txt')
       expect(out).to eq("error: access denied for 'secret.txt'")
