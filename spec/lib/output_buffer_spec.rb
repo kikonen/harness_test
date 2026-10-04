@@ -45,12 +45,14 @@ RSpec.describe OutputBuffer do
       expect(buffer.size).to eq(1)
     end
 
-    it 'defaults content to an empty string and nil origin to :unknown' do
+    it 'keeps content as nil when not given, normalizes nil origin to :unknown' do
       buffer = described_class.new
 
       entry = buffer.put(type: :text, origin: nil)
 
-      expect(entry.content).to eq('')
+      # Nil stays nil (callers like Task.emit use it for progress events that
+      # carry no text payload); renderers must handle both nil and "".
+      expect(entry.content).to be_nil
       expect(entry.origin).to eq(:unknown)
     end
 

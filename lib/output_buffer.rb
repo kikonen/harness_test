@@ -18,11 +18,15 @@
 #   * content - the text itself (a single line; multi-part output is either
 #               one blob or several entries, in order).
 #
-# The buffer is owned by the harness (Harness#output_buffer). Because the
-# harness constructs its tools, those tools can reach the same instance and
-# append to it too. Thread-safety is provided by a single Mutex: task threads
-# append from many call sites at once while the main thread drains on its own
-# tick, so both operations are synchronized.
+# The buffer is owned by the TASK (one per Task instance - see
+# Task#buffer). Because the Task is the component that renders the entries
+# (its drain loop), the code that appends to it and the code that reads it
+# live in the same object; no shared mutable state crosses component
+# boundaries. Task-thread code (harness itself, session manager, tools)
+# reaches the buffer through `Task.output_buffer` (a thread-local accessor
+# set by Task#start). Thread-safety is provided by a single Mutex: task
+# threads append from many call sites at once while the main thread drains
+# on its own tick, so both operations are synchronized.
 
 class OutputBuffer
   # One unit of output. A Data instance - IMMUTABLE BY CONSTRUCTION: no
@@ -51,9 +55,12 @@ class OutputBuffer
   # Append a structured entry (thread-safe). Returns the Entry that was
   # stored, so a caller can assert on it directly.
   def put(type:, origin:, content: nil)
-    # Data is immutable; freezing the content string too stops a renderer
-    # from mutating the payload text in place.
-    entry = Entry.new(type: type.to_sym, origin: normalize(origin), content: content.to_s.freeze)
+    # Data is immutable; freezing the content string (when one) stops a
+    # renderer from mutating the payload text in place. Non-string content
+    # (e.g. a Hash for :progress_start) is stored as-is - renderers must
+    # treat it read-only too, since Entry itself is immutable.
+    stored = content.is_a?(String) ? content.freeze : content
+    entry  = Entry.new(type: type.to_sym, origin: normalize(origin), content: stored)
     @mutex.synchronize { @entries << entry }
     entry
   end
