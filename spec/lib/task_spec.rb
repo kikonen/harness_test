@@ -232,7 +232,7 @@ RSpec.describe Task do
     end
   end
 
-  describe 'spinner stack (owned by the task, LIFO)' do
+  describe 'the ONE spinner (owned by the drain loop)' do
     let(:task) { described_class.new { |_t| } }
 
     def make_spinner(running: true)
@@ -241,46 +241,38 @@ RSpec.describe Task do
       sp
     end
 
-    it 'top_spinner returns the last pushed entry' do
+    it 'spinner= replaces the spinner and visible_spinner tracks it' do
       a = make_spinner
       b = make_spinner
-      task.push_spinner(a)
-      task.push_spinner(b)
 
-      expect(task.top_spinner).to equal(b)
+      task.spinner = a
+      expect(task.visible_spinner).to equal(a)
+
+      b.start
+      task.spinner = b
+      expect(task.visible_spinner).to equal(b)
     end
 
-    it 'visible_spinner is the topmost running entry' do
-      outer = make_spinner
-      inner = make_spinner
-      task.push_spinner(outer)
-      task.push_spinner(inner)
-
-      expect(task.visible_spinner).to equal(inner)
-    end
-
-    it 'pop_spinner restores the outer spinner to visibility' do
-      outer = make_spinner
-      inner = make_spinner
-      task.push_spinner(outer)
-      task.push_spinner(inner)
-
-      task.pop_spinner&.stop
-
-      expect(task.visible_spinner).to equal(outer)
-    end
-
-    it 'visible_spinner is nil when the stack is empty' do
+    it 'visible_spinner is nil when no spinner has been set yet' do
+      expect(task.spinner).to be_nil
       expect(task.visible_spinner).to be_nil
     end
 
-    it 'clear_all_spinners stops every spinner and empties the stack' do
-      task.push_spinner(make_spinner)
-      task.push_spinner(make_spinner)
+    it 'visible_spinner is nil once the spinner is stopped' do
+      sp = make_spinner
+      task.spinner = sp
+      sp.stop
+
+      expect(task.visible_spinner).to be_nil
+    end
+
+    it 'clear_all_spinners stops the spinner' do
+      sp = make_spinner
+      task.spinner = sp
 
       task.clear_all_spinners
 
-      expect(task.top_spinner).to be_nil
+      expect(sp.running?).to be(false)
       expect(task.visible_spinner).to be_nil
     end
   end
