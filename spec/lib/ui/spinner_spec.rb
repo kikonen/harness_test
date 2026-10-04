@@ -4,8 +4,9 @@ require 'ui'
 require 'stringio'
 
 # The Spinner suite (issue #74 / #40): the class lives in the `UI` namespace.
-# Single-thread I/O model (issue #40): start/stop/pause/resume are pure state
-# changes (no background thread). render! advances one animation frame and
+# Single-thread I/O model (issue #40): start/stop are pure state changes
+# (no background thread). update_detail re-points message/suffix without
+# restarting the animation. render! advances one animation frame and
 # writes it to $stdout. The main thread calls render! on each drain tick.
 # Tests assert the frame text via capture_stdout + render!, not via sleep-based
 # thread observation.
@@ -130,54 +131,70 @@ RSpec.describe UI::Spinner do
     end
   end
 
-  describe '#pause / #resume state management' do
-    it 'reports running? only when active and not paused' do
+  describe '#running?' do
+    it 'is true only between start and stop' do
       spinner = described_class.new
       expect(spinner.running?).to be(false)
       spinner.start
       expect(spinner.running?).to be(true)
-      spinner.pause
-      expect(spinner.running?).to be(false)
-      spinner.resume
-      expect(spinner.running?).to be(true)
       spinner.stop
       expect(spinner.running?).to be(false)
-    end
-
-    it 'does not resume a stopped spinner (issue #116)' do
-      spinner = described_class.new
-      spinner.start
-      spinner.stop
-      spinner.resume
-      expect(spinner.running?).to be(false)
-    end
-
-    it 'pause prevents render! from writing' do
-      spinner = described_class.new('Working', 'ctx 1/2 (50%)')
-      out = capture_stdout do
-        spinner.start
-        spinner.pause
-        spinner.render! # should be no-op
-        spinner.stop
-      end
-      expect(out).to eq('')
-    end
-
-    it 'resume restores rendering after pause' do
-      spinner = described_class.new('Working', 'ctx 1/2 (50%)')
-      out = capture_stdout do
-        spinner.start
-        spinner.pause
-        spinner.resume
-        spinner.render!
-        spinner.stop
-      end
-      expect(out).to include('Working... ctx 1/2 (50%)')
     end
 
     it 'does not raise when stop is called without start' do
       spinner = described_class.new
       capture_stdout { spinner.stop }
+    end
+  end
+
+  describe '#update_detail (re-point without restarting, issue #40 follow-up)' do
+    it 'updates only the message, keeps the existing suffix' do
+      spinner = described_class.new('Working', 'ctx 1/2 (50%)')
+      out = capture_stdout do
+        spinner.start
+        spinner.render!
+        spinner.update_detail(message: 'Sending to gpt-x')
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include('Working... ctx 1/2 (50%)')
+      expect(out).to include('Sending to gpt-x... ctx 1/2 (50%)')
+    end
+
+    it 'updates only the suffix, keeps the existing message' do
+      spinner = described_class.new('Working', 'ctx 1/2 (50%)')
+      out = capture_stdout do
+        spinner.start
+        spinner.render!
+        spinner.update_detail(suffix: 'file.read')
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include('Working... ctx 1/2 (50%)')
+      expect(out).to include('Working... file.read')
+    end
+
+    it 'accepts a callable suffix and keeps animating' do
+      value = 'ctx 1/10 (10%)'
+      spinner = described_class.new('Working')
+      out = capture_stdout do
+        spinner.start
+        spinner.update_detail(suffix: -> { value })
+        spinner.render!
+        value = 'ctx 9/10 (90%)'
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include('Working... ctx 1/10 (10%)')
+      expect(out).to include('Working... ctx 9/10 (90%)')
+    end
+
+    it 'is a no-op when nothing is passed' do
+      spinner = described_class.new('Working', 'ctx 1/2 (50%)')
+      spinner.update_detail
+
+      expect(spinner.instance_variable_get(:@message)).to eq('Working')
+      expect(spinner.instance_variable_get(:@suffix)).to eq('ctx 1/2 (50%)')
     end
   end
 

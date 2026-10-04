@@ -3,8 +3,8 @@
 # -- UI::Spinner --------------------------------------------------------------
 #
 # Animated status indicator (issue #74 / #13). First primitive of the
-# namespaced UI library. Public API is unchanged from the previous top-level
-# Spinner: start / stop / pause / resume / running?.
+# namespaced UI library. Public API is unchanged from the previous
+# top-level Spinner: start / stop / running?.
 #
 # Single-thread I/O rule (issue #40): the spinner does NOT spawn a background
 # thread. It is a pure state object + render method. The main thread calls
@@ -32,12 +32,13 @@ module UI
     # callable (lambda/proc) that is re-evaluated on EVERY frame so it always
     # shows the CURRENT value, not the snapshot taken at construction time
     # (issue #126). nil/empty shows only the message, as before.
+    # The Task drain loop re-points these via #update_detail while the wait
+    # continues - no restart needed.
     def initialize(message = 'Working', suffix = nil)
       @message   = message
       @suffix    = suffix
       @active    = false  # between #start and #stop
-      @paused    = false  # temporarily hidden (tool execution, etc.)
-      @resumable = false  # started and not yet stopped (survives a pause)
+      @resumable = false  # started and not yet stopped
       @frame     = 0
     end
 
@@ -45,29 +46,14 @@ module UI
     # The main thread will start drawing frames on its next render! call.
     def start
       @active    = true
-      @paused    = false
       @resumable = true
       @frame     = 0
     end
 
     # True while the spinner should be visible (between #start and the next
-    # #pause/#stop). Callers use this to decide whether to resume after they
-    # pause it (issue #116).
+    # #stop). The drain loop uses this to decide what gets rendered.
     def running?
-      @active && !@paused
-    end
-
-    # Pause the animation: the main thread will stop drawing frames and
-    # clear the line on its next tick, so that tool output is not broken.
-    def pause
-      @paused = true if @active
-    end
-
-    # Resume the animation after a pause. No-op for a spinner that was never
-    # started or was already stopped - only a paused spinner may be restarted,
-    # so a caller can never resurrect a spinner it does not own (issue #116).
-    def resume
-      @paused = false if @active && @paused
+      @active
     end
 
     # End the spinner. Pure state change - the main thread clears the line
@@ -81,7 +67,7 @@ module UI
 
     # Advance one animation frame and write it to $stdout. Called by the
     # main thread on each drain tick (typically every 100ms). No-op when
-    # not running (paused or stopped).
+    # not running (stopped).
     def render!
       return unless running?
 
@@ -98,13 +84,16 @@ module UI
       $stdout.flush
     end
 
-    # Re-point the suffix (the extra label shown next to the message) without
-    # restarting the animation. The value may be a String or a callable
-    # (matching the constructor's contract - callables are re-evaluated every
-    # frame so they track live state). The spinner continues animating; the
-    # next frame simply shows the new label.
-    def update_suffix(value)
-      @suffix = value
+    # Re-point the message and/or suffix without restarting the animation
+    # (issue #40 follow-up - the drain loop uses this to apply a
+    # :spinner_detail entry). Each argument is independent: pass nil to
+    # keep the current value, pass a new one to replace it. The values
+    # follow the constructor's contract (plain strings, or callables that
+    # are re-evaluated every frame so they track live state). The spinner
+    # keeps animating; the next frame simply shows the new content.
+    def update_detail(message: nil, suffix: nil)
+      @message = message unless message.nil?
+      @suffix  = suffix  unless suffix.nil?
     end
 
     # One spinner frame as a plain string (no \r, no write). Public so tests

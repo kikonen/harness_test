@@ -101,8 +101,9 @@ class CommandHandler
 
   # issue #40: direct prompts run on a Task thread. All console I/O is
   # serialized through the main thread via the drain loop (single-thread
-  # I/O rule). The task thread's $stdout is a StdoutProxy that captures
-  # puts/print and routes them through the outbox queue to the main thread.
+  # I/O rule): the task thread emits typed entries to its OutputBuffer via
+  # Task.emit (or posts blocking requests for dialogs), and the drain loop
+  # renders everything on the main thread - including spinner frames.
   def run_direct_prompt(text)
     puts
     error, _task = Task.run(harness: @harness) do |_t|
