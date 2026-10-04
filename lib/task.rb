@@ -30,12 +30,15 @@
 #
 # Spinner ownership - the RUNNER decides, trivially:
 #   The drain loop shows the spinner while the outbox is EMPTY (the task is
-#   silently working). A :spinner_detail event re-points what the current
-#   wait looks like (message + optional suffix) and keeps the spinner alive
-#   across that batch. Any OTHER data clears it - we are rendering output,
-#   not waiting. It comes back on the next tick only if the outbox is empty
-#   again. Harness code never starts or stops spinners - it just emits
-#   :spinner_detail (or nothing at all) and is done.
+#   silently working - i.e. while we wait for a slow operation such as an
+#   LLM request). A :spinner_detail event re-points what the current wait
+#   looks like (message + optional suffix) and keeps the spinner alive after
+#   that batch. Any OTHER data clears the spinner line BEFORE it is rendered
+#   (output lines must never land under a stale spin frame). It comes back on
+#   the next tick only if the outbox is empty again. Harness code never
+#   starts or stops spinners - it just emits :spinner_detail (or nothing at
+#   all) and is done. Tool execution renders output, it does not wait, so it
+#   never re-points the spinner.
 #
 # Ctrl+C:
 #   While Task.run is draining, SIGINT is trapped so an interrupt targets
@@ -196,6 +199,11 @@ class Task
   attr_reader :spinner
   def spinner=(sp); @spinner = sp; end
 
+  # True while the main thread is inside a dialog's perform_direct
+  # (stdin read + prompt print) - store_and_render must not clear any
+  # output line in that window, so the Choice prompt survives.
+  attr_writer :dialog_open
+
   # The spinner while it is animating (nil when stopped).
   def visible_spinner
     @spinner if @spinner&.running?
@@ -212,14 +220,15 @@ class Task
   #
   # Spawns the task, then blocks in a poll loop that:
   #   1. Shows the spinner ONLY while the outbox is empty (the task is
-  #      silently working).
+  #      silently working - i.e. waiting on something slow such as an LLM).
   #   2. Polls the SINGLE event queue (the outbox) one message at a time.
-  #      - Output events: stored into the OutputBuffer (structured log) AND
-  #        rendered to stdout in order.
+  #      - Output events: the stale spinner line is cleared FIRST (a spin
+  #        frame must never survive above real output), then the event is
+  #        stored into the OutputBuffer and rendered to stdout in order.
   #      - Control events (:done, :error_ctrl, :__request__): handled directly.
-  #   3. After each batch: clear the spinner UNLESS the batch contained a
-  #      :spinner_detail (the wait is re-pointed, keep animating). Exits on
-  #      :done or :error_ctrl.
+  #   3. A :spinner_detail batch keeps the spinner alive with its new
+  #      message (the wait continues); every other batch has already
+  #      cleared the spinner line inside store_and_render before printing.
   #
   # Ctrl+C: SIGINT is trapped for the duration of this call, so an interrupt
   # always hits the drain loop (which then force-stops the task thread - a
@@ -247,10 +256,8 @@ class Task
 
         # Process this event and any that arrived in the same window
         # (batch-drain so we render one spinner frame per batch, not
-        # one per event). detail_hit remembers whether a :spinner_detail
-        # re-pointed the wait in this batch.
+        # one per event).
         finished   = false
-        detail_hit = false
         loop do
           case msg[:type]
           when :done
@@ -261,7 +268,7 @@ class Task
           when :__request__
             handle_request(task, msg)
           when :spinner_detail
-            detail_hit = true
+            # Handled inside store_and_render (re-points the spinner).
           end
 
           # Control events are handled above and must not be rendered; only
@@ -272,15 +279,6 @@ class Task
 
           msg = task.poll(0)  # non-blocking: grab next if available
           break unless msg
-        end
-
-        # Data arrived: clear the spinner line - EXCEPT when a
-        # :spinner_detail re-pointed the wait, in which case the spinner
-        # must stay alive to show its new message. It comes back on the
-        # next tick only if the outbox is still empty (task working).
-        unless detail_hit
-          task.visible_spinner&.clear_line
-          task.clear_all_spinners
         end
 
         break if finished
