@@ -125,7 +125,9 @@ module Tools
         note: args['note'],
         free_text: args['free_text'] == true,
         free_text_prompt: args['free_text_prompt']
-      ).show
+        # nil/nil: tools run on the Task thread, so the dialog is routed
+        # through the task and the MAIN THREAD services the I/O (issue #40).
+      ).show(stdout: nil, stdin: nil)
 
       if choice.is_a?(Array) && choice.first == Dialog::FREE_TEXT
         # [FREE_TEXT, text]: the user typed their own answer.

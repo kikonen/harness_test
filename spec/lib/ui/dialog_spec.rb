@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'task'
 require 'stringio'
 
 # The Dialog suite (issue #74): the class lives in the `UI` namespace.
@@ -21,7 +22,43 @@ RSpec.describe UI::Dialog do
   end
 
   def show(dialog)
-    dialog.show
+    # Streams are the explicit contract (no globals inside Dialog): these
+    # specs stub $stdin / capture $stdout, so pass exactly those in.
+    dialog.show(stdout: $stdout, stdin: $stdin)
+  end
+
+  describe 'stream contract (issue #40: no global stream access)' do
+    let(:dialog) { described_class.new(title: 't', options: options) }
+
+    it 'raises when no Task is active and streams are not given' do
+      expect { dialog.show }.to raise_error(ArgumentError, /explicit stdout:\/stdin:/)
+    end
+
+    it 'raises when only one stream is given without a Task' do
+      expect { dialog.show(stdout: StringIO.new) }
+        .to raise_error(ArgumentError, /explicit stdout:\/stdin:/)
+    end
+
+    context 'on a task thread (Thread.current[:harness_task] set)' do
+      around do |example|
+        old = Thread.current[:harness_task]
+        Thread.current[:harness_task] = Task.new { }
+        example.run
+      ensure
+        Thread.current[:harness_task] = old
+      end
+
+      it 'routes through the task and rejects named streams' do
+        expect { dialog.show(stdout: $stdout, stdin: $stdin) }
+          .to raise_error(ArgumentError, /pass stdout: nil, stdin: nil/)
+      end
+
+      it 'passes nil/nil straight to the task request protocol' do
+        task = Task.current
+        expect(task).to receive(:request).with(:dialog, dialog: dialog).and_return(:yes)
+        expect(dialog.show(stdout: nil, stdin: nil)).to eq(:yes)
+      end
+    end
   end
 
   # Capture everything written to $stdout while the block runs.
@@ -249,7 +286,7 @@ RSpec.describe UI::Dialog do
         title: 't',
         options: [Dialog::Option.new(title: 'Allow', value: :allow)]
       )
-      expect(dialog.show).to eq([:allow, 'seems fine'])
+      expect(show(dialog)).to eq([:allow, 'seems fine'])
     end
   end
 end

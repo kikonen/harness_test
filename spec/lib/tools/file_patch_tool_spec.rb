@@ -11,6 +11,17 @@ RSpec.describe Tools::FilePatchTool do
     Digest::SHA256.file(path).hexdigest
   end
 
+  # Drive the grant dialog without any real I/O: intercept Dialog#show (the
+  # tool calls it with stdout: nil, stdin: nil because tools run on the Task
+  # thread) and perform the interaction directly on a StringIO.
+  def drive_dialog(*lines)
+    stdin  = StringIO.new(lines.join("\n"))
+    stdout = StringIO.new
+    allow_any_instance_of(UI::Dialog).to receive(:show) do |dialog|
+      dialog.perform_direct(stdout: stdout, stdin: stdin)
+    end
+  end
+
   describe '#execute' do
     it 'applies a simple single-hunk patch and returns the new sha' do
       Dir.mktmpdir do |dir|
@@ -116,7 +127,7 @@ RSpec.describe Tools::FilePatchTool do
         File.write(target, "line1\n")
         list   = FileList.new(workdir: dir)
         tool   = described_class.new(list, {})
-        allow($stdin).to receive(:gets).and_return("4\n", nil)
+        drive_dialog("4\n")
 
         out = tool.execute('path' => 'hello.txt', 'diff' => '@@ -1 +1 @@\n+new', 'sha' => sha_of(target))
         expect(out).to eq("error: access denied for 'hello.txt'")

@@ -140,7 +140,9 @@ module Tools
         # (e.g. "2 4") - issue #102. Only meaningful when there is at
         # least one grantable prefix.
         multi_select: !prefixes.empty?
-      ).show
+        # nil/nil: tools run on the Task thread, so the dialog is routed
+        # through the task and the MAIN THREAD services the I/O (issue #40).
+      ).show(stdout: nil, stdin: nil)
 
       result = handle_choice(choice)
       return result[:denial] if result[:denied]

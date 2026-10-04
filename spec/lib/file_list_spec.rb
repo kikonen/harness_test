@@ -5,17 +5,28 @@ require 'stringio'
 require 'tmpdir'
 
 RSpec.describe FileList do
-  # Feed a sequence of lines to $stdin (last element nil = EOF).
-  def stub_stdin(*lines)
-    allow($stdin).to receive(:gets).and_return(*lines)
+  # Drive the grant dialog without any real I/O: intercept Dialog#show and
+  # perform it on StringIO streams we control. grant_access passes
+  # stdout: nil, stdin: nil (task-thread contract), so the stub must NOT
+  # call through to show - it performs the direct I/O itself. Returns
+  # [grant result, dialog output].
+  def drive_grant_dialog(list, *lines)
+    stdin  = StringIO.new(lines.join("\n"))
+    stdout = StringIO.new
+    allow_any_instance_of(UI::Dialog).to receive(:show) do |dialog|
+      dialog.perform_direct(stdout: stdout, stdin: stdin)
+    end
+    result = list.grant_access(*@grant_args)
+    [result, stdout.string]
   end
 
   describe '#grant_access denial' do
     it 'returns { status: :denied, note: nil } for a plain cancel' do
       Dir.mktmpdir do |dir|
         list = described_class.new(workdir: dir)
-        stub_stdin("4\n") # file prompt: 1=file, 2=parent flat, 3=parent recursive, 4=cancel
-        result = list.grant_access('secret.txt', :r)
+        @grant_args = ['secret.txt', :r]
+        # file prompt: 1=file, 2=parent flat, 3=parent recursive, 4=cancel
+        result, _out = drive_grant_dialog(list, "4\n")
         expect(result).to eq({ status: :denied, note: nil })
       end
     end
@@ -23,8 +34,8 @@ RSpec.describe FileList do
     it 'carries the user\'s note on a noted cancel' do
       Dir.mktmpdir do |dir|
         list = described_class.new(workdir: dir)
-        stub_stdin("4 no, and because X\n")
-        result = list.grant_access('secret.txt', :r)
+        @grant_args = ['secret.txt', :r]
+        result, _out = drive_grant_dialog(list, "4 no, and because X\n")
         expect(result).to eq({ status: :denied, note: 'no, and because X' })
       end
     end
@@ -32,8 +43,9 @@ RSpec.describe FileList do
     it 'still returns :granted when the user allows' do
       Dir.mktmpdir do |dir|
         list = described_class.new(workdir: dir)
-        stub_stdin("1\n") # file prompt option 1 = allow this file only
-        result = list.grant_access('secret.txt', :r)
+        @grant_args = ['secret.txt', :r]
+        # file prompt option 1 = allow this file only
+        result, _out = drive_grant_dialog(list, "1\n")
         expect(result).to eq(:granted)
       end
     end
@@ -43,8 +55,8 @@ RSpec.describe FileList do
     it 'offers the target directory itself as the first option' do
       Dir.mktmpdir do |dir|
         list = described_class.new(workdir: dir)
-        stub_stdin("1\n")
-        result = list.grant_access('newdir', :w)
+        @grant_args = ['newdir', :w]
+        result, _out = drive_grant_dialog(list, "1\n")
         expect(result).to eq(:granted)
         # The grant must be on the TARGET, not the parent: existing siblings
         # of the parent stay non-writable.
@@ -56,8 +68,9 @@ RSpec.describe FileList do
     it 'still allows a parent-dir grant when the user prefers one' do
       Dir.mktmpdir do |dir|
         list = described_class.new(workdir: dir)
-        stub_stdin("3\n") # 1=target, 2=parent flat, 3=parent recursive
-        result = list.grant_access('newdir', :w)
+        @grant_args = ['newdir', :w]
+        # 1=target, 2=parent flat, 3=parent recursive
+        result, _out = drive_grant_dialog(list, "3\n")
         expect(result).to eq(:granted)
         expect(list.writable?('newdir')).to be(true)
         expect(list.writable?('sibling.txt')).to be(true)

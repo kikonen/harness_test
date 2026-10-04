@@ -42,8 +42,11 @@
 # Single-thread I/O rule (issue #40): when called from within a Task
 # thread, `show` routes the entire dialog interaction through the task's
 # request/response protocol so that stdin/stdout are used only on the
-# main thread. When no Task is active (tests, direct CLI commands), it
-# performs the I/O directly as before.
+# main thread - and callers MUST pass nil for both streams then, since
+# naming $stdout/$stdin from a task thread would be direct global stream
+# access from the wrong thread. When no Task is active (tests, direct
+# CLI commands), explicit stdout:/stdin: streams are REQUIRED and used
+# directly.
 #
 #   dialog = UI::Dialog.new(
 #     title: 'Access requested (write access): lib/foo.rb',
@@ -54,7 +57,9 @@
 #                              description: 'covers every file under lib/')
 #     ]
 #   )
-#   choice = dialog.show  # => :file_only, [:file_only, 'note'], or :cancelled
+#   choice = dialog.show                        # inside a Task thread: routed
+#   choice = dialog.show(stdout: out, stdin: in)  # no task: direct I/O on them
+#     # => :file_only, [:file_only, 'note'], or :cancelled
 module UI
   class Dialog
     # Standard value returned when the user picks the cancel option (or
@@ -124,18 +129,31 @@ module UI
     #
     # Single-thread I/O rule (issue #40): when called from within a Task
     # thread (Thread.current[:harness_task] is set), this routes through
-    # the task's request/response protocol so that all stdin/stdout I/O
-    # happens on the main thread. Otherwise, performs the I/O directly
-    # (tests, /grant commands, etc.).
-    def show
-      task = Thread.current[:harness_task]
+    # the task's request/response protocol and the MAIN THREAD services the
+    # I/O with the task's injected streams (Task.run owns them). In that
+    # case pass nil for both - a caller on a task thread must NOT name
+    # $stdout/$stdin at all, since that would be direct global stream
+    # access from the wrong thread. When no Task is active (CLI main
+    # thread, tests), the streams are used DIRECTLY and must be the exact
+    # ones the caller wants to use - deliberately no defaults and no
+    # global lookup: a dialog never silently talks to some stream nobody
+    # passed in.
+    def show(stdout: nil, stdin: nil)
+      # Guard keeps the load order independent: dialog can be loaded before
+      # task (they only meet at runtime on the main thread).
+      task = defined?(Task) ? Task.current : nil
       if task
+        raise ArgumentError, 'dialog routed through a Task: pass stdout: nil, stdin: nil' \
+          unless stdout.nil? && stdin.nil?
+
         # Route through the main thread: post a request and block until
         # the main thread processes the dialog and responds.
         task.request(:dialog, dialog: self)
       else
-        # TODO KI GOTCHA! how these are suppoed to come here?!?
-        perform_direct(stdout: $stdout, stdin: $stdin)
+        raise ArgumentError, 'no Task active: show requires explicit stdout:/stdin: streams' \
+          if stdout.nil? || stdin.nil?
+
+        perform_direct(stdout: stdout, stdin: stdin)
       end
     end
 
