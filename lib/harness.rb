@@ -13,7 +13,6 @@ require_relative 'tool'
 require_relative 'llm_client'
 require_relative 'file_list'
 require_relative 'session'
-require_relative 'output_buffer'
 require_relative 'task'
 require_relative 'tools/echo_tool'
 require_relative 'tools/notify_tool'
@@ -63,17 +62,13 @@ class Harness
   # Log file name (inside the session's own directory, see #session_log_path).
   SESSION_LOG_FILE = 'harness.log'
 
-  attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager, :client, :output_buffer
-  attr_accessor :spinner, :history
+  attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager, :client
+  attr_accessor :history
 
   def initialize(options, file_list)
     @options       = options
     @file_list     = file_list
     @session       = Session.new(build_system_prompt)
-    # Structured output sink (issue #40 follow-up): task-thread code appends
-    # typed {type, origin, content} entries here instead of writing to
-    # $stdout; the CLI drain loop advances the read waterline and renders.
-    @output_buffer = OutputBuffer.new
     # One-time migration of legacy state (.sessions/, .harness_history) into
     # the .harness directory. Best-effort: failures are reported but never
     # block startup (issue #120).
@@ -86,7 +81,6 @@ class Harness
     @tool_registry = build_tool_registry
     @client        = LLMClient.new(options, @logger)
     @session_manager = SessionManager.new(self, file_list)
-    @spinner       = nil
   end
 
   # Base system prompt (from config or built-in default) plus optional
@@ -347,8 +341,9 @@ class Harness
     ctx = context_indicator
     parts << ctx if ctx
 
-    # issue #40 follow-up: structured output sink (no direct puts).
-    @output_buffer.put(type: :stats, origin: :harness, content: "  [#{parts.join(' | ')}]")
+    # issue #40 follow-up: structured output sink - emit to the Task-owned
+    # buffer; the drain loop renders it on the main thread.
+    Task.emit(:stats, origin: :harness, content: "  [#{parts.join(' | ')}]")
   end
 
   # Context-usage indicator, e.g. "🧠 ctx 42133/65536 (64%)". Shown on every
@@ -425,9 +420,6 @@ class Harness
   def print_step_display(iteration, message)
     return if step_display_disabled?
 
-    # Pause the send_session spinner while printing (best-effort: there is
-    # no active spinner when called outside a live send_session).
-    @spinner&.pause
     @session_manager.log_response(reasoning: message[:reasoning], content: message[:content])
 
     first_line = ->(key) { [message[key]].map { |m| m.to_s.strip }.reject(&:empty?).first }
@@ -437,12 +429,12 @@ class Harness
     tools  = message[:tool_calls].map { |tc| tc[:function][:name] }
     # The step header uses the reasoning when present, otherwise the
     # content (a response with no reasoning still shows a readable step).
-    # issue #40 follow-up: structured output sink (no direct puts).
-    @output_buffer.put(type: :step, origin: :harness, content: "[step #{iteration}]")
-    @output_buffer.put(type: :step, origin: :harness, content: ">>> #{reason} <<<") if reason
-    @output_buffer.put(type: :step, origin: :harness, content: "||| #{content} |||") if content
+    # issue #40 follow-up: structured output sink - no direct puts.
+    Task.emit(:step, origin: :harness, content: "[step #{iteration}]")
+    Task.emit(:step, origin: :harness, content: ">>> #{reason} <<<") if reason
+    Task.emit(:step, origin: :harness, content: "||| #{content} |||") if content
 
-    @output_buffer.put(type: :step, origin: :harness, content: "    -> #{tools.join(', ')}")
+    Task.emit(:step, origin: :harness, content: "    -> #{tools.join(', ')}")
   end
 
   def step_display_disabled?
@@ -459,12 +451,11 @@ class Harness
       return "error: unknown tool '#{func_name}'"
     end
 
-    spinner_paused = false
-    if @spinner
-      @spinner.pause
-      spinner_paused = true
-    end
-
+    # Update the visible spinner's extra label to the tool being executed,
+    # so the user can see what is happening while it runs. The drain loop
+    # suppresses the spinner automatically when any text/dialog I/O happens,
+    # and re-shows it on the next tick - we only update the label here.
+    Task.emit(:spinner_detail, origin: :harness, content: func_name)
     begin
       result = tool.execute(args)
       logger.info("tool #{func_name} → #{result}")
@@ -472,8 +463,6 @@ class Harness
     rescue => e
       logger.error("tool #{func_name} failed: #{e.message}")
       "error: #{e.message}"
-    ensure
-      @spinner&.resume if spinner_paused
     end
   end
 end
