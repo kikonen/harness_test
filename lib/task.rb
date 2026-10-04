@@ -254,6 +254,11 @@ class Task
         msg = task.poll
         next unless msg  # timeout expired, loop again (spinner re-renders)
 
+        if spinner = task.spinner
+          spinner.stop
+          spinner.clear_line
+        end
+
         # Process this event and any that arrived in the same window
         # (batch-drain so we render one spinner frame per batch, not
         # one per event).
