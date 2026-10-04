@@ -13,6 +13,7 @@ require_relative 'tool'
 require_relative 'llm_client'
 require_relative 'file_list'
 require_relative 'session'
+require_relative 'output_buffer'
 require_relative 'task'
 require_relative 'tools/echo_tool'
 require_relative 'tools/notify_tool'
@@ -62,13 +63,17 @@ class Harness
   # Log file name (inside the session's own directory, see #session_log_path).
   SESSION_LOG_FILE = 'harness.log'
 
-  attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager, :client
+  attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager, :client, :output_buffer
   attr_accessor :spinner, :history
 
   def initialize(options, file_list)
     @options       = options
     @file_list     = file_list
     @session       = Session.new(build_system_prompt)
+    # Structured output sink (issue #40 follow-up): task-thread code appends
+    # typed {type, origin, content} entries here instead of writing to
+    # $stdout; the CLI drain loop advances the read waterline and renders.
+    @output_buffer = OutputBuffer.new
     # One-time migration of legacy state (.sessions/, .harness_history) into
     # the .harness directory. Best-effort: failures are reported but never
     # block startup (issue #120).
@@ -342,7 +347,8 @@ class Harness
     ctx = context_indicator
     parts << ctx if ctx
 
-    puts "  [#{parts.join(' | ')}]"
+    # issue #40 follow-up: structured output sink (no direct puts).
+    @output_buffer.put(type: :stats, origin: :harness, content: "  [#{parts.join(' | ')}]")
   end
 
   # Context-usage indicator, e.g. "🧠 ctx 42133/65536 (64%)". Shown on every
@@ -431,12 +437,12 @@ class Harness
     tools  = message[:tool_calls].map { |tc| tc[:function][:name] }
     # The step header uses the reasoning when present, otherwise the
     # content (a response with no reasoning still shows a readable step).
-    puts "[step #{iteration}]"
-    puts ">>> #{reason} <<<" if reason
-    puts "||| #{content} |||" if content
+    # issue #40 follow-up: structured output sink (no direct puts).
+    @output_buffer.put(type: :step, origin: :harness, content: "[step #{iteration}]")
+    @output_buffer.put(type: :step, origin: :harness, content: ">>> #{reason} <<<") if reason
+    @output_buffer.put(type: :step, origin: :harness, content: "||| #{content} |||") if content
 
-    puts "    -> #{tools.join(', ')}"
-    $stdout.flush
+    @output_buffer.put(type: :step, origin: :harness, content: "    -> #{tools.join(', ')}")
   end
 
   def step_display_disabled?

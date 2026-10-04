@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'logger'
 require 'spinner'
+require 'output_buffer'
 require 'session_manager'
 require 'fileutils'
 require 'tmpdir'
@@ -28,9 +29,11 @@ RSpec.describe SessionManager do
         @spinner = nil
         @history = nil
         @logger  = Logger.new(File::NULL)
+        # issue #40 follow-up: structured output sink (SessionManager writes here).
+        @output_buffer = OutputBuffer.new
       end
 
-      attr_reader :options, :logger
+      attr_reader :options, :logger, :output_buffer
 
       # issue #113: resume re-points the logger; no-op in the stub.
       def rebind_logger
@@ -320,9 +323,11 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
         @client  = client
         @options = { num_ctx: 1000, auto_save: false }
         @logger  = Logger.new(File::NULL)
+        # issue #40 follow-up: structured output sink (SessionManager writes here).
+        @output_buffer = OutputBuffer.new
       end
 
-      attr_reader :options, :logger
+      attr_reader :options, :logger, :output_buffer
 
       def compact_max_size
         nil
