@@ -98,6 +98,15 @@ module UI
       $stdout.flush
     end
 
+    # Re-point the suffix (the extra label shown next to the message) without
+    # restarting the animation. The value may be a String or a callable
+    # (matching the constructor's contract - callables are re-evaluated every
+    # frame so they track live state). The spinner continues animating; the
+    # next frame simply shows the new label.
+    def update_suffix(value)
+      @suffix = value
+    end
+
     # One spinner frame as a plain string (no \r, no write). Public so tests
     # can assert the exact frame text without capturing stdout.
     def line(i)
