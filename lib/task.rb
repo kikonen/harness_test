@@ -24,6 +24,15 @@
 #   helpers fall back to the real `$stdout` so existing bare `puts` call-
 #   sites in main-thread-only code keep working.
 #
+#   Structured sink (issue #40 follow-up): harness-owned code (Harness itself,
+#   SessionManager, and soon the tools) no longer writes to the Capture at
+#   all - it appends typed {type, origin, content} entries to the harness's
+#   OutputBuffer instead. The drain loop (#drain_output_buffer below) is the
+#   single place that turns those entries into screen output: each tick it
+#   advances the buffer's read waterline and renders whatever is new. This is
+#   the "waterline" the CLI/renderer polls to know there is more output, and
+#   the same loop will hand entries to a TUI later - no puts anywhere.
+#
 #   Dialogs use a different mechanism: UI::Dialog#show checks
 #   `Thread.current[:harness_task]` and routes via request/response, so
 #   $stdin reads happen on the main thread as well.
@@ -119,7 +128,8 @@ class Task
   # expected to call for console output: puts / print / write / flush. It
   # does NOT model a full stream (no fileno, no seek, no binary mode); it
   # just funnels text into the task's outbox queue so the drain loop can
-  # order and serialize writes on the main thread.
+  # order and serialize writes on the main thread. This is the LEGACY path
+  # still used by tools that have not been migrated to the OutputBuffer yet.
   class Capture
     def initialize(task)
       @task = task
@@ -198,14 +208,41 @@ class Task
     end
   end
 
+  # -- Structured sink rendering (issue #40 follow-up) ----------------------
+
+  # Render ONE structured OutputBuffer::Entry to the given stream. For now
+  # every type is printed as a plain line; this is the extension point where
+  # a future TUI will style entries by `type`/`origin` instead of dumping raw
+  # text. Kept dumb and main-thread-only so it can never race task writes.
+  def self.render_entry(entry, stdout)
+    stdout.puts(entry.content)
+  end
+
+  # Drain the harness's OutputBuffer (the structured output sink owned by
+  # the harness) and render whatever is new onto `stdout`. This is the
+  # "waterline" read: each tick the main thread advances the buffer's read
+  # index and dumps the new entries to the screen, in order. No-op when the
+  # harness exposes no buffer (e.g. a bare double in tests). Runs on the
+  # MAIN thread only - the single-thread I/O rule (issue #40).
+  def self.drain_output_buffer(harness, stdout)
+    buffer = harness.respond_to?(:output_buffer) ? harness.output_buffer : nil
+    return unless buffer
+
+    entries = buffer.drain
+    return if entries.empty?
+
+    entries.each { |entry| render_entry(entry, stdout) }
+    stdout.flush
+  end
+
   # -- Drain loop (called from the MAIN thread) ------------------------------
   #
   # Spawns the task, then blocks in a poll loop that:
   #   1. Renders the spinner frame (if active) - main thread I/O.
-  #   2. Reads the next message from the outbox (or times out).
-  #   3. Writes :output messages to the real $stdout.
-  #   4. Handles :dialog requests via perform_direct ($stdin on main).
-  #   5. Exits on :done or :error.
+  #   2. Drains the harness OutputBuffer and renders new entries (waterline).
+  #   3. Reads the next message from the outbox (or times out) - the legacy
+  #      :output channel and :dialog requests still work as before.
+  #   4. Exits on :done or :error.
   #
   # Returns [error_msg, task] where error_msg is nil on success.
   def self.run(harness:, &block)
@@ -228,7 +265,10 @@ class Task
           spinner_was_rendering = false
         end
 
-        # 2. Poll the outbox (non-blocking, DEFAULT_POLL_TIMEOUT).
+        # 2. Drain + render the harness OutputBuffer (structured sink).
+        drain_output_buffer(harness, real_stdout)
+
+        # 3. Poll the outbox (non-blocking, DEFAULT_POLL_TIMEOUT).
         msg = task.poll
 
         if msg
@@ -251,6 +291,13 @@ class Task
           end
         end
       end
+
+      # Final drain: the in-loop order is drain-then-poll, so one window
+      # remains where an entry appended just before :done was enqueued could
+      # slip past the last in-loop drain. After :done no more appends occur
+      # (the task block has finished), so one more drain here is complete and
+      # idempotent (returns [] when nothing is pending).
+      drain_output_buffer(harness, real_stdout)
     ensure
       sp = harness.spinner
       sp.clear_line if spinner_was_rendering && sp

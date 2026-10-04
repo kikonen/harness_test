@@ -201,6 +201,9 @@ RSpec.describe Harness do
 
   describe '#print_step_display (issue #131)' do
     let(:harness) { build_harness }
+    # issue #40 follow-up: print_step_display writes to the harness's
+    # OutputBuffer instead of $stdout; drain it to assert on the lines.
+    let(:drained_lines) { harness.output_buffer.drain.map(&:content) }
 
     let(:message) do
       {
@@ -213,30 +216,34 @@ RSpec.describe Harness do
     end
 
     it 'prints the step number, a digest of the reasoning and the tools called' do
-      out = capture_stdout { harness.send(:print_step_display, 3, message) }
+      harness.send(:print_step_display, 3, message)
+      lines = drained_lines
 
-      expect(out).to include('[step 3]')
-      expect(out).to include('>>> First I will inspect the spinner, then run the specs. <<<')
-      expect(out).to include('-> file.read, run.command')
+      expect(lines).to include('[step 3]')
+      expect(lines).to include('>>> First I will inspect the spinner, then run the specs. <<<')
+      expect(lines).to include('    -> file.read, run.command')
     end
 
     it 'falls back to message content when there is no reasoning' do
       msg = { reasoning: nil, content: 'checking the test suite', tool_calls: [{ id: 'c1', function: { name: 'run.command' } }] }
 
-      out = capture_stdout { harness.send(:print_step_display, 2, msg) }
+      harness.send(:print_step_display, 2, msg)
+      lines = drained_lines
 
-      expect(out).to include('[step 2]')
-      expect(out).to include('||| checking the test suite |||')
-      expect(out).to include('-> run.command')
+      expect(lines).to include('[step 2]')
+      expect(lines).to include('||| checking the test suite |||')
+      expect(lines).to include('    -> run.command')
     end
 
     it 'prints only the tool line when there is no reasoning text at all' do
       msg = { reasoning: nil, content: nil, tool_calls: [{ id: 'c1', function: { name: 'file.search' } }] }
 
-      out = capture_stdout { harness.send(:print_step_display, 4, msg) }
+      harness.send(:print_step_display, 4, msg)
+      lines = drained_lines
 
-      expect(out).to include('[step 4]')
-      expect(out).to include("    -> file.search\n")
+      expect(lines).to include('[step 4]')
+      # The renderer owns the trailing newline now - the entry holds the raw line.
+      expect(lines).to include('    -> file.search')
     end
 
     it 'prints nothing when disabled via HARNESS_STEP_DISPLAY=off' do
@@ -244,9 +251,9 @@ RSpec.describe Harness do
       ENV['HARNESS_STEP_DISPLAY'] = 'off'
 
       begin
-        out = capture_stdout { harness.send(:print_step_display, 1, message) }
+        harness.send(:print_step_display, 1, message)
 
-        expect(out).to be_empty
+        expect(drained_lines).to be_empty
       ensure
         ENV['HARNESS_STEP_DISPLAY'] = original
       end
