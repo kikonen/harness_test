@@ -160,19 +160,14 @@ class SessionManager
                       'Include: (1) what was being worked on, (2) key decisions made, ' \
                       '(3) files that were modified or created, (4) any pending tasks or ' \
                       'unresolved issues, (5) important context needed to continue. '
-    # issue #115 / #126: show the LIVE context usage next to the spinner.
-    # A callable suffix is re-evaluated every frame from the CURRENT chain,
-    # not the "before" snapshot (already visible above). The Task drain loop
-    # owns the actual animation - we only describe the state change.
-    Task.emit(:progress_start, origin: :session_manager,
+    # issue #115 / #126: show the LIVE context usage next to the spinner -
+    # a callable suffix is re-evaluated every frame from the CURRENT chain,
+    # not the "before" snapshot (already visible above).
+    Task.emit(:spinner_detail, origin: :session_manager,
               content: { message: "Compacting session (#{before} messages to summary)",
                          suffix: -> { @harness.context_indicator_live } })
 
-    begin
-      summary_text = generate_compact_summary(conversation, end_instruction)
-    ensure
-      Task.emit(:progress_stop, origin: :session_manager)
-    end
+    summary_text = generate_compact_summary(conversation, end_instruction)
     @harness.session.compact(summary_text, recent_count: @harness.compact_recent_messages)
     after = @harness.session.messages.size
     retained = [after - 3, 0].max
@@ -224,18 +219,13 @@ class SessionManager
     # from inside Harness#call_llm). The Task's LIFO spinner stack handles
     # nesting for free: we push OUR compaction spinner on top, the drain loop
     # draws only the topmost running one (so the outer send line goes quiet
-    # while ours is up), and when we pop it falls back to the outer again.
-    # No pause/resume needed - visibility follows the stack automatically.
+    # while ours is up).
 
-    Task.emit(:progress_start, origin: :session_manager,
+    Task.emit(:spinner_detail, origin: :session_manager,
               content: { message: 'Compacting session mid-task (summarizing full work trail)',
                          suffix: -> { @harness.context_indicator_live(messages) } })
-    begin
-      summary_text = generate_compact_summary(conversation, INLOOP_SUMMARY_INSTRUCTION)
-    ensure
-      Task.emit(:progress_stop, origin: :session_manager)
-    end
 
+    summary_text = generate_compact_summary(conversation, INLOOP_SUMMARY_INSTRUCTION)
     new_chain = [
       { role: 'system', content: @harness.session.system_prompt },
       { role: 'user', content: "This is a summary of our previous conversation:\n\n#{summary_text}" },
@@ -270,8 +260,9 @@ class SessionManager
   def send_session
     # issue #115 / #126: show the LIVE context usage estimate next to the
     # spinner (re-evaluated each frame from the current chain, not a snapshot).
-    # The Task drain loop owns the animation - we only describe the state.
-    Task.emit(:progress_start, origin: :session_manager,
+    # We describe the wait; the runner decides when to show / hide the
+    # spinner (always while waiting on us).
+    Task.emit(:spinner_detail, origin: :session_manager,
               content: { message: "Sending to #{@harness.options[:model]}",
                          suffix: -> { @harness.context_indicator_live } })
 
@@ -294,8 +285,6 @@ class SessionManager
                   content: "  #{result[:context_before]} -> #{result[:context_line]}")
       end
       response = @harness.call_llm
-    ensure
-      Task.emit(:progress_stop, origin: :session_manager)
     end
 
     # issue #131: the full reasoning and content of every response go to

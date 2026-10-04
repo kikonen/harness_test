@@ -6,31 +6,30 @@ require 'ui/spinner'
 require 'stringio'
 
 RSpec.describe Task do
-  def collect_until_done(task)
-    messages = []
+  def drain_outbox(task)
+    events = []
     loop do
-      msg = task.poll(2)
-      break if msg.nil?
-
-      messages << msg
-      break if msg[:type] == :done
+      msg = task.poll(0)
+      break unless msg
+      events << msg
     end
-    messages
+    events
   end
 
-  describe 'emit (fire-and-forget)' do
+  describe 'push_event (single event queue)' do
     it 'delivers messages to the outbox in order' do
       task = described_class.new do |t|
-        t.emit(:output, text: "hello")
-        t.emit(:stats, iterations: 3)
+        t.push_event(type: :output, origin: :harness, content: 'hello')
+        t.push_event(type: :stats, origin: :harness, content: '3 iterations')
       end
       task.start
 
-      messages = collect_until_done(task)
+      sleep 0.1 # let the thread start and push its events before draining
+      messages = drain_outbox(task)
 
       expect(messages.map { |m| m[:type] }).to eq(%i[output stats done])
-      expect(messages[0][:text]).to eq("hello")
-      expect(messages[1][:iterations]).to eq(3)
+      expect(messages[0][:content]).to eq('hello')
+      expect(messages[1][:content]).to eq('3 iterations')
     end
 
     it 'delivers a :done message when the block completes' do
@@ -50,8 +49,8 @@ RSpec.describe Task do
     it 'blocks the task thread until the main thread responds' do
       task = described_class.new do |t|
         reply = t.request(:test_request, key: 'value')
-        # After unblock, emit the received value for verification
-        t.emit(:result, value: reply)
+        # After unblock, push the received value for verification
+        t.push_event(type: :result, origin: :task, content: reply)
       end
       task.start
 
@@ -70,7 +69,7 @@ RSpec.describe Task do
       # Respond to unblock the task thread
       task.respond('the_answer')
 
-      # Now poll for the result (emitted after unblock)
+      # Now poll for the result (pushed after unblock)
       result_msg = nil
       20.times do
         m = task.poll(0.5)
@@ -80,7 +79,7 @@ RSpec.describe Task do
         break if m[:type] == :done
       end
 
-      expect(result_msg[:value]).to eq('the_answer')
+      expect(result_msg[:content]).to eq('the_answer')
     end
 
     it 'captures the error when task is stopped while waiting' do
@@ -100,7 +99,7 @@ RSpec.describe Task do
       # Stop the task: sends STOP to inbox, unblocking the pending request
       task.stop(2)
 
-      # Drain remaining messages (the rescue in start ensures :error + :done)
+      # Drain remaining messages (the rescue in start ensures :error_ctrl + :done)
       got_done = false
       20.times do
         m = task.poll(0.5)
@@ -126,99 +125,110 @@ RSpec.describe Task do
     end
   end
 
-  describe 'Task.puts / Task.print (single-thread I/O, issue #40)' do
-    it 'routes through the capture queue when a task is active' do
-      task = described_class.new do |_t|
-        Task.puts "hello from task"
-        Task.print "raw text"
+  describe 'Task.puts / Task.print (single event queue)' do
+    it 'pushes :text events onto the active task outbox' do
+      task = described_class.new { }
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+
+      begin
+        Task.puts 'hello from task'
+        Task.puts 'second line'
+      ensure
+        Thread.current[:harness_task] = old_current
       end
-      task.start
 
-      captured = []
-      collect_until_done(task).each { |m| captured << m[:text] if m[:type] == :output }
+      events = drain_outbox(task)
+      expect(events.map { |m| m[:type] }).to eq(%i[text text])
+      expect(events[0][:content]).to eq('hello from task')
+      expect(events[1][:content]).to eq('second line')
+    end
 
-      expect(captured.join).to eq("hello from task\nraw text")
+    it 'Task.print pushes a single :text event with terminal: false' do
+      task = described_class.new { }
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+
+      begin
+        Task.print 'raw text'
+      ensure
+        Thread.current[:harness_task] = old_current
+      end
+
+      events = drain_outbox(task)
+      expect(events.map { |m| m[:type] }).to eq([:text])
+      expect(events[0][:content]).to eq('raw text')
+      expect(events[0][:terminal]).to be(false)
     end
 
     it 'falls back to Kernel.puts when no task is active' do
       old_stdout = $stdout
       $stdout = StringIO.new
 
-      Task.puts "main thread line"
+      Task.puts 'no task around'
 
-      expect($stdout.string).to eq("main thread line\n")
+      expect($stdout.string).to eq("no task around\n")
     ensure
       $stdout = old_stdout
     end
 
-    it 'never reassigns the shared global $stdout' do
+    it 'falls back to Kernel.print when no task is active' do
       old_stdout = $stdout
-      sentinel = $stdout = StringIO.new
+      $stdout = StringIO.new
 
-      task = described_class.new { |_t| Task.puts "task output" }
-      task.start
+      Task.print 'no task around'
 
-      # Drain the queue so the thread can finish.
-      collect_until_done(task)
-
-      # $stdout must still be the sentinel - no proxy leaked in.
-      expect($stdout.equal?(sentinel)).to be(true)
+      expect($stdout.string).to eq('no task around')
     ensure
       $stdout = old_stdout
     end
   end
 
-  describe 'Task.emit (structured sink, issue #40 follow-up)' do
-    it 'appends a typed entry to the active task buffer' do
-      buf = OutputBuffer.new
-      described_class.output_buffer = buf
+  describe 'Task.emit (structured events on the outbox)' do
+    it 'pushes a typed event onto the active task outbox' do
+      task = described_class.new { }
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
 
-      Task.emit(:step, origin: :harness, content: '[step 1] did a thing')
+      begin
+        Task.emit(:step, origin: :harness, content: '[step 1] did a thing')
+      ensure
+        Thread.current[:harness_task] = old_current
+      end
 
-      entry = buf.drain.first
-      expect(entry.type).to eq(:step)
-      expect(entry.origin).to eq(:harness)
-      expect(entry.content).to eq('[step 1] did a thing')
-    ensure
-      described_class.output_buffer = nil
+      events = drain_outbox(task)
+      expect(events[0][:type]).to eq(:step)
+      expect(events[0][:origin]).to eq(:harness)
+      expect(events[0][:content]).to eq('[step 1] did a thing')
     end
 
-    it 'falls back to Kernel.puts for text content without an active buffer' do
+    it 'is a no-op when no task is active' do
       old_stdout = $stdout
       $stdout = StringIO.new
 
       Task.emit(:stats, origin: :harness, content: '3 iterations')
-
-      expect($stdout.string).to eq("3 iterations\n")
-    ensure
-      $stdout = old_stdout
-    end
-
-    it 'is a no-op for progress events without an active buffer' do
-      old_stdout = $stdout
-      $stdout = StringIO.new
-
-      Task.emit(:progress_start, origin: :session_manager, content: { message: 'Working' })
-      Task.emit(:progress_stop, origin: :session_manager)
 
       expect($stdout.string).to eq('')
     ensure
       $stdout = old_stdout
     end
 
-    it 'stores non-string payloads (e.g. progress_start Hashes) intact' do
-      buf = OutputBuffer.new
-      described_class.output_buffer = buf
+    it 'stores non-string payloads (e.g. spinner_detail Hashes) intact' do
+      task = described_class.new { }
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
 
-      payload = { message: 'Sending', suffix: -> { 'ctx 99%' } }
-      Task.emit(:progress_start, origin: :session_manager, content: payload)
+      begin
+        payload = { message: 'Sending', suffix: 'ctx 99%' }
+        Task.emit(:spinner_detail, origin: :session_manager, content: payload)
+      ensure
+        Thread.current[:harness_task] = old_current
+      end
 
-      entry = buf.drain.first
-      expect(entry.type).to eq(:progress_start)
-      expect(entry.content).to be_a(Hash)
-      expect(entry.content[:message]).to eq('Sending')
-    ensure
-      described_class.output_buffer = nil
+      events = drain_outbox(task)
+      expect(events[0][:type]).to eq(:spinner_detail)
+      expect(events[0][:content]).to be_a(Hash)
+      expect(events[0][:content][:message]).to eq('Sending')
     end
   end
 
@@ -278,7 +288,7 @@ RSpec.describe Task do
   describe 'Task.run (drain loop, issue #40)' do
     it 'runs the block and drains all output' do
       error, task = described_class.run(harness: nil) do |_t|
-        Task.puts "greeting"
+        Task.puts 'greeting'
       end
 
       expect(error).to be_nil
@@ -294,62 +304,73 @@ RSpec.describe Task do
       expect(error).to include('boom')
     end
 
-    it 'drives the spinner from :progress_* events on the main thread' do
+    it 'shows a spinner automatically while waiting on the task thread' do
       old_stdout = $stdout
       $stdout = StringIO.new
 
-      error, _task = described_class.run(harness: nil) do |_t|
-        Task.emit(:progress_start, origin: :session_manager,
-                  content: { message: 'Sending', suffix: 'ctx 12%' })
-        sleep 0.3 # let the drain loop render a few frames
-        Task.emit(:progress_stop, origin: :session_manager)
+      described_class.run(harness: nil) do |_t|
+        sleep 0.3 # let the drain loop render a few default frames
       end
 
       captured = $stdout.string
       $stdout = old_stdout
 
-      expect(error).to be_nil
+      expect(captured).to include('Working...')
+    end
+
+    it 're-points the spinner from :spinner_detail events' do
+      old_stdout = $stdout
+      $stdout = StringIO.new
+
+      described_class.run(harness: nil) do |_t|
+        Task.emit(:spinner_detail, origin: :session_manager,
+                  content: { message: 'Sending', suffix: 'ctx 12%' })
+        sleep 0.3 # let the drain loop render the re-pointed frames
+      end
+
+      captured = $stdout.string
+      $stdout = old_stdout
+
       expect(captured).to include('Sending...')
       expect(captured).to include('ctx 12%')
     end
 
-    it 'renders nested spinners LIFO - inner start, inner stop restores outer' do
+    it 're-points suffix only when the detail provides one' do
       old_stdout = $stdout
       $stdout = StringIO.new
 
       described_class.run(harness: nil) do |_t|
-        Task.emit(:progress_start, origin: :session_manager, content: { message: 'Sending' })
+        Task.emit(:spinner_detail, origin: :harness, content: { message: 'Running tool' })
         sleep 0.2
-        # In-loop compaction: a second spinner goes ON TOP of the first.
-        Task.emit(:progress_start, origin: :session_manager, content: { message: 'Compacting' })
+        # A later detail that only sets the suffix keeps the current message.
+        Task.emit(:spinner_detail, origin: :harness, content: { suffix: 'file.read' })
         sleep 0.2
-        Task.emit(:progress_stop, origin: :session_manager)
-        sleep 0.2
-        Task.emit(:progress_stop, origin: :session_manager)
       end
 
       captured = $stdout.string
       $stdout = old_stdout
 
-      # Both spinners rendered while active; order follows the protocol.
-      expect(captured).to include('Sending...')
-      expect(captured).to include('Compacting...')
+      expect(captured).to include('Running tool...')
+      expect(captured).to include('file.read')
     end
 
-    it 'prints text entries from the buffer in order' do
+    it 'prints text events from the outbox in order (and keeps the spinner going after)' do
       old_stdout = $stdout
       $stdout = StringIO.new
 
       described_class.run(harness: nil) do |_t|
-        Task.emit(:step, origin: :harness, content: '[step 1] first')
-        Task.emit(:step, origin: :harness, content: '[step 2] second')
+        Task.puts '[step 1] first'
+        sleep 0.1 # let the text line render and the spinner re-appear
+        Task.puts '[step 2] second'
+        sleep 0.2
       end
 
       captured = $stdout.string
       $stdout = old_stdout
 
-      expect(captured).to include("[step 1] first")
-      expect(captured).to include("[step 2] second")
+      expect(captured).to include('[step 1] first')
+      expect(captured).to include('[step 2] second')
+      expect(captured).to include('Working...') # default spinner re-shown
     end
 
     it 'handles a dialog request from the task thread on the main thread' do
@@ -367,7 +388,7 @@ RSpec.describe Task do
           title: 'Test dialog',
           options: [UI::Dialog::Option.new(title: 'Yes', value: :yes)]
         )
-        choice = dialog.show
+        choice = t.request(:dialog, dialog: dialog)
       end
 
       $stdin = old_stdin

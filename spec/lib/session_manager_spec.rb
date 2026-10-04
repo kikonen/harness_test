@@ -20,10 +20,10 @@ RSpec.describe SessionManager do
   # A minimal stand-in for Harness providing only what SessionManager uses.
   # NOTE: in the post-refactor design the harness no longer owns a spinner
   # or an output buffer - both are owned by the running Task (see
-  # lib/task.rb). SessionManager talks to them via `Task.emit`, which is a
-  # thread-local accessor. Specs that assert on emitted entries set
-  # `Task.output_buffer` in a before hook; specs that drive the real drain
-  # loop go through `Task.run`.
+  # lib/task.rb). SessionManager emits typed events onto the Task's outbox
+  # (the single event queue) via `Task.emit`. Specs that assert on emitted
+  # entries set `Thread.current[:harness_task]` to a Task instance and drain
+  # its outbox; specs that drive the real drain loop go through `Task.run`.
   let(:harness) do
     Class.new do
       attr_accessor :session, :client, :history
@@ -431,63 +431,60 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
     expect(session.instance_variable_get(:@last_stats)).to be_nil
   end
   # issue #116: in-loop compaction runs from INSIDE Harness#call_llm, so the
-  # send_session spinner is still animating. In the current design the Task
-  # owns the spinner stack and interprets :progress_* events against it:
-  # SessionManager simply emits progress_start (compaction) / progress_stop
-  # around the summary call. The drain loop pushes the compaction spinner on
-  # TOP of the outer one (LIFO) and pops it on stop, so the outer resumes by
-  # construction - no pause/resume events needed for in-loop compaction.
-  describe 'outer spinner handling (issue #116, LIFO push/pop)' do
-    it 'emits progress_start (compact) / progress_stop without touching the outer spinner' do
+  # send_session wait is still animating. The runner owns the spinner and
+  # always keeps one visible while it waits; SessionManager's only protocol
+  # entry for that is a single :spinner_detail event (message + live suffix)
+  # emitted BEFORE the blocking summary call - it re-points what the
+  # already-visible spinner displays, no start/stop pair.
+  describe 'outer spinner handling (issue #116, spinner_detail)' do
+    def drain_outbox(task)
+      events = []
+      loop do
+        msg = task.poll(0)
+        break unless msg
+        events << msg
+      end
+      events
+    end
+
+    it 'emits a single spinner_detail (message + live suffix), no start/stop pair' do
       allow_summary_response
       messages = inloop_messages
 
-      # Set up a Task-owned spinner stack so Task.current.visible_spinner is
-      # non-nil (the outer send_session spinner that is still animating).
-      task = Task.new { } # not started - we only want its buffer + stack
-      Task.output_buffer = task.buffer
-      outer = UI::Spinner.new('Sending to gpt-x', nil)
-      outer.start
-      task.push_spinner(outer)
+      # A Task instance (not started) provides the outbox for event capture.
+      task = Task.new { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
 
       begin
         result = manager.check_inloop_compaction(messages, 1000)
-        types = task.buffer.drain.map(&:type)
+        types = drain_outbox(task).map { |m| m[:type] }
 
         expect(result).to be(true)
-        # One info line, then exactly one start/stop pair for the compact
-        # spinner - and NO pause/resume: the LIFO stack handles nesting.
-        expect(types).to eq(%i[compact progress_start progress_stop])
-        # The outer spinner was never touched by the compaction path.
-        expect(task.visible_spinner).to be(outer)
-        expect(outer.running?).to be(true)
-        outer.stop
+        # One info line, then exactly ONE detail event - no start/stop pair:
+        # the runner's spinner is always visible while waiting and the detail
+        # only re-points what it displays.
+        expect(types).to eq(%i[compact spinner_detail])
       ensure
         Thread.current[:harness_task] = old_current
-        Task.output_buffer = nil
       end
     end
 
-    it 'emits the same start/stop pair when no outer spinner is running' do
+    it 'emits the same spinner_detail event even without an active wait context' do
       allow_summary_response
       messages = inloop_messages
 
       task = Task.new { }
-      Task.output_buffer = task.buffer
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
         result = manager.check_inloop_compaction(messages, 1000)
-        types = task.buffer.drain.map(&:type)
+        types = drain_outbox(task).map { |m| m[:type] }
 
         expect(result).to be(true)
-        expect(types).to eq(%i[compact progress_start progress_stop])
-        expect(task.visible_spinner).to be_nil
+        expect(types).to eq(%i[compact spinner_detail])
       ensure
         Thread.current[:harness_task] = old_current
-        Task.output_buffer = nil
       end
     end
   end

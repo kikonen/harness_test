@@ -201,19 +201,27 @@ RSpec.describe Harness do
 
   describe '#print_step_display (issue #131)' do
     let(:harness) { build_harness }
-    # issue #40 follow-up: print_step_display emits typed entries into the
-    # Task-owned OutputBuffer via Task.emit. Point the thread-local buffer
-    # at our own instance and drain it to assert on the lines - this is
-    # exactly the mechanism the real Task drain loop uses, so what we see
-    # here is what a live session would print.
-    let(:buffer) { OutputBuffer.new }
+    # issue #40 follow-up: print_step_display emits typed events onto the
+    # Task's outbox (single event queue) via Task.emit. Set the thread-local
+    # task so Task.emit finds it, then drain the outbox to assert on the
+    # lines - exactly what the real drain loop does.
+    let(:task) { Task.new { } }
     around do |example|
-      Task.output_buffer = buffer
+      @old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
       example.run
     ensure
-      Task.output_buffer = nil
+      Thread.current[:harness_task] = @old_current
     end
-    let(:drained_lines) { buffer.drain.map(&:content) }
+    let(:drained_lines) { drain_outbox(task).map { |m| m[:content] } }
+    def drain_outbox(t)
+      ms = []
+      loop do
+        m = t.poll(0); break unless m
+        ms << m
+      end
+      ms
+    end
 
     let(:message) do
       {
@@ -259,7 +267,7 @@ RSpec.describe Harness do
     it 'emits only :step entries - no spinner pause/resume (drain loop owns that)' do
       harness.send(:print_step_display, 1, message)
 
-      types = buffer.drain.map(&:type)
+      types = drain_outbox(task).map { |m| m[:type] }
       expect(types).to all(eq(:step))
       expect(types).not_to include(:progress_pause, :progress_resume, :spinner_detail)
     end
@@ -271,7 +279,7 @@ RSpec.describe Harness do
       begin
         harness.send(:print_step_display, 1, message)
 
-        expect(buffer.drain).to be_empty
+        expect(drain_outbox(task)).to be_empty
       ensure
         ENV['HARNESS_STEP_DISPLAY'] = original
       end
@@ -280,12 +288,21 @@ RSpec.describe Harness do
 
   describe '#execute_tool_call spinner_detail (issue #40)' do
     let(:harness) { build_harness }
-    let(:buffer) { OutputBuffer.new }
+    let(:task) { Task.new { } }
+    def drain_outbox(t)
+      ms = []
+      loop do
+        m = t.poll(0); break unless m
+        ms << m
+      end
+      ms
+    end
     around do |example|
-      Task.output_buffer = buffer
+      @old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
       example.run
     ensure
-      Task.output_buffer = nil
+      Thread.current[:harness_task] = @old_current
     end
 
     let(:fake_tool) do
@@ -302,9 +319,9 @@ RSpec.describe Harness do
 
       expect(harness.send(:execute_tool_call, call)).to eq('ok')
 
-      detail = buffer.drain.find { |e| e.type == :spinner_detail }
+      detail = drain_outbox(task).find { |m| m[:type] == :spinner_detail }
       expect(detail).not_to be_nil
-      expect(detail.content).to eq('ui.notify')
+      expect(detail[:content]).to eq('ui.notify')
     end
 
     it 'does not emit spinner_detail for an unknown tool' do
@@ -312,7 +329,7 @@ RSpec.describe Harness do
 
       expect(harness.send(:execute_tool_call, call)).to include('unknown tool')
 
-      expect(buffer.drain.map(&:type)).not_to include(:spinner_detail)
+      expect(drain_outbox(task).map { |m| m[:type] }).not_to include(:spinner_detail)
     end
   end
 end
