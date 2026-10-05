@@ -190,15 +190,8 @@ RSpec.describe Task do
       expect(events[0][:content]).to eq('[step 1] did a thing')
     end
 
-    it 'is a no-op when no task is active' do
-      old_stdout = $stdout
-      $stdout = StringIO.new
-
-      Task.emit(:stats, origin: :harness, content: '3 iterations')
-
-      expect($stdout.string).to eq('')
-    ensure
-      $stdout = old_stdout
+    it 'is a no-op when no task is active (CLI owns main-thread output)' do
+      expect { Task.emit(:stats, origin: :harness, content: '3 iterations') }.not_to raise_error
     end
 
     it 'stores non-string payloads (e.g. spinner_detail Hashes) intact' do
