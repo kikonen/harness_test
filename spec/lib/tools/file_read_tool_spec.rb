@@ -7,13 +7,13 @@ require 'tools/file_read_tool'
 
 RSpec.describe Tools::FileReadTool do
   # Drive the grant dialog without any real I/O: intercept Dialog#show (the
-  # tool calls it with stdout: nil, stdin: nil because tools run on the Task
+  # tool calls it with ui: nil because tools run on the Task
   # thread) and perform the interaction directly on a StringIO.
   def drive_dialog(*lines)
     stdin  = StringIO.new(lines.join("\n"))
     stdout = StringIO.new
     allow_any_instance_of(UI::Dialog).to receive(:show) do |dialog|
-      dialog.perform_direct(stdout: stdout, stdin: stdin)
+      dialog.perform_direct(ui: UI::Console.new(stdout: stdout, stdin: stdin))
     end
   end
 

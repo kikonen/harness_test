@@ -8,16 +8,16 @@ module Commands
     def handle(_args)
       result = @harness.session_manager.compact_session
       retained = result[:retained]
-      puts "Session compacted: #{result[:before]} messages -> " \
+      @ui.puts "Session compacted: #{result[:before]} messages -> " \
            "#{result[:after]} messages (#{retained} recent retained)."
       # issue #70 / #93: report the context size before and after so the
       # user can see how much space was freed (message count alone is
       # misleading - tool calls and long outputs inflate token usage).
-      puts "  #{result[:context_before]} -> #{result[:context_line]}" if result[:context_before] && result[:context_line]
-      puts
-      puts "Summary:"
-      puts result[:summary]
-      puts
+      @ui.puts "  #{result[:context_before]} -> #{result[:context_line]}" if result[:context_before] && result[:context_line]
+      @ui.puts
+      @ui.puts "Summary:"
+      @ui.puts result[:summary]
+      @ui.puts
     end
   end
 end

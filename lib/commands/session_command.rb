@@ -6,7 +6,7 @@ module Commands
   # /session - show a summary of the current session.
   class SessionCommand < Command
     def handle(_args)
-      puts @harness.session.summary
+      @ui.puts @harness.session.summary
     end
   end
 end

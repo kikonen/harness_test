@@ -7,7 +7,7 @@ module Commands
   class ClearCommand < Command
     def handle(_args)
       @file_list.clear
-      puts "Access list cleared."
+      @ui.puts "Access list cleared."
     end
   end
 end

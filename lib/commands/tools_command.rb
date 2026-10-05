@@ -7,11 +7,11 @@ module Commands
   class ToolsCommand < Command
     def handle(_args)
       registry = @harness.tool_registry
-      puts "Available tools (#{registry.tools.size}):"
+      @ui.puts "Available tools (#{registry.tools.size}):"
       registry.grouped.each do |ns, tools|
-        puts "  #{ns}:"
+        @ui.puts "  #{ns}:"
         tools.each do |t|
-          puts "    #{t.name} - #{t.description}"
+          @ui.puts "    #{t.name} - #{t.description}"
         end
       end
     end

@@ -22,21 +22,17 @@ RSpec.describe UI::Dialog do
   end
 
   def show(dialog)
-    # Streams are the explicit contract (no globals inside Dialog): these
-    # specs stub $stdin / capture $stdout, so pass exactly those in.
-    dialog.show(stdout: $stdout, stdin: $stdin)
+    # The console is the explicit contract (no globals inside Dialog): these
+    # specs stub $stdin / capture $stdout, so wrap exactly those in a
+    # UI::Console and pass it in.
+    dialog.show(ui: UI::Console.new(stdout: $stdout, stdin: $stdin))
   end
 
   describe 'stream contract (issue #40: no global stream access)' do
     let(:dialog) { described_class.new(title: 't', options: options) }
 
-    it 'raises when no Task is active and streams are not given' do
-      expect { dialog.show }.to raise_error(ArgumentError, /explicit stdout:\/stdin:/)
-    end
-
-    it 'raises when only one stream is given without a Task' do
-      expect { dialog.show(stdout: StringIO.new) }
-        .to raise_error(ArgumentError, /explicit stdout:\/stdin:/)
+    it 'raises when no Task is active and the ui console is nil' do
+      expect { dialog.show }.to raise_error(ArgumentError, /explicit ui: console/)
     end
 
     context 'on a task thread (Thread.current[:harness_task] set)' do
@@ -48,15 +44,15 @@ RSpec.describe UI::Dialog do
         Thread.current[:harness_task] = old
       end
 
-      it 'routes through the task and rejects named streams' do
-        expect { dialog.show(stdout: $stdout, stdin: $stdin) }
-          .to raise_error(ArgumentError, /pass stdout: nil, stdin: nil/)
+      it 'routes through the task and rejects a named console' do
+        expect { dialog.show(ui: UI::Console.new(stdout: $stdout, stdin: $stdin)) }
+          .to raise_error(ArgumentError, /pass ui: nil/)
       end
 
-      it 'passes nil/nil straight to the task request protocol' do
+      it 'passes ui: nil straight to the task request protocol' do
         task = Task.current
         expect(task).to receive(:request).with(:dialog, dialog: dialog).and_return(:yes)
-        expect(dialog.show(stdout: nil, stdin: nil)).to eq(:yes)
+        expect(dialog.show(ui: nil)).to eq(:yes)
       end
     end
   end

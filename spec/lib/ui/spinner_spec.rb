@@ -7,11 +7,11 @@ require 'stringio'
 # Single-thread I/O model (issue #40): start/stop are pure state changes
 # (no background thread). update_detail re-points message/suffix without
 # restarting the animation. render! advances one animation frame and
-# writes it to an EXPLICIT stream argument (there is deliberately no
-# $stdout default - the caller must pass the stream). The main thread
-# calls render! on each drain tick. Tests assert the frame text via a
-# captured StringIO passed to render!/clear_line, not via sleep-based
-# thread observation.
+# writes it via an EXPLICIT UI::Console (there is deliberately no console
+# default - the caller must pass one). The main thread calls render! on
+# each drain tick. Tests assert the frame text by wrapping a captured
+# StringIO in a UI::Console and passing it to render!/clear_line, not via
+# sleep-based thread observation.
 RSpec.describe UI::Spinner do
   OVERRIDE = UI::Spinner::ENV_OVERRIDE
 
@@ -30,11 +30,11 @@ RSpec.describe UI::Spinner do
     end
   end
 
-  # Run the block with a captured stream: every I/O method must receive it
-  # as an explicit argument (Spinner has no $stdout default).
+  # Run the block with a captured console: every I/O method receives the
+  # explicit UI::Console (Spinner has no console default).
   def capture_stdout
     io = StringIO.new
-    yield(io)
+    yield(UI::Console.new(stdout: io))
     io.string
   end
 
@@ -61,9 +61,9 @@ RSpec.describe UI::Spinner do
   describe '#render! and frame advancement' do
     it 'renders the frame, message and a string suffix on one line' do
       spinner = described_class.new('Sending to gpt-x', '🧠 ctx 42133/65536 (64%)')
-      out = capture_stdout do |io|
+      out = capture_stdout do |ui|
         spinner.start
-        spinner.render!(io)
+        spinner.render!(ui)
         spinner.stop
       end
       expect(out).to include('Sending to gpt-x... 🧠 ctx 42133/65536 (64%)')
@@ -71,9 +71,9 @@ RSpec.describe UI::Spinner do
 
     it 'renders only the message when no suffix is given' do
       spinner = described_class.new('Working')
-      out = capture_stdout do |io|
+      out = capture_stdout do |ui|
         spinner.start
-        spinner.render!(io)
+        spinner.render!(ui)
         spinner.stop
       end
       expect(out).to include('Working...')
@@ -83,9 +83,9 @@ RSpec.describe UI::Spinner do
 
     it 'strips surrounding whitespace from a string suffix' do
       spinner = described_class.new('Working', '  ctx 1/2 (50%)  ')
-      out = capture_stdout do |io|
+      out = capture_stdout do |ui|
         spinner.start
-        spinner.render!(io)
+        spinner.render!(ui)
         spinner.stop
       end
       expect(out).to include('Working... ctx 1/2 (50%)')
@@ -94,12 +94,12 @@ RSpec.describe UI::Spinner do
     it 're-evaluates a callable suffix every frame so it tracks live state (issue #126)' do
       value = 'ctx 1/10 (10%)'
       spinner = described_class.new('Sending to gpt-x', -> { value })
-      out = capture_stdout do |io|
+      out = capture_stdout do |ui|
         spinner.start
-        spinner.render!(io)
+        spinner.render!(ui)
         # The "current" value changes; the next frame must show the new value.
         value = 'ctx 9/10 (90%)'
-        spinner.render!(io)
+        spinner.render!(ui)
         spinner.stop
       end
       expect(out).to include('Sending to gpt-x... ctx 1/10 (10%)')
@@ -108,9 +108,9 @@ RSpec.describe UI::Spinner do
 
     it 'falls back to no suffix when the callable raises' do
       spinner = described_class.new('Working', -> { raise 'boom' })
-      out = capture_stdout do |io|
+      out = capture_stdout do |ui|
         spinner.start
-        spinner.render!(io)
+        spinner.render!(ui)
         spinner.stop
       end
       expect(out).to include('Working...')
@@ -119,9 +119,9 @@ RSpec.describe UI::Spinner do
 
     it 'advances through frames sequentially' do
       spinner = described_class.new('Working')
-      out = capture_stdout do |io|
+      out = capture_stdout do |ui|
         spinner.start
-        3.times { spinner.render!(io) }
+        3.times { spinner.render!(ui) }
         spinner.stop
       end
       # Each frame uses the next glyph from FRAMES
@@ -150,11 +150,11 @@ RSpec.describe UI::Spinner do
   describe '#update_detail (re-point without restarting, issue #40 follow-up)' do
     it 'updates only the message, keeps the existing suffix' do
       spinner = described_class.new('Working', 'ctx 1/2 (50%)')
-      out = capture_stdout do |io|
+      out = capture_stdout do |ui|
         spinner.start
-        spinner.render!(io)
+        spinner.render!(ui)
         spinner.update_detail(message: 'Sending to gpt-x')
-        spinner.render!(io)
+        spinner.render!(ui)
         spinner.stop
       end
       expect(out).to include('Working... ctx 1/2 (50%)')
@@ -163,11 +163,11 @@ RSpec.describe UI::Spinner do
 
     it 'updates only the suffix, keeps the existing message' do
       spinner = described_class.new('Working', 'ctx 1/2 (50%)')
-      out = capture_stdout do |io|
+      out = capture_stdout do |ui|
         spinner.start
-        spinner.render!(io)
+        spinner.render!(ui)
         spinner.update_detail(suffix: 'file.read')
-        spinner.render!(io)
+        spinner.render!(ui)
         spinner.stop
       end
       expect(out).to include('Working... ctx 1/2 (50%)')
@@ -177,12 +177,12 @@ RSpec.describe UI::Spinner do
     it 'accepts a callable suffix and keeps animating' do
       value = 'ctx 1/10 (10%)'
       spinner = described_class.new('Working')
-      out = capture_stdout do |io|
+      out = capture_stdout do |ui|
         spinner.start
         spinner.update_detail(suffix: -> { value })
-        spinner.render!(io)
+        spinner.render!(ui)
         value = 'ctx 9/10 (90%)'
-        spinner.render!(io)
+        spinner.render!(ui)
         spinner.stop
       end
       expect(out).to include('Working... ctx 1/10 (10%)')
@@ -204,10 +204,10 @@ RSpec.describe UI::Spinner do
       # one column short, leaving a stray ")" on the next line. The ANSI
       # erase-to-end escape clears the whole line regardless of width.
       spinner = described_class.new('Sending to gpt-x', '🧠 ctx 42133/65536 (64%)')
-      out = capture_stdout do |io|
+      out = capture_stdout do |ui|
         spinner.start
-        spinner.render!(io)
-        spinner.clear_line(io)
+        spinner.render!(ui)
+        spinner.clear_line(ui)
         spinner.stop
       end
       expect(out).to include("\e[2K")
@@ -228,7 +228,7 @@ RSpec.describe UI::Spinner do
 
   # Renderer-selection gate: exercise the ENV override directly, restoring the
   # suite's 'print' default after each case so it works regardless of the
-  # actual terminal. The tty branch is stubbed (a fake IO would otherwise
+  # actual terminal. The tty branch is stubbed (a fake console would otherwise
   # make interactive_tty? report false on real runs).
   describe 'renderer selection (issue #74)' do
     def with_override(value)
@@ -252,25 +252,28 @@ RSpec.describe UI::Spinner do
 
     it 'prefers the TUI renderer on an interactive terminal when not forced' do
       spinner = described_class.new
+      console  = UI::Console.new(stdout: $stdout, stdin: $stdin)
       with_override(nil) do
         allow(spinner).to receive(:interactive_tty?).and_return(true)
-        expect(spinner.tui_preferred?($stdout, $stdin)).to be(true)
+        expect(spinner.tui_preferred?(console)).to be(true)
       end
     end
 
     it 'never uses the TUI renderer when output is not an interactive terminal (CI / pipes)' do
       spinner = described_class.new
+      console  = UI::Console.new(stdout: $stdout, stdin: $stdin)
       with_override(nil) do
         allow(spinner).to receive(:interactive_tty?).and_return(false)
-        expect(spinner.tui_preferred?($stdout, $stdin)).to be(false)
+        expect(spinner.tui_preferred?(console)).to be(false)
       end
     end
 
     it 'stays on the ANSI path even when a TTY is present but the user pinned print' do
       spinner = described_class.new
+      console  = UI::Console.new(stdout: $stdout, stdin: $stdin)
       with_override('print') do
         allow(spinner).to receive(:interactive_tty?).and_return(true)
-        expect(spinner.tui_preferred?($stdout, $stdin)).to be(false)
+        expect(spinner.tui_preferred?(console)).to be(false)
       end
     end
   end
@@ -282,9 +285,9 @@ RSpec.describe UI::Spinner do
 
     it 'is constructible through the legacy alias with identical behavior' do
       spinner = Spinner.new('Working', 'ctx 1/2 (50%)')
-      out = capture_stdout do |io|
+      out = capture_stdout do |ui|
         spinner.start
-        spinner.render!(io)
+        spinner.render!(ui)
         spinner.stop
       end
       expect(out).to include('Working... ctx 1/2 (50%)')

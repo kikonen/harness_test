@@ -19,7 +19,7 @@ RSpec.describe Commands::GrantCommand do
   # StringIO and reads it back instead of swapping $stdout.
   def run_command
     io      = StringIO.new
-    command = described_class.new(harness: nil, file_list:, options: nil, stdout: io)
+    command = described_class.new(harness: nil, file_list:, options: nil, ui: UI::Console.new(stdout: io))
     command.handle('')
     io.string
   end

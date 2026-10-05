@@ -40,11 +40,12 @@
 #   all) and is done. Tool execution renders output, it does not wait, so it
 #   never re-points the spinner.
 #
-# Stdout injection:
-#   Task.run REQUIRES a `stdout:`. The same
-#   stream is used for spinner frames, text output, and dialog prompts so
-#   tests can capture everything through a single StringIO. The stream is
-#   published on the task instance and passed explicitly to every I/O call.
+# Console injection:
+#   Task.run REQUIRES a `ui:` (a UI::Console wrapping an explicit stdout/
+#   stdin pair). The same console is used for spinner frames, text output,
+#   and dialog prompts so tests can capture everything through a single
+#   StringIO-backed console. It is published on the task instance and passed
+#   explicitly to every I/O call.
 #
 # Ctrl+C:
 #   While Task.run is draining, SIGINT is trapped so an interrupt targets
@@ -73,7 +74,7 @@ class Task
   # ([:__request__], answered on the main thread).
   CONTROL_EVENTS = %i[error_ctrl __request__].freeze
 
-  attr_reader :thread, :buffer, :stdout, :stdin
+  attr_reader :thread, :buffer, :ui
 
   def initialize(&block)
     @block   = block
@@ -82,11 +83,11 @@ class Task
     @buffer  = OutputBuffer.new    # structured log (runner fills it)
     @spinner = nil
     @thread  = nil
-    @stdout  = nil                 # set by Task.run before start
+    @ui      = nil                 # set by Task.run before start
     @dialog_open = false           # true while perform_direct is on stdin
   end
 
-  attr_writer :stdout, :stdin
+  attr_writer :ui
 
   # True while the main thread is inside a dialog's perform_direct
   # (stdin read + prompt print) - store_and_render must not clear any
@@ -226,10 +227,10 @@ class Task
   # (:done/:error), or on Ctrl+C (ensure).
   def clear_all_spinners
     return unless @spinner
-    # In production stdout is always set by Task.run; in unit tests it may
-    # be nil - just stop without clearing.
-    if @stdout && @spinner.running?
-      @spinner.clear_line(@stdout)
+    # In production the console is always set by Task.run; in unit tests it
+    # may be nil - just stop without clearing.
+    if @ui && @spinner.running?
+      @spinner.clear_line(@ui)
     end
     @spinner.stop
     @spinner = nil
@@ -249,9 +250,9 @@ class Task
   #      message (the wait continues); every other batch has already
   #      cleared the spinner line inside store_and_render before printing.
   #
-  # The required `stdout:` argument is the single stream used for
+  # The required `ui:` console is the single sink used for
   # ALL output - spinner frames, text lines, dialog prompts. Tests can pass
-  # a StringIO to capture everything deterministically.
+  # a StringIO-backed UI::Console to capture everything deterministically.
   #
   # Ctrl+C: SIGINT is trapped for the duration of this call, so an interrupt
   # always hits the drain loop (which then force-stops the task thread - a
@@ -261,13 +262,11 @@ class Task
   # Returns [error_msg, task] where error_msg is nil on success.
   def self.run(
     harness:,
-    stdout:,
-    stdin:,
+    ui:,
     &block
   )
     task = Task.new(&block)
-    task.stdout = stdout
-    task.stdin = stdin
+    task.ui = ui
     error_msg   = nil
     old_trap    = trap('INT') { raise Interrupt }
 
@@ -349,7 +348,7 @@ class Task
     return unless task.outbox_empty?
 
     ensure_spinner_running(task)
-    task.visible_spinner&.render!(task.stdout)
+    task.visible_spinner&.render!(task.ui)
   end
 
   # Handle a :__request__ control event on the main thread.
@@ -358,7 +357,7 @@ class Task
       dialog = msg[:dialog]
       task.instance_variable_set(:@dialog_open, true)
       begin
-        answer = dialog.perform_direct(stdout: task.stdout, stdin: task.stdin)
+        answer = dialog.perform_direct(ui: task.ui)
         task.respond(answer)
       ensure
         task.instance_variable_set(:@dialog_open, false)
@@ -369,11 +368,11 @@ class Task
   end
 
   # Store one output event into the OutputBuffer (structured log) and render
-  # it to the task's stdout stream. The buffer is the durable record; stdout
+  # it to the task's console. The buffer is the durable record; the console
   # is what the user sees right now. Both happen on the main thread, in
   # outbox order.
   def self.store_and_render(task, msg)
-    stdout = task.stdout
+    ui = task.ui
 
     case msg[:type]
     when :spinner_detail
@@ -384,10 +383,10 @@ class Task
       task.visible_spinner&.update_detail(**payload)
       task.buffer.put(type: :spinner_detail, origin: msg[:origin] || :task, content: msg[:content])
     when :text
-      stdout.puts(msg[:content].to_s)
+      ui.puts(msg[:content].to_s)
       task.buffer.put(type: :text, origin: msg[:origin] || :task, content: msg[:content])
     else
-      stdout.puts(msg[:content].to_s) if msg[:content]
+      ui.puts(msg[:content].to_s) if msg[:content]
       task.buffer.put(type: msg[:type], origin: msg[:origin] || :task, content: msg[:content])
     end
   end

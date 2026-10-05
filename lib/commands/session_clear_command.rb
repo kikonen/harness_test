@@ -7,7 +7,7 @@ module Commands
   class SessionClearCommand < Command
     def handle(_args)
       @harness.session.clear
-      puts "Session cleared (conversation history reset)."
+      @ui.puts "Session cleared (conversation history reset)."
     end
   end
 end
