@@ -19,33 +19,33 @@ module Commands
         flats   = section[:flat_dirs] || []
         next if files.empty? && dirs.empty? && flats.empty?
 
-        puts "#{labels[mode]}:"
+        @ui.puts "#{labels[mode]}:"
         unless files.empty?
           files.each_with_index do |f, i|
-            puts "  #{i + 1}. #{@file_list.display_path(f)}"
+            @ui.puts "  #{i + 1}. #{@file_list.display_path(f)}"
           end
         end
         idx = files.size + 1
         unless dirs.empty?
           dirs.each_with_index do |d, i|
-            puts "  #{idx + i}. #{@file_list.display_path(d)}/ (recursive)"
+            @ui.puts "  #{idx + i}. #{@file_list.display_path(d)}/ (recursive)"
           end
         end
         idx += dirs.size
         unless flats.empty?
           flats.each_with_index do |d, i|
-            puts "  #{idx + i}. #{@file_list.display_path(d)}/ (dir only)"
+            @ui.puts "  #{idx + i}. #{@file_list.display_path(d)}/ (dir only)"
           end
         end
       end
 
       prefixes = CommandAllowlist.new(@file_list.workdir).prefixes
       if prefixes.empty?
-        puts "Commands: (none allowed)"
+        @ui.puts "Commands: (none allowed)"
       else
-        puts "Commands (auto-approved prefixes):"
+        @ui.puts "Commands (auto-approved prefixes):"
         prefixes.each_with_index do |p, i|
-          puts "  #{i + 1}. #{p}"
+          @ui.puts "  #{i + 1}. #{p}"
         end
       end
     end

@@ -350,7 +350,7 @@ class FileList
       options: options,
       note: note,
       note_on_cancel_only: true
-    ).show(stdout: nil, stdin: nil)
+    ).show(ui: nil)
 
     # The user may attach a short note to the CANCEL choice only
     # ("<cancel number> <note>"); the dialog then returns

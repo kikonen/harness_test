@@ -7,8 +7,8 @@ module Commands
   class ReloadCommand < Command
     def handle(_args)
       @harness.session_manager.reload_rules
-      puts "harness.md reloaded - project rules updated in the system prompt."
-      puts
+      @ui.puts "harness.md reloaded - project rules updated in the system prompt."
+      @ui.puts
     end
   end
 end

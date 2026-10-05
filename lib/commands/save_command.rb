@@ -7,9 +7,9 @@ module Commands
   class SaveCommand < Command
     def handle(_args)
       id = @harness.session_manager.save_session
-      puts "Session saved as #{id} (#{@harness.session_manager.sessions_dir}/#{id}.json)"
-      puts "Resume it later with: /resume #{id}"
-      puts "  or from the command line: #{resume_cli_string(id)}"
+      @ui.puts "Session saved as #{id} (#{@harness.session_manager.sessions_dir}/#{id}.json)"
+      @ui.puts "Resume it later with: /resume #{id}"
+      @ui.puts "  or from the command line: #{resume_cli_string(id)}"
     end
 
     # Build the CLI command to resume this session in a new harness run.

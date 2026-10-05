@@ -8,13 +8,13 @@ module Commands
     def handle(args)
       id = args.strip
       if id.empty?
-        puts "Usage: /resume <id>   (see /sessions for available ids)"
+        @ui.puts "Usage: /resume <id>   (see /sessions for available ids)"
         return
       end
 
       path = @harness.session_manager.resume_session(id)
-      puts "Session #{File.basename(path, '.json')} resumed."
-      puts "  (conversation and file list restored - see /session)"
+      @ui.puts "Session #{File.basename(path, '.json')} resumed."
+      @ui.puts "  (conversation and file list restored - see /session)"
     end
 
     # Build the CLI command to resume a session in a new harness run.

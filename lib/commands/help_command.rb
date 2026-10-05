@@ -6,7 +6,7 @@ module Commands
   # /help - show available commands.
   class HelpCommand < Command
     def handle(_args)
-      puts <<~HELP
+      @ui.puts <<~HELP
         Available commands:
           /grant         Show all current grants: file/dir access (read, write,
                          delete) and command allowlist prefixes

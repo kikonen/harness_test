@@ -9,6 +9,7 @@ require_relative 'harness'
 require_relative 'file_list'
 require_relative 'history_manager'
 require_relative 'command_handler'
+require_relative 'ui'
 
 # -- CLI ------------------------------------------------------------------
 
@@ -17,13 +18,15 @@ class CLI
     :harness,
     :file_list,
     :commands,
-    :history
+    :history,
+    :ui
 
   # Default API base URL (used when neither the CLI nor the config provides one).
   DEFAULT_BASE_URL = 'http://localhost:11434/v1'
 
   def initialize
     @options   = parse_options
+    @ui        = UI::Console.new(stdout: $stdout, stdin: $stdin)
     @file_list = FileList.new([], workdir: @options[:workdir])
     @harness   = Harness.new(@options, @file_list)
 
@@ -31,8 +34,7 @@ class CLI
       harness: @harness,
       file_list: @file_list,
       options: @options,
-      stdout: $stdout,
-      stdin: $stdin)
+      ui: @ui)
 
     @history   = HistoryManager.new(@file_list.workdir)
     # issue #135: share the manager with the harness (it declares
@@ -174,14 +176,14 @@ class CLI
   def run
     @history.load
 
-    puts "Harness ready. Type /help for commands, /exit to quit."
-    puts "Model: #{harness.session_manager.active_model_name} (@ #{@options[:base_url]})"
-    puts "Working directory: #{@file_list.workdir}"
-    puts "Tip: type a plain message (no /) to send it directly to the model."
-    puts "Tip: paste multiline text directly, or end a line with a backslash (\\) " \
+    ui.puts "Harness ready. Type /help for commands, /exit to quit."
+    ui.puts "Model: #{harness.session_manager.active_model_name} (@ #{@options[:base_url]})"
+    ui.puts "Working directory: #{@file_list.workdir}"
+    ui.puts "Tip: type a plain message (no /) to send it directly to the model."
+    ui.puts "Tip: paste multiline text directly, or end a line with a backslash (\\) " \
          "to continue."
-    puts "Tip: a line starting with / is a command (executed immediately)."
-    puts
+    ui.puts "Tip: a line starting with / is a command (executed immediately)."
+    ui.puts
 
     begin
       loop do
@@ -192,38 +194,38 @@ class CLI
         begin
           commands.handle(input)
         rescue Interrupt
-          puts "\n  [interrupted]"
+          ui.puts "\n  [interrupted]"
         rescue HarnessError => e
-          puts "  [error] #{e.message}"
+          ui.puts "  [error] #{e.message}"
         rescue LLMError => e
-          puts "  [LLM error] #{e.message}"
-          puts "  (the prompt is kept in the session - type /retry to re-send it)"
+          ui.puts "  [LLM error] #{e.message}"
+          ui.puts "  (the prompt is kept in the session - type /retry to re-send it)"
         rescue ToolLoopError => e
-          puts "  [tool loop] #{e.message}"
+          ui.puts "  [tool loop] #{e.message}"
         rescue StandardError => e
-          puts "  [unexpected error] #{e.class}: #{e.message}"
-          puts e.backtrace.join("\n")
-          puts "  (harness continues - type /exit to quit)"
+          ui.puts "  [unexpected error] #{e.class}: #{e.message}"
+          ui.puts e.backtrace.join("\n")
+          ui.puts "  (harness continues - type /exit to quit)"
         end
 
         break if commands.exiting?
 
-        puts
-        puts "-" * 40
-        puts
+        ui.puts
+        ui.puts "-" * 40
+        ui.puts
       end
     rescue Interrupt
       # Ctrl+C at the prompt (or anywhere in the loop is waiting): treat as
       # a normal exit so that history and the session are still saved.
-      puts "\n  [interrupted]"
+      ui.puts "\n  [interrupted]"
     end
 
     @history.save
     id = auto_save_session
-    puts "Goodbye."
+    ui.puts "Goodbye."
     if id
-      puts "Session saved as #{id} (#{harness.session_manager.sessions_dir}/#{id}.json)."
-      puts "Resume it later with: #{commands.resume_command(id)}"
+      ui.puts "Session saved as #{id} (#{harness.session_manager.sessions_dir}/#{id}.json)."
+      ui.puts "Resume it later with: #{commands.resume_command(id)}"
     end
   end
 
@@ -232,7 +234,7 @@ class CLI
   # Silent when there is no conversation yet (nothing to measure).
   def show_context_indicator
     ctx = @harness.context_indicator
-    puts ctx if ctx
+    ui.puts ctx if ctx
   end
 
   private
@@ -243,7 +245,7 @@ class CLI
     id   = @options[:resume]
     path = @harness.session_manager.resume_session(id)
     name = File.basename(path, '.json')
-    puts "Resumed session #{name} (conversation and file list restored - see /session)."
+    ui.puts "Resumed session #{name} (conversation and file list restored - see /session)."
   end
 
   # issue #107: resume the most recently saved session in this workdir's
@@ -254,7 +256,7 @@ class CLI
 
     name = File.basename(path, '.json')
     @harness.session_manager.resume_session(name)
-    puts "Continued session #{name} (the newest saved in #{@file_list.workdir}/.harness/sessions/)."
+    ui.puts "Continued session #{name} (the newest saved in #{@file_list.workdir}/.harness/sessions/)."
   end
 
   # Auto-save the session on exit (best-effort). Returns the session id,
@@ -264,7 +266,7 @@ class CLI
 
     @harness.session_manager.save_session
   rescue StandardError => e
-    puts "  [warning] could not auto-save session: #{e.message}"
+    ui.puts "  [warning] could not auto-save session: #{e.message}"
     nil
   end
 
@@ -296,8 +298,8 @@ class CLI
   # lines) can operate on the structured form rather than a flat string.
   PASTE_LF_INTERVAL = 0.05
   def get_command
-    puts "[harness] > "
-    $stdout.flush
+    ui.puts "[harness] > "
+    ui.flush
 
     last_lf_time = nil
 

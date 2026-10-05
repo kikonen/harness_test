@@ -29,8 +29,7 @@ require_relative 'commands/exit_command'
 class CommandHandler
   attr_reader :harness,
     :file_list,
-    :stdout,
-    :stdin,
+    :ui,
     :options
 
   # Registry: command name (without slash) -> class
@@ -58,14 +57,12 @@ class CommandHandler
     harness:,
     file_list:,
     options:,
-    stdout:,
-    stdin:)
+    ui:)
     @harness   = harness
     @file_list = file_list
     @options   = options
     @exiting   = false
-    @stdout = stdout
-    @stdin = stdin
+    @ui      = ui
   end
 
   def exiting?
@@ -74,12 +71,12 @@ class CommandHandler
 
   # Delegate for CLI's --list-sessions flag.
   def list_sessions
-    Commands::SessionsCommand.new(harness:, file_list:, options:, stdout:).handle('')
+    Commands::SessionsCommand.new(harness:, file_list:, options:, ui:).handle('')
   end
 
   # Build the command line to resume a saved session in a new harness run.
   def resume_command(id)
-    Commands::ResumeCommand.new(harness:, file_list:, options:, stdout:).resume_cli_string(id)
+    Commands::ResumeCommand.new(harness:, file_list:, options:, ui:).resume_cli_string(id)
   end
 
   # Dispatch a single line of input. Slash-commands go through the registry;
@@ -101,11 +98,11 @@ class CommandHandler
 
     cmd_class = COMMANDS[name]
     if cmd_class
-      cmd = cmd_class.new(harness:, file_list:, options:, stdout:)
+      cmd = cmd_class.new(harness:, file_list:, options:, ui:)
       cmd.handle(args)
       @exiting = true if cmd.respond_to?(:exited?) && cmd.exited?
     else
-      stdout.puts "Unknown command: /#{name}.\n----\nType /help for available commands."
+      ui.puts "Unknown command: /#{name}.\n----\nType /help for available commands."
     end
   end
 
@@ -117,11 +114,11 @@ class CommandHandler
   # Task.emit (or posts blocking requests for dialogs), and the drain loop
   # renders everything on the main thread - including spinner frames.
   def run_direct_prompt(text)
-    stdout.puts
-    error, _task = Task.run(harness:, stdout:, stdin:) do |_t|
+    ui.puts
+    error, _task = Task.run(harness:, ui:) do |_t|
       @harness.session_manager.run_prompt(text)
     end
-    stdout.puts "  [task error] #{error}" if error
-    stdout.puts
+    ui.puts "  [task error] #{error}" if error
+    ui.puts
   end
 end

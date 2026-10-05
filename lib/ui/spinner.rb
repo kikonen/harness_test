@@ -67,25 +67,25 @@ module UI
 
     # Advance one animation frame and write it to stdout. Called by the
     # main thread on each drain tick (typically every 100ms). The output
-    # stream is passed by the caller - there is deliberately no stdout
-    # default, the stream must always be an explicit argument (Task.run
-    # injects it; tests capture it with a StringIO).
+    # console (UI::Console) is passed by the caller - there is deliberately
+    # no console default, it must always be an explicit argument (Task.run
+    # injects it; tests wrap a StringIO in one).
     # No-op when not running (stopped).
-    def render!(stdout)
+    def render!(ui)
       return unless running?
 
       text = "#{FRAMES[@frame % FRAMES.size]} #{@message}...#{render_suffix}"
-      stdout.print("\r#{text}")
-      stdout.flush
+      ui.print("\r#{text}")
+      ui.flush
       @frame += 1
     end
 
     # Clear the spinner line with an ANSI erase-entire-line escape (issue #125).
     # Called by the main thread when transitioning from rendering to idle.
     # Same explicit-stream contract as #render! .
-    def clear_line(stdout)
-      stdout.print("\r\e[2K")
-      stdout.flush
+    def clear_line(ui)
+      ui.print("\r\e[2K")
+      ui.flush
     end
 
     # Re-point the message and/or suffix without restarting the animation
@@ -122,8 +122,10 @@ module UI
       ENV[ENV_OVERRIDE].to_s.strip.casecmp('print').zero?
     end
 
-    # True only when both stdin and stdout are real terminals.
-    def interactive_tty?(stdout, stdin)
+    # True only when both the console's stdin and stdout are real terminals.
+    def interactive_tty?(ui)
+      stdin  = ui&.stdin
+      stdout = ui&.stdout
       return false unless stdin.respond_to?(:tty?) && stdin.tty?
       return true if stdout.nil?
 
@@ -132,10 +134,10 @@ module UI
 
     # True when the TUI renderer could be preferred over print (interactive
     # terminal AND not forced to print). Preserved for future use.
-    def tui_preferred?(stdout, stdin)
+    def tui_preferred?(ui)
       return false if forced_print?
 
-      interactive_tty?(stdout, stdin)
+      interactive_tty?(ui)
     end
 
     private

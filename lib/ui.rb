@@ -6,5 +6,6 @@
 # lives in its own file under lib/ui/, mirrored by spec/lib/ui/.
 module UI; end
 
+require_relative 'ui/console'
 require_relative 'ui/dialog'
 require_relative 'ui/spinner'

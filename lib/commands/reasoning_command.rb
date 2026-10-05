@@ -10,14 +10,14 @@ module Commands
     def handle(_args)
       reasoning = @harness.session.last_reasoning
       if reasoning.nil? || reasoning.strip.empty?
-        puts 'No reasoning to show yet (no response with reasoning in this session).'
+        @ui.puts 'No reasoning to show yet (no response with reasoning in this session).'
         return
       end
 
-      puts "Reasoning for the last response (#{reasoning.length} chars):"
-      puts '-' * 60
-      puts reasoning
-      puts '-' * 60
+      @ui.puts "Reasoning for the last response (#{reasoning.length} chars):"
+      @ui.puts '-' * 60
+      @ui.puts reasoning
+      @ui.puts '-' * 60
     end
   end
 end

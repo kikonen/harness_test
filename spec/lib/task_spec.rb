@@ -284,7 +284,8 @@ RSpec.describe Task do
       io_out = StringIO.new
       io_in = StringIO.new
 
-      error, task = described_class.run(harness: nil, stdout: io_out, stdin: io_in) do |_t|
+      error, task = described_class.run(harness: nil,
+                                       ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
         Task.puts 'greeting'
       end
 
@@ -296,7 +297,8 @@ RSpec.describe Task do
       io_out = StringIO.new
       io_in = StringIO.new
 
-      error, _task = described_class.run(harness: nil, stdout: io_out, stdin: io_in) do |_t|
+      error, _task = described_class.run(harness: nil,
+                                         ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
         raise 'boom'
       end
 
@@ -308,7 +310,8 @@ RSpec.describe Task do
       io_out = StringIO.new
       io_in = StringIO.new
 
-      described_class.run(harness: nil, stdout: io_out, stdin: io_in) do |_t|
+      described_class.run(harness: nil,
+                          ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
         sleep 0.3 # let the drain loop render a few default frames
       end
 
@@ -319,7 +322,8 @@ RSpec.describe Task do
       io_out = StringIO.new
       io_in = StringIO.new
 
-      described_class.run(harness: nil, stdout: io_out, stdin: io_in) do |_t|
+      described_class.run(harness: nil,
+                          ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
         Task.emit(:spinner_detail, origin: :session_manager,
                   content: { message: 'Sending', suffix: 'ctx 12%' })
         sleep 0.3 # let the drain loop render the re-pointed frames
@@ -333,7 +337,8 @@ RSpec.describe Task do
       io_out = StringIO.new
       io_in = StringIO.new
 
-      described_class.run(harness: nil, stdout: io_out, stdin: io_in) do |_t|
+      described_class.run(harness: nil,
+                          ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
         Task.puts '[step 1] first'
         sleep 0.1 # let the text line render and the spinner re-appear
         Task.puts '[step 2] second'
@@ -352,7 +357,8 @@ RSpec.describe Task do
       io_in = StringIO.new("1\n") # "1" selects the first option
 
       choice = nil
-      described_class.run(harness: nil, stdout: io_out, stdin: io_in) do |t|
+      described_class.run(harness: nil,
+                          ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |t|
         dialog = UI::Dialog.new(
           title: 'Test dialog',
           options: [UI::Dialog::Option.new(title: 'Yes', value: :yes)]

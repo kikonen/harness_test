@@ -7,14 +7,14 @@ require 'tmpdir'
 RSpec.describe FileList do
   # Drive the grant dialog without any real I/O: intercept Dialog#show and
   # perform it on StringIO streams we control. grant_access passes
-  # stdout: nil, stdin: nil (task-thread contract), so the stub must NOT
+  # ui: nil (task-thread contract), so the stub must NOT
   # call through to show - it performs the direct I/O itself. Returns
   # [grant result, dialog output].
   def drive_grant_dialog(list, *lines)
     stdin  = StringIO.new(lines.join("\n"))
     stdout = StringIO.new
     allow_any_instance_of(UI::Dialog).to receive(:show) do |dialog|
-      dialog.perform_direct(stdout: stdout, stdin: stdin)
+      dialog.perform_direct(ui: UI::Console.new(stdout: stdout, stdin: stdin))
     end
     result = list.grant_access(*@grant_args)
     [result, stdout.string]
