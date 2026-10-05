@@ -11,27 +11,10 @@ require 'stringio'
 # per-call stream argument and no global fallback. The main thread calls
 # render! on each drain tick. Tests assert the frame text by constructing
 # the spinner against a captured StringIO-backed UI::Console, not via
-# sleep-based thread observation.
+# sleep-based thread observation - no $stdout/$stdin globals anywhere.
 RSpec.describe UI::Spinner do
-  OVERRIDE = UI::Spinner::ENV_OVERRIDE
-
-  # Force the ANSI renderer for ALL examples: they must be deterministic and
-  # must never touch a real terminal or load the ratatui native extension.
-  before(:context) do
-    @original_override = ENV[OVERRIDE]
-    ENV[OVERRIDE] = 'print'
-  end
-
-  after(:context) do
-    if @original_override.nil?
-      ENV.delete(OVERRIDE)
-    else
-      ENV[OVERRIDE] = @original_override
-    end
-  end
-
   # A non-capturing console for examples that only need a valid constructor
-  # argument (renderer selection, state queries).
+  # argument (state queries).
   def quiet_console
     UI::Console.new(stdout: StringIO.new)
   end
@@ -236,57 +219,6 @@ RSpec.describe UI::Spinner do
     it 'wraps around the FRAMES array' do
       spinner = described_class.new('Working', ui: quiet_console)
       expect(spinner.line(UI::Spinner::FRAMES.size)).to eq("#{UI::Spinner::FRAMES[0]} Working...")
-    end
-  end
-
-  # Renderer-selection gate: exercise the ENV override directly, restoring the
-  # suite's 'print' default after each case so it works regardless of the
-  # actual terminal. The tty branch is stubbed (a fake console would otherwise
-  # make interactive_tty? report false on real runs).
-  describe 'renderer selection (issue #74)' do
-    let(:console) { UI::Console.new(stdout: $stdout, stdin: $stdin) }
-
-    def with_override(value)
-      if value.nil?
-        ENV.delete(OVERRIDE)
-      else
-        ENV[OVERRIDE] = value
-      end
-      yield
-    ensure
-      ENV[OVERRIDE] = 'print' # restore the suite default for the next example
-    end
-
-    it 'is forced to the ANSI spinner when HARNESS_SPINNER=print (case-insensitive)' do
-      with_override('PRINT') { expect(described_class.new(ui: quiet_console).forced_print?).to be(true) }
-    end
-
-    it 'is NOT forced by an unrelated override value' do
-      with_override('tui') { expect(described_class.new(ui: quiet_console).forced_print?).to be(false) }
-    end
-
-    it 'prefers the TUI renderer on an interactive terminal when not forced' do
-      spinner = described_class.new(ui: quiet_console)
-      with_override(nil) do
-        allow(spinner).to receive(:interactive_tty?).and_return(true)
-        expect(spinner.tui_preferred?(console)).to be(true)
-      end
-    end
-
-    it 'never uses the TUI renderer when output is not an interactive terminal (CI / pipes)' do
-      spinner = described_class.new(ui: quiet_console)
-      with_override(nil) do
-        allow(spinner).to receive(:interactive_tty?).and_return(false)
-        expect(spinner.tui_preferred?(console)).to be(false)
-      end
-    end
-
-    it 'stays on the ANSI path even when a TTY is present but the user pinned print' do
-      spinner = described_class.new(ui: quiet_console)
-      with_override('print') do
-        allow(spinner).to receive(:interactive_tty?).and_return(true)
-        expect(spinner.tui_preferred?(console)).to be(false)
-      end
     end
   end
 end

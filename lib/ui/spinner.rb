@@ -12,20 +12,12 @@
 # that all console I/O (spinner frames, output, dialogs) happens on the same
 # thread and can never interleave or race.
 #
-# Renderers:
-#   * print  - the long-standing ANSI single-line spinner on stdout. Always
-#              the safe default (CI, pipes, non-TTY). Forced by
-#              HARNESS_SPINNER=print.
-#   * tui    - an inline single-row RatatuiRuby viewport. Preserved for
-#              headless testing via `draw_tui_frame`; NOT used in the live
-#              render loop (would require blocking the main thread).
+# Rendering: the ANSI single-line spinner on the injected console (the safe
+# default for CI, pipes and non-TTY alike); draw_tui_frame is preserved for
+# headless testing through ratatui's test terminal.
 module UI
   class Spinner
     FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-
-    # Optional override / kill switch: HARNESS_SPINNER=print forces the ANSI
-    # spinner (case-insensitive). Any other value leaves it in effect.
-    ENV_OVERRIDE = 'HARNESS_SPINNER'
 
     attr_reader :ui
 
@@ -120,30 +112,6 @@ module UI
     def draw_tui_frame(tui, i)
       tui.draw { |frame| frame.render_widget(tui.paragraph(text: line(i)), frame.area) }
       tui.poll_event(timeout: 0.05)
-    end
-
-    # -- Renderer selection (preserved for reference / future TUI path) -----
-
-    # True when the user pinned the ANSI spinner via HARNESS_SPINNER=print
-    # (case-insensitive).
-    def forced_print?
-      ENV[ENV_OVERRIDE].to_s.strip.casecmp('print').zero?
-    end
-
-    # True only when both the console's stdin and stdout are real terminals.
-    def interactive_tty?(ui)
-      stdin  = ui&.stdin
-      stdout = ui&.stdout
-      return false unless stdin.respond_to?(:tty?) && stdin.tty?
-      stdout.nil? || (stdout.respond_to?(:tty?) && stdout.tty?)
-    end
-
-    # True when the TUI renderer could be preferred over print (interactive
-    # terminal AND not forced to print). Preserved for future use.
-    def tui_preferred?(ui)
-      return false if forced_print?
-
-      interactive_tty?(ui)
     end
 
     private

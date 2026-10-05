@@ -20,16 +20,6 @@ RSpec.describe Harness do
     described_class.new(opts, file_list)
   end
 
-  # Capture everything written to $stdout while the block runs.
-  def capture_stdout
-    old = $stdout
-    $stdout = StringIO.new
-    yield
-    $stdout.string
-  ensure
-    $stdout = old
-  end
-
   def seed_usage(harness, prompt_tokens)
     harness.session.add_user('hello')
     harness.session.add_assistant('hi')

@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'task'
+require 'ui/console'
 require 'stringio'
 
 # The Dialog suite (issue #74): the class lives in the `UI` namespace.
@@ -15,16 +16,25 @@ RSpec.describe UI::Dialog do
     ]
   end
 
-  # Feed a sequence of lines to $stdin (last element nil = EOF).
+  # Per-example streams behind the UI::Console (issue #40 / TUI prep): no
+  # $stdout / $stdin globals are touched anywhere in this suite.
+  let(:io_in)   { StringIO.new }
+  let(:io_out)  { StringIO.new }
+  let(:console) { UI::Console.new(stdout: io_out, stdin: io_in) }
+
+  # Feed a sequence of lines into the console's stdin (empty = immediate EOF).
   def stub_stdin(*lines)
-    allow($stdin).to receive(:gets).and_return(*lines)
+    lines.compact.each { |line| io_in << line }
+    io_in.rewind # `<<` leaves the position at EOF; rewind so gets() reads it
   end
 
   def show(dialog)
-    # The console is the explicit contract (no globals inside Dialog): these
-    # specs stub $stdin / capture $stdout, so wrap exactly those in a
-    # UI::Console and pass it in.
-    dialog.show(ui: UI::Console.new(stdout: $stdout, stdin: $stdin))
+    dialog.show(ui: console)
+  end
+
+  # Everything the dialog wrote, as a string.
+  def capture
+    io_out.string
   end
 
   describe 'stream contract (issue #40: no global stream access)' do
@@ -44,7 +54,7 @@ RSpec.describe UI::Dialog do
       end
 
       it 'routes through the task and rejects a named console' do
-        expect { dialog.show(ui: UI::Console.new(stdout: $stdout, stdin: $stdin)) }
+        expect { dialog.show(ui: console) }
           .to raise_error(ArgumentError, /pass ui: nil/)
       end
 
@@ -54,16 +64,6 @@ RSpec.describe UI::Dialog do
         expect(dialog.show(ui: nil)).to eq(:yes)
       end
     end
-  end
-
-  # Capture everything written to $stdout while the block runs.
-  def capture_stdout
-    old = $stdout
-    $stdout = StringIO.new
-    yield
-    $stdout.string
-  ensure
-    $stdout = old
   end
 
   describe 'construction' do
@@ -153,9 +153,9 @@ RSpec.describe UI::Dialog do
 
       it 'renders the choice prompt without a doubled "or"' do
         stub_stdin(nil)
-        out = capture_stdout { show(dialog) }
-        expect(out).not_to include('or or')
-        expect(out).to include('or type a short note')
+        show(dialog)
+        expect(capture).not_to include('or or')
+        expect(capture).to include('or type a short note')
       end
 
       it 'returns [FREE_TEXT, text] for a non-numeric answer' do
@@ -179,14 +179,14 @@ RSpec.describe UI::Dialog do
 
       it 're-prompts with an invalid message, then accepts a valid choice' do
         stub_stdin("9\n", "1\n")
-        out = capture_stdout { expect(show(dialog)).to eq(:allow) }
-        expect(out).to include('invalid choice 9 (valid: 1..3)')
+        expect(show(dialog)).to eq(:allow)
+        expect(capture).to include('invalid choice 9 (valid: 1..3)')
       end
 
       it 're-prompts on "<number> <note>" with an out-of-range number' do
         stub_stdin("9 nope\n", "2\n")
-        out = capture_stdout { expect(show(dialog)).to eq(:deny) }
-        expect(out).to include('invalid choice 9 (valid: 1..3)')
+        expect(show(dialog)).to eq(:deny)
+        expect(capture).to include('invalid choice 9 (valid: 1..3)')
       end
 
       it 'still cancels when the user dismisses with EOF' do
@@ -199,8 +199,8 @@ RSpec.describe UI::Dialog do
           title: 't', options: options, free_text: true, free_text_prompt: 'or type a short note'
         )
         stub_stdin("9\n", "1\n")
-        out = capture_stdout { expect(show(dialog)).to eq(:allow) }
-        expect(out).to include('invalid choice 9 (valid: 1..3)')
+        expect(show(dialog)).to eq(:allow)
+        expect(capture).to include('invalid choice 9 (valid: 1..3)')
       end
 
       it 'still accepts genuine free text after an invalid number' do
@@ -248,8 +248,8 @@ RSpec.describe UI::Dialog do
 
       it 're-prompts when any number is out of range, then accepts a valid line' do
         stub_stdin("1 9\n", "2\n")
-        out = capture_stdout { expect(show(dialog)).to eq(:deny) }
-        expect(out).to include('invalid choice 9 (valid: 1..3)')
+        expect(show(dialog)).to eq(:deny)
+        expect(capture).to include('invalid choice 9 (valid: 1..3)')
       end
 
       it 'still cancels on EOF' do
@@ -259,9 +259,9 @@ RSpec.describe UI::Dialog do
 
       it 'shows a multi-select hint in the choice prompt' do
         stub_stdin(nil)
-        out = capture_stdout { show(dialog) }
-        expect(out).to include('several numbers like "1 3"')
+        show(dialog)
+        expect(capture).to include('several numbers like "1 3"')
       end
     end
   end
-  end
+end
