@@ -1,11 +1,10 @@
 # frozen_string_literal: true
 
+require_relative '../command'
+
 module Commands
   # /help - show available commands.
-  class HelpCommand
-    def initialize(_harness, _file_list, _options)
-    end
-
+  class HelpCommand < Command
     def handle(_args)
       puts <<~HELP
         Available commands:

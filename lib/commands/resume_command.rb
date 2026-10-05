@@ -1,14 +1,10 @@
 # frozen_string_literal: true
 
+require_relative '../command'
+
 module Commands
   # /resume <id> - resume a saved session by its id.
-  class ResumeCommand
-    def initialize(harness, file_list, options)
-      @harness = harness
-      @file_list = file_list
-      @options = options
-    end
-
+  class ResumeCommand < Command
     def handle(args)
       id = args.strip
       if id.empty?

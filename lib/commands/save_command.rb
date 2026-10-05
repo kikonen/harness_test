@@ -1,14 +1,10 @@
 # frozen_string_literal: true
 
+require_relative '../command'
+
 module Commands
   # /save - save the session (conversation + access list) to disk.
-  class SaveCommand
-    def initialize(harness, file_list, options)
-      @harness = harness
-      @file_list = file_list
-      @options = options
-    end
-
+  class SaveCommand < Command
     def handle(_args)
       id = @harness.session_manager.save_session
       puts "Session saved as #{id} (#{@harness.session_manager.sessions_dir}/#{id}.json)"

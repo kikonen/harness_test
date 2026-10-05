@@ -1,12 +1,10 @@
 # frozen_string_literal: true
 
+require_relative '../command'
+
 module Commands
   # /exit - exit the harness.
-  class ExitCommand
-    def initialize(_harness, _file_list, _options)
-      @exited = false
-    end
-
+  class ExitCommand < Command
     def exited?
       @exited
     end

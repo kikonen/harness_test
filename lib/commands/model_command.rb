@@ -1,14 +1,11 @@
 # frozen_string_literal: true
 
+require_relative '../command'
+
 module Commands
   # /model <name> - switch the active model for this run.
   # /model        - show the currently active model.
-  class ModelCommand
-    def initialize(harness, _file_list, options)
-      @harness = harness
-      @options = options
-    end
-
+  class ModelCommand < Command
     def handle(args)
       name = args.strip
       if name.empty?

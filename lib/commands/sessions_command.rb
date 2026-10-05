@@ -1,12 +1,10 @@
 # frozen_string_literal: true
 
+require_relative '../command'
+
 module Commands
   # /sessions - list saved sessions.
-  class SessionsCommand
-    def initialize(harness, _file_list, _options)
-      @harness = harness
-    end
-
+  class SessionsCommand < Command
     def handle(_args)
       sessions = @harness.session_manager.list_sessions
       if sessions.empty?

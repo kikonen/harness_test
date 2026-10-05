@@ -1,12 +1,10 @@
 # frozen_string_literal: true
 
+require_relative '../command'
+
 module Commands
   # /tools - list available tools.
-  class ToolsCommand
-    def initialize(harness, _file_list, _options)
-      @harness = harness
-    end
-
+  class ToolsCommand < Command
     def handle(_args)
       registry = @harness.tool_registry
       puts "Available tools (#{registry.tools.size}):"
