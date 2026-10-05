@@ -178,10 +178,10 @@ class Task
   # -- Task-thread output helpers --------------------------------------------
   #
   # These find the current task via Thread.current and push events onto
-  # ITS outbox (the single event queue). They NEVER write to stdout and
-  # NEVER touch the buffer. When no task is active (main-thread CLI
-  # startup/shutdown), they fall back to Kernel since there is no drain
-  # loop to render events for.
+  # ITS outbox (the single event queue). They NEVER write to a stream and
+  # NEVER touch the buffer. Main-thread startup/shutdown output goes through
+  # the CLI's UI::Console instead - there is no Kernel fallback, and none
+  # should ever be needed (production callers run on a task thread).
 
   # The Task running on the current thread (set by #start), or nil.
   def self.current
@@ -198,16 +198,14 @@ class Task
   end
 
   # Write lines as :text events on the active task's outbox. One event per
-  # argument (like Kernel.puts). Falls back to Kernel.puts when no task is
-  # active (main-thread code outside a Task has no drain loop).
+  # argument (like Kernel.puts). No-op when no task is active (the CLI owns
+  # main-thread output through its UI::Console).
   def self.puts(*args)
     task = current
-    if task
-      args = [''] if args.empty?
-      args.each { |part| task.push_event(type: :text, origin: :task, content: part.to_s) }
-    else
-      Kernel.puts(*args)
-    end
+    return unless task
+
+    args = [''] if args.empty?
+    args.each { |part| task.push_event(type: :text, origin: :task, content: part.to_s) }
     nil
   end
 

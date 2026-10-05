@@ -144,15 +144,8 @@ RSpec.describe Task do
       expect(events[1][:content]).to eq('second line')
     end
 
-    it 'falls back to Kernel.puts when no task is active' do
-      old_stdout = $stdout
-      $stdout = StringIO.new
-
-      Task.puts 'no task around'
-
-      expect($stdout.string).to eq("no task around\n")
-    ensure
-      $stdout = old_stdout
+    it 'is a no-op when no task is active (CLI owns main-thread output)' do
+      expect { Task.puts 'no task around' }.not_to raise_error
     end
   end
 
@@ -174,15 +167,8 @@ RSpec.describe Task do
       expect(events[0][:content]).to eq("  [test.tool] ok")
     end
 
-    it 'falls back to Kernel.puts when no task is active' do
-      old_stdout = $stdout
-      $stdout = StringIO.new
-
-      Tool.puts "  [test.tool] ok"
-
-      expect($stdout.string).to eq("  [test.tool] ok\n")
-    ensure
-      $stdout = old_stdout
+    it 'is a no-op when no task is active (CLI owns main-thread output)' do
+      expect { Tool.puts "  [test.tool] ok" }.not_to raise_error
     end
   end
 

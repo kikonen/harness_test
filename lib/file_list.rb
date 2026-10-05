@@ -360,15 +360,9 @@ class FileList
     choice    = choice[0] if choice.is_a?(Array)
     # Feedback line. grant_access runs on the task thread, so this must go
     # through the task's event queue (Tool.puts), never a bare puts onto
-    # $stdout from the wrong thread (issue #40). Fallback to Kernel.puts
-    # when no task is active (unit tests, one-off use).
-    report = lambda do |line|
-      if defined?(Tool) && defined?(Task) && Task.current
-        Tool.puts line
-      else
-        Kernel.puts line
-      end
-    end
+    # $stdout from the wrong thread (issue #40). No task active = no-op
+    # (the CLI owns main-thread output through its UI::Console).
+    report = lambda { |line| Tool.puts line }
     case choice
     when :target
       add_file(path, mode)
