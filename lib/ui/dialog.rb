@@ -284,7 +284,3 @@ module UI
   end
 end
 
-# Backward-compatible top-level alias (issue #74): existing call sites that
-# still reference the old flat `Dialog` keep working unchanged. New code
-# should use UI::Dialog.
-Dialog = UI::Dialog unless defined?(Dialog)

@@ -7,7 +7,6 @@ require 'stringio'
 # The Dialog suite (issue #74): the class lives in the `UI` namespace.
 # Behavior is asserted IDENTICALLY to the pre-migration top-level Dialog
 # (option handling, notes, free text, multi-select, out-of-range re-prompt),
-# plus a group for the backward-compatible `Dialog` alias.
 RSpec.describe UI::Dialog do
   let(:options) do
     [
@@ -265,24 +264,4 @@ RSpec.describe UI::Dialog do
       end
     end
   end
-
-  describe 'backward-compatible top-level alias' do
-    it 'exposes the namespaced Dialog as the legacy top-level Dialog' do
-      expect(Dialog).to be(UI::Dialog)
-    end
-
-    it 'shares its constants with the namespaced class' do
-      expect(Dialog::CANCEL_VALUE).to eq(UI::Dialog::CANCEL_VALUE)
-      expect(Dialog::FREE_TEXT).to eq(UI::Dialog::FREE_TEXT)
-    end
-
-    it 'is constructible through the legacy alias with identical behavior' do
-      stub_stdin("1 seems fine\n")
-      dialog = Dialog.new(
-        title: 't',
-        options: [Dialog::Option.new(title: 'Allow', value: :allow)]
-      )
-      expect(show(dialog)).to eq([:allow, 'seems fine'])
-    end
   end
-end

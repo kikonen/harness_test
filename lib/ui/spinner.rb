@@ -27,6 +27,8 @@ module UI
     # spinner (case-insensitive). Any other value leaves it in effect.
     ENV_OVERRIDE = 'HARNESS_SPINNER'
 
+    attr_reader :ui
+
     # suffix is optional extra text appended after the message (issue #115,
     # e.g. the current context-usage estimate). It may be a plain string or a
     # callable (lambda/proc) that is re-evaluated on EVERY frame so it always
@@ -34,12 +36,18 @@ module UI
     # (issue #126). nil/empty shows only the message, as before.
     # The Task drain loop re-points these via #update_detail while the wait
     # continues - no restart needed.
-    def initialize(message = 'Working', suffix = nil)
+    # ui: the output console (UI::Console), injected ONCE at construction and
+    # used by every per-frame write (render!, clear_line) - there is
+    # deliberately no per-call stream argument and no global fallback.
+    def initialize(message = 'Working', suffix = nil, ui: nil)
       @message   = message
       @suffix    = suffix
       @active    = false  # between #start and #stop
       @resumable = false  # started and not yet stopped
       @frame     = 0
+      raise ArgumentError, 'Spinner requires a ui: console' if ui.nil?
+
+      @ui = ui
     end
 
     # Begin the spinner. Pure state change - no I/O, no thread spawn.
@@ -65,13 +73,12 @@ module UI
 
     # -- Main-thread render (issue #40 single-thread I/O rule) ---------------
 
-    # Advance one animation frame and write it to stdout. Called by the
-    # main thread on each drain tick (typically every 100ms). The output
-    # console (UI::Console) is passed by the caller - there is deliberately
-    # no console default, it must always be an explicit argument (Task.run
-    # injects it; tests wrap a StringIO in one).
+    # Advance one animation frame and write it to the injected console
+    # (ui: passed at construction). Called by the main thread on each
+    # drain tick (typically every 100ms). No per-call stream argument: the
+    # console is fixed for the spinner's lifetime.
     # No-op when not running (stopped).
-    def render!(ui)
+    def render!
       return unless running?
 
       text = "#{FRAMES[@frame % FRAMES.size]} #{@message}...#{render_suffix}"
@@ -80,10 +87,11 @@ module UI
       @frame += 1
     end
 
-    # Clear the spinner line with an ANSI erase-entire-line escape (issue #125).
-    # Called by the main thread when transitioning from rendering to idle.
-    # Same explicit-stream contract as #render! .
-    def clear_line(ui)
+    # Clear the spinner line with an ANSI erase-entire-line escape
+    # (issue #125) on the injected console. Called by the main thread when
+    # transitioning from rendering to idle. Same constructor-injected
+    # contract as #render! .
+    def clear_line
       ui.print("\r\e[2K")
       ui.flush
     end
@@ -127,9 +135,7 @@ module UI
       stdin  = ui&.stdin
       stdout = ui&.stdout
       return false unless stdin.respond_to?(:tty?) && stdin.tty?
-      return true if stdout.nil?
-
-      stdout.respond_to?(:tty?) && stdout.tty?
+      stdout.nil? || (stdout.respond_to?(:tty?) && stdout.tty?)
     end
 
     # True when the TUI renderer could be preferred over print (interactive
@@ -156,8 +162,3 @@ module UI
     end
   end
 end
-
-# Backward-compatible top-level alias (issue #74): existing call sites that
-# still reference the old flat `Spinner` keep working unchanged. New code
-# should use UI::Spinner.
-Spinner = UI::Spinner unless defined?(Spinner)

@@ -230,7 +230,7 @@ class Task
     # In production the console is always set by Task.run; in unit tests it
     # may be nil - just stop without clearing.
     if @ui && @spinner.running?
-      @spinner.clear_line(@ui)
+      @spinner.clear_line
     end
     @spinner.stop
     @spinner = nil
@@ -337,7 +337,7 @@ class Task
   def self.ensure_spinner_running(task)
     return if task.visible_spinner
 
-    spinner = UI::Spinner.new(DEFAULT_SPINNER_MESSAGE)
+    spinner = UI::Spinner.new(DEFAULT_SPINNER_MESSAGE, ui: task.ui)
     spinner.start
     task.spinner = spinner
   end
@@ -348,7 +348,7 @@ class Task
     return unless task.outbox_empty?
 
     ensure_spinner_running(task)
-    task.visible_spinner&.render!(task.ui)
+    task.visible_spinner&.render!
   end
 
   # Handle a :__request__ control event on the main thread.
