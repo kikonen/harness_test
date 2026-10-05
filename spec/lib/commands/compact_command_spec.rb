@@ -32,16 +32,13 @@ RSpec.describe Commands::CompactCommand do
     end.new(session, manager)
   end
 
-  let(:command) { described_class.new(harness, nil, nil) }
-
-  # Capture $stdout while running the command and return it as a string.
+  # Commands write to an explicit stream (TUI-ready), so the spec supplies a
+  # StringIO and reads it back instead of swapping $stdout.
   def run_command
-    old_stdout = $stdout
-    $stdout    = StringIO.new
+    io      = StringIO.new
+    command = described_class.new(harness:, file_list: nil, options: nil, stdout: io)
     command.handle('')
-    $stdout.string
-  ensure
-    $stdout = old_stdout
+    io.string
   end
 
   it 'prints the resulting context size after compaction' do

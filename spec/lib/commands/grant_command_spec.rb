@@ -14,15 +14,14 @@ RSpec.describe Commands::GrantCommand do
   after { FileUtils.remove_entry(workdir) }
 
   let(:file_list) { FileList.new([], workdir: workdir) }
-  let(:command) { described_class.new(nil, file_list, nil) }
 
+  # Commands write to an explicit stream (TUI-ready), so the spec supplies a
+  # StringIO and reads it back instead of swapping $stdout.
   def run_command
-    old_stdout = $stdout
-    $stdout    = StringIO.new
+    io      = StringIO.new
+    command = described_class.new(harness: nil, file_list:, options: nil, stdout: io)
     command.handle('')
-    $stdout.string
-  ensure
-    $stdout = old_stdout
+    io.string
   end
 
   it 'lists file, dir and flat-dir grants grouped by mode' do

@@ -1,12 +1,10 @@
 # frozen_string_literal: true
 
+require_relative '../command'
+
 module Commands
   # /ctx - report current context usage on demand (issue #63).
-  class CtxCommand
-    def initialize(harness, _file_list, _options)
-      @harness = harness
-    end
-
+  class CtxCommand < Command
     def handle(_args)
       puts @harness.context_report
       puts

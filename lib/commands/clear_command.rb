@@ -1,12 +1,10 @@
 # frozen_string_literal: true
 
+require_relative '../command'
+
 module Commands
   # /clear - remove all grants from the access list.
-  class ClearCommand
-    def initialize(harness, file_list, options)
-      @file_list = file_list
-    end
-
+  class ClearCommand < Command
     def handle(_args)
       @file_list.clear
       puts "Access list cleared."

@@ -1,13 +1,10 @@
 # frozen_string_literal: true
 
+require_relative '../command'
+
 module Commands
   # /models - list configured models (marks the default and active one).
-  class ModelsCommand
-    def initialize(harness, _file_list, options)
-      @harness = harness
-      @options = options
-    end
-
+  class ModelsCommand < Command
     def handle(_args)
       profiles = @harness.session_manager.model_profiles
       current  = @harness.session_manager.active_model_name

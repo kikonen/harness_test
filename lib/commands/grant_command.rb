@@ -1,16 +1,13 @@
 # frozen_string_literal: true
 
+require_relative '../command'
 require_relative '../command_allowlist'
 
 module Commands
   # /grant - show all current grants: file/dir access grants (read, write,
   # delete) and command allowlist prefixes. Replaces the constant grant
   # display that used to be printed above every prompt (issue #101).
-  class GrantCommand
-    def initialize(_harness, file_list, _options)
-      @file_list = file_list
-    end
-
+  class GrantCommand < Command
     def handle(_args)
       access = @file_list.accessible_paths
       labels = { both: 'Read + write', read: 'Read only', write: 'Write only', delete: 'Delete' }

@@ -3,6 +3,7 @@
 require_relative 'harness'
 require_relative 'file_list'
 require_relative 'task'
+require_relative 'command'
 
 # Individual command classes.
 require_relative 'commands/grant_command'
@@ -73,12 +74,12 @@ class CommandHandler
 
   # Delegate for CLI's --list-sessions flag.
   def list_sessions
-    Commands::SessionsCommand.new(harness, file_list, options).handle('')
+    Commands::SessionsCommand.new(harness:, file_list:, options:, stdout:).handle('')
   end
 
   # Build the command line to resume a saved session in a new harness run.
   def resume_command(id)
-    Commands::ResumeCommand.new(harness, file_list, options).resume_cli_string(id)
+    Commands::ResumeCommand.new(harness:, file_list:, options:, stdout:).resume_cli_string(id)
   end
 
   # Dispatch a single line of input. Slash-commands go through the registry;
@@ -100,7 +101,7 @@ class CommandHandler
 
     cmd_class = COMMANDS[name]
     if cmd_class
-      cmd = cmd_class.new(harness, file_list, options)
+      cmd = cmd_class.new(harness:, file_list:, options:, stdout:)
       cmd.handle(args)
       @exiting = true if cmd.respond_to?(:exited?) && cmd.exited?
     else
