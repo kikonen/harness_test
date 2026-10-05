@@ -5,7 +5,7 @@ require 'bundler'
 require 'timeout'
 
 require_relative '../tool'
-require_relative '../dialog'
+require_relative '../ui/dialog'
 require_relative '../command_allowlist'
 
 # Executes a shell command in the harness working directory.
@@ -108,12 +108,12 @@ module Tools
       # behaviour when saved (issue #94).
       all_candidates = CommandAllowlist.extract_prefix_options(command)
       prefixes       = @allowlist.filter_uncovered(all_candidates)
-      options        = [Dialog::Option.new(title: 'Allow', value: :allow)]
+      options        = [UI::Dialog::Option.new(title: 'Allow', value: :allow)]
       # Simple segments yield one "Always allow" option per candidate
       # prefix; commands with unsafe constructs (redirects, substitutions,
       # subshells, background) yield none, so no saving is offered.
       prefixes.each do |p|
-        options << Dialog::Option.new(
+        options << UI::Dialog::Option.new(
           title: "Always allow '#{p}'",
           # Unique per prefix so a multi-select answer maps back to the
           # exact prefixes chosen (issue #102).
@@ -130,7 +130,7 @@ module Tools
         note  = label ? "UNSAFE: #{label} cannot be auto-approved" : UNSAFETY_NOTE
       end
 
-      choice = Dialog.new(
+      choice = UI::Dialog.new(
         title: "The model is requesting to run a shell command:\n" \
                "$ #{command}\ncwd: #{shown} (timeout: #{timeout}s)",
         options: options,
@@ -170,7 +170,7 @@ module Tools
         # [value, note]: a note was attached; with note_on_cancel_only it
         # only survives on the cancel choice (issue #79).
         return denial('user denied executing the command', note: choice[1]) \
-               if choice[0] == Dialog::CANCEL_VALUE
+               if choice[0] == UI::Dialog::CANCEL_VALUE
         return {}
       end
 
@@ -178,7 +178,7 @@ module Tools
       # Single selection returns the bare value.
       values = choice.is_a?(Array) ? choice : [choice]
       return denial('user denied executing the command') \
-             if values.include?(Dialog::CANCEL_VALUE)
+             if values.include?(UI::Dialog::CANCEL_VALUE)
 
       # A mix of plain "Allow" with one or more grants is ambiguous: the
       # user wants to run the command now, so we honor the Allow and save

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../tool'
-require_relative '../dialog'
+require_relative '../ui/dialog'
 
 # Lets the MODEL ask the user a question (or make a choice) via a dialog.
 #
@@ -112,14 +112,14 @@ module Tools
           return "error: every option needs a 'value' (non-empty string, number, or boolean)"
         end
 
-        options << Dialog::Option.new(
+        options << UI::Dialog::Option.new(
           title: opt_title,
           value: value,
           description: raw['description']
         )
       end
 
-      choice = Dialog.new(
+      choice = UI::Dialog.new(
         title: title,
         options: options,
         note: args['note'],
@@ -129,13 +129,13 @@ module Tools
         # through the task and the MAIN THREAD services the I/O (issue #40).
       ).show(ui: nil)
 
-      if choice.is_a?(Array) && choice.first == Dialog::FREE_TEXT
+      if choice.is_a?(Array) && choice.first == UI::Dialog::FREE_TEXT
         # [FREE_TEXT, text]: the user typed their own answer.
         "free text response from the user: \"#{choice[1]}\""
       elsif choice.is_a?(Array)
         # [option value, note]: an option was picked with a short note on top.
         "selected: #{choice[0].inspect} (user's note: \"#{choice[1]}\")"
-      elsif choice == Dialog::CANCEL_VALUE
+      elsif choice == UI::Dialog::CANCEL_VALUE
         'cancelled (the user dismissed the dialog without choosing an option)'
       else
         "selected: #{choice.inspect}"

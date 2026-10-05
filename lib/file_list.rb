@@ -3,7 +3,7 @@
 require 'digest'
 
 require_relative 'sensitive_files'
-require_relative 'dialog'
+require_relative 'ui/dialog'
 
 # Single source of truth for file access permissions.
 #
@@ -284,8 +284,8 @@ class FileList
     options = if dir_prompt || is_dir
       # Directory: offer flat or recursive.
       [
-        Dialog::Option.new(title: 'Allow this directory only', value: :flat),
-        Dialog::Option.new(
+        UI::Dialog::Option.new(title: 'Allow this directory only', value: :flat),
+        UI::Dialog::Option.new(
           title: 'Allow this directory and subdirs (recursive)',
           value: :recursive,
           description: 'covers every file under the directory'
@@ -296,17 +296,17 @@ class FileList
       # the target itself so existing siblings of the parent are NOT made
       # writeable (issue #54).
       [
-        Dialog::Option.new(
+        UI::Dialog::Option.new(
           title: "Allow this directory only: #{shown}",
           value: :target,
           description: 'grant covers just this new directory'
         ),
-        Dialog::Option.new(
+        UI::Dialog::Option.new(
           title: "Allow parent directory: #{parent_shown}/ (dir only)",
           value: :parent_flat,
           description: 'the parent itself + direct children - makes ALL of them writeable'
         ),
-        Dialog::Option.new(
+        UI::Dialog::Option.new(
           title: "Allow parent directory: #{parent_shown}/ (recursive)",
           value: :parent_recursive,
           description: 'every file under the parent'
@@ -315,13 +315,13 @@ class FileList
     elsif file_prompt
       # File within workdir: offer file-only or parent-dir (flat/recursive).
       [
-        Dialog::Option.new(title: 'Allow this file only', value: :file),
-        Dialog::Option.new(
+        UI::Dialog::Option.new(title: 'Allow this file only', value: :file),
+        UI::Dialog::Option.new(
           title: "Allow directory: #{parent_shown}/ (dir only)",
           value: :parent_flat,
           description: 'the directory itself + direct children only'
         ),
-        Dialog::Option.new(
+        UI::Dialog::Option.new(
           title: "Allow directory: #{parent_shown}/ (recursive)",
           value: :parent_recursive,
           description: 'every file under the directory'
@@ -330,7 +330,7 @@ class FileList
     else
       # Outside workdir or special path.
       [
-        Dialog::Option.new(
+        UI::Dialog::Option.new(
           title: 'Allow',
           value: :flat,
           description: is_dir ? 'this directory only (not subdirs)' : nil
@@ -345,7 +345,7 @@ class FileList
       note  = [note, warn_line].compact.join("\n")
     end
 
-    choice = Dialog.new(
+    choice = UI::Dialog.new(
       title: "Access requested (#{verb}): #{shown}",
       options: options,
       note: note,

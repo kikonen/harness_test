@@ -238,7 +238,7 @@ RSpec.describe Task do
     let(:task) { described_class.new { |_t| } }
 
     def make_spinner(running: true)
-      sp = UI::Spinner.new('Working')
+      sp = UI::Spinner.new('Working', ui: UI::Console.new(stdout: StringIO.new))
       running ? sp.start : nil
       sp
     end

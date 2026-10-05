@@ -3,7 +3,7 @@
 # Spec helper: load the harness library from lib/.
 $LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
 
-require 'dialog'
+require 'ui/dialog'
 require 'file_list'
 require 'session'
 require 'tools/dialog_tool'

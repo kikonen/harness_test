@@ -23,23 +23,25 @@ RSpec.describe UI::Spinner do
     end
 
     it 'draws the frame, message and suffix through a ratatui paragraph' do
-      spinner = described_class.new('Sending to gpt-x', 'ctx 42133/65536 (64%)')
+      console  = UI::Console.new(stdout: StringIO.new)
+      spinner  = described_class.new('Sending to gpt-x', 'ctx 42133/65536 (64%)', ui: console)
       tui = RatatuiRuby::TUI.new
       spinner.draw_tui_frame(tui, 0)
     end
 
     it 'produces the exact frame text shared with the ANSI renderer' do
-      spinner = described_class.new('Sending to gpt-x', 'ctx 42133/65536 (64%)')
+      console = UI::Console.new(stdout: StringIO.new)
+      spinner = described_class.new('Sending to gpt-x', 'ctx 42133/65536 (64%)', ui: console)
       expect(spinner.line(0)).to eq('⠋ Sending to gpt-x... ctx 42133/65536 (64%)')
     end
 
     it 'renders the message only when no suffix is given' do
-      spinner = described_class.new('Working')
+      spinner = described_class.new('Working', ui: UI::Console.new(stdout: StringIO.new))
       expect(spinner.line(1)).to eq('⠙ Working...')
     end
 
     it 'keeps polling events without hanging when no input is pending' do
-      spinner = described_class.new('Working')
+      spinner = described_class.new('Working', ui: UI::Console.new(stdout: StringIO.new))
       tui = RatatuiRuby::TUI.new
       3.times { spinner.draw_tui_frame(tui, 0) } # three poll cycles, no hang
     end

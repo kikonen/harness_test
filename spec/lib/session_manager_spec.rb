@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 require 'logger'
-require 'spinner'
+require 'ui/spinner'
 require 'output_buffer'
 require 'session_manager'
 require 'fileutils'
