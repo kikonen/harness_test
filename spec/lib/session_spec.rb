@@ -179,4 +179,62 @@ RSpec.describe Session do
       expect(session.compact_trigger(4_000, 88, reserved_tokens: 10_000)).to eq(3520)
     end
   end
+
+  describe '#add_note / #flush_notes (issue #138)' do
+    def pending_notes(session)
+      session.instance_variable_get(:@notes) || []
+    end
+
+    it 'buffers notes without touching the chain until flush' do
+      size_before = session.messages.size
+
+      session.add_note('granted read on lib/')
+
+      expect(pending_notes(session)).to eq(['granted read on lib/'])
+      expect(session.messages.size).to eq(size_before)
+    end
+
+    it 'flushes pending notes as system messages and clears the buffer' do
+      session.add_note('fact one')
+      session.add_note('fact two')
+
+      session.flush_notes
+
+      expect(pending_notes(session)).to be_empty
+      expect(session.messages.last(2)).to eq(
+        [{ role: 'system', content: 'Note: fact one' },
+         { role: 'system', content: 'Note: fact two' }]
+      )
+    end
+
+    it 'is a no-op when nothing is pending' do
+      expect { session.flush_notes }.not_to change { session.messages.size }
+    end
+
+    it 'strips whitespace and ignores empty notes' do
+      session.add_note('  spaced note  ')
+      session.add_note('   ')
+
+      expect(pending_notes(session)).to eq(['spaced note'])
+    end
+
+    it '#clear resets the pending buffer' do
+      session.add_note('pending fact')
+
+      session.clear
+
+      expect(pending_notes(session)).to be_empty
+    end
+
+    it 'compact appends pending notes to the fresh chain so they survive' do
+      10.times { |i| session.add_user("message #{i}") }
+      session.add_note('granted write on tmp/')
+
+      session.compact('a summary')
+
+      expect(pending_notes(session)).to be_empty
+      expect(session.messages.last)
+        .to eq({ role: 'system', content: 'Note: granted write on tmp/' })
+    end
+  end
 end
