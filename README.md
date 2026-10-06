@@ -58,6 +58,7 @@ models:
 default_model: local
 compact:
   recent_messages: 6        # messages kept verbatim after /compact
+  reserved_tokens: 8192     # absolute headroom (tokens) kept free before auto-compact
 retry:
   count: 3                  # total attempts for transient errors
   delay: 2                  # base delay (s, exponential backoff)

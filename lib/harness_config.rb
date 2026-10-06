@@ -35,6 +35,7 @@ require_relative 'harness_error'
 #     recent_messages: 3        # messages retained verbatim after /compact
 #     auto_threshold: 88        # auto-compact when context usage reaches this % of the window
 #     max_size: 500             # max length (words) of the compaction summary
+#     reserved_tokens: 8192     # absolute headroom (tokens) kept free before auto-compact (issue #151)
 #   auto_save: true             # auto-save the session at every prompt boundary (issue #107)
 #   retry:
 #     count: 3                  # total attempts for transient network errors
@@ -78,6 +79,7 @@ class HarnessConfig
       recent_messages: 6       # messages retained verbatim after /compact
       auto_threshold: 88       # auto-compact when context usage reaches this % of the window
       max_size: 500            # max length (words) of the compaction summary
+      reserved_tokens: 8192    # absolute headroom (tokens) kept free before auto-compact (issue #151)
 
     # Auto-save the session at every prompt boundary (crash-proof, issue #107).
     auto_save: true
@@ -105,7 +107,8 @@ class HarnessConfig
     @compact      = {
       recent_messages: int_or_nil(data.dig('compact', 'recent_messages')),
       auto_threshold:  float_or_nil(data.dig('compact', 'auto_threshold')),
-      max_size:        int_or_nil(data.dig('compact', 'max_size'))
+      max_size:        int_or_nil(data.dig('compact', 'max_size')),
+      reserved_tokens: int_or_nil(data.dig('compact', 'reserved_tokens'))
     }
     @retry        = {
       count: int_or_nil(data.dig('retry', 'count')),
@@ -193,6 +196,12 @@ class HarnessConfig
   # Max length (words) of the compaction summary (or nil).
   def compact_max_size
     @compact[:max_size]
+  end
+
+  # Absolute headroom (tokens) reserved for the compaction summary call
+  # before auto-compact fires (or nil; the built-in default then applies).
+  def compact_reserved_tokens
+    @compact[:reserved_tokens]
   end
 
   # Total retry attempts for transient network errors (or nil).

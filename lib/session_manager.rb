@@ -69,7 +69,10 @@ class SessionManager
 
     # The previous attempt may have failed because the context was full:
     # compact first, then re-send.
-    if @harness.session.auto_compact_due?(@harness.options[:num_ctx] || LLMClient::NUM_CTX, @harness.compact_auto_threshold)
+    if @harness.session.auto_compact_due?(
+      @harness.options[:num_ctx] || LLMClient::NUM_CTX, @harness.compact_auto_threshold,
+      reserved_tokens: @harness.compact_reserved_tokens
+    )
       Task.emit(:compact, origin: :session_manager,
                 content: '  [context over threshold - compacting before retry...]')
       result = compact_session
@@ -202,9 +205,11 @@ class SessionManager
   # otherwise (not due yet, too small to compact, or the summary call
   # failed - the turn then simply continues with the existing chain).
   def check_inloop_compaction(messages, last_prompt_tokens)
-    window = @harness.options[:num_ctx] || LLMClient::NUM_CTX
-    threshold = @harness.compact_auto_threshold
-    return false unless last_prompt_tokens.to_i >= (window * (threshold.to_f / 100.0)).ceil
+    window  = @harness.options[:num_ctx] || LLMClient::NUM_CTX
+    trigger = compact_trigger_tokens
+    # issue #151: the trigger depends on the context size - min of the
+    # %-threshold and window - reserved headroom for the summary call.
+    return false if trigger.nil? || last_prompt_tokens.to_i < trigger
 
     # Only compact when there is real work to summarize: a single short
     # exchange never reaches the threshold anyway, but guard against an
@@ -212,8 +217,10 @@ class SessionManager
     conversation = messages.size > 1 ? messages[1..] : []
     return false if conversation.size < 4
 
+    # issue #151: report the effective trigger for THIS window (it depends
+    # on context size), not just the raw usage percentage.
     Task.emit(:compact, origin: :session_manager,
-              content: "  [context at #{(last_prompt_tokens.to_f / window * 100).round}% of the window - in-loop compaction...]")
+              content: "  [context at #{last_prompt_tokens}/#{window} tokens (trigger #{trigger}) - in-loop compaction...]")
 
     # issue #116: the send_session spinner is still animating here (this
     # runs from inside Harness#call_llm). The task has exactly ONE spinner;
@@ -317,10 +324,16 @@ class SessionManager
   # must never break the prompt flow, the next request will simply fail on
   # the server side and the user can /compact manually.
   def compact_if_due
-    return unless @harness.session.auto_compact_due?(@harness.options[:num_ctx] || LLMClient::NUM_CTX, @harness.compact_auto_threshold)
+    return unless @harness.session.auto_compact_due?(
+      @harness.options[:num_ctx] || LLMClient::NUM_CTX, @harness.compact_auto_threshold,
+      reserved_tokens: @harness.compact_reserved_tokens
+    )
 
+    # issue #151: report the effective trigger for THIS window (it depends
+    # on context size), not just the raw percentage.
+    trigger = compact_trigger_tokens
     Task.emit(:compact, origin: :session_manager,
-              content: "  [context at #{threshold_pct}% of the window - auto-compacting session...]")
+              content: "  [context over #{trigger} tokens (trigger) - auto-compacting session...]")
     result = compact_session
     Task.emit(:compact, origin: :session_manager,
               content: "  [auto-compact done: #{result[:before]} -> #{result[:after]} messages]")
@@ -333,9 +346,10 @@ class SessionManager
               content: "  [auto-compact failed: #{e.message} - try /compact manually]")
   end
 
-  # The configured auto-compact threshold as a percentage.
-  def threshold_pct
-    @harness.compact_auto_threshold
+  # The effective auto-compact trigger for the active window (issue #151):
+  # min(threshold% of window, window - reserved headroom); nil when invalid.
+  def compact_trigger_tokens
+    @harness.compact_trigger_tokens
   end
 
   # issue #131: log the full text of a response (reasoning + content) to

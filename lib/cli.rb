@@ -150,6 +150,7 @@ class CLI
     opts[:compact_recent]   ||= config.compact_recent_messages
     opts[:compact_auto_threshold] = config.compact_auto_threshold
     opts[:compact_max_size] = config.compact_max_size
+    opts[:compact_reserved] = config.compact_reserved_tokens
 
     # issue #107: auto-save at every prompt boundary. Default true; the
     # --no-auto-save flag or config 'auto_save: false' disables it.

@@ -108,7 +108,7 @@ RSpec.describe Session do
       session.record_stats(usage: { prompt_tokens: 60_000, total_tokens: 61_000 })
     end
 
-    it 'is due when usage reached the threshold' do
+    it 'is due when usage reached the percentage threshold (no headroom reserve)' do
       expect(session.auto_compact_due?(65_536, 88)).to be(true)
     end
 
@@ -116,12 +116,67 @@ RSpec.describe Session do
       expect(session.auto_compact_due?(65_536, 99)).to be(false)
     end
 
-    it 'can be disabled with a threshold above 100' do
+    it 'can be disabled with a threshold above 100 and no headroom reserve' do
       expect(session.auto_compact_due?(65_536, 1000)).to be(false)
     end
 
     it 'is false when the window size is invalid' do
       expect(session.auto_compact_due?(0, 88)).to be(false)
+    end
+  end
+
+  describe '#auto_compact_due? with reserved headroom (issue #151)' do
+    before do
+      session.add_user('hello')
+      session.add_assistant('hi')
+    end
+
+    it 'fires at window - reserved_tokens even when below the percentage threshold' do
+      # 65536 - 8192 = 57344 < 57500 used, while 88% (57672) would NOT trigger.
+      session.record_stats(usage: { prompt_tokens: 57_500, total_tokens: 58_000 })
+
+      expect(session.auto_compact_due?(65_536, 88)).to be(false)
+      expect(session.auto_compact_due?(65_536, 88, reserved_tokens: 8_192)).to be(true)
+    end
+
+    it 'uses the LOWER of the two triggers (headroom wins when stricter)' do
+      session.record_stats(usage: { prompt_tokens: 57_500, total_tokens: 58_000 })
+
+      # 88% of 65536 = 57672 > 57500 (NOT due by percentage alone),
+      # but window - 8192 = 57344 <= 57500 -> the headroom trigger wins.
+      expect(session.auto_compact_due?(65_536, 88)).to be(false)
+      expect(session.auto_compact_due?(65_536, 88, reserved_tokens: 8_192)).to be(true)
+    end
+
+    it 'a small window compacts proportionally earlier than a large one' do
+      session.record_stats(usage: { prompt_tokens: 25_000, total_tokens: 25_500 })
+
+      # 32K window: trigger = min(28836, 24576) = 24576 <= 25000 -> due.
+      expect(session.auto_compact_due?(32_768, 88, reserved_tokens: 8_192)).to be(true)
+      # Same usage on a 100K window: trigger = min(88000, 91808) = 88000
+      # -> NOT due (issue #151: room for the summary grows with the window).
+      expect(session.auto_compact_due?(100_000, 88, reserved_tokens: 8_192)).to be(false)
+    end
+
+    it 'ignores a non-positive reserved_tokens (percentage behavior only)' do
+      # Below both triggers -> not due whether or not a reserve is passed.
+      session.record_stats(usage: { prompt_tokens: 50_000, total_tokens: 50_500 })
+
+      expect(session.auto_compact_due?(65_536, 88, reserved_tokens: 0)).to be(false)
+    end
+  end
+
+  describe '#compact_trigger (issue #151)' do
+    it 'returns the min of percentage trigger and window minus reserve' do
+      expect(session.compact_trigger(65_536, 88, reserved_tokens: 8_192)).to eq(57_344)
+      # Percentage below window - reserve: percentage wins.
+      expect(session.compact_trigger(65_536, 50, reserved_tokens: 8_192)).to eq((65_536 * 0.5).ceil)
+    end
+
+    it 'falls back to the percentage trigger when the reserve covers the whole window' do
+      # 100% of 4000 = 4000; a reserve of 10000 would leave no room at all,
+      # so the (always valid) percentage trigger wins instead.
+      expect(session.compact_trigger(4_000, 88, reserved_tokens: 10_000)).to eq(3520)
     end
   end
 end

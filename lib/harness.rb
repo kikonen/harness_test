@@ -177,8 +177,29 @@ class Harness
     options[:compact_auto_threshold] || Session::AUTO_COMPACT_THRESHOLD
   end
 
+  # Absolute headroom (tokens) that must stay free before auto-compaction
+  # fires (issue #151): the compaction summary call needs room to send and
+  # generate, so a small window compacts proportionally earlier than a big
+  # one. nil/0 disables the headroom check (percentage trigger only).
+  def compact_reserved_tokens
+    options[:compact_reserved] || Session::COMPACT_RESERVED_TOKENS
+  end
+
   def compact_max_size
     options[:compact_max_size]
+  end
+
+  # The effective auto-compact usage level (tokens) for the active window:
+  # min(threshold_pct% of window, window - reserved tokens). nil when no
+  # valid window size is configured. Shared by every auto-compact decision
+  # (SessionManager, /ctx report) so the trigger stays in ONE place
+  # (issue #151).
+  def compact_trigger_tokens
+    window = options[:num_ctx] || LLMClient::NUM_CTX
+    return nil if window.to_i <= 0
+
+    @session.compact_trigger(window, compact_auto_threshold,
+                             reserved_tokens: compact_reserved_tokens)
   end
 
   # -- LLM call logic -------------------------------------------------------
@@ -396,9 +417,14 @@ class Harness
     used   = @session.context_used
     return "No conversation yet - nothing to measure." if used.nil?
 
+    # issue #151: the auto-compact trigger depends on the context size
+    # (min of the %-threshold and window - reserved headroom), so report
+    # the effective level for THIS window instead of a bare percentage.
+    trigger = compact_trigger_tokens
+
     pct      = @session.context_pct(window)
     headroom = [window - used[:tokens], 0].max
-    due      = @session.auto_compact_due?(window, compact_auto_threshold)
+    due      = trigger && (used[:tokens] >= trigger)
 
     status = due ? 'due' : 'not due'
     lines = []
@@ -406,7 +432,7 @@ class Harness
     lines << "  Used:        #{used[:tokens]} tokens (#{pct}% of #{window})"
     lines << "  Source:      #{used[:estimated] ? 'estimate (~4 chars/token)' : 'last LLM response'}"
     lines << "  Headroom:    #{headroom} tokens"
-    lines << "  Auto-compact: #{status} (threshold #{compact_auto_threshold}%)"
+    lines << "  Auto-compact: #{status} (fires at #{trigger} tokens, #{(trigger.to_f / window * 100).round}% of the window)" if trigger
     lines.join("\n")
   end
 
