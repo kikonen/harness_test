@@ -174,6 +174,10 @@ class SessionManager
     @harness.session.compact(summary_text, recent_count: @harness.compact_recent_messages)
     after = @harness.session.messages.size
     retained = [after - 3, 0].max
+    # issue #139: dump exactly which messages survived the compaction so the
+    # retained window is inspectable from harness.log (message counts alone
+    # leave it a guess).
+    log_retained_window(@harness.session.messages.last(retained)) if retained.positive?
 
     @harness.logger.info(
       "session compacted: #{before} to #{after} messages " \
@@ -249,6 +253,9 @@ class SessionManager
     # issue #138: fold any pending ui.note facts (grants) into the new chain
     # so they survive the compaction.
     @harness.session.flush_notes
+    # issue #139: log the fresh post-compaction chain (no retained tail -
+    # see INLOOP_SUMMARY_INSTRUCTION).
+    log_retained_window(messages)
 
     @harness.logger.info(
       "in-loop compaction: #{before} -> #{messages.size} messages " \
@@ -367,6 +374,17 @@ class SessionManager
   def log_text_or_none(text)
     s = text.to_s.strip
     s.empty? ? '(none)' : text.to_s
+  end
+
+  # issue #139: dump the messages that SURVIVED a compaction (the retained
+  # tail, or the fresh in-loop chain) to harness.log. One line per message:
+  # role + a ~80-char content preview - enough to see exactly what is still
+  # in context without flooding the log with full contents.
+  def log_retained_window(messages)
+    lines = messages.map do |m|
+      %(#{m[:role]}: #{m[:content].to_s.strip[0, 80]})
+    end
+    @harness.logger.info("retained after compaction:\n" + lines.join("\n"))
   end
 
   # -- Rules file (harness.md) ---------------------------------------------

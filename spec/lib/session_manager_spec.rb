@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'logger'
+require 'stringio'
 require 'ui/spinner'
 require 'output_buffer'
 require 'session_manager'
@@ -531,5 +532,64 @@ RSpec.describe SessionManager, '#log_response (issue #131)' do
     expect(harness.logger).to receive(:info).with("--- response ---\nfinal answer")
 
     manager.log_response(reasoning: nil, content: 'final answer')
+  end
+end
+
+# issue #139: compaction must log exactly which messages SURVIVED so the
+# retained window is inspectable from harness.log instead of a guess.
+RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
+  let(:log_io) { StringIO.new }
+  let(:logger) { Logger.new(log_io) }
+
+  describe '#compact_session (end-of-turn)' do
+    let(:session) { Session.new('system prompt') }
+    let(:client) { double('client', chat: { choices: [{ message: { content: 'S' } }] }) }
+    let(:harness) do
+      double('harness', session: session, client: client, logger: logger,
+             compact_recent_messages: 2, compact_max_size: nil,
+             context_indicator: 'ctx 1/65536 (0%)')
+    end
+    let(:manager) { described_class.new(harness, FileList.new([], workdir: Dir.pwd)) }
+
+    it 'logs the retained tail to harness.log' do
+      4.times { |i| session.add_user("msg #{i}"); session.add_assistant("reply #{i}") }
+
+      manager.compact_session
+
+      expect(log_io.string).to include(
+        "retained after compaction:\nuser: msg 3\nassistant: reply 3"
+      )
+    end
+  end
+
+  describe '#check_inloop_compaction (mid-turn)' do
+    let(:session) { Session.new('system prompt') }
+    let(:client) { double('client', chat: { choices: [{ message: { content: 'HANDOFF' } }] }) }
+    let(:options) { { num_ctx: 1000 } }
+    let(:harness) do
+      double('harness', session: session, client: client, logger: logger,
+             options: options, compact_trigger_tokens: 1, compact_max_size: nil)
+    end
+    let(:manager) { described_class.new(harness, FileList.new([], workdir: Dir.pwd)) }
+
+    it 'logs the fresh post-compaction chain to harness.log' do
+      messages = [
+        { role: 'system', content: 'system prompt' },
+        { role: 'user', content: 'implement X' },
+        { role: 'assistant', content: nil,
+          tool_calls: [{ id: 't1', function: { name: 'x' } }] },
+        { role: 'tool', tool_call_id: 't1', content: 'r1' },
+        { role: 'assistant', content: 'done' }
+      ]
+
+      expect(manager.check_inloop_compaction(messages, 1000)).to be(true)
+
+      expect(log_io.string).to include("retained after compaction:\nsystem: system prompt")
+      # The in-loop chain has no retained tail - the log shows the fresh
+      # [system, summary, ack, continue] chain instead.
+      expect(log_io.string).to include(
+        "user: Continuing the in-progress task from the summary above."
+      )
+    end
   end
 end
