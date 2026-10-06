@@ -39,6 +39,11 @@
 # mistyped choice is never silently reinterpreted as free text
 # (issue #73). Dismissing with EOF still cancels.
 #
+# In a dialog without free text, ANY other non-numeric input is also
+# rejected and the dialog re-prompts - it is never silently reinterpreted
+# as a cancel, so stray keystrokes cannot cause accidental denials
+# (issue #155). Only a valid option number or EOF decides the dialog.
+#
 # Single-thread I/O rule (issue #40): when called from within a Task
 # thread, `show` routes the entire dialog interaction through the task's
 # request/response protocol so that stdin/stdout are used only on the
@@ -231,8 +236,12 @@ module UI
           next
         end
 
-        # Not a valid option number: free text when allowed, cancel otherwise.
-        return @free_text ? [FREE_TEXT, answer] : CANCEL_VALUE
+        # Not a valid option number: free text when allowed, otherwise it
+        # was clearly meant as a choice - reject and re-prompt instead of
+        # silently cancelling (issue #155). EOF still cancels.
+        return [FREE_TEXT, answer] if @free_text
+
+        reprompt_invalid(answer, ui)
       end
       CANCEL_VALUE
     end
@@ -274,8 +283,9 @@ module UI
       ui.flush
     end
 
-    # Reject an out-of-range option number and ask again (issue #73).
-    # The user can still dismiss the dialog with EOF.
+    # Reject an invalid answer (out-of-range option number or stray text)
+    # and ask again (issues #73 / #155). The user can still dismiss the
+    # dialog with EOF.
     def reprompt_invalid(number, ui)
       ui.puts
       ui.puts "             invalid choice #{number} (valid: 1..#{@options.size})"
@@ -283,4 +293,3 @@ module UI
     end
   end
 end
-
