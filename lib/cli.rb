@@ -293,10 +293,12 @@ class CLI
     # issue #156: show the active model in the modeline so the current
     # profile is visible at a glance (e.g. after a /model switch).
     # The ctx indicator (issue #63) is merged into the SAME line to save a
-    # line of vertical space every turn; omitted until there is a
-    # conversation (nothing to measure yet).
+    # line of vertical space every turn; it is omitted until there is a
+    # conversation (nothing to measure yet). The old "harness:" label is
+    # dropped - with the model name on the line it adds no information.
     model  = @harness.session_manager.active_model_name
-    prefix = model ? "[harness: #{model}] > " : "[harness] > "
+    # Bracketed model name keeps the prompt visually distinct from replies.
+    prefix = model ? "[#{model}] > " : '> '
     ctx = @harness.context_indicator
     ui.puts ctx ? "#{ctx} #{prefix}" : prefix
     ui.flush
