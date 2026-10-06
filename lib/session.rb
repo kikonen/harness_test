@@ -36,6 +36,15 @@ class Session
   # 100 (or higher) to effectively disable auto-compaction.
   AUTO_COMPACT_THRESHOLD = 88
 
+  # Default absolute headroom reserved for the compaction summary call
+  # (issue #151): a fixed percentage of the window reserves MORE room on
+  # larger windows than needed and LESS relative room on smaller ones.
+  # Reserving an absolute number of tokens keeps the same room for
+  # generating the summary regardless of context size - a 32K window then
+  # compacts proportionally earlier than a 100K one. Configurable via the
+  # 'compact.reserved_tokens' config key.
+  COMPACT_RESERVED_TOKENS = 8192
+
   # Rough chars-per-token ratio used only for fallback context estimates.
   EST_CHARS_PER_TOKEN = 4
 
@@ -210,11 +219,29 @@ class Session
   # window_size is the model's context window in tokens; threshold_pct is
   # the threshold as a percentage (0-100, or higher to disable). Returns
   # false when there is nothing to measure yet.
-  def auto_compact_due?(window_size, threshold_pct)
+  #
+  # reserved_tokens (issue #151): absolute headroom that must stay free for
+  # the compaction summary call - compaction is due as soon as usage
+  # reaches window_size - reserved_tokens, regardless of threshold_pct.
+  # nil disables the headroom check (percentage-based behavior only).
+  def auto_compact_due?(window_size, threshold_pct, reserved_tokens: nil)
     used = context_used
     return false if used.nil? || window_size.to_i <= 0
 
-    used[:tokens] >= (window_size * (threshold_pct.to_f / 100.0)).ceil
+    used[:tokens] >= compact_trigger(window_size, threshold_pct, reserved_tokens: reserved_tokens)
+  end
+
+  # The usage level (in tokens) at which auto-compaction fires: the lower
+  # of the percentage threshold and the headroom-reserve trigger
+  # (issue #151). A non-positive reserve, or a reserve that covers the whole
+  # window (nothing could fit in it), leaves the percentage trigger.
+  def compact_trigger(window_size, threshold_pct, reserved_tokens: nil)
+    trigger = (window_size * (threshold_pct.to_f / 100.0)).ceil
+    reserve = reserved_tokens.to_i
+    if reserve.positive? && reserve < window_size
+      trigger = [trigger, [window_size - reserved_tokens, 0].max].min
+    end
+    trigger
   end
 
   # Number of conversation messages (excluding the system message).

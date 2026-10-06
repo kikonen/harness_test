@@ -96,14 +96,17 @@ RSpec.describe Harness do
       expect(report).to include('42133 tokens (64% of 65536)')
       expect(report).to include('Headroom:    23403 tokens')
       expect(report).to include('last LLM response')
-      expect(report).to include('not due (threshold 88%)')
+      # issue #151: trigger depends on context size - min(88% of 65536,
+      # 65536 - 8192) = 57344.
+      expect(report).to include('not due (fires at 57344 tokens, 88% of the window)')
     end
 
     it 'flags auto-compact as due when the threshold is exceeded' do
       harness = build_harness
       seed_usage(harness, 60_000)
 
-      expect(harness.context_report).to include('due (threshold 88%)')
+      # 60000 >= 57344 (window - reserved headroom) -> due (issue #151).
+      expect(harness.context_report).to include('due (fires at 57344 tokens, 88% of the window)')
     end
   end
 

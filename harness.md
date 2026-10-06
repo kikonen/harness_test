@@ -73,6 +73,9 @@ Keep this in mind:
 - `Session::AUTO_COMPACT_THRESHOLD` - auto-compact when context usage
   reaches this % of the window (default 88); config key
   `compact.auto_threshold`; set to 100+ to disable.
+- `Session::COMPACT_RESERVED_TOKENS` - absolute headroom (tokens) kept free
+  before auto-compact fires (default 8192, issue #151); config key
+  `compact.reserved_tokens`. Trigger is the stricter of pct and reserve.
 - `Harness::MAX_TOOL_ITERATIONS`, `TOOL_LOOP_WARN_THRESHOLD`,
   `TOOL_LOOP_HARD_LIMIT` - tool-loop safety limits.
 - `LLMClient::NUM_CTX` - context window size (default 65536); sampling

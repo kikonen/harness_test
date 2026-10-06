@@ -51,6 +51,16 @@ RSpec.describe SessionManager do
         Session::AUTO_COMPACT_THRESHOLD
       end
 
+      # issue #151: default reserved headroom (the stub mirrors Harness).
+      def compact_reserved_tokens
+        Session::COMPACT_RESERVED_TOKENS
+      end
+
+      def compact_trigger_tokens
+        @session.compact_trigger(@options[:num_ctx], compact_auto_threshold,
+                                 reserved_tokens: compact_reserved_tokens)
+      end
+
       def compact_max_size
         nil
       end
@@ -336,6 +346,17 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
 
       def compact_auto_threshold
         88
+      end
+
+      # issue #151: reserve larger than this tiny window -> percentage
+      # trigger wins (880 tokens of the 1000 window).
+      def compact_reserved_tokens
+        Session::COMPACT_RESERVED_TOKENS
+      end
+
+      def compact_trigger_tokens
+        @session.compact_trigger(@options[:num_ctx], compact_auto_threshold,
+                                 reserved_tokens: compact_reserved_tokens)
       end
 
       def context_indicator
