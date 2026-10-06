@@ -188,7 +188,6 @@ class CLI
 
     begin
       loop do
-        show_context_indicator
         input = get_command
         break if input.nil?
 
@@ -228,14 +227,6 @@ class CLI
       ui.puts "Session saved as #{id} (#{harness.session_manager.sessions_dir}/#{id}.json)."
       ui.puts "Resume it later with: #{commands.resume_command(id)}"
     end
-  end
-
-  # Always-visible context usage indicator (issue #63): printed above the
-  # prompt at turn start so the current headroom is visible even when idle.
-  # Silent when there is no conversation yet (nothing to measure).
-  def show_context_indicator
-    ctx = @harness.context_indicator
-    ui.puts ctx if ctx
   end
 
   private
@@ -301,9 +292,13 @@ class CLI
   def get_command
     # issue #156: show the active model in the modeline so the current
     # profile is visible at a glance (e.g. after a /model switch).
+    # The ctx indicator (issue #63) is merged into the SAME line to save a
+    # line of vertical space every turn; omitted until there is a
+    # conversation (nothing to measure yet).
     model  = @harness.session_manager.active_model_name
     prefix = model ? "[harness: #{model}] > " : "[harness] > "
-    ui.puts prefix
+    ctx = @harness.context_indicator
+    ui.puts ctx ? "#{ctx} #{prefix}" : prefix
     ui.flush
 
     last_lf_time = nil
