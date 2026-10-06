@@ -212,6 +212,27 @@ RSpec.describe UI::Dialog do
       end
     end
 
+    describe 'stray non-numeric input in a plain dialog (issue #155)' do
+      let(:dialog) { described_class.new(title: 't', options: options) }
+
+      it 're-prompts on random text instead of cancelling' do
+        stub_stdin("s1\n", "1\n")
+        expect(show(dialog)).to eq(:allow)
+        expect(capture).to include('invalid choice s1 (valid: 1..3)')
+      end
+
+      it 'still cancels when the user dismisses with EOF after stray text' do
+        stub_stdin("s1\n", nil)
+        expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
+      end
+
+      it 're-prompts on a full word and accepts the next valid choice' do
+        stub_stdin("nope\n", "3\n")
+        expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
+        expect(capture).to include('invalid choice nope (valid: 1..3)')
+      end
+    end
+
     describe 'with multi_select' do
       let(:dialog) { described_class.new(title: 't', options: options, multi_select: true) }
       # Options: Allow(1), Deny(2), Cancel(3).
