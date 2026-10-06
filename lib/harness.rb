@@ -48,7 +48,8 @@ require_relative 'state_migrator'
 class Harness
   SYSTEM_PROMPT = File.read(File.join(__dir__, 'system_prompt.txt'))
 
-  MAX_TOOL_ITERATIONS = 100
+  # issue #158: 100 was too low for long multi-step tasks (bumped to 200).
+  MAX_TOOL_ITERATIONS = 200
   # After this many consecutive tool-call iterations, inject a "stop looping" message
   TOOL_LOOP_WARN_THRESHOLD = 10
   # After this many consecutive tool-call iterations, force-break and return whatever we have
