@@ -246,6 +246,9 @@ class SessionManager
     @harness.session.messages.replace(new_chain)
     @harness.session.reset_stats
     messages.replace(new_chain)
+    # issue #138: fold any pending ui.note facts (grants) into the new chain
+    # so they survive the compaction.
+    @harness.session.flush_notes
 
     @harness.logger.info(
       "in-loop compaction: #{before} -> #{messages.size} messages " \
@@ -482,32 +485,13 @@ class SessionManager
   def build_user_prompt(instruction)
     parts = ["## Working Directory\n\n#{@file_list.workdir}"]
 
-    access = @file_list.accessible_paths
-    any_grants = access.any? do |_mode, section|
-      !section[:files].empty? || !section[:dirs].empty? ||
-        !(section[:flat_dirs] || []).empty?
-    end
-
-    if any_grants
-      sections = []
-      %i[both read write delete].each do |mode|
-        section = access[mode]
-        lines = []
-        lines += section[:files].map { |f| @file_list.display_path(f) }
-        lines += section[:dirs].map { |d| "#{@file_list.display_path(d)}/ (recursive)" }
-        lines += (section[:flat_dirs] || []).map { |d| "#{@file_list.display_path(d)}/ (dir only)" }
-        next if lines.empty?
-
-        label = case mode
-                when :both then 'Read + write'
-                when :read then 'Read only'
-               when :delete then 'Delete'
-                else 'Write only'
-                end
-        sections << "#{label}:\n#{lines.join("\n")}"
-      end
-      parts << "## Accessible Paths\n\n#{sections.join("\n\n")}"
-    end
+    # issue #138: the full grant list is NO LONGER dumped into every prompt.
+    # It was redundant noise: static (so repeated verbatim each turn and on
+    # every /retry), out of sync after /clear, and irrelevant meta to the
+    # model - permissions are enforced by the tools anyway (an unauthorized
+    # attempt prompts the user, whose decision then lands in the chain).
+    # Task-relevant permission changes (a grant just made) reach the model
+    # as system notes via ui.note instead.
 
     parts << "## Instruction\n\n#{instruction}\n"
     parts.join("\n\n")

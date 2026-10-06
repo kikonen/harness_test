@@ -28,6 +28,7 @@ require_relative 'tools/file_search_tool'
 require_relative 'tools/file_patch_tool'
 require_relative 'tools/file_copy_tool'
 require_relative 'tools/file_info_tool'
+require_relative 'tools/note_tool'
 require_relative 'tools/dir_create_tool'
 require_relative 'tools/dir_delete_tool'
 require_relative 'tools/git_diff_tool'
@@ -153,6 +154,9 @@ class Harness
     registry.register(Tools::FileInfoTool.new(@file_list))
     registry.register(Tools::DirCreateTool.new(@file_list))
     registry.register(Tools::DirDeleteTool.new(@file_list, @options))
+    # Context note (issue #138): records transient facts (e.g. just-granted
+    # paths) in the chain instead of re-dumping the grant list per prompt.
+    registry.register(Tools::NoteTool.new)
     # Git tools (operate on the repository containing the working dir).
     registry.register(Tools::GitDiffTool.new(@file_list))
     registry.register(Tools::GitShowTool.new(@file_list))
@@ -292,6 +296,7 @@ class Harness
         # Execute each tool call and append results
         message[:tool_calls].each do |tc|
           result = execute_tool_call(tc)
+          record_note(tc, result)
           messages << {
             role: 'tool',
             tool_call_id: tc[:id],
@@ -333,6 +338,10 @@ class Harness
 
       # Commit the successful exchange to the session.
       @session.add_assistant(message[:content])
+      # issue #138: persist any grants recorded with ui.note this turn as
+      # system messages in the chain, so the fact survives past this turn
+      # (the tool-call trail itself is never committed into the session).
+      @session.flush_notes
       @session.record_stats(stats)
       # issue #98: keep the reasoning of the last response so it can be
       # shown on demand with /reasoning. The full text goes to harness.log
@@ -345,6 +354,20 @@ class Harness
         stats:     stats
       }
     end
+  end
+
+  # issue #138: a successful ui.note call carries its fact in the argument.
+  # Buffer it into the session so it is flushed into the chain when the turn
+  # commits (see #call_llm) - this is what makes the grant survive past the
+  # transient tool result and across /retry.
+  def record_note(tool_call, result)
+    return unless tool_call[:function][:name] == 'ui.note'
+    return unless result.is_a?(String) && result.start_with?('ok: noted')
+
+    args = tool_call[:function][:arguments] ? JSON.parse(tool_call[:function][:arguments]) : {}
+    @session.add_note(args['text'])
+  rescue StandardError
+    # A malformed note must never break the turn.
   end
 
   # Prints the response stats line.

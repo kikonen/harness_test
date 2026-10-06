@@ -323,4 +323,53 @@ RSpec.describe Harness do
       expect(drain_outbox(task).map { |m| m[:type] }).not_to include(:spinner_detail)
     end
   end
+
+  describe '#record_note (issue #138)' do
+    def note_call(text)
+      { id: 'c1', function: { name: 'ui.note', arguments: JSON.dump(text: text) } }
+    end
+
+    it 'buffers the note when a ui.note call succeeds' do
+      harness = build_harness
+
+      harness.record_note(note_call('granted read on lib/'), 'ok: noted 19 chars')
+
+      expect(harness.session.instance_variable_get(:@notes))
+        .to eq(['granted read on lib/'])
+    end
+
+    it 'does not buffer anything for a different tool' do
+      harness = build_harness
+
+      call = { id: 'c1', function: { name: 'file.read', arguments: '{}' } }
+      harness.record_note(call, 'ok: noted 19 chars')
+
+      expect(harness.session.instance_variable_get(:@notes)).to be_nil
+    end
+
+    it 'does not buffer anything when the ui.note call failed' do
+      harness = build_harness
+
+      harness.record_note(note_call('should not appear'), 'error: empty note')
+
+      expect(harness.session.instance_variable_get(:@notes)).to be_nil
+    end
+
+    it 'survives a malformed arguments payload without raising' do
+      harness = build_harness
+
+      call = { id: 'c1', function: { name: 'ui.note', arguments: '{not json' } }
+
+      expect { harness.record_note(call, 'ok: noted 5 chars') }.not_to raise_error
+      expect(harness.session.instance_variable_get(:@notes)).to be_nil
+    end
+
+    it 'does not buffer anything when the result is not a string' do
+      harness = build_harness
+
+      harness.record_note(note_call('nope'), nil)
+
+      expect(harness.session.instance_variable_get(:@notes)).to be_nil
+    end
+  end
 end

@@ -77,6 +77,30 @@ class Session
     self
   end
 
+  # issue #138: notes recorded with ui.note during a tool loop are held here
+  # until the turn commits (then appended as system messages, see
+  # SessionManager#send_session / #check_inloop_compaction). Tool-call
+  # trails are local to a turn and never commit into the chain, so the NOTE
+  # is what persists - not the transient tool result it followed.
+  def add_note(text)
+    text = text.to_s.strip
+    return if text.empty?
+
+    (@notes ||= []) << text
+    self
+  end
+
+  # Append all pending notes to the chain as system messages and clear the
+  # buffer. Called at every commit point (end of turn, in-loop compaction)
+  # so the facts survive past the current turn - including across /retry
+  # (the notes live in the persisted session chain).
+  def flush_notes
+    return unless (@notes || []).any?
+
+    @notes.each { |t| @messages << { role: 'system', content: "Note: #{t}" } }
+    @notes = []
+  end
+
   def add_assistant(content)
     @messages << { role: 'assistant', content: content }
     self
@@ -110,6 +134,7 @@ class Session
     @user_prompts = 0
     @last_stats   = nil
     @last_reasoning = nil
+    @notes        = []
     @created_at   = Time.now
     self
   end
@@ -153,6 +178,10 @@ class Session
       { role: 'assistant', content: 'Understood. I have the context from our previous conversation. How can I help you continue?' }
     ]
     @messages.concat(recent) if recent && !recent.empty?
+    # issue #138: pending ui.note facts must not be dropped by compaction -
+    # append them as system messages on the fresh chain.
+    (@notes || []).each { |t| @messages << { role: 'system', content: "Note: #{t}" } }
+    @notes = []
     @last_stats = nil
     @last_reasoning = nil
     self
@@ -311,6 +340,7 @@ class Session
     @user_prompts  = data[:user_prompts] || 0
     @last_stats    = data[:last_stats]
     @messages      = data[:messages] || [system_message]
+    @notes         = [] # pending notes are per-process; saved ones are already in the chain
 
     restore_access_grants(data, file_list)
     self
