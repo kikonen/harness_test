@@ -273,17 +273,17 @@ class CommandAllowlist
 
   # Filter a list of candidate prefixes down to those that add value over
   # the stored allowlist (issue #94, issue #102). A candidate is DROPPED
-  # when its tokens overlap with any stored prefix's leading run - i.e.
-  # when some stored grant P and the candidate share a common leading
-  # token sequence of at least one token. This catches:
+  # when it is already covered by a stored grant in either direction,
+  # i.e. when one is a full token-level prefix of the other. This catches:
   #   - exact duplicates (e.g. stored 'tail', candidate 'tail'),
   #   - candidates subsumed by a broader grant (stored 'gh issue view',
   #     candidate 'gh' or 'gh issue' - the existing grant already covers
   #     them, so offering them is redundant),
-  #   - candidates that subsume a narrower grant (stored 'git status',
-  #     candidate 'git' - 'git' already covers 'git status', so a new
-  #     grant of 'git' would just make the stored one redundant).
-  # Candidates with NO overlap (different command tree) are kept.
+  #   - candidates that subsume a narrower grant (stored 'git log',
+  #     candidate 'git' - saving 'git' would make the stored 'git log'
+  #     entry dead weight, so it is not offered).
+  # Candidates in a DIFFERENT command tree are kept (issue #164): a
+  # stored 'gh issue view' must not hide an unrelated 'git remote'.
   def filter_uncovered(candidates)
     (candidates || []).reject do |cand|
       cand = cand.to_s.strip
@@ -292,18 +292,24 @@ class CommandAllowlist
       next true if cand.empty?
 
       c_tokens = cand.split(/\s+/)
-      @prefixes.any? do |p|
-        p_tokens = p.to_s.strip.split(/\s+/)
-        # Overlap: at least one leading token position where both lists
-        # have an equal token, AND the shared run does not extend beyond
-        # either list's length. In practice this means "some stored
-        # prefix starts with the same word(s)" - enough to consider the
-        # candidate redundant.
-        min_len = [p_tokens.size, c_tokens.size].min
-        (0...min_len).any? { |i| p_tokens[i] == c_tokens[i] } &&
-          p_tokens.first == c_tokens.first
+      @prefixes.any? do |stored|
+        stored_tokens = stored.to_s.strip.split(/\s+/)
+        # True-prefix subsumption: one list is a full token-level prefix
+        # of the other - either the candidate is already covered by the
+        # stored grant, or it would cover the stored grant.
+        self.class.starts_with_tokens?(stored_tokens, c_tokens) ||
+          self.class.starts_with_tokens?(c_tokens, stored_tokens)
       end
     end
+  end
+
+  # True when `head` starts with every token of `prefix`. Used by
+  # filter_uncovered to detect token-level subsumption in either
+  # direction (issue #164).
+  def self.starts_with_tokens?(head, prefix)
+    return false if prefix.empty? || head.size < prefix.size
+
+    (0...prefix.size).all? { |i| head[i] == prefix[i] }
   end
 
   # Remove a previously saved prefix and persist.

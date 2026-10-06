@@ -144,6 +144,29 @@ RSpec.describe Tools::RunCommandTool do
       end
     end
 
+    it 'still offers other segments in a chain when one is stored (issue #164)' do
+      Dir.mktmpdir do |dir|
+        # Pre-seed the allowlist file BEFORE the tool is built.
+        FileUtils.mkdir_p(File.join(dir, '.harness'))
+        File.write(File.join(dir, '.harness', 'allowed_commands.yml'),
+                   YAML.dump(['gh issue view']))
+
+        list = FileList.new(workdir: dir)
+        tool = described_class.new(list, {})
+
+        # Option 2 = Cancel; deny - only the rendered dialog is under test.
+        out = drive_dialog("2\n")
+        tool.execute('command' => 'git remote -v && gh issue view 113')
+
+        # The stored 'gh ...' grant must not suppress the OTHER segment:
+        # 'git' and 'git remote' are offered, while the 'gh' candidates
+        # (already covered) are not.
+        expect(out.string).to include("Always allow 'git'")
+        expect(out.string).to include("Always allow 'git remote'")
+        expect(out.string).not_to include("Always allow 'gh'")
+      end
+    end
+
     it 'drops a candidate that exactly matches a stored grant (issue #94)' do
       Dir.mktmpdir do |dir|
         # Pre-seed the allowlist file BEFORE the tool is built.
@@ -159,11 +182,11 @@ RSpec.describe Tools::RunCommandTool do
         out = drive_dialog("2\n")
         tool.execute('command' => 'git log --oneline | tail -5')
 
-        # Both 'git' and 'git log' are in the same command tree as the
-        # stored 'git log' grant - either would just be redundant (a no-op
-        # or a widening of something already granted), so neither is
-        # offered. '-5' is a trailing flag (a parameter), so only bare
-        # 'tail' is offered for the second segment.
+        # 'git log' exactly matches the stored grant (no-op) and bare
+        # 'git' would cover it (making the stored entry redundant), so
+        # neither is offered (issue #94, issue #164). '-5' is a trailing
+        # flag (a parameter), so only bare 'tail' is offered for the
+        # second segment.
         expect(out.string).not_to include("Always allow 'git'")
         expect(out.string).not_to include("Always allow 'git log'")
         expect(out.string).to include("Always allow 'tail'")

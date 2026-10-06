@@ -558,14 +558,25 @@ RSpec.describe CommandAllowlist do
       end
     end
 
-    it 'drops every candidate that shares the leading token of a stored grant' do
+    it 'keeps candidates from a different command tree (issue #164)' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(dir)
+        list.add('gh issue view')
+        # 'git remote' shares no leading token with the stored 'gh ...'
+        # grant - it must be offered even when both appear in one command.
+        expect(list.filter_uncovered(['git', 'git remote'])).to eq(
+          ['git', 'git remote']
+        )
+      end
+    end
+
+    it 'keeps same-tree candidates that are not subsumed' do
       Dir.mktmpdir do |dir|
         list = described_class.new(dir)
         list.add('git status')
-        # 'git log' shares its leading token with the stored 'git status' -
-        # the whole command tree is considered covered, so it is not offered.
-        # Only genuinely different trees (e.g. 'ls') stay.
-        expect(list.filter_uncovered(['git log', 'ls'])).to eq(['ls'])
+        # 'git log' is neither covered by nor covers the stored
+        # 'git status' - saving it changes behaviour, so it stays.
+        expect(list.filter_uncovered(['git log'])).to eq(['git log'])
       end
     end
 
@@ -592,10 +603,10 @@ RSpec.describe CommandAllowlist do
         list = described_class.new(dir)
         list.add('ls')
         list.add('git status')
-        # Both 'ls' and every 'git ...' candidate are covered by the
-        # stored grants; a fresh tree like 'bundle exec rspec' stays.
+        # 'ls' and 'git status' are exact duplicates - dropped. 'git log'
+        # is a separate grant, so it stays (issue #164).
         expect(list.filter_uncovered(['ls', 'git status', 'git log']))
-          .to eq([])
+          .to eq(['git log'])
       end
     end
   end
