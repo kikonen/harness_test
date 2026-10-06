@@ -161,6 +161,15 @@ class Session
   # the matching `tool_calls`, and if that assistant message fell into the
   # summarized (dropped) region the API would reject the chain. Dropping
   # leading `tool` messages guarantees the window starts on a safe boundary.
+  #
+  # issue #139: the trim is effectively dead code today - in practice this
+  # method only sees committed chains, which never contain tool messages
+  # (mid-turn tool trails live in the local working copy and are never
+  # committed; only the final reply enters the chain). The in-loop path
+  # (issue #108) does NOT use a retained tail at all. If an empty retained
+  # window were ever produced it degrades gracefully too: the window is
+  # simply skipped and the summary stands on its own - the session never
+  # ends up with fewer messages than before compaction.
   def compact(summary_text, recent_count: COMPACT_RECENT_MESSAGES)
     # Grab the last N conversation messages (excluding system) before we
     # replace the chain.

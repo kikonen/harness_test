@@ -237,4 +237,41 @@ RSpec.describe Session do
         .to eq({ role: 'system', content: 'Note: granted write on tmp/' })
     end
   end
+
+  # issue #139: the retained window is trimmed so it never begins with an
+  # orphaned `tool` message. The committed chain never contains tool messages
+  # in practice (this is a dead safety net today), but the trim must behave
+  # correctly if it ever fires - including degrading gracefully to a bare
+  # summary when the whole window is orphaned.
+  describe '#compact retained-window trim (issue #139)' do
+    it 'drops a leading tool message orphaned by the summary boundary' do
+      session.add_user('one')
+      session.add_assistant('two')
+      session.messages << { role: 'assistant', content: nil,
+                            tool_calls: [{ id: 't1', function: { name: 'x' } }] }
+      session.messages << { role: 'tool', tool_call_id: 't1', content: 'r1' }
+      session.add_assistant('three')
+
+      session.compact('summary', recent_count: 2)
+
+      # The leading (orphaned) tool is trimmed; only the final reply is kept.
+      expect(session.messages.map { |m| m[:content] }).to eq(
+        ['system prompt',
+         "This is a summary of our previous conversation:\n\nsummary",
+         'Understood. I have the context from our previous conversation. How can I help you continue?',
+         'three']
+      )
+    end
+
+    it 'skips an entirely orphaned window (the summary stands on its own)' do
+      session.add_user('one')
+      session.add_assistant('two')
+      session.messages << { role: 'tool', tool_call_id: 't1', content: 'r1' }
+      session.messages << { role: 'tool', tool_call_id: 't2', content: 'r2' }
+
+      session.compact('summary', recent_count: 2)
+
+      expect(session.messages.size).to eq(3)
+    end
+  end
 end
