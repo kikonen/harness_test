@@ -299,7 +299,11 @@ class CLI
   # lines) can operate on the structured form rather than a flat string.
   PASTE_LF_INTERVAL = 0.05
   def get_command
-    ui.puts "[harness] > "
+    # issue #156: show the active model in the modeline so the current
+    # profile is visible at a glance (e.g. after a /model switch).
+    model  = @harness.session_manager.active_model_name
+    prefix = model ? "[harness: #{model}] > " : "[harness] > "
+    ui.puts prefix
     ui.flush
 
     last_lf_time = nil
