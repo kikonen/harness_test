@@ -3,14 +3,10 @@
 require 'spec_helper'
 require 'stringio'
 require 'tmpdir'
-require 'digest'
 require 'tools/file_patch_tool'
+require 'session'
 
 RSpec.describe Tools::FilePatchTool do
-  def sha_of(path)
-    Digest::SHA256.file(path).hexdigest
-  end
-
   # Drive the grant dialog without any real I/O: intercept Dialog#show (the
   # tool calls it with ui: nil because tools run on the Task
   # thread) and perform the interaction directly on a StringIO.
@@ -23,7 +19,7 @@ RSpec.describe Tools::FilePatchTool do
   end
 
   describe '#execute' do
-    it 'applies a simple single-hunk patch and returns the new sha' do
+    it 'applies a simple single-hunk patch' do
       Dir.mktmpdir do |dir|
         target = File.join(dir, 'hello.txt')
         File.write(target, "line1\nline2\nline3\n")
@@ -41,20 +37,26 @@ RSpec.describe Tools::FilePatchTool do
            line3
         DIFF
 
-        out = tool.execute('path' => 'hello.txt', 'diff' => diff, 'sha' => sha_of(target))
+        out = tool.execute('path' => 'hello.txt', 'diff' => diff)
         expect(out).to start_with('ok: applied 1 hunk(s)')
-        expect(out).to include("sha256: #{sha_of(target)}")
         expect(File.read(target)).to eq("line1\nline2-changed\nline3\n")
       end
     end
 
-    it 'rejects a patch when the sha does not match' do
+    it 'rejects a patch when the file changed externally since the last read' do
       Dir.mktmpdir do |dir|
         target = File.join(dir, 'hello.txt')
         File.write(target, "line1\nline2\n")
         list   = FileList.new(workdir: dir)
         list.add_file('hello.txt', :rw)
-        tool   = described_class.new(list, {})
+        session = Session.new('sp')
+        tool    = described_class.new(list, {}, session)
+
+        # Seed the cache as if we had just read the file at this state.
+        session.file_cache.record(target, FileList.sha256(target))
+
+        # External change after our last read.
+        File.write(target, "line1\nline2-external\n")
 
         diff = <<~DIFF
           --- a/hello.txt
@@ -65,22 +67,35 @@ RSpec.describe Tools::FilePatchTool do
           +line2-new
         DIFF
 
-        out = tool.execute('path' => 'hello.txt', 'diff' => diff, 'sha' => 'deadbeef')
-        expect(out).to start_with('error: sha mismatch')
-        expect(out).to include(sha_of(target))
+        out = tool.execute('path' => 'hello.txt', 'diff' => diff)
+        expect(out).to start_with("error: 'hello.txt' has changed externally")
       end
     end
 
-    it 'rejects a patch when sha is missing' do
+    it 'proceeds after re-reading the file (cache refreshed by file.read)' do
       Dir.mktmpdir do |dir|
         target = File.join(dir, 'hello.txt')
-        File.write(target, "line1\n")
+        File.write(target, "line1\nline2\n")
         list   = FileList.new(workdir: dir)
         list.add_file('hello.txt', :rw)
-        tool   = described_class.new(list, {})
+        session = Session.new('sp')
+        tool    = described_class.new(list, {}, session)
 
-        out = tool.execute('path' => 'hello.txt', 'diff' => '@@ -1 +1 @@', 'sha' => '')
-        expect(out).to start_with("error: 'sha' is required")
+        # Simulate a file.read that records the current digest.
+        session.file_cache.record(target, FileList.sha256(target))
+
+        diff = <<~DIFF
+          --- a/hello.txt
+          +++ b/hello.txt
+          @@ -1,2 +1,2 @@
+           line1
+          -line2
+          +line2-new
+        DIFF
+
+        out = tool.execute('path' => 'hello.txt', 'diff' => diff)
+        expect(out).to start_with('ok: applied 1 hunk(s)')
+        expect(File.read(target)).to eq("line1\nline2-new\n")
       end
     end
 
@@ -90,7 +105,7 @@ RSpec.describe Tools::FilePatchTool do
         list.add_file('missing.txt', :rw)
         tool   = described_class.new(list, {})
 
-        out = tool.execute('path' => 'missing.txt', 'diff' => '@@ -1 +1 @@', 'sha' => 'abc')
+        out = tool.execute('path' => 'missing.txt', 'diff' => '@@ -1 +1 @@')
         expect(out).to start_with("error: file 'missing.txt' does not exist")
       end
     end
@@ -103,7 +118,7 @@ RSpec.describe Tools::FilePatchTool do
         list.add_file('hello.txt', :rw)
         tool   = described_class.new(list, {})
 
-        out = tool.execute('path' => 'hello.txt', 'diff' => 'no hunks here', 'sha' => sha_of(target))
+        out = tool.execute('path' => 'hello.txt', 'diff' => 'no hunks here')
         expect(out).to include('no hunks')
       end
     end
@@ -116,7 +131,7 @@ RSpec.describe Tools::FilePatchTool do
         list.add_file('hello.txt', :rw)
         tool   = described_class.new(list, {})
 
-        out = tool.execute('path' => 'hello.txt', 'diff' => "@@ -abc +def @@\n+new", 'sha' => sha_of(target))
+        out = tool.execute('path' => 'hello.txt', 'diff' => "@@ -abc +def @@\n+new")
         expect(out).to start_with('error: could not parse the diff')
       end
     end
@@ -129,7 +144,7 @@ RSpec.describe Tools::FilePatchTool do
         tool   = described_class.new(list, {})
         drive_dialog("4\n")
 
-        out = tool.execute('path' => 'hello.txt', 'diff' => '@@ -1 +1 @@\n+new', 'sha' => sha_of(target))
+        out = tool.execute('path' => 'hello.txt', 'diff' => '@@ -1 +1 @@\n+new')
         expect(out).to eq("error: access denied for 'hello.txt'")
       end
     end
@@ -151,7 +166,7 @@ RSpec.describe Tools::FilePatchTool do
           +line2-new
         DIFF
 
-        out = tool.execute('path' => 'hello.txt', 'diff' => diff, 'sha' => sha_of(target))
+        out = tool.execute('path' => 'hello.txt', 'diff' => diff)
         expect(out).to start_with('DRY RUN:')
         expect(File.read(target)).to eq("line1\nline2\n")
       end
@@ -178,7 +193,7 @@ RSpec.describe Tools::FilePatchTool do
            e
         DIFF
 
-        out = tool.execute('path' => 'multi.txt', 'diff' => diff, 'sha' => sha_of(target))
+        out = tool.execute('path' => 'multi.txt', 'diff' => diff)
         expect(out).to start_with('ok: applied 1 hunk(s)')
         expect(File.read(target)).to eq("A\nb\nc\nD\ne\n")
       end
@@ -203,7 +218,7 @@ RSpec.describe Tools::FilePatchTool do
            v
         DIFF
 
-        out = tool.execute('path' => 'offset.txt', 'diff' => diff, 'sha' => sha_of(target))
+        out = tool.execute('path' => 'offset.txt', 'diff' => diff)
         expect(out).to start_with('ok: applied 1 hunk(s)')
         expect(File.read(target)).to eq("x\ny\nz\nW\nv\nu\nt\ns\nr\nq\n")
       end
@@ -227,7 +242,7 @@ RSpec.describe Tools::FilePatchTool do
            line3
         DIFF
 
-        out = tool.execute('path' => 'crlf.txt', 'diff' => diff, 'sha' => sha_of(target))
+        out = tool.execute('path' => 'crlf.txt', 'diff' => diff)
         expect(out).to start_with('ok: applied 1 hunk(s)')
         expect(File.read(target)).to eq("line1\r\nline2-new\r\nline3\r\n")
       end
@@ -251,7 +266,7 @@ RSpec.describe Tools::FilePatchTool do
            gamma
         DIFF
 
-        out = tool.execute('path' => 'nomatch.txt', 'diff' => diff, 'sha' => sha_of(target))
+        out = tool.execute('path' => 'nomatch.txt', 'diff' => diff)
         expect(out).to start_with('error: hunk at old-line')
         expect(out).to include('did not apply cleanly')
       end
@@ -274,7 +289,7 @@ RSpec.describe Tools::FilePatchTool do
            bottom
         DIFF
 
-        out = tool.execute('path' => 'insert.txt', 'diff' => diff, 'sha' => sha_of(target))
+        out = tool.execute('path' => 'insert.txt', 'diff' => diff)
         expect(out).to start_with('ok: applied 1 hunk(s)')
         expect(File.read(target)).to eq("top\nmiddle\nbottom\n")
       end
@@ -300,31 +315,9 @@ RSpec.describe Tools::FilePatchTool do
            c
         DIFF
 
-        out = tool.execute('path' => 'blank.txt', 'diff' => diff, 'sha' => sha_of(target))
+        out = tool.execute('path' => 'blank.txt', 'diff' => diff)
         expect(out).to start_with('ok: applied 1 hunk(s)')
         expect(File.read(target)).to eq("a\n\nB\nc\n")
-      end
-    end
-
-    it 'returns the updated sha in the success message' do
-      Dir.mktmpdir do |dir|
-        target = File.join(dir, 'sha.txt')
-        File.write(target, "before\n")
-        list   = FileList.new(workdir: dir)
-        list.add_file('sha.txt', :rw)
-        tool   = described_class.new(list, {})
-
-        diff = <<~DIFF
-          --- a/sha.txt
-          +++ b/sha.txt
-          @@ -1 +1 @@
-          -before
-          +after
-        DIFF
-
-        out = tool.execute('path' => 'sha.txt', 'diff' => diff, 'sha' => sha_of(target))
-        new_sha = Digest::SHA256.file(target).hexdigest
-        expect(out).to include("sha256: #{new_sha}")
       end
     end
   end

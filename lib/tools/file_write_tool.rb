@@ -7,27 +7,29 @@ require 'fileutils'
 module Tools
 
   class FileWriteTool < Tool
-    def initialize(file_list, options)
+    def initialize(file_list, options, session = nil)
       @file_list = file_list
       @options   = options
+      # issue #170: optional Session - when given, writes are checked
+      # against the digest cache (external-change detection) and record
+      # the new digest on success. nil only for specs that never had a
+      # prior read in-session (nothing to detect).
+      @session   = session
       super(
         name: 'file.write',
         description: 'Writes content to a file. ' \
                      'Paths are relative to the harness working directory. ' \
                      'The content must be the COMPLETE file content. ' \
-                     'If the file already exists you must also provide the sha256 digest of the file ' \
-                     'as it was when you last read it (from file.read or file.sha); it is verified to ' \
-                     'match the file on disk before writing, so the file is guaranteed to be the version ' \
-                     'you based your edit on. For a brand-new file that does not exist yet, leave sha empty. ' \
-                     'On success the NEW sha256 digest of the file is returned - use it for the next write/patch on the same file.',
+                     'If the file may have been modified EXTERNALLY since you last read it ' \
+                     '(you can tell, e.g. from a git diff or another tool\'s output), re-read ' \
+                     'it with file.read first so the write is based on fresh content.',
         parameters: {
           type: 'object',
           properties: {
             path:    { type: 'string', description: 'Path to the file to write (relative to the working directory)' },
-            content: { type: 'string', description: 'Complete content to write to the file' },
-            sha:     { type: 'string', description: 'SHA-256 digest of the file as last read (from file.read or file.sha); must match the file on disk. Leave empty only when creating a new file that does not exist yet.' }
+            content: { type: 'string', description: 'Complete content to write to the file' }
           },
-          required: ['path', 'content', 'sha']
+          required: ['path', 'content']
         }
       )
     end
@@ -36,25 +38,25 @@ module Tools
       path    = @file_list.resolve(args['path'])
       shown   = @file_list.display_path(path)
       content = args['content']
-      sha     = args['sha']
 
       unless @file_list.writable?(path)
         result = @file_list.grant_access(path, :w)
         return Tool.denial_error("error: access denied for '#{shown}'", result) unless Tool.granted?(result)
       end
 
-      current_sha = FileList.sha256(path)
-
-      if current_sha
-        if sha.nil? || sha.empty?
-          Tool.puts "  [file.write] ✗ #{shown} (missing sha)"
-          return "error: 'sha' is required for an existing file - pass the SHA-256 digest returned by file.read or file.sha"
-        end
-
-        unless current_sha == sha
-          Tool.puts "  [file.write] ✗ #{shown} (sha mismatch)"
-          return "error: sha mismatch for '#{shown}' - the file has changed since you read it. " \
-                 "Current sha256: #{current_sha}. Re-read the file with file.read and retry."
+      # issue #170: external-change detection. If the file exists and was
+      # read in this session, the on-disk digest must still match what we
+      # cached - otherwise someone (or something) changed it OUTSIDE us.
+      # This is deliberately NOT a concurrency lock: only changes the
+      # harness did not make itself are flagged.
+      if @session && File.file?(path)
+        current = FileList.sha256(path)
+        cached  = @session.file_cache.digest(path)
+        if cached && current != cached
+          Tool.puts "  [file.write] ✗ #{shown} (externally changed since last read)"
+          return "error: '#{shown}' has changed externally since you last read it. " \
+                 'Re-read the file with file.read, or report the external change ' \
+                 'with file.touch if you know what happened.'
         end
       end
 
@@ -66,9 +68,16 @@ module Tools
       dir = File.dirname(path)
       FileUtils.mkdir_p(dir) unless dir == '.'
       File.write(path, content)
-      new_sha = FileList.sha256(path)
-      Tool.puts "  [file.write] ✓ #{shown} (#{content.length} chars, sha256: #{new_sha})"
-      "ok: wrote #{content.length} chars to #{shown}\nsha256: #{new_sha}"
+
+      # issue #170: our own write refreshes the cache (the file is now in
+      # the exact state we wrote it).
+      if @session
+        sha = FileList.sha256(path)
+        @session.file_cache.record(path, sha) if sha
+      end
+
+      Tool.puts "  [file.write] ✓ #{shown} (#{content.length} chars)"
+      "ok: wrote #{content.length} chars to #{shown}"
     end
   end
 end

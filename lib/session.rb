@@ -3,6 +3,8 @@
 require 'time'
 require 'securerandom'
 
+require_relative 'session_file_cache'
+
 # -- Session --------------------------------------------------------------
 #
 # Holds the conversation message chain (OpenAI chat format) for the current
@@ -22,6 +24,8 @@ require 'securerandom'
 
 class Session
   UUID_RE = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
+  # issue #170: key under which the file digest cache is serialized.
+  FILE_CACHE_KEY = 'file_cache'
 
   # How many recent messages to retain verbatim after compaction, so the
   # immediate working context (exact file contents, tool outputs, etc.)
@@ -41,14 +45,15 @@ class Session
   # larger windows than needed and LESS relative room on smaller ones.
   # Reserving an absolute number of tokens keeps the same room for
   # generating the summary regardless of context size - a 32K window then
-  # compacts proportionally earlier than a 100K one. Configurable via the
-  # 'compact.reserved_tokens' config key.
+  # compacts proportionally earlier than a 100K one. Configurable via
+  # the 'compact.reserved_tokens' config key.
   COMPACT_RESERVED_TOKENS = 8192
 
   # Rough chars-per-token ratio used only for fallback context estimates.
   EST_CHARS_PER_TOKEN = 4
 
-  attr_reader :messages, :created_at, :system_prompt, :session_id, :last_reasoning
+  attr_reader :messages, :created_at, :system_prompt, :session_id,
+              :last_reasoning, :file_cache
 
   def initialize(system_prompt)
     @system_prompt = system_prompt
@@ -57,6 +62,9 @@ class Session
     @user_prompts  = 0
     @last_stats    = nil
     @last_reasoning = nil
+    # issue #170: one cache per session - restored with a resumed session,
+    # untouched by compaction (a compacted file is still the same file).
+    @file_cache    = SessionFileCache.new
     @messages      = [system_message]
   end
 
@@ -135,6 +143,8 @@ class Session
     @last_stats   = nil
     @last_reasoning = nil
     @notes        = []
+    # issue #170: a fresh conversation has read nothing - the cache is stale.
+    @file_cache.clear_all
     @created_at   = Time.now
     self
   end
@@ -170,6 +180,10 @@ class Session
   # window were ever produced it degrades gracefully too: the window is
   # simply skipped and the summary stands on its own - the session never
   # ends up with fewer messages than before compaction.
+  #
+  # issue #170: the file digest cache (@file_cache) is deliberately NOT
+  # touched here: a compacted file is still the same file, so the digests
+  # of files read in this session stay valid across compaction.
   def compact(summary_text, recent_count: COMPACT_RECENT_MESSAGES)
     # Grab the last N conversation messages (excluding system) before we
     # replace the chain.
@@ -324,6 +338,10 @@ class Session
       user_prompts:  @user_prompts,
       last_stats:    @last_stats,
       messages:      @messages,
+      # issue #170: the file digest cache is session state - a resumed
+      # session must keep knowing what it last read so write/patch can
+      # still detect external changes (and only those).
+      FILE_CACHE_KEY => @file_cache.to_h,
       workdir:       file_list.workdir,
       # Access grants are saved per mode (read / write / both) so that
       # separate read and write permissions survive a session round trip.
@@ -350,6 +368,10 @@ class Session
     @last_stats    = data[:last_stats]
     @messages      = data[:messages] || [system_message]
     @notes         = [] # pending notes are per-process; saved ones are already in the chain
+    # issue #170: restore the digest cache. The JSON round trip stringifies
+    # symbol keys, so both key forms are checked; a missing key means the
+    # session was saved before this feature and starts with an empty cache.
+    @file_cache.restore(data[FILE_CACHE_KEY] || data[:FILE_CACHE_KEY] || {})
 
     restore_access_grants(data, file_list)
     self
