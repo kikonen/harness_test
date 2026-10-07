@@ -33,7 +33,7 @@ module Tools
         description: 'Applies a unified diff patch to the working tree (like `git apply`). ' \
                      'Provide the full unified diff (with --- / +++ / @@ hunks). ' \
                      'Use dry_run to validate without applying. ' \
-                     'Unlike file.patch, no sha is required and multiple files are supported. ' \
+                     'Unlike file.patch, multiple files can be patched in a single call. ' \
                      'Hunk line numbers and stray trailing whitespace are tolerated.',
         parameters: {
           type: 'object',
