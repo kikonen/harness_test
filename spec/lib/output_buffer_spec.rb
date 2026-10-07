@@ -2,7 +2,6 @@
 
 require 'spec_helper'
 require 'output_buffer'
-require 'timeout'
 
 RSpec.describe OutputBuffer do
   describe '.Entry' do
@@ -181,35 +180,6 @@ RSpec.describe OutputBuffer do
       expect(consumed.first.content).to eq('old 0')
       expect(consumed.last.content).to eq("new #{tail_size - 1}")
       expect(buffer.drain).to be_empty # waterline advanced past everything
-    end
-  end
-
-  describe 'thread safety' do
-    it 'serves concurrent producers and a single draining consumer without loss' do
-      buffer = described_class.new
-      threads = 4
-      per_thread = 2_000
-      expected  = threads * per_thread
-
-      producers = Array.new(threads) do |t|
-        Thread.new do
-          per_thread.times { |i| buffer.put(type: :t, origin: "producer#{t}", content: i.to_s) }
-        end
-      end
-
-      drained_total = 0
-      deadline      = Time.now + 10
-      loop do
-        batch = buffer.drain
-        drained_total += batch.size
-        break if producers.all? { |t| !t.alive? } && batch.empty?
-        raise 'timed out draining' if Time.now > deadline
-
-        sleep 0.001
-      end
-
-      expect(drained_total).to eq(expected)
-      expect(buffer.pending?).to be(false)
     end
   end
 end

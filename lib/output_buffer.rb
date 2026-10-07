@@ -22,9 +22,14 @@
 # Task#buffer). The DRAIN LOOP fills it (one put per output event it reads
 # from the outbox); task-thread code NEVER touches the buffer directly.
 # A future TUI can read the buffer as a durable, inspectable record of
-# everything shown to the user. Thread-safety is provided by a single
-# Mutex: the drain loop appends from the main thread while a TUI or test
-# may read concurrently, so both operations are synchronized.
+# everything shown to the user.
+#
+# THREADING: main-thread-only access. The task thread communicates through
+# the outbox and never reaches the buffer; every put/drain in production is
+# driven by the single drain loop on the main thread (issue #154). There is
+# therefore no synchronization here - it would be dead weight. If a future
+# TUI ever reads the buffer from a second thread while the drain loop writes,
+# put a Mutex back at that point.
 
 class OutputBuffer
   # One unit of output. A Data instance - IMMUTABLE BY CONSTRUCTION: no
@@ -47,11 +52,10 @@ class OutputBuffer
   def initialize
     @entries    = []
     @read_index = 0
-    @mutex      = Mutex.new
   end
 
-  # Append a structured entry (thread-safe). Returns the Entry that was
-  # stored, so a caller can assert on it directly.
+  # Append a structured entry. Returns the Entry that was stored, so a
+  # caller can assert on it directly.
   def put(type:, origin:, content: nil)
     # Data is immutable; freezing the content string (when one) stops a
     # renderer from mutating the payload text in place. Non-string content
@@ -59,7 +63,7 @@ class OutputBuffer
     # treat it read-only too, since Entry itself is immutable.
     stored = content.is_a?(String) ? content.freeze : content
     entry  = Entry.new(type: type.to_sym, origin: normalize(origin), content: stored)
-    @mutex.synchronize { @entries << entry }
+    @entries << entry
     entry
   end
 
@@ -78,41 +82,35 @@ class OutputBuffer
     last
   end
 
-  # Waterline read (thread-safe): return the entries appended since the LAST
-  # call and advance the read index past them. Subsequent calls see only new
-  # entries - this is the "is there more output?" poll the CLI/renderer uses.
-  # A trailing trim drops the already-consumed prefix to bound memory.
+  # Waterline read: return the entries appended since the LAST call and
+  # advance the read index past them. Subsequent calls see only new entries
+  # - this is the "is there more output?" poll the CLI/renderer uses. A
+  # trailing trim drops the already-consumed prefix to bound memory.
   def drain
-    @mutex.synchronize do
-      if @read_index >= @entries.size
-        []
-      else
-        batch   = @entries[@read_index...@entries.size]
-        @read_index += batch.size
-        trim_prefix
-        batch
-      end
-    end
+    return [] if @read_index >= @entries.size
+
+    batch      = @entries[@read_index...@entries.size]
+    @read_index += batch.size
+    trim_prefix
+    batch
   end
 
   # True when there are unread entries waiting for a renderer.
   def pending?
-    @mutex.synchronize { @read_index < @entries.size }
+    @read_index < @entries.size
   end
 
   # Number of entries stored in total (consumed or not). Useful for tests.
   def size
-    @mutex.synchronize { @entries.size }
+    @entries.size
   end
 
   # Drop EVERYTHING (consumed and pending) and reset the waterline to zero.
   # Intended for explicit "new surface" boundaries if a renderer ever wants
   # a clean slate; the drain loop normally does not need it.
   def clear
-    @mutex.synchronize do
-      @entries.clear
-      @read_index = 0
-    end
+    @entries.clear
+    @read_index = 0
   end
 
   private
@@ -124,8 +122,7 @@ class OutputBuffer
   end
 
   # Drop the consumed prefix when the waterline is far enough along that it
-  # no longer matters (it is at least half of what we hold). Called with @mutex
-  # held by the public methods.
+  # no longer matters (it is at least half of what we hold).
   def trim_prefix
     return if @read_index < TRIM_AT
     return if @read_index * 2 < @entries.size
