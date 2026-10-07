@@ -58,7 +58,7 @@ module Tools
       File.delete(path)
       Tool.puts "  [file.delete] ✓ #{shown} (deleted)"
       # issue #170: the file is gone - drop its cache entry.
-      @session&.file_cache.clear(path)
+      @session&.file_cache.clear(path, workdir: @file_list.workdir)
 
       "ok: file '#{shown}' has been deleted"
     end

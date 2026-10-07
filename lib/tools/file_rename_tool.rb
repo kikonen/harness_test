@@ -73,7 +73,7 @@ module Tools
       FileUtils.mv(old_path, new_path)
 
       # issue #170: the digest travels with the file - re-key the cache.
-      @session&.file_cache.rename(old_path, new_path)
+      @session&.file_cache.rename(old_path, new_path, workdir: @file_list.workdir)
 
       Tool.puts "  [file.rename] ✓ #{old_shown} → #{new_shown}"
       "ok: renamed #{old_shown} to #{new_shown}"

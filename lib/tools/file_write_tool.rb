@@ -51,7 +51,7 @@ module Tools
       # harness did not make itself are flagged.
       if @session && File.file?(path)
         current = FileList.sha256(path)
-        cached  = @session.file_cache.digest(path)
+        cached  = @session.file_cache.digest(path, workdir: @file_list.workdir)
         if cached && current != cached
           Tool.puts "  [file.write] ✗ #{shown} (externally changed since last read)"
           return "error: '#{shown}' has changed externally since you last read it. " \
@@ -73,7 +73,7 @@ module Tools
       # the exact state we wrote it).
       if @session
         sha = FileList.sha256(path)
-        @session.file_cache.record(path, sha) if sha
+        @session.file_cache.record(path, sha, workdir: @file_list.workdir) if sha
       end
 
       Tool.puts "  [file.write] ✓ #{shown} (#{content.length} chars)"

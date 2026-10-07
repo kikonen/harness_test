@@ -51,7 +51,7 @@ module Tools
       # part of its persistence).
       if @session
         sha = FileList.sha256(path)
-        @session.file_cache.record(path, sha) if sha
+        @session.file_cache.record(path, sha, workdir: @file_list.workdir) if sha
       end
 
       Tool.puts "  [file.read] ✓ #{shown}"
