@@ -3,6 +3,7 @@
 require_relative 'harness'
 require_relative 'file_list'
 require_relative 'task'
+require_relative 'command_runner'
 require_relative 'command'
 
 # Individual command classes.
@@ -80,12 +81,17 @@ class CommandHandler
   end
 
   # Dispatch a single line of input. Slash-commands go through the registry;
+  # lines starting with "!" run a shell command locally (issue #129);
   # anything else is sent as a direct prompt to the model.
   def handle(input)
     input = input.strip
     return if input.empty?
 
     unless input.start_with?('/')
+      if input.start_with?('!')
+        run_bang_command(input[1..].to_s.strip)
+        return
+      end
       run_direct_prompt(input)
       return
     end
@@ -103,6 +109,38 @@ class CommandHandler
       @exiting = true if cmd.respond_to?(:exited?) && cmd.exited?
     else
       ui.puts "Unknown command: /#{name}.\n----\nType /help for available commands."
+    end
+  end
+
+  # issue #129: `! cmd` runs a shell command locally, bypassing the model.
+  # The same safety model as the run.command tool applies (CommandRunner):
+  # the full command is shown and an explicit "Allow" is required unless the
+  # prefix is in the allowlist. The command and its output never enter the
+  # session. Runs on the main thread - the dialog is served in place on the
+  # console, no Task involved.
+  def run_bang_command(command)
+    if command.empty?
+      ui.puts '  usage: ! <command> (runs locally, never sent to the model)'
+      return
+    end
+
+    # Flatten multiline input the same way slash commands are flattened.
+    command = command.gsub(/\s*\n\s*/, ' ').strip
+
+    runner = CommandRunner.new(
+      @file_list,
+      @options,
+      label: 'shell',
+      title_fmt: CommandRunner::BANG_TITLE,
+      ui: @ui)
+    result = runner.run(command).to_s
+
+    if result.start_with?('error: user denied')
+      # The runner already printed the denial status line.
+    elsif result.start_with?('error:')
+      ui.puts "  [error] #{result.delete_prefix('error: ')}"
+    else
+      ui.puts result
     end
   end
 

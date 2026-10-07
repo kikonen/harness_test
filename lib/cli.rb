@@ -183,6 +183,8 @@ class CLI
     ui.puts "Tip: type a plain message (no /) to send it directly to the model."
     ui.puts "Tip: paste multiline text directly, or end a line with a backslash (\\) " \
          "to continue."
+    ui.puts "Tip: a line starting with ! runs a shell command locally (not sent " \
+         "to the model)."
     ui.puts "Tip: a line starting with / is a command (executed immediately)."
     ui.puts
 

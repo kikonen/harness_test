@@ -43,6 +43,13 @@ module Commands
           the granularity you prefer: the single file, the directory only
           (direct children), or the directory recursively (all subdirs).
 
+        Shell mode:
+          Type any line starting with ! to run a shell command locally,
+          bypassing the model. The command follows the same approval rules
+          as run.command (Allow / always-allow; unsafe constructs can never
+          be auto-approved). The command and its output are NOT sent to or
+          stored in the model's session.
+
         Session:
           Prompts are accumulated in a session, so the model sees the whole
           conversation. If a request to the LLM fails, the prompt stays in the
