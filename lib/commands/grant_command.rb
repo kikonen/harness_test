@@ -39,14 +39,23 @@ module Commands
         end
       end
 
-      prefixes = CommandAllowlist.new(@file_list.workdir).prefixes
-      if prefixes.empty?
+      tool_list = CommandAllowlist.new(@file_list.workdir).prefixes
+      shell_list = CommandAllowlist.new(@file_list.workdir,
+                                        file: CommandAllowlist::SHELL_FILENAME)
+                             .prefixes
+
+      if tool_list.empty? && shell_list.empty?
         @ui.puts "Commands: (none allowed)"
-      else
-        @ui.puts "Commands (auto-approved prefixes):"
-        prefixes.each_with_index do |p, i|
-          @ui.puts "  #{i + 1}. #{p}"
-        end
+        return
+      end
+
+      unless tool_list.empty?
+        @ui.puts 'Commands for run.command:'
+        tool_list.each { |p| @ui.puts "  - #{p}" }
+      end
+      unless shell_list.empty?
+        @ui.puts 'Commands for shell (!):'
+        shell_list.each { |p| @ui.puts "  - #{p}" }
       end
     end
   end

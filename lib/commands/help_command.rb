@@ -9,7 +9,8 @@ module Commands
       @ui.puts <<~HELP
         Available commands:
           /grant         Show all current grants: file/dir access (read, write,
-                         delete) and command allowlist prefixes
+                         delete) and the auto-approved command lists
+                         (run.command tool and shell (!), kept separate)
           /clear         Remove all grants from the list
 
           /retry         Re-send the session message chain (after a failed request)
@@ -47,8 +48,10 @@ module Commands
           Type any line starting with ! to run a shell command locally,
           bypassing the model. The command follows the same approval rules
           as run.command (Allow / always-allow; unsafe constructs can never
-          be auto-approved). The command and its output are NOT sent to or
-          stored in the model's session.
+          be auto-approved) but uses a SEPARATE allowlist
+          (.harness/shell_commands.yml) from the run.command tool - grants
+          saved one way never auto-approve commands on the other. The command
+          and its output are NOT sent to or stored in the model's session.
 
         Session:
           Prompts are accumulated in a session, so the model sees the whole

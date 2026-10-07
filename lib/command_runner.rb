@@ -21,9 +21,11 @@ require_relative 'ui/dialog'
 #
 # SAFETY MODEL:
 #   - The FULL command string is displayed to the user before anything runs;
-#     explicit "Allow" required unless the prefix is in the allowlist.
-#   - "Always allow <prefix>" saves a grant to .harness/allowed_commands.yml
-#     (issue #69, multi-select per-prefix issue #102).
+#     explicit "Allow" required unless the prefix is in the list.
+#   - "Always allow <prefix>" saves a grant (issue #69, multi-select
+#     per-prefix issue #102). The list is SEPARATE per caller (issue #129):
+#     the tool writes .harness/allowed_commands.yml, bang syntax writes
+#     .harness/shell_commands.yml - one never auto-approves for the other.
 #   - Commands run under a timeout (default 60 s, cap 300 s) so a hung
 #     process can never block the session indefinitely.
 #   - Output is truncated to a line limit (default 200, max 5000); that
@@ -39,6 +41,10 @@ class CommandRunner
                "$ %s\ncwd: %s (timeout: %ss)"
   BANG_TITLE = "Run shell command:\n$ %s\ncwd: %s (timeout: %ss)"
 
+  # Which allowlist file this runner consults and writes.
+  LISTS = { tool: CommandAllowlist::TOOL_FILENAME,
+            shell: CommandAllowlist::SHELL_FILENAME }.freeze
+
   # Shown as a dialog note when no "Always allow" option is offered because
   # the command contains constructs that can never be auto-approved.
   # Normally replaced by a tailored note naming the specific unsafe
@@ -48,14 +54,16 @@ class CommandRunner
   # label:     bracket used in status lines ('run.command' or 'shell')
   # title_fmt: sprintf-style dialog title (TOOL_TITLE / BANG_TITLE)
   # ui:        UI::Console for direct main-thread dialogs (nil = Task thread)
-  def initialize(file_list, options, label: 'run.command',
-                 title_fmt: TOOL_TITLE, ui: nil)
+  # list:      :tool (default) or :shell - selects the allowlist file
+  def initialize(file_list, options, label: 'run.command', title_fmt: TOOL_TITLE,
+                 ui: nil, list: :tool)
     @file_list = file_list
     @options   = options
     @label     = label
     @title_fmt = title_fmt
     @ui        = ui
-    @allowlist = CommandAllowlist.new(file_list.workdir)
+    @allowlist = CommandAllowlist.new(file_list.workdir,
+                                      file: LISTS.fetch(list.to_sym))
   end
 
   # Run a command after any required user consent. Returns the formatted

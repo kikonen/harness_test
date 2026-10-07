@@ -8,7 +8,10 @@ require_relative 'shell_parser'
 
 # -- CommandAllowlist -----------------------------------------------------
 #
-# Persists user-approved command prefixes in .harness/allowed_commands.yml.
+# Persists user-approved command prefixes in .harness/allowed_commands.yml
+# (run.command tool) or .harness/shell_commands.yml (`!` bang syntax) - two
+# separate lists, so a local convenience grant never auto-approves a
+# model-initiated command (issue #129).
 # When the user picks "Always allow" in the run.command dialog, the
 # candidate prefix(es) are saved here. Subsequent commands whose leading
 # tokens match a stored prefix are auto-approved without a dialog.
@@ -48,7 +51,12 @@ require_relative 'shell_parser'
 #   the previous hand-rolled char-by-char splitting and safety scanning.
 #
 class CommandAllowlist
-  FILENAME = 'allowed_commands.yml'
+  # Two SEPARATE lists (issue #129): the same prefix must not auto-approve
+  # both model-driven and locally typed commands.
+  TOOL_FILENAME = 'allowed_commands.yml'   # run.command tool (LLM)
+  SHELL_FILENAME = 'shell_commands.yml'    # `!` bang syntax (local shell)
+
+  FILENAME = TOOL_FILENAME
 
   # Maximum number of tokens considered for a single command's prefix.
   MAX_PREFIX_TOKENS = 3
@@ -243,9 +251,9 @@ class CommandAllowlist
 
   attr_reader :prefixes
 
-  def initialize(workdir)
+  def initialize(workdir, file: TOOL_FILENAME)
     @workdir  = workdir
-    @path     = File.join(workdir, '.harness', FILENAME)
+    @path     = File.join(workdir, '.harness', file)
     @prefixes = load
   end
 

@@ -512,6 +512,29 @@ RSpec.describe CommandAllowlist do
       end
     end
 
+    it 'keeps the tool and shell lists in separate files' do
+      Dir.mktmpdir do |dir|
+        tool  = described_class.new(dir)
+        shell = described_class.new(dir,
+                                    file: described_class::SHELL_FILENAME)
+
+        tool.add('git status')
+        shell.add('ls -la')
+
+        # Each instance only sees its own list (issue #129).
+        expect(tool.prefixes).to eq(['git status'])
+        expect(shell.prefixes).to eq(['ls -la'])
+        expect(tool.allowed?('ls -la')).to be false
+        expect(shell.allowed?('git status -s')).to be false
+
+        # The default constructor keeps reading allowed_commands.yml.
+        expect(File.file?(File.join(dir, '.harness',
+                                    described_class::TOOL_FILENAME))).to be true
+        expect(File.file?(File.join(dir, '.harness',
+                                    described_class::SHELL_FILENAME))).to be true
+      end
+    end
+
     it 'does not duplicate prefixes' do
       Dir.mktmpdir do |dir|
         list = described_class.new(dir)
