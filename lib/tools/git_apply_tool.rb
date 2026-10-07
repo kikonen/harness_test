@@ -14,17 +14,27 @@ require_relative '../git_runner'
 #   dry_run  - validate with `git apply --check` without applying
 #   three_way - if the direct apply fails, retry with a 3-way merge
 #               (requires the blob objects to be present in the repo)
+#
+# issue #170: takes an optional trailing `session` argument - when given,
+# patched files are checked against the digest cache (external-change
+# detection) and their new digests are recorded on success.
+# issue #171: the diff is normalized before git sees it (CRLF -> LF and
+# trailing whitespace stripped from every line), which absorbs the two
+# most common model output quirks. Hunk line numbers are treated as
+# hints by git itself, so small numbering mistakes are tolerated too.
 module Tools
 
   class GitApplyTool < GitRunner
-    def initialize(file_list)
+    def initialize(file_list, session = nil)
       @file_list = file_list
+      @session   = session
       super(
         name: 'git.apply',
         description: 'Applies a unified diff patch to the working tree (like `git apply`). ' \
                      'Provide the full unified diff (with --- / +++ / @@ hunks). ' \
                      'Use dry_run to validate without applying. ' \
-                     'Unlike file.patch, no sha is required and multiple files are supported.',
+                     'Unlike file.patch, no sha is required and multiple files are supported. ' \
+                     'Hunk line numbers and stray trailing whitespace are tolerated.',
         parameters: {
           type: 'object',
           properties: {
@@ -63,9 +73,17 @@ module Tools
         Tool.puts "  [git.apply] #{dry_run ? 'would patch' : 'patching'}: #{files.join(', ')}"
       end
 
+      # issue #170: external-change detection (see file.write /
+      # file.patch) - the on-disk digest of every known file must still
+      # match what we cached, otherwise a re-read is needed first.
+      guard = external_change_guard(files)
+      return guard if guard
+
       Tempfile.create(['harness_git_apply', '.diff']) do |tmp|
-        # Normalize to LF - git apply expects consistent line endings.
-        tmp.write(diff.gsub("\r\n", "\n"))
+        # issue #171: normalize before git sees the diff - consistent LF
+        # line endings and no trailing whitespace on any line (a common
+        # model output quirk that would otherwise hard-fail context lines).
+        tmp.write(normalize_diff(diff))
         tmp.flush
 
         result = run_git('git', 'apply', *apply_flags(dry_run), tmp.path)
@@ -84,6 +102,9 @@ module Tools
           return "#{msg}\nfiles: #{files.join(', ')}" if files.any?
           msg
         end
+
+        # issue #170: our own patch refreshes the cache.
+        record_cache(files) unless dry_run
 
         applied = result[:stdout].strip
         label   = dry_run ? 'validated (dry run)' : 'applied'
@@ -105,6 +126,55 @@ module Tools
       # Be lenient about whitespace (a common model output quirk).
       flags << '--whitespace=nowarn'
       flags
+    end
+
+    # issue #171: normalize a model-produced diff before handing it to
+    # git: CRLF -> LF (git apply expects consistent line endings) and
+    # trailing whitespace stripped from every line, so stray spaces in
+    # context lines do not hard-fail the match (a common model quirk).
+    def normalize_diff(diff)
+      diff.gsub("\r\n", "\n")
+          # Strip trailing whitespace before each newline; a blank context
+          # line ("" or " ") is left empty either way, and the file's own
+          # final newline is preserved.
+          .gsub(/[ \t]+\n/, "\n")
+    end
+    # issue #170: external-change detection (same rule as file.write and
+    # file.patch) - every touched file that has a cached digest must still
+    # match the on-disk bytes, otherwise someone changed it outside us.
+    # Returns an error string for the first offending file, else nil.
+    def external_change_guard(files)
+      return nil unless @session && files.any?
+
+      files.each do |rel|
+        path = resolve_path(rel)
+        next unless File.file?(path)
+
+        current = FileList.sha256(path)
+        cached  = @session.file_cache.digest(path, workdir: workdir)
+        next unless cached && current != cached
+
+        shown = @file_list.display_path(path)
+        Tool.puts "  [git.apply] ✗ #{shown} (externally changed since last read)"
+        return "error: '#{shown}' has changed externally since you last read it. " \
+               'Re-read the file with file.read, or report the external change ' \
+               'with file.touch if you know what happened.'
+      end
+      nil
+    end
+
+    # issue #170: our own patch refreshes the cache for every touched
+    # file (new files get an entry; missing ones are left alone).
+    def record_cache(files)
+      return unless @session
+
+      files.each do |rel|
+        path = resolve_path(rel)
+        next unless File.file?(path)
+
+        sha = FileList.sha256(path)
+        @session.file_cache.record(path, sha, workdir: workdir) if sha
+      end
     end
 
     # Extracts the list of files a unified diff touches, from its

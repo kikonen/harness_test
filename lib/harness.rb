@@ -161,7 +161,7 @@ class Harness
     registry.register(Tools::GitStatusTool.new(@file_list))
     registry.register(Tools::GitLogTool.new(@file_list))
     registry.register(Tools::GitGrepTool.new(@file_list))
-    registry.register(Tools::GitApplyTool.new(@file_list))
+    registry.register(Tools::GitApplyTool.new(@file_list, @session))
     # Shell execution. Commands not in the user's allowlist require
     # explicit confirmation (issue #69, CommandAllowlist).
     registry.register(Tools::RunCommandTool.new(@file_list, @options))
