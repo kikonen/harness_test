@@ -49,20 +49,33 @@ RSpec.describe Commands::GrantCommand do
   end
 
   it 'lists the command allowlist prefixes' do
-    allowlist = CommandAllowlist.new(workdir)
-    allowlist.add('git log')
-    allowlist.add('bundle exec rspec')
+    CommandAllowlist.new(workdir).add('git log')
+    shell = CommandAllowlist.new(workdir,
+                                 file: CommandAllowlist::SHELL_FILENAME)
+    shell.add('ls -la')
 
     out = run_command
 
-    expect(out).to include('Commands (auto-approved prefixes):')
-    expect(out).to include('1. git log')
-    expect(out).to include('2. bundle exec rspec')
+    expect(out).to include('Commands for run.command:')
+    expect(out).to include('- git log')
+    expect(out).to include('Commands for shell (!):')
+    expect(out).to include('- ls -la')
   end
 
   it 'reports no allowed commands when the allowlist is empty' do
     out = run_command
 
     expect(out).to include('Commands: (none allowed)')
+    expect(out).not_to include('Commands for run.command:')
+  end
+
+  it 'shows only the non-empty command list' do
+    CommandAllowlist.new(workdir).add('git log')
+
+    out = run_command
+
+    expect(out).to include('Commands for run.command:')
+    expect(out).to include('- git log')
+    expect(out).not_to include('Commands for shell (!):')
   end
 end

@@ -115,7 +115,8 @@ class CommandHandler
   # issue #129: `! cmd` runs a shell command locally, bypassing the model.
   # The same safety model as the run.command tool applies (CommandRunner):
   # the full command is shown and an explicit "Allow" is required unless the
-  # prefix is in the allowlist. The command and its output never enter the
+  # prefix is in the local shell allowlist (shell_commands.yml - separate
+  # from the run.command list). The command and its output never enter the
   # session. Runs on the main thread - the dialog is served in place on the
   # console, no Task involved.
   def run_bang_command(command)
@@ -132,7 +133,8 @@ class CommandHandler
       @options,
       label: 'shell',
       title_fmt: CommandRunner::BANG_TITLE,
-      ui: @ui)
+      ui: @ui,
+      list: :shell)
     result = runner.run(command).to_s
 
     if result.start_with?('error: user denied')

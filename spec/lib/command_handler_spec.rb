@@ -29,7 +29,7 @@ RSpec.describe CommandHandler do
     it 'runs an allowed command and prints the result to the console' do
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, '.harness'))
-        File.write(File.join(dir, '.harness', 'allowed_commands.yml'),
+        File.write(File.join(dir, '.harness', 'shell_commands.yml'),
                    YAML.dump(['echo']))
 
         handler, stdout = drive_bang(dir)
@@ -37,6 +37,22 @@ RSpec.describe CommandHandler do
 
         expect(stdout.string).to include('exit code: 0')
         expect(stdout.string).to include('bang')
+      end
+    end
+
+    it 'does NOT auto-approve from the run.command tool list' do
+      Dir.mktmpdir do |dir|
+        # A grant saved by the MODEL tool must not auto-approve a
+        # locally typed command (issue #129).
+        FileUtils.mkdir_p(File.join(dir, '.harness'))
+        File.write(File.join(dir, '.harness', 'allowed_commands.yml'),
+                   YAML.dump(['echo']))
+
+        handler, stdout = drive_bang(dir, '4') # would cancel the dialog
+        handler.handle('! echo bang')
+
+        expect(stdout.string).to include('Run shell command:')
+        expect(stdout.string).to include('[shell] ✗ denied by user')
       end
     end
 

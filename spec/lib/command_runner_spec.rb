@@ -32,9 +32,11 @@ RSpec.describe CommandRunner do
     stdin  = StringIO.new(dialog_lines.join("\n"))
     stdout = StringIO.new
     file_list = FileList.new([], workdir: dir)
-    runner = described_class.new(
-      file_list, {},
-      label: 'shell', ui: UI::Console.new(stdout: stdout), **kwargs)
+    runner = described_class.new(file_list, {},
+                                 label: 'shell',
+                                 ui: UI::Console.new(stdout: stdout,
+                                                     stdin: stdin),
+                                 list: :shell, **kwargs)
     [runner, stdout]
   end
 
@@ -65,6 +67,20 @@ RSpec.describe CommandRunner do
       out = make_tool_runner(dir).run('echo hi')
       expect(out).to start_with('exit code: 0')
       expect(out).to include("hi\n")
+    end
+  end
+
+  it 'does NOT auto-approve from the local shell (!) list' do
+    Dir.mktmpdir do |dir|
+      # A grant saved for local bang syntax must not auto-approve a
+      # model-initiated run.command (issue #129).
+      FileUtils.mkdir_p(File.join(dir, '.harness'))
+      File.write(File.join(dir, '.harness', 'shell_commands.yml'),
+                 YAML.dump(['echo']))
+
+      drive_dialog(['4']) # must reach the dialog -> cancel it
+      out = make_tool_runner(dir).run('echo hi')
+      expect(out).to eq('error: user denied executing the command')
     end
   end
 
@@ -112,6 +128,24 @@ RSpec.describe CommandRunner do
       # A new runner instance (fresh allowlist load) auto-approves now.
       out2 = make_tool_runner(dir).run('echo something else')
       expect(out2).to start_with('exit code:')
+    end
+  end
+
+  it 'saves "Always allow" into the local shell list only' do
+    Dir.mktmpdir do |dir|
+      runner, out = make_main_runner(dir, '2') # Allow(1), 'echo'(2)
+      result = runner.run('echo hi')
+      expect(result).to start_with('exit code: 0')
+
+      shell_yml = File.join(dir, '.harness', 'shell_commands.yml')
+      tool_yml  = File.join(dir, '.harness', 'allowed_commands.yml')
+      expect(YAML.safe_load(File.read(shell_yml))).to eq(['echo'])
+      expect(File.file?(tool_yml)).to be false
+
+      # A fresh shell runner auto-approves from the saved grant.
+      expect(described_class.new(FileList.new([], workdir: dir), {},
+                                 label: 'shell', list: :shell).run('echo x'))
+        .to start_with('exit code: 0')
     end
   end
 
