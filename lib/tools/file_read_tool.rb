@@ -6,14 +6,17 @@ require_relative '../file_list'
 module Tools
 
   class FileReadTool < Tool
-    def initialize(file_list)
+    def initialize(file_list, session = nil)
       @file_list = file_list
+      # issue #170: optional Session - when given, files read by the model
+      # are recorded in its digest cache (external-change detection for
+      # later write/patch). nil is only used by specs that never write.
+      @session   = session
       super(
         name: 'file.read',
         description: 'Reads the contents of a file. ' \
                      'Paths are relative to the harness working directory. ' \
-                     'Returns the SHA-256 digest of the file along with its full contents. ' \
-                     'Pass the returned sha back to file.write to prove the file has not changed since you read it.',
+                     'Returns the full file content.',
         parameters: {
           type: 'object',
           properties: {
@@ -39,14 +42,21 @@ module Tools
       end
 
       content = File.read(path)
-      sha     = FileList.sha256(path)
 
       # Normalize CRLF to LF so the LLM always sees clean line endings.
       content = content.gsub("\r\n", "\n")
 
-      Tool.puts "  [file.read] ✓ #{shown} (sha256: #{sha})"
+      # issue #170: remember what the model just read so a later write/patch
+      # can detect EXTERNAL changes (the cache lives in the Session and is
+      # part of its persistence).
+      if @session
+        sha = FileList.sha256(path)
+        @session.file_cache.record(path, sha) if sha
+      end
 
-      "sha256: #{sha}\n---\n#{content}"
+      Tool.puts "  [file.read] ✓ #{shown}"
+
+      content
     end
   end
 end

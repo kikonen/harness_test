@@ -4,9 +4,8 @@ require_relative '../tool'
 require_relative '../file_list'
 
 # Applies a standard unified diff patch to a file.
-# The model provides the file path, a unified diff, and the SHA-256 digest
-# of the file as last read. The patch is applied to the file content and the
-# result is written back.
+# The model provides the file path and a unified diff; the patch is applied
+# to the file content and the result is written back.
 #
 # Unified diff format (standard):
 #   --- a/path
@@ -16,9 +15,14 @@ require_relative '../file_list'
 #   -removed line
 #   +added line
 #
-# The tool verifies:
-#   2. The SHA-256 matches (file unchanged since read)
-#   3. Each hunk's old-side lines (context + deletions) are found in the file
+# The tool verifies that each hunk's old-side lines (context + deletions)
+# are found in the file.
+#
+# issue #170: before applying, a file that was read in this session must
+# still match its cached digest - otherwise it changed EXTERNALLY and the
+# patch would apply to stale content. Re-reading the file refreshes the
+# cached digest, so after a file.read the patch proceeds normally (but its
+# hunks must now match the NEW content). The cache lives in the Session.
 #
 # Robustness:
 #   - Hunks are located by SEARCHING for their old-side lines, starting at the
@@ -41,32 +45,34 @@ require_relative '../file_list'
 # This is safer than a full file rewrite because:
 #   - The model only specifies the changed regions
 #   - Context lines are verified, preventing misapplied patches
-#   - The SHA check protects against concurrent modifications
 module Tools
 
   class FilePatchTool < Tool
     SEARCH_WINDOW = 50  # lines to search above/below the declared position
 
-    def initialize(file_list, options)
+    def initialize(file_list, options, session = nil)
       @file_list = file_list
       @options   = options
+      # issue #170: optional Session - when given, the digest cache is used
+      # for external-change detection and refreshed after a successful patch.
+      # nil only for specs without a prior read (nothing to detect).
+      @session   = session
       super(
         name: 'file.patch',
         description: 'Applies a standard unified diff patch to a file. ' \
                      'The diff must be in unified diff format (--- / +++ / @@ hunks). ' \
-                     'You must provide the sha256 digest of the file as last read (from file.read or file.sha). ' \
                      'Hunk line numbers are used as a hint - the hunk is located by matching its context lines, ' \
                      'so small line-number errors are tolerated. ' \
                      'Use this for targeted edits instead of rewriting the entire file with file.write. ' \
-                     'On success the NEW sha256 digest of the file is returned - use it for the next write/patch on the same file.',
+                     'If the file may have been modified EXTERNALLY since you last read it, ' \
+                     "re-read it with file.read first so the patch applies to fresh content.",
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: 'Path to the file to patch (relative to the working directory)' },
-            diff: { type: 'string', description: 'Unified diff to apply (standard format with --- / +++ / @@ hunks)' },
-            sha:  { type: 'string', description: 'SHA-256 digest of the file as last read (from file.read or file.sha); must match the file on disk' }
+            path: { type: 'string', description: 'Path of the file to patch (relative to the working directory)' },
+            diff: { type: 'string', description: 'Unified diff to apply (standard format with --- / +++ / @@ hunks)' }
           },
-          required: ['path', 'diff', 'sha']
+          required: ['path', 'diff']
         }
       )
     end
@@ -75,7 +81,6 @@ module Tools
       path = @file_list.resolve(args['path'])
       shown = @file_list.display_path(path)
       diff  = args['diff'].to_s
-      sha   = args['sha'].to_s
 
       unless @file_list.writable?(path)
         result = @file_list.grant_access(path, :w)
@@ -87,17 +92,18 @@ module Tools
         return "error: file '#{shown}' does not exist on disk"
       end
 
-      current_sha = FileList.sha256(path)
-
-      if sha.empty?
-        Tool.puts "  [file.patch] ✗ #{shown} (missing sha)"
-        return "error: 'sha' is required - pass the SHA-256 digest returned by file.read or file.sha"
-      end
-
-      unless current_sha == sha
-        Tool.puts "  [file.patch] ✗ #{shown} (sha mismatch)"
-        return "error: sha mismatch for '#{shown}' - the file has changed since you read it. " \
-               "Current sha256: #{current_sha}. Re-read the file with file.read and retry."
+      # issue #170: external-change detection - same rules as file.write.
+      # A read-in-session file whose on-disk digest no longer matches the
+      # cache was changed outside us; re-read (or file.touch) first.
+      if @session
+        current = FileList.sha256(path)
+        cached  = @session.file_cache.digest(path)
+        if cached && current != cached
+          Tool.puts "  [file.patch] ✗ #{shown} (externally changed since last read)"
+          return "error: '#{shown}' has changed externally since you last read it. " \
+                 'Re-read the file with file.read, or report the external change ' \
+                 'with file.touch if you know what happened.'
+        end
       end
 
       hunks = parse_unified_diff(diff)
@@ -130,7 +136,7 @@ module Tools
           diag = diagnose(lines, hunk)
           Tool.puts "  [file.patch] ✗ #{shown} (hunk at line #{hunk[:old_start]} did not apply)"
           return "error: hunk at old-line #{hunk[:old_start]} did not apply cleanly. #{diag} " \
-                 "Re-read the file with file.read and adjust the diff so its context lines match exactly."
+                 'Re-read the file with file.read and adjust the diff so its context lines match exactly.'
         end
         lines   = result
         applied += 1
@@ -147,9 +153,16 @@ module Tools
       end
 
       File.write(path, new_content)
-      new_sha = FileList.sha256(path)
-      Tool.puts "  [file.patch] ✓ #{shown} (#{applied} hunk(s) applied, sha256: #{new_sha})"
-      "ok: applied #{applied} hunk(s) to #{shown}\nsha256: #{new_sha}"
+
+      # issue #170: our own patch refreshes the cache (the file is now in
+      # the exact state we wrote it).
+      if @session
+        sha = FileList.sha256(path)
+        @session.file_cache.record(path, sha) if sha
+      end
+
+      Tool.puts "  [file.patch] ✓ #{shown} (#{applied} hunk(s) applied)"
+      "ok: applied #{applied} hunk(s) to #{shown}"
     end
 
     private

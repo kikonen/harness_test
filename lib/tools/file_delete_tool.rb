@@ -8,9 +8,12 @@ require_relative '../file_list'
 module Tools
 
   class FileDeleteTool < Tool
-    def initialize(file_list, options)
+    def initialize(file_list, options, session = nil)
       @file_list = file_list
       @options   = options
+      # issue #170: optional Session - when given, the digest cache entry
+      # is dropped when the file is deleted.
+      @session   = session
       super(
         name: 'file.delete',
         description: 'Deletes a file from disk. ' \
@@ -54,6 +57,9 @@ module Tools
 
       File.delete(path)
       Tool.puts "  [file.delete] ✓ #{shown} (deleted)"
+      # issue #170: the file is gone - drop its cache entry.
+      @session&.file_cache.clear(path)
+
       "ok: file '#{shown}' has been deleted"
     end
   end
