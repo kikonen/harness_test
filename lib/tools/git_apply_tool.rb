@@ -22,6 +22,9 @@ require_relative '../git_runner'
 # trailing whitespace stripped from every line), which absorbs the two
 # most common model output quirks. Hunk line numbers are treated as
 # hints by git itself, so small numbering mistakes are tolerated too.
+# issue #22: structurally broken diffs (no hunk at all, or hunks without
+# any file header) fail up front with an actionable message instead of
+# the generic "does not match the working tree" error.
 module Tools
 
   class GitApplyTool < GitRunner
@@ -50,6 +53,10 @@ module Tools
     def execute(args)
       diff = args['diff'].to_s
       return 'error: \'diff\' is required' if diff.strip.empty?
+
+      # issue #22: catch structurally broken diffs before git sees them.
+      bad = structural_error(diff)
+      return bad if bad
 
       dry_run   = args['dry_run'] == true
       three_way = args['three_way'] == true
@@ -126,6 +133,28 @@ module Tools
       # Be lenient about whitespace (a common model output quirk).
       flags << '--whitespace=nowarn'
       flags
+    end
+
+    # issue #22: pre-validate the diff's structure so the model gets an
+    # actionable message for inputs git would reject outright. Returns an
+    # error string, or nil when the structure looks plausible and git can
+    # be trusted to judge content:
+    #   - no '@@' line at all -> "No valid patches in input"
+    #   - hunks but no file headers (--- / +++ / diff --git) ->
+    #     "patch fragment without header at line N"
+    def structural_error(diff)
+      text = diff.gsub("\r\n", "\n")
+      if text.scan(/^@@ /).empty?
+        'error: the diff contains no hunks (no "@@ -x,y +a,b @@" lines). ' \
+          'Provide the full unified diff, or use file.patch for a single file.'
+      elsif touched_files(text).any?
+        nil
+      else
+        'error: the diff has hunks but no file headers. Each hunk must be ' \
+          'preceded by a "--- a/<file>" and "+++ b/<file>" line (a full ' \
+          '"diff --git" header is also fine). For single-file edits, ' \
+          'file.patch is more forgiving.'
+      end
     end
 
     # issue #171: normalize a model-produced diff before handing it to
