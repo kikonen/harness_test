@@ -97,7 +97,7 @@ module Tools
       # cache was changed outside us; re-read (or file.touch) first.
       if @session
         current = FileList.sha256(path)
-        cached  = @session.file_cache.digest(path)
+        cached  = @session.file_cache.digest(path, workdir: @file_list.workdir)
         if cached && current != cached
           Tool.puts "  [file.patch] ✗ #{shown} (externally changed since last read)"
           return "error: '#{shown}' has changed externally since you last read it. " \
@@ -158,7 +158,7 @@ module Tools
       # the exact state we wrote it).
       if @session
         sha = FileList.sha256(path)
-        @session.file_cache.record(path, sha) if sha
+        @session.file_cache.record(path, sha, workdir: @file_list.workdir) if sha
       end
 
       Tool.puts "  [file.patch] ✓ #{shown} (#{applied} hunk(s) applied)"

@@ -53,7 +53,7 @@ RSpec.describe Tools::FilePatchTool do
         tool    = described_class.new(list, {}, session)
 
         # Seed the cache as if we had just read the file at this state.
-        session.file_cache.record(target, FileList.sha256(target))
+        session.file_cache.record(target, FileList.sha256(target), workdir: dir)
 
         # External change after our last read.
         File.write(target, "line1\nline2-external\n")
@@ -82,7 +82,7 @@ RSpec.describe Tools::FilePatchTool do
         tool    = described_class.new(list, {}, session)
 
         # Simulate a file.read that records the current digest.
-        session.file_cache.record(target, FileList.sha256(target))
+        session.file_cache.record(target, FileList.sha256(target), workdir: dir)
 
         diff = <<~DIFF
           --- a/hello.txt
