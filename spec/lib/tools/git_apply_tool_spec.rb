@@ -190,6 +190,39 @@ RSpec.describe Tools::GitApplyTool do
     end
   end
 
+  describe 'structural pre-validation (issue #22)' do
+    it 'rejects a diff without any hunk up front' do
+      Dir.mktmpdir do |dir|
+        list = FileList.new(workdir: dir)
+        tool = described_class.new(list)
+
+        out = tool.execute('diff' => "some prose\nno hunks here\n")
+        expect(out).to start_with('error: the diff contains no hunks')
+      end
+    end
+
+    it 'rejects a hunk without file headers up front' do
+      Dir.mktmpdir do |dir|
+        target = setup_git_repo(dir)
+        list   = FileList.new(workdir: dir)
+        tool   = described_class.new(list)
+
+        diff = <<~DIFF
+          @@ -1,3 +1,3 @@
+           line1
+          -line2
+          +line2-changed
+           line3
+        DIFF
+
+        out = tool.execute('diff' => diff)
+        expect(out).to start_with('error: the diff has hunks but no file headers')
+        # The rejected patch must not have touched the file.
+        expect(File.read(target)).to eq("line1\nline2\nline3\n")
+      end
+    end
+  end
+
   describe 'session file cache (issue #170)' do
     it 'rejects a patch when the file changed externally since the last read' do
       Dir.mktmpdir do |dir|
