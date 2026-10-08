@@ -21,12 +21,13 @@ class CLI
     :history,
     :ui
 
-  # Default API base URL (used when neither the CLI nor the config provides one).
   DEFAULT_BASE_URL = 'http://localhost:11434/v1'
 
-  def initialize
-    @options   = parse_options
-    @ui        = UI::Console.new(stdout: $stdout, stdin: $stdin)
+  # Defaults keep the entry point (`CLI.new.run`) unchanged; the tests inject
+  # pre-parsed options and a stubbed UI instead.
+  def initialize(options = nil, ui = nil)
+    @options   = options || parse_options
+    @ui        = ui || UI::Console.new(stdout: $stdout, stdin: $stdin)
     @file_list = FileList.new([], workdir: @options[:workdir])
     @harness   = Harness.new(@options, @file_list)
 
@@ -180,6 +181,10 @@ class CLI
     ui.puts "Harness ready. Type /help for commands, /exit to quit."
     ui.puts "Model: #{harness.session_manager.active_model_name} (@ #{@options[:base_url]})"
     ui.puts "Working directory: #{@file_list.workdir}"
+    # issue #189: show the session id at startup so the user knows WHERE
+    # this session's log is written (.harness/sessions/<id>/harness.log) -
+    # and which id a later /save or --resume would refer to.
+    ui.puts "Session: #{harness.session.session_id} (log: #{session_log_path_display})"
     ui.puts "Tip: type a plain message (no /) to send it directly to the model."
     ui.puts "Tip: paste multiline text directly, or end a line with a backslash (\\) " \
          "to continue."
@@ -232,6 +237,12 @@ class CLI
   end
 
   private
+
+  # issue #189: the log path relative to the workdir (absolute paths would
+  # duplicate the Working directory line above).
+  def session_log_path_display
+    File.join(Harness::HARNESS_DIR, 'sessions', harness.session.session_id, Harness::SESSION_LOG_FILE)
+  end
 
   # Resume a saved session given via -r / --resume (best-effort: a missing
   # or ambiguous id raises HarnessError, which the entry point reports).
