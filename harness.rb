@@ -25,6 +25,7 @@
 LOG_FILE = ENV['HARNESS_LOG_FILE'] || 'harness.log'
 
 require 'debug'
+require 'amazing_print'
 
 require_relative 'lib/cli'
 
