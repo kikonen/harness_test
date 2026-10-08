@@ -164,7 +164,8 @@ class Harness
     registry.register(Tools::GitApplyTool.new(@file_list, @session))
     # Shell execution. Commands not in the user's allowlist require
     # explicit confirmation (issue #69, CommandAllowlist).
-    registry.register(Tools::RunCommandTool.new(@file_list, @options))
+    registry.register(Tools::RunCommandTool.new(@file_list, @options,
+                                                harness: self))
     # Meta-tools (discovery): registered last so they appear at the end
     # of the sorted tool list. They take the registry itself as an
     # argument (built before the tools are instantiated).

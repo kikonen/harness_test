@@ -55,13 +55,17 @@ class CommandRunner
   # title_fmt: sprintf-style dialog title (TOOL_TITLE / BANG_TITLE)
   # ui:        UI::Console for direct main-thread dialogs (nil = Task thread)
   # list:      :tool (default) or :shell - selects the allowlist file
+  # harness:   optional Harness (any object with a lazy #logger accessor):
+  #            when given, FAILED commands are logged to the session's
+  #            harness.log so they leave a trace (issue #185). nil in specs.
   def initialize(file_list, options, label: 'run.command', title_fmt: TOOL_TITLE,
-                 ui: nil, list: :tool)
+                 ui: nil, list: :tool, harness: nil)
     @file_list = file_list
     @options   = options
     @label     = label
     @title_fmt = title_fmt
     @ui        = ui
+    @harness   = harness
     @allowlist = CommandAllowlist.new(file_list.workdir,
                                       file: LISTS.fetch(list.to_sym))
   end
@@ -222,13 +226,48 @@ class CommandRunner
       status("✗ #{command} (exit #{code}, #{elapsed}s)")
     end
 
+    format_result(command, code, elapsed, stdout, stderr, out, err)
+  rescue Timeout::Error
+    status("✗ #{command} (timed out after #{timeout}s)")
+    log_failure(command, "TIMED OUT after #{timeout}s")
+    "error: command timed out after #{timeout}s"
+  end
+
+  # Builds the formatted result string. A FAILED command that produced no
+  # stdout AND no stderr leaves only the bare "exit code:" line - which is
+  # exactly the trace-less failure of issue #185 (e.g. a missing binary
+  # prints nothing on some platforms). Name it in the result so the model
+  # sees WHY there is no output, and log the full raw output to
+  # harness.log so the failure is always recoverable from the log.
+  def format_result(command, code, elapsed, stdout, stderr, out, err)
     msg = "exit code: #{code} (#{elapsed}s)\n"
     msg += "--- stdout ---\n#{out}\n" if out.strip != ''
     msg += "--- stderr ---\n#{err}\n" if err&.strip&.!= ''
+    if !code.zero? && stdout.strip.empty? && stderr.strip.empty?
+      msg += "(the command produced no output - nothing to inspect)\n"
+    end
+    log_failure(command, "exit #{code}", stdout, stderr) unless code.zero?
     msg
-  rescue Timeout::Error
-    status("✗ #{command} (timed out after #{timeout}s)")
-    "error: command timed out after #{timeout}s"
+  end
+
+  # issue #185: every FAILED command (non-zero exit or timeout) gets an
+  # entry in the session's harness.log with the command, its status and
+  # the full UNTRUNCATED stdout/stderr - so a failure always leaves a
+  # trace even when the returned result had none. Empty streams are
+  # labeled "(none)" rather than omitted. No-op without a harness
+  # (specs construct the runner standalone).
+  def log_failure(command, why, stdout = nil, stderr = nil)
+    logger = @harness&.logger
+    return unless logger
+
+    parts = ["command: #{command}", "status: #{why}"]
+    if stdout
+      parts << "--- stdout ---\n#{stdout.strip.empty? ? '(none)' : stdout}"
+    end
+    if stderr
+      parts << "--- stderr ---\n#{stderr.strip.empty? ? '(none)' : stderr}"
+    end
+    logger.warn("shell command failed:\n" + parts.join("\n"))
   end
 
   # Runs the command in a shell with the inherited bundler env stripped
