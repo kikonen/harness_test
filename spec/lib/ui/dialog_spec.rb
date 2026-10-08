@@ -25,8 +25,10 @@ RSpec.describe UI::Dialog do
 
   # Feed a sequence of lines into the console's stdin (empty = immediate EOF).
   def stub_stdin(*lines)
-    lines.compact.each { |line| io_in << line }
-    io_in.rewind # `<<` leaves the position at EOF; rewind so gets() reads it
+    # Rewrite the stream (not append): an earlier example may leave its
+    # position mid-stream, where << would overlap or truncate content.
+    io_in.string = lines.compact.join
+    io_in.rewind # string= leaves the position at EOF; rewind so gets() reads it
   end
 
   def show(dialog)
@@ -303,9 +305,15 @@ RSpec.describe UI::Dialog do
         expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
       end
 
-      it 'cancels on "<number> <note>" for a non-cancel choice' do
-        stub_stdin("1 seems fine\n")
-        expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
+      it 're-prompts on "<number> <text>" for a non-cancel choice (never cancels)' do
+        stub_stdin("1 seems fine\n", "1\n")
+        expect(show(dialog)).to eq(:allow)
+        expect(capture).to include('invalid choice 1 seems fine (valid: 1..3)')
+      end
+
+      it 're-prompts on stray text mixed into a multi selection' do
+        stub_stdin("2 3 4 does_this_show\n", "1 2\n")
+        expect(show(dialog)).to eq([:allow, :deny])
       end
 
       it 'keeps the note on the cancel choice' do
@@ -364,6 +372,23 @@ RSpec.describe UI::Dialog do
       it 'cancels when cancel is part of the selection' do
         stub_stdin("1 4\n")
         expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
+      end
+
+      it 'takes "<Other number> <text>" as the answer on one line' do
+        stub_stdin("3 my own answer\n")
+        expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'my own answer'])
+      end
+
+      it 're-prompts when the line does not start with a number' do
+        stub_stdin("does_this_show 2\n", "1\n")
+        expect(show(dialog)).to eq(:allow)
+        expect(capture).to include('invalid choice does_this_show 2 (valid: 1..4)')
+      end
+
+      it 're-prompts when trailing text is not the "Other" answer (issue #72 regression)' do
+        stub_stdin("2 3 4 does_this_show\n", "1 2\n")
+        expect(show(dialog)).to eq([:allow, :deny])
+        expect(capture).to include('invalid choice 2 3 4 does_this_show (valid: 1..4)')
       end
     end
   end
