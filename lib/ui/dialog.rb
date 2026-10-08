@@ -37,7 +37,8 @@
 # "1 3" or "1,3"). One selection returns the bare value; two or more
 # return an ARRAY of the selected values in the order typed. In
 # multi-select mode a note is only kept on the cancel choice; any other
-# "<number> <text>" line cancels. A multi-select dialog can combine with
+# "<number> <text>" line re-prompts (it is never taken as a selection or
+# a cancel). A multi-select dialog can combine with
 # free_text (issue #72): selecting the "Other" option - alone or mixed in
 # the selection - then prompts for the typed answer, which is returned as
 # [FREE_TEXT, text]. EOF still cancels the whole dialog.
@@ -218,11 +219,11 @@ module UI
         answer = line.chomp.strip
         next if answer.empty?
 
-        # Multi-select: "1 3", "1,3" or "1 3, 5" - several option numbers
-        # in one line. Returns nil when the line was invalid
-        # and the dialog re-prompted.
-        if @multi_select && answer.match?(/\A\d+(?:[,\s]+\d+)+\z/)
-          chosen = handle_multi_select(answer, ui)
+        # Multi-select: the whole line is selection input ("1 3", "1,2",
+        # "3 my answer", "4 no, because X"). Anything invalid - including
+        # stray text - re-prompts; only the cancel number cancels.
+        if @multi_select
+          chosen = handle_multi_line(answer, ui)
           next if chosen.nil?
           return chosen
         end
@@ -241,15 +242,9 @@ module UI
           value = @options[idx].value
           if value == FREE_TEXT
             # "Other" with text on the same line ("3 my answer") is taken
-            # as the answer directly in single-select mode; in multi-select
-            # it still leads to the prompt.
-            return [FREE_TEXT, m[2].strip] unless @multi_select
-            return prompt_free_text(ui)
+            # as the answer directly.
+            return [FREE_TEXT, m[2].strip]
           end
-          # Multi-select mode: notes are only meaningful on the cancel
-          # choice; any other selection-with-text cancels.
-          return CANCEL_VALUE if @multi_select && value != CANCEL_VALUE
-
           keep_note = !@note_on_cancel_only || value == CANCEL_VALUE
           return keep_note ? [value, m[2].strip] : value
         end
@@ -280,11 +275,46 @@ module UI
       CANCEL_VALUE
     end
 
-    # Resolve a multi-select answer ("1 3", "1,3") to the selected values.
-    # One selection returns the bare value; two or more return an array in
-    # the order typed. Any out-of-range number rejects the whole line.
-    def handle_multi_select(answer, ui)
-      numbers = answer.split(/\s*,\s*|\s+/).map(&:to_i)
+    # Resolve a multi-select line to its result, or nil when the line was
+    # invalid (the dialog re-prompted). The whole line is selection input
+    # so "1 2", "3 my answer" and "4 no, because X" all work in one line;
+    # a line that does not START with a number is stray input (issue #155).
+    def handle_multi_line(answer, ui)
+      return reprompt_invalid(answer, ui) unless answer.match?(/\A\d/)
+
+      first, rest = answer.split(/\s+/, 2)
+      idx = first.to_i - 1
+      if out_of_range?(idx)
+        return reprompt_invalid(first, ui)
+      end
+
+      value = @options[idx].value
+      # Picking "Other": the rest of the line (when present and not a
+      # number) is the typed answer; otherwise ask for it.
+      if value == FREE_TEXT
+        if rest && !rest.match?(/\A\d/)
+          return [FREE_TEXT, rest.strip]
+        end
+        return prompt_free_text(ui)
+      end
+
+      # The rest of the line is either more selections ("2 3"), a note on
+      # the cancel choice ("4 no, because X"), or stray text (re-prompt -
+      # never a cancel).
+      if value == CANCEL_VALUE
+        return [value, rest.strip] unless rest.nil? || rest.strip.empty?
+        return value
+      end
+
+      # Anything beyond the first number that is not (more) numbers is
+      # stray text: a note only on the cancel choice, a free-text answer
+      # only after "Other". Re-prompt in every other case - never treat
+      # it as a selection or a cancel (issue #155).
+      unless rest.nil? || rest.match?(/\A\d+(?:[,\s]+\d+)*\z/)
+        return reprompt_invalid(answer, ui)
+      end
+
+      numbers = "#{first} #{rest}".to_s.split(/\s*,\s*|\s+/).compact.map(&:to_i)
       if numbers.any? { |n| n < 1 || n > @options.size }
         bad = numbers.reject { |n| (1..@options.size).cover?(n) }
         reprompt_invalid(bad.join(', '), ui)
@@ -292,15 +322,11 @@ module UI
       end
 
       values = numbers.map { |n| @options[n - 1].value }
-      # "Other" in the selection leads to the free-text prompt; so does a
-      # bare pick of it (single selection below).
+      # Picking "Other" mixed in makes the typed answer THE answer; an
+      # explicit cancel anywhere in the selection cancels the dialog.
       return prompt_free_text(ui) if values.include?(FREE_TEXT)
-
-      if values.include?(CANCEL_VALUE)
-        CANCEL_VALUE
-      else
-        values.size == 1 ? values.first : values
-      end
+      return CANCEL_VALUE if values.include?(CANCEL_VALUE)
+      values.size == 1 ? values.first : values
     end
 
     private
