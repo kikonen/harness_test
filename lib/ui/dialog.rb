@@ -358,14 +358,25 @@ module UI
       nil
     end
 
-    # Print the "Choice (...)" prompt line (shared by the first ask and
-    # re-prompts after an invalid choice). ui is passed explicitly -
-    # there is deliberately no console default.
+    # Print the "Choice:" prompt with the allowed input forms as a short
+    # list under it (one line each, only what THIS dialog allows) instead
+    # of one long run-on sentence. Shared by the first ask and the
+    # re-prompts after an invalid choice. ui is passed explicitly - there
+    # is deliberately no console default.
     def print_choice_prompt(ui)
-      multi_hint   = @multi_select ? ', or several numbers like "1 3" to select many' : ''
-      details_hint = @free_text ? ', or pick the "Additional details" option for a typed answer' : ''
-      ui.print "             Choice (1..#{@options.size}#{multi_hint}#{details_hint}, " \
-               "<cancel> + reason): "
+      forms = []
+      if @multi_select
+        forms.push('"1 3"           several numbers in one line (space or comma)')
+      end
+      details_no = @options.index { |o| o.value == FREE_TEXT }
+      if @free_text && details_no
+        form = "#{details_no + 1}                + typed details (multi-line)"
+        forms << form
+      end
+      forms << "#{@options.size} <one line>    cancel + reason"
+      ui.puts "             Choice (1..#{@options.size}):"
+      forms.each { |f| ui.puts "               - #{f}" }
+      ui.print '             > '
       ui.flush
     end
 

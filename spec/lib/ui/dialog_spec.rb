@@ -347,7 +347,7 @@ RSpec.describe UI::Dialog do
       it 'shows a multi-select hint in the choice prompt' do
         stub_stdin(nil)
         show(dialog)
-        expect(capture).to include('several numbers like "1 3"')
+        expect(capture).to include('several numbers in one line (space or comma)')
       end
     end
 
