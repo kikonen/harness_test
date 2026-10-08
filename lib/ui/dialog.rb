@@ -12,9 +12,14 @@
 # standard cancel option (or dismissing with EOF) returns
 # CANCEL_VALUE.
 #
-# A dialog can also allow FREE TEXT: when free_text is enabled the user
-# may type their own short answer instead of picking a number, and that
-# text is returned to the caller verbatim.
+# A dialog can also allow FREE TEXT: when free_text is enabled the dialog
+# gets an EXPLICIT numbered "Other" option (FREE_TEXT_OPTION), and picking
+# it prompts for the typed answer, which is returned as [FREE_TEXT, text].
+# In single-select mode typing "<Other number> <text>" on one line gives
+# the answer directly.
+# Bare typed text without selecting that option is NEVER treated as an
+# answer - like any other stray input it re-prompts, so a pasted line can
+# never be mistaken for a free-text answer.
 #
 # The user may attach a short NOTE to a choice by typing its option
 # number, whitespace, then the note (e.g. "1 seems fine"). By default
@@ -32,17 +37,21 @@
 # "1 3" or "1,3"). One selection returns the bare value; two or more
 # return an ARRAY of the selected values in the order typed. In
 # multi-select mode a note is only kept on the cancel choice; any other
-# "<number> <text>" line cancels. EOF still cancels the whole dialog.
+# "<number> <text>" line cancels. A multi-select dialog can combine with
+# free_text (issue #72): selecting the "Other" option - alone or mixed in
+# the selection - then prompts for the typed answer, which is returned as
+# [FREE_TEXT, text]. EOF still cancels the whole dialog.
 #
 # An out-of-range option number (e.g. "5" when only 1..4 exist) is
 # rejected with an explanatory line and the dialog re-prompts, so a
-# mistyped choice is never silently reinterpreted as free text
+# mistyped choice is never silently reinterpreted as something else
 # (issue #73). Dismissing with EOF still cancels.
 #
-# In a dialog without free text, ANY other non-numeric input is also
-# rejected and the dialog re-prompts - it is never silently reinterpreted
-# as a cancel, so stray keystrokes cannot cause accidental denials
-# (issue #155). Only a valid option number or EOF decides the dialog.
+# CANCEL IS ALWAYS EXPLICIT (issue #155): only picking the cancel option,
+# an attached "<cancel number> <note>" line, or EOF decides a dialog by
+# cancelling it. ANY other non-numeric input - including pasted text - is
+# rejected with an explanatory line and the dialog re-prompts, so stray
+# keystrokes can never cause an accidental denial.
 #
 # Single-thread I/O rule (issue #40): when called from within a Task
 # thread, `show` routes the entire dialog interaction through the task's
@@ -76,6 +85,10 @@ module UI
     # apart from a plain option value (which is returned as-is).
     FREE_TEXT = :free_text
 
+    # Default title of the explicit free-text ("Other") option appended
+    # to free_text dialogs.
+    FREE_TEXT_OPTION = 'Other (type your own answer)'
+
     # A single selectable item in a dialog.
     class Option
       attr_reader :title, :description, :value
@@ -95,11 +108,12 @@ module UI
 
     # title:   what the dialog is about (required, non-empty).
     # options: non-empty array of Option; the standard cancel option is
-    #          appended automatically.
+    #          appended automatically (and before it, when free_text is
+    #          enabled, the explicit "Other" free-text option).
     # note:    optional context line(s) shown under the title (e.g. a
     #          warning, or an explanation of why the dialog was asked).
-    # free_text: allow the user to type their own short answer instead of
-    #            picking an option (returned as [FREE_TEXT, text]).
+    # free_text: let the user type their own short answer by picking the
+    #            explicit "Other" option (returned as [FREE_TEXT, text]).
     # free_text_prompt: optional hint shown to the user about what kind of
     #            free-text answer is expected.
     # note_on_cancel_only: restrict notes to the cancel choice only (grant
@@ -122,14 +136,22 @@ module UI
       @note    = note&.to_s
       @free_text = free_text ? true : false
       @free_text_prompt = free_text_prompt.to_s.strip.sub(/\Aor\s+/, '')
-      @options = options + [Option.new(title: 'Cancel', value: CANCEL_VALUE)]
+      options = options.dup
+      if @free_text
+        # The explicit "Other" option: the hint (when given) IS the
+        # option's label, otherwise the generic default.
+        title = @free_text_prompt.empty? ? FREE_TEXT_OPTION : @free_text_prompt
+        options << Option.new(title: title, value: FREE_TEXT)
+      end
+      options << Option.new(title: 'Cancel', value: CANCEL_VALUE)
+      @options = options
       @note_on_cancel_only = note_on_cancel_only ? true : false
       @multi_select = multi_select ? true : false
     end
 
     # Render the dialog and wait for the user's choice on stdin.
     # Returns the VALUE of the selected option, [FREE_TEXT, text] when the
-    # user types their own answer (free_text dialogs only), or CANCEL_VALUE
+    # user picks the "Other" option (free_text dialogs only), or CANCEL_VALUE
     # when the user cancels (or stdin is closed).
     #
     # Single-thread I/O rule (issue #40): when called from within a Task
@@ -211,37 +233,49 @@ module UI
         m = answer.match(/\A(\d+)\s+(.*)\z/m)
         if m
           idx = m[1].to_i - 1
-          if idx >= 0 && idx < @options.size
-            value = @options[idx].value
-            # Multi-select mode: notes are only meaningful on the cancel
-            # choice; any other selection-with-text cancels.
-            return CANCEL_VALUE if @multi_select && value != CANCEL_VALUE
-            keep_note = !@note_on_cancel_only || value == CANCEL_VALUE
-            return keep_note ? [value, m[2].strip] : value
+          if out_of_range?(idx)
+            reprompt_invalid(m[1], ui)
+            next
           end
 
-          # Out-of-range number: it was clearly meant as an option
-          # selection, so reject it and re-prompt instead of silently
-          # treating it as free text (issue #73).
-          reprompt_invalid(m[1], ui)
-          next
+          value = @options[idx].value
+          if value == FREE_TEXT
+            # "Other" with text on the same line ("3 my answer") is taken
+            # as the answer directly in single-select mode; in multi-select
+            # it still leads to the prompt.
+            return [FREE_TEXT, m[2].strip] unless @multi_select
+            return prompt_free_text(ui)
+          end
+          # Multi-select mode: notes are only meaningful on the cancel
+          # choice; any other selection-with-text cancels.
+          return CANCEL_VALUE if @multi_select && value != CANCEL_VALUE
+
+          keep_note = !@note_on_cancel_only || value == CANCEL_VALUE
+          return keep_note ? [value, m[2].strip] : value
         end
 
         # Plain number: the option's value, unchanged.
         if answer.match?(/\A\d+\z/)
           idx = answer.to_i - 1
-          return @options[idx].value if idx >= 0 && idx < @options.size
+          if !out_of_range?(idx) && @options[idx].value != FREE_TEXT
+            return @options[idx].value
+          end
+
+          # Bare pick of the "Other" option: ask for the typed answer.
+          unless out_of_range?(idx)
+            return prompt_free_text(ui) if @options[idx].value == FREE_TEXT
+          end
 
           reprompt_invalid(answer, ui)
           next
         end
 
-        # Not a valid option number: free text when allowed, otherwise it
-        # was clearly meant as a choice - reject and re-prompt instead of
-        # silently cancelling (issue #155). EOF still cancels.
-        return [FREE_TEXT, answer] if @free_text
-
+        # Not a valid option number: never an answer and never a cancel -
+        # stray input (including pasted text) re-prompts so a mistake can
+        # not be mistaken for a choice (issue #155). Only the explicit
+        # "Other" option leads to free-text input. EOF still cancels.
         reprompt_invalid(answer, ui)
+        next
       end
       CANCEL_VALUE
     end
@@ -258,6 +292,10 @@ module UI
       end
 
       values = numbers.map { |n| @options[n - 1].value }
+      # "Other" in the selection leads to the free-text prompt; so does a
+      # bare pick of it (single selection below).
+      return prompt_free_text(ui) if values.include?(FREE_TEXT)
+
       if values.include?(CANCEL_VALUE)
         CANCEL_VALUE
       else
@@ -267,19 +305,37 @@ module UI
 
     private
 
+    def out_of_range?(idx)
+      idx < 0 || idx >= @options.size
+    end
+
+    # Ask for the typed free-text answer after the user picked the
+    # explicit "Other" option. Returns [FREE_TEXT, text]; EOF cancels.
+    def prompt_free_text(ui)
+      ui.puts
+      hint = @free_text_prompt.empty? ? 'type your short answer' : @free_text_prompt
+      ui.print "             #{hint}: "
+      ui.flush
+
+      loop do
+        line = ui.gets
+        return CANCEL_VALUE if line.nil?
+
+        text = line.chomp.strip
+        next if text.empty?
+
+        return [FREE_TEXT, text]
+      end
+    end
+
     # Print the "Choice (...)" prompt line (shared by the first ask and
     # re-prompts after an invalid choice). ui is passed explicitly -
     # there is deliberately no console default.
     def print_choice_prompt(ui)
       note_hint = @note_on_cancel_only ? 'cancel + short note' : '<number> + short note'
       multi_hint = @multi_select ? 'or several numbers like "1 3" to select many' : ''
-      if @free_text
-        hint = @free_text_prompt.to_s.strip
-        hint = 'type a short free-text answer' if hint.empty?
-        ui.print "             Choice (1..#{@options.size},#{multi_hint} #{note_hint}, or #{hint}): "
-      else
-        ui.print "             Choice (1..#{@options.size},#{multi_hint} or #{note_hint}): "
-      end
+      free_hint = @free_text ? ', or pick the "Other" option to type your own answer' : ''
+      ui.print "             Choice (1..#{@options.size}#{multi_hint}#{free_hint}, #{note_hint}): "
       ui.flush
     end
 
@@ -290,6 +346,7 @@ module UI
       ui.puts
       ui.puts "             invalid choice #{number} (valid: 1..#{@options.size})"
       print_choice_prompt(ui)
+      nil
     end
   end
 end
