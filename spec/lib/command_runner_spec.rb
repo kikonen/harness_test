@@ -185,6 +185,79 @@ RSpec.describe CommandRunner do
     end
   end
 
+  context 'failure tracing (issue #185)' do
+    # A harness stand-in whose logger records everything it is told.
+    def fake_logger
+      messages = []
+      logger = double('logger')
+      allow(logger).to receive(:warn) { |m| messages << m }
+      [messages, logger]
+    end
+
+    def harness_with(logger)
+      double('harness', logger: logger)
+    end
+
+    it 'names the failure when a command exits non-zero without output' do
+      Dir.mktmpdir do |dir|
+        seed_allowlist(dir, 'false')
+        _, logger = fake_logger
+        runner = described_class.new(FileList.new([], workdir: dir), {},
+                                     harness: harness_with(logger))
+
+        out = runner.run('false')
+        expect(out).to start_with('exit code: 1')
+        expect(out)
+          .to include('(the command produced no output - nothing to inspect)')
+      end
+    end
+
+    it 'logs failed commands (with "(none)" streams) to the session log' do
+      Dir.mktmpdir do |dir|
+        seed_allowlist(dir, 'false')
+        messages, logger = fake_logger
+        runner = described_class.new(FileList.new([], workdir: dir), {},
+                                     harness: harness_with(logger))
+
+        runner.run('false')
+        expect(messages.size).to eq(1)
+        expect(messages[0]).to start_with('shell command failed:')
+        expect(messages[0]).to include('command: false')
+        expect(messages[0]).to include('status: exit 1')
+        expect(messages[0]).to include("--- stdout ---\n(none)")
+        expect(messages[0]).to include("--- stderr ---\n(none)")
+      end
+    end
+
+    it 'logs the timed-out command to the session log' do
+      Dir.mktmpdir do |dir|
+        seed_allowlist(dir, 'sleep 120')
+        messages, logger = fake_logger
+        runner = described_class.new(FileList.new([], workdir: dir), {},
+                                     harness: harness_with(logger))
+        allow_any_instance_of(described_class).to receive(:run_in_shell)
+                  .and_raise(Timeout::Error, 'timeout')
+
+        runner.run('sleep 120', timeout: 60)
+        expect(messages.size).to eq(1)
+        expect(messages[0]).to start_with('shell command failed:')
+        expect(messages[0]).to include('status: TIMED OUT after 60s')
+      end
+    end
+
+    it 'does not log successful commands' do
+      Dir.mktmpdir do |dir|
+        seed_allowlist(dir, 'echo')
+        messages, logger = fake_logger
+        runner = described_class.new(FileList.new([], workdir: dir), {},
+                                     harness: harness_with(logger))
+
+        runner.run('echo hi')
+        expect(messages).to be_empty
+      end
+    end
+  end
+
   it 'returns a timeout error when the command exceeds its limit' do
     Dir.mktmpdir do |dir|
       seed_allowlist(dir, 'sleep 120')

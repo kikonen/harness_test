@@ -132,6 +132,7 @@ class CommandHandler
       @file_list,
       @options,
       label: 'shell',
+      harness: @harness, # failed commands traced in harness.log (issue #185)
       title_fmt: CommandRunner::BANG_TITLE,
       ui: @ui,
       list: :shell)
