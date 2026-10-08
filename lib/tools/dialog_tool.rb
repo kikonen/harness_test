@@ -18,6 +18,10 @@ require_relative '../ui/dialog'
 # fine"): the chosen option's value is still returned, with the note as
 # extra context on top of the selection.
 #
+# Optionally the dialog is a MULTI-SELECT (issue #72): the user types
+# several option numbers in one line (e.g. "1 3") to pick several
+# options at once; all selected values are returned to the model.
+
 # The VALUE of the selected option (or the typed free-text answer) is
 # returned to the model as the tool result; a cancelled dialog returns
 # the standard value ":cancelled".
@@ -30,12 +34,15 @@ module Tools
       super(
         name: 'ui.dialog',
         description: 'Shows a dialog (question / choice) to the user and waits for their answer. ' \
-                     'The dialog has a title (what it is about), an optional note (extra context), ' \
+                     'The dialog has a title (what it is about), an optional note (extra context or warning), ' \
                      'and a list of options; each option has a title, an optional description, and a value. ' \
                      'A standard "Cancel" option is always available to the user. ' \
                      'Optionally enables free text so the user can type their own short answer instead of ' \
                      'picking an option - use this when the question is not black/white but better ' \
                      'expressed as a short note. ' \
+                     'Optionally enables multi-select so the user can pick SEVERAL options at once by ' \
+                     'typing their numbers in one line (e.g. "1 3") - use this for questions where any ' \
+                     'combination of options is valid. ' \
                      'The VALUE of the selected option (or the typed free-text answer) is returned to you; ' \
                      'if the user cancels, you get ":cancelled". Use this to ask the user for a decision, ' \
                      'a preference, or clarification when you cannot decide on your own.',
@@ -75,6 +82,12 @@ module Tools
               type: 'string',
               description: 'Optional hint shown to the user about what kind of free-text answer is expected ' \
                            '(only relevant when free_text is true). Do not start it with "or" - the prompt already includes the conjunction.'
+            },
+            multi_select: {
+              type: 'boolean',
+              description: 'Let the user pick several options at once by typing their numbers in one line ' \
+                           '(e.g. "1 3"). The values of all selected options are returned. Use for ' \
+                           'questions where any combination of options is valid.'
             }
           },
           required: ['title', 'options']
@@ -124,7 +137,8 @@ module Tools
         options: options,
         note: args['note'],
         free_text: args['free_text'] == true,
-        free_text_prompt: args['free_text_prompt']
+        free_text_prompt: args['free_text_prompt'],
+        multi_select: args['multi_select'] == true
         # ui: nil - tools run on the Task thread, so the dialog is routed
         # through the task and the MAIN THREAD services the I/O (issue #40).
       ).show(ui: nil)
@@ -132,9 +146,13 @@ module Tools
       if choice.is_a?(Array) && choice.first == UI::Dialog::FREE_TEXT
         # [FREE_TEXT, text]: the user typed their own answer.
         "free text response from the user: \"#{choice[1]}\""
-      elsif choice.is_a?(Array)
+      elsif choice.is_a?(Array) && choice.size == 2 && choice[1].is_a?(String)
         # [option value, note]: an option was picked with a short note on top.
         "selected: #{choice[0].inspect} (user's note: \"#{choice[1]}\")"
+      elsif choice.is_a?(Array)
+        # Multi-select (issue #72): two or more options were picked; the
+        # dialog returns an array of their values in the order typed.
+        "selected: #{choice.map(&:inspect).join(', ')}"
       elsif choice == UI::Dialog::CANCEL_VALUE
         'cancelled (the user dismissed the dialog without choosing an option)'
       else
