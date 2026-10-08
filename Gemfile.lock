@@ -1,6 +1,7 @@
 GEM
   remote: https://rubygems.org/
   specs:
+    amazing_print (3.0.0)
     debug (1.11.1)
       irb (~> 1.10)
       reline (>= 0.3.8)
@@ -60,6 +61,7 @@ PLATFORMS
   x86_64-linux
 
 DEPENDENCIES
+  amazing_print
   debug
   fiddle
   logger

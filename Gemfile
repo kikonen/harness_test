@@ -12,6 +12,10 @@ gem 'racc'
 
 gem 'debug'
 
+# Nicer object inspection for debugging: `ap` prints with indentation and
+# colors, then returns the value (issue #186).
+gem 'amazing_print'
+
 # Terminal UI (issue #74 / #13): inline TUI primitives for the spinner
 # and, later, the dialogs.
 gem 'ratatui_ruby'
