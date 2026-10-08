@@ -543,7 +543,10 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
 
   describe '#compact_session (end-of-turn)' do
     let(:session) { Session.new('system prompt') }
-    let(:client) { double('client', chat: { choices: [{ message: { content: 'S' } }] }) }
+    # issue #178: summary longer than the old ~80-char preview cut, so a
+    # regression to truncated logging would fail this expectation.
+    let(:long_summary) { 'x' * 120 }
+    let(:client) { double('client', chat: { choices: [{ message: { content: long_summary } }] }) }
     let(:harness) do
       double('harness', session: session, client: client, logger: logger,
              compact_recent_messages: 2, compact_max_size: nil,
@@ -556,9 +559,14 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
 
       manager.compact_session
 
+      # issue #178: each surviving message is logged as "role:\n<full content>".
+      # The full post-compaction chain is dumped (summary first), so the
+      # retained tail comes after the summary + ack messages.
       expect(log_io.string).to include(
-        "retained after compaction:\nuser: msg 3\nassistant: reply 3"
+        "user:\nmsg 3\nassistant:\nreply 3"
       )
+      # issue #178: the summary itself is logged in full, not truncated.
+      expect(log_io.string).to include("This is a summary of our previous conversation:\n\n#{long_summary}")
     end
   end
 
@@ -584,11 +592,15 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
 
       expect(manager.check_inloop_compaction(messages, 1000)).to be(true)
 
-      expect(log_io.string).to include("retained after compaction:\nsystem: system prompt")
+      # issue #178: the system prompt is identical every compaction - it
+      # must NOT be part of the dump.
+      expect(log_io.string).not_to include('system:')
+      # issue #178: content is logged in full (no ~80-char preview cut),
+      # so the summary is actually inspectable from the log.
       # The in-loop chain has no retained tail - the log shows the fresh
-      # [system, summary, ack, continue] chain instead.
+      # [summary, ack, continue] chain instead.
       expect(log_io.string).to include(
-        "user: Continuing the in-progress task from the summary above."
+        "user:\nThis is a summary of our previous conversation:\n\nHANDOFF"
       )
     end
   end
