@@ -11,8 +11,11 @@ require_relative '../ui/dialog'
 # (the user can dismiss the dialog without choosing).
 #
 # Optionally the dialog allows FREE TEXT: the user may type their own
-# short answer instead of picking an option. The typed text is returned
-# to the model as the response - good for questions that are not black/white.
+# short answer instead of picking an option: the dialog then shows an
+# explicit "Other" option, and picking it prompts for the typed answer,
+# which is returned to the model - good for questions that are not
+# black/white. The user must explicitly pick "Other"; stray typed text
+# is never taken as the answer.
 #
 # The user may also attach a short NOTE to any choice (e.g. "1 seems
 # fine"): the chosen option's value is still returned, with the note as
@@ -20,7 +23,8 @@ require_relative '../ui/dialog'
 #
 # Optionally the dialog is a MULTI-SELECT (issue #72): the user types
 # several option numbers in one line (e.g. "1 3") to pick several
-# options at once; all selected values are returned to the model.
+# options at once; all selected values are returned to the model. Can be
+# combined with free_text: picking "Other" then prompts for the answer.
 
 # The VALUE of the selected option (or the typed free-text answer) is
 # returned to the model as the tool result; a cancelled dialog returns
@@ -38,11 +42,12 @@ module Tools
                      'and a list of options; each option has a title, an optional description, and a value. ' \
                      'A standard "Cancel" option is always available to the user. ' \
                      'Optionally enables free text so the user can type their own short answer instead of ' \
-                     'picking an option - use this when the question is not black/white but better ' \
+                     'picking an option: the dialog then shows an explicit "Other" option, and picking it ' \
+                     'prompts for the typed answer. Use this when the question is not black/white but better ' \
                      'expressed as a short note. ' \
                      'Optionally enables multi-select so the user can pick SEVERAL options at once by ' \
-                     'typing their numbers in one line (e.g. "1 3") - use this for questions where any ' \
-                     'combination of options is valid. ' \
+                     'typing their numbers in one line (e.g. "1 3"); it can be combined with free text. ' \
+                     'Use this for questions where any combination of options is valid. ' \
                      'The VALUE of the selected option (or the typed free-text answer) is returned to you; ' \
                      'if the user cancels, you get ":cancelled". Use this to ask the user for a decision, ' \
                      'a preference, or clarification when you cannot decide on your own.',
@@ -75,18 +80,20 @@ module Tools
             },
             free_text: {
               type: 'boolean',
-              description: 'Also let the user type their own short answer instead of picking an option. ' \
+              description: 'Let the user type their own short answer: the dialog shows an explicit "Other" ' \
+                           'option, and picking it prompts for the typed answer. ' \
                            'Use for questions that are not black/white (e.g. "What should the error message say?").'
             },
             free_text_prompt: {
               type: 'string',
-              description: 'Optional hint shown to the user about what kind of free-text answer is expected ' \
-                           '(only relevant when free_text is true). Do not start it with "or" - the prompt already includes the conjunction.'
+              description: 'Optional short hint used as the label of the "Other" option and shown when asking ' \
+                           'for the typed answer (only relevant when free_text is true).'
             },
             multi_select: {
               type: 'boolean',
               description: 'Let the user pick several options at once by typing their numbers in one line ' \
-                           '(e.g. "1 3"). The values of all selected options are returned. Use for ' \
+                           '(e.g. "1 3"). The values of all selected options are returned. Can be combined ' \
+                           'with free_text. Use for ' \
                            'questions where any combination of options is valid.'
             }
           },

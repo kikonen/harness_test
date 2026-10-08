@@ -70,6 +70,12 @@ RSpec.describe Tools::DialogTool do
       expect(kwargs[:multi_select]).to be(true)
     end
 
+    it 'passes multi_select and free_text through when both are requested' do
+      _out, kwargs = run_tool(base_args.merge('multi_select' => true, 'free_text' => true), :a)
+      expect(kwargs[:multi_select]).to be(true)
+      expect(kwargs[:free_text]).to be(true)
+    end
+
     it 'treats a truthy non-boolean multi_select as false' do
       _out, kwargs = run_tool(base_args.merge('multi_select' => 'yes'), :a)
       expect(kwargs[:multi_select]).to be(false)

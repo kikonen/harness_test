@@ -6,8 +6,9 @@ require 'ui/console'
 require 'stringio'
 
 # The Dialog suite (issue #74): the class lives in the `UI` namespace.
-# Behavior is asserted IDENTICALLY to the pre-migration top-level Dialog
-# (option handling, notes, free text, multi-select, out-of-range re-prompt),
+# Behavior is asserted for the current contract (option handling, notes,
+# explicit "Other" free-text option, multi-select incl. with free text,
+# out-of-range re-prompt, cancel-is-always-explicit).
 RSpec.describe UI::Dialog do
   let(:options) do
     [
@@ -70,6 +71,25 @@ RSpec.describe UI::Dialog do
     it 'appends the standard Cancel option automatically' do
       dialog = described_class.new(title: 't', options: options)
       expect(dialog.options.map(&:value)).to eq(%i[allow deny cancelled])
+    end
+
+    it 'inserts the explicit "Other" option before cancel when free_text is on' do
+      dialog = described_class.new(title: 't', options: options, free_text: true)
+      expect(dialog.options.map(&:value))
+        .to eq([:allow, :deny, UI::Dialog::FREE_TEXT, UI::Dialog::CANCEL_VALUE])
+    end
+
+    it 'uses the default label for the "Other" option without a hint' do
+      dialog = described_class.new(title: 't', options: options, free_text: true)
+      expect(dialog.options[2].title).to eq(UI::Dialog::FREE_TEXT_OPTION)
+    end
+
+    it 'uses the free_text_prompt as the label of the "Other" option' do
+      dialog = described_class.new(
+        title: 't', options: options,
+        free_text: true, free_text_prompt: 'or type a short note'
+      )
+      expect(dialog.options[2].title).to eq('type a short note')
     end
 
     it 'rejects an empty title' do
@@ -143,7 +163,8 @@ RSpec.describe UI::Dialog do
       end
     end
 
-    describe 'with free text enabled' do
+    describe 'with free text enabled (explicit "Other" option)' do
+      # Options: Allow(1), Deny(2), Other(3), Cancel(4).
       let(:dialog) do
         described_class.new(
           title: 't', options: options,
@@ -151,20 +172,45 @@ RSpec.describe UI::Dialog do
         )
       end
 
-      it 'renders the choice prompt without a doubled "or"' do
+      it 'renders the "Other" option with the hint as its label' do
         stub_stdin(nil)
         show(dialog)
-        expect(capture).not_to include('or or')
-        expect(capture).to include('or type a short note')
+        expect(capture).to include('3) type a short note')
+        expect(capture).to include('4) Cancel')
       end
 
-      it 'returns [FREE_TEXT, text] for a non-numeric answer' do
-        stub_stdin("looks good to me\n")
-        expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'looks good to me'])
+      it 'shows a generic "Other" label without a hint' do
+        plain = described_class.new(
+          title: 't', options: options, free_text: true
+        )
+        stub_stdin(nil)
+        show(plain)
+        expect(capture).to include("3) #{UI::Dialog::FREE_TEXT_OPTION}")
+      end
+
+      it 'prompts for the typed answer when "Other" is picked' do
+        stub_stdin("3\n", "my own answer\n")
+        expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'my own answer'])
+      end
+
+      it 'takes "<Other number> <text>" as the answer on one line' do
+        stub_stdin("3 my own answer\n")
+        expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'my own answer'])
+      end
+
+      it 'cancels on EOF at the free-text prompt' do
+        stub_stdin("3\n", nil)
+        expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
+      end
+
+      it 're-prompts on stray text instead of taking it as the answer' do
+        stub_stdin("looks good to me\n", "1\n")
+        expect(show(dialog)).to eq(:allow)
+        expect(capture).to include('invalid choice looks good to me (valid: 1..4)')
       end
 
       it 'still returns [value, note] when a number leads' do
-        stub_stdin("3 no, and because X\n")
+        stub_stdin("4 no, and because X\n")
         expect(show(dialog)).to eq([UI::Dialog::CANCEL_VALUE, 'no, and because X'])
       end
 
@@ -200,14 +246,14 @@ RSpec.describe UI::Dialog do
         )
         stub_stdin("9\n", "1\n")
         expect(show(dialog)).to eq(:allow)
-        expect(capture).to include('invalid choice 9 (valid: 1..3)')
+        expect(capture).to include('invalid choice 9 (valid: 1..4)')
       end
 
-      it 'still accepts genuine free text after an invalid number' do
+      it 'still reaches the free-text flow after an invalid number' do
         dialog = described_class.new(
           title: 't', options: options, free_text: true, free_text_prompt: 'or type a short note'
         )
-        stub_stdin("9\n", "something else entirely\n")
+        stub_stdin("9\n", "3 something else entirely\n")
         expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'something else entirely'])
       end
     end
@@ -234,8 +280,8 @@ RSpec.describe UI::Dialog do
     end
 
     describe 'with multi_select' do
-      let(:dialog) { described_class.new(title: 't', options: options, multi_select: true) }
       # Options: Allow(1), Deny(2), Cancel(3).
+      let(:dialog) { described_class.new(title: 't', options: options, multi_select: true) }
 
       it 'returns an array of values in the order typed for "n m"' do
         stub_stdin("1 2\n")
@@ -282,6 +328,42 @@ RSpec.describe UI::Dialog do
         stub_stdin(nil)
         show(dialog)
         expect(capture).to include('several numbers like "1 3"')
+      end
+    end
+
+    describe 'with multi_select AND free_text (issue #72)' do
+      # Options: Allow(1), Deny(2), Other(3), Cancel(4).
+      let(:dialog) do
+        described_class.new(
+          title: 't', options: options,
+          multi_select: true, free_text: true,
+          free_text_prompt: 'or type a short note'
+        )
+      end
+
+      it 'prompts for the answer when "Other" is picked bare' do
+        stub_stdin("3\n", "typed answer\n")
+        expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'typed answer'])
+      end
+
+      it 'prompts for the answer when "Other" is mixed into a selection' do
+        stub_stdin("1 3\n", "typed answer\n")
+        expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'typed answer'])
+      end
+
+      it 'cancels on EOF at the free-text prompt' do
+        stub_stdin("3\n", nil)
+        expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
+      end
+
+      it 'still returns the selected values without "Other"' do
+        stub_stdin("1 2\n")
+        expect(show(dialog)).to eq([:allow, :deny])
+      end
+
+      it 'cancels when cancel is part of the selection' do
+        stub_stdin("1 4\n")
+        expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
       end
     end
   end
