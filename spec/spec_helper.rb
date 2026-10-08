@@ -6,6 +6,7 @@ $LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
 require 'ui/console'
 require 'ui/dialog'
 require 'file_list'
+require 'harness'
 require 'session'
 require 'tools/dialog_tool'
 
