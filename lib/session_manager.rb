@@ -177,7 +177,9 @@ class SessionManager
     # issue #139: dump exactly which messages survived the compaction so the
     # retained window is inspectable from harness.log (message counts alone
     # leave it a guess).
-    log_retained_window(@harness.session.messages.last(retained)) if retained.positive?
+    # issue #178: the full post-compaction chain - with only the tail dumped,
+    # the summary itself (the valuable part) was never in the log at all.
+    log_retained_window(@harness.session.messages)
 
     @harness.logger.info(
       "session compacted: #{before} to #{after} messages " \
@@ -376,13 +378,16 @@ class SessionManager
     s.empty? ? '(none)' : text.to_s
   end
 
-  # issue #139: dump the messages that SURVIVED a compaction (the retained
-  # tail, or the fresh in-loop chain) to harness.log. One line per message:
-  # role + a ~80-char content preview - enough to see exactly what is still
-  # in context without flooding the log with full contents.
+  # issue #139 / #178: dump the messages that SURVIVED a compaction (the
+  # summary + retained tail, or the fresh in-loop chain) to harness.log.
+  # The system
+  # prompt is identical every compaction and would only be noise, so it is
+  # skipped. Content is logged IN FULL, no preview truncation: the summary
+  # is exactly what is being inspected here (issue #178), and these dumps
+  # are rare enough that harness.log size is a non-issue.
   def log_retained_window(messages)
-    lines = messages.map do |m|
-      %(#{m[:role]}: #{m[:content].to_s.strip[0, 80]})
+    lines = messages.reject { |m| m[:role] == 'system' }.map do |m|
+      %(#{m[:role]}:\n#{m[:content].to_s})
     end
     @harness.logger.info("retained after compaction:\n" + lines.join("\n"))
   end
