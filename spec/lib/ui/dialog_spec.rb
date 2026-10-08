@@ -6,9 +6,14 @@ require 'ui/console'
 require 'stringio'
 
 # The Dialog suite (issue #74): the class lives in the `UI` namespace.
-# Behavior is asserted for the current contract (option handling, notes,
-# explicit "Other" free-text option, multi-select incl. with free text,
-# out-of-range re-prompt, cancel-is-always-explicit).
+# Behavior is asserted for the current contract (issue #72 unified design):
+# the choice line is option numbers only - single-select IS multi-select
+# with one number; stray text re-prompts (never selects/notes/cancels,
+# issue #155); cancel keeps a one-line reason ("<cancel> <reason>",
+# issue #79); free text is the explicit "Additional details" option,
+# selectable alongside ANY options and Cancel, entered as a multi-line
+# block (blank line finishes, Ctrl-D cancels), riding along as
+# [FREE_TEXT, text]; out-of-range numbers re-prompt (issue #73).
 RSpec.describe UI::Dialog do
   let(:options) do
     [
@@ -27,7 +32,11 @@ RSpec.describe UI::Dialog do
   def stub_stdin(*lines)
     # Rewrite the stream (not append): an earlier example may leave its
     # position mid-stream, where << would overlap or truncate content.
-    io_in.string = lines.compact.join
+    newlined = lines.map do |l|
+      l.to_s.end_with?("\n") ? l.to_s : "#{l}\n"
+    end
+    # join("\n") would eat the last line's newline (EOF, not an answer).
+    io_in.string = newlined.join
     io_in.rewind # string= leaves the position at EOF; rewind so gets() reads it
   end
 
@@ -75,18 +84,18 @@ RSpec.describe UI::Dialog do
       expect(dialog.options.map(&:value)).to eq(%i[allow deny cancelled])
     end
 
-    it 'inserts the explicit "Other" option before cancel when free_text is on' do
+    it 'inserts the "Additional details" option before cancel when free_text is on' do
       dialog = described_class.new(title: 't', options: options, free_text: true)
       expect(dialog.options.map(&:value))
         .to eq([:allow, :deny, UI::Dialog::FREE_TEXT, UI::Dialog::CANCEL_VALUE])
     end
 
-    it 'uses the default label for the "Other" option without a hint' do
+    it 'uses the default label for the "Additional details" option without a hint' do
       dialog = described_class.new(title: 't', options: options, free_text: true)
       expect(dialog.options[2].title).to eq(UI::Dialog::FREE_TEXT_OPTION)
     end
 
-    it 'uses the free_text_prompt as the label of the "Other" option' do
+    it 'uses the free_text_prompt as the label of the "Additional details" option' do
       dialog = described_class.new(
         title: 't', options: options,
         free_text: true, free_text_prompt: 'or type a short note'
@@ -133,40 +142,24 @@ RSpec.describe UI::Dialog do
         .to eq(UI::Dialog::CANCEL_VALUE)
     end
 
-    describe 'with a note attached to the choice' do
-      it 'returns [value, note] for "<number> <note>"' do
-        stub_stdin("1 seems fine\n")
-        expect(show(described_class.new(title: 't', options: options)))
-          .to eq([:allow, 'seems fine'])
+    describe 'choice line is option numbers only (issue #72)' do
+      let(:dialog) { described_class.new(title: 't', options: options) }
+
+      it 're-prompts on "<number> <text>" for a non-cancel choice (no inline notes)' do
+        stub_stdin("1 seems fine\n", "1\n")
+        expect(show(dialog)).to eq(:allow)
+        expect(capture).to include('invalid choice 1 seems fine (valid: 1..3)')
       end
 
-      it 'allows a note on the cancel option too' do
+      it 'keeps the one-line reason on the cancel choice' do
         stub_stdin("3 no, and because X\n")
-        expect(show(described_class.new(title: 't', options: options)))
+        expect(show(dialog))
           .to eq([UI::Dialog::CANCEL_VALUE, 'no, and because X'])
       end
     end
 
-    describe 'with note_on_cancel_only (grant dialogs, issue #79)' do
-      let(:dialog) do
-        described_class.new(
-          title: 't', options: options, note_on_cancel_only: true
-        )
-      end
-
-      it 'ignores a note on a non-cancel choice' do
-        stub_stdin("1 seems fine\n")
-        expect(show(dialog)).to eq(:allow)
-      end
-
-      it 'keeps the note on the cancel choice' do
-        stub_stdin("3 no, and because X\n")
-        expect(show(dialog)).to eq([UI::Dialog::CANCEL_VALUE, 'no, and because X'])
-      end
-    end
-
-    describe 'with free text enabled (explicit "Other" option)' do
-      # Options: Allow(1), Deny(2), Other(3), Cancel(4).
+    describe 'with free text enabled (the "Additional details" option)' do
+      # Options: Allow(1), Deny(2), Additional details(3), Cancel(4).
       let(:dialog) do
         described_class.new(
           title: 't', options: options,
@@ -174,14 +167,14 @@ RSpec.describe UI::Dialog do
         )
       end
 
-      it 'renders the "Other" option with the hint as its label' do
+      it 'renders the "Additional details" option with the hint as its label' do
         stub_stdin(nil)
         show(dialog)
         expect(capture).to include('3) type a short note')
         expect(capture).to include('4) Cancel')
       end
 
-      it 'shows a generic "Other" label without a hint' do
+      it 'shows the generic label without a hint' do
         plain = described_class.new(
           title: 't', options: options, free_text: true
         )
@@ -190,17 +183,41 @@ RSpec.describe UI::Dialog do
         expect(capture).to include("3) #{UI::Dialog::FREE_TEXT_OPTION}")
       end
 
-      it 'prompts for the typed answer when "Other" is picked' do
-        stub_stdin("3\n", "my own answer\n")
+      it 'enters the text block when "Additional details" is picked bare' do
+        stub_stdin("3\n", "my own answer\n", "")
         expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'my own answer'])
       end
 
-      it 'takes "<Other number> <text>" as the answer on one line' do
-        stub_stdin("3 my own answer\n")
-        expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'my own answer'])
+      it 'takes a multi-line (pasted) block: lines until the blank one' do
+        stub_stdin("3\n", "line one", "line two with spaces  ", "line three", "")
+        expect(show(dialog))
+          .to eq([UI::Dialog::FREE_TEXT, "line one\nline two with spaces\nline three"])
       end
 
-      it 'cancels on EOF at the free-text prompt' do
+      it 'keeps the selection when "Additional details" is mixed in (issue #72)' do
+        stub_stdin("2 3\n", "second and a note\n", "")
+        expect(show(dialog)).to eq([:deny, [UI::Dialog::FREE_TEXT, 'second and a note']])
+      end
+
+      it 'option + details works even without multi_select ("option X but blaa blaa")' do
+        stub_stdin("1 3\n", "but please also do Y\n", "")
+        expect(show(dialog))
+          .to eq([:allow, [UI::Dialog::FREE_TEXT, 'but please also do Y']])
+      end
+
+      it 'cancel + details returns cancelled with the reason block (issue #72)' do
+        stub_stdin("4 3\n", "because the options miss Z\n", "")
+        expect(show(dialog))
+          .to eq([UI::Dialog::CANCEL_VALUE, [UI::Dialog::FREE_TEXT, 'because the options miss Z']])
+      end
+
+      it 're-prompts the choice on an empty text block' do
+        stub_stdin("3\n", "", "1\n")
+        expect(show(dialog)).to eq(:allow)
+        expect(capture).to include('no text entered')
+      end
+
+      it 'cancels the whole dialog on EOF inside the text block' do
         stub_stdin("3\n", nil)
         expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
       end
@@ -211,7 +228,7 @@ RSpec.describe UI::Dialog do
         expect(capture).to include('invalid choice looks good to me (valid: 1..4)')
       end
 
-      it 'still returns [value, note] when a number leads' do
+      it 'keeps the one-line reason form on cancel' do
         stub_stdin("4 no, and because X\n")
         expect(show(dialog)).to eq([UI::Dialog::CANCEL_VALUE, 'no, and because X'])
       end
@@ -231,8 +248,8 @@ RSpec.describe UI::Dialog do
         expect(capture).to include('invalid choice 9 (valid: 1..3)')
       end
 
-      it 're-prompts on "<number> <note>" with an out-of-range number' do
-        stub_stdin("9 nope\n", "2\n")
+      it 're-prompts when the line mixes a valid and an out-of-range number' do
+        stub_stdin("1 9\n", "2\n")
         expect(show(dialog)).to eq(:deny)
         expect(capture).to include('invalid choice 9 (valid: 1..3)')
       end
@@ -251,16 +268,16 @@ RSpec.describe UI::Dialog do
         expect(capture).to include('invalid choice 9 (valid: 1..4)')
       end
 
-      it 'still reaches the free-text flow after an invalid number' do
+      it 'still reaches the details flow after an invalid number' do
         dialog = described_class.new(
           title: 't', options: options, free_text: true, free_text_prompt: 'or type a short note'
         )
-        stub_stdin("9\n", "3 something else entirely\n")
+        stub_stdin("9\n", "3\n", "something else entirely\n", "")
         expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'something else entirely'])
       end
     end
 
-    describe 'stray non-numeric input in a plain dialog (issue #155)' do
+    describe 'stray non-numeric input (issue #155)' do
       let(:dialog) { described_class.new(title: 't', options: options) }
 
       it 're-prompts on random text instead of cancelling' do
@@ -305,18 +322,13 @@ RSpec.describe UI::Dialog do
         expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
       end
 
-      it 're-prompts on "<number> <text>" for a non-cancel choice (never cancels)' do
-        stub_stdin("1 seems fine\n", "1\n")
-        expect(show(dialog)).to eq(:allow)
-        expect(capture).to include('invalid choice 1 seems fine (valid: 1..3)')
-      end
-
-      it 're-prompts on stray text mixed into a multi selection' do
+      it 're-prompts on stray text mixed into a multi selection (never cancels)' do
         stub_stdin("2 3 4 does_this_show\n", "1 2\n")
         expect(show(dialog)).to eq([:allow, :deny])
+        expect(capture).to include('invalid choice')
       end
 
-      it 'keeps the note on the cancel choice' do
+      it 'keeps the one-line reason on cancel' do
         stub_stdin("3 no, and because X\n")
         expect(show(dialog)).to eq([UI::Dialog::CANCEL_VALUE, 'no, and because X'])
       end
@@ -339,8 +351,8 @@ RSpec.describe UI::Dialog do
       end
     end
 
-    describe 'with multi_select AND free_text (issue #72)' do
-      # Options: Allow(1), Deny(2), Other(3), Cancel(4).
+    describe 'multi_select + free text (issue #72)' do
+      # Options: Allow(1), Deny(2), Additional details(3), Cancel(4).
       let(:dialog) do
         described_class.new(
           title: 't', options: options,
@@ -349,22 +361,18 @@ RSpec.describe UI::Dialog do
         )
       end
 
-      it 'prompts for the answer when "Other" is picked bare' do
-        stub_stdin("3\n", "typed answer\n")
-        expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'typed answer'])
+      it 'keeps ALL selections plus the typed details (no mutual exclusion)' do
+        stub_stdin("2 3 4\n", "you see second and third selected\n", "")
+        expect(show(dialog))
+          .to eq([:deny, [UI::Dialog::FREE_TEXT, 'you see second and third selected']])
       end
 
-      it 'prompts for the answer when "Other" is mixed into a selection' do
-        stub_stdin("1 3\n", "typed answer\n")
-        expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'typed answer'])
-      end
-
-      it 'cancels on EOF at the free-text prompt' do
+      it 'cancels on EOF inside the text block' do
         stub_stdin("3\n", nil)
         expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
       end
 
-      it 'still returns the selected values without "Other"' do
+      it 'still returns the selected values without "Additional details"' do
         stub_stdin("1 2\n")
         expect(show(dialog)).to eq([:allow, :deny])
       end
@@ -374,21 +382,35 @@ RSpec.describe UI::Dialog do
         expect(show(dialog)).to eq(UI::Dialog::CANCEL_VALUE)
       end
 
-      it 'takes "<Other number> <text>" as the answer on one line' do
-        stub_stdin("3 my own answer\n")
-        expect(show(dialog)).to eq([UI::Dialog::FREE_TEXT, 'my own answer'])
-      end
-
-      it 're-prompts when the line does not start with a number' do
+      it 're-prompts on stray text before accepting a valid line' do
         stub_stdin("does_this_show 2\n", "1\n")
         expect(show(dialog)).to eq(:allow)
         expect(capture).to include('invalid choice does_this_show 2 (valid: 1..4)')
       end
 
-      it 're-prompts when trailing text is not the "Other" answer (issue #72 regression)' do
+      it 're-prompts when the line mixes numbers and stray text (regression)' do
         stub_stdin("2 3 4 does_this_show\n", "1 2\n")
         expect(show(dialog)).to eq([:allow, :deny])
         expect(capture).to include('invalid choice 2 3 4 does_this_show (valid: 1..4)')
+      end
+    end
+
+    describe 'non-multi_select single-pick limit' do
+      let(:dialog) { described_class.new(title: 't', options: options) }
+
+      it 're-prompts when two regular options are picked at once' do
+        stub_stdin("1 2\n", "1\n")
+        expect(show(dialog)).to eq(:allow)
+        expect(capture).to include('pick one option only')
+      end
+
+      it 're-prompts when cancel is picked alongside an option too' do
+        # Cancel counts against the single-pick limit in a non-multi-select
+        # dialog (only "Additional details" is reserved): "1 3" re-prompts
+        # and must not silently cancel.
+        stub_stdin("1 3\n", "1\n")
+        expect(show(dialog)).to eq(:allow)
+        expect(capture).to include('pick one option only')
       end
     end
   end

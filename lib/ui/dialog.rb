@@ -12,47 +12,35 @@
 # standard cancel option (or dismissing with EOF) returns
 # CANCEL_VALUE.
 #
-# A dialog can also allow FREE TEXT: when free_text is enabled the dialog
-# gets an EXPLICIT numbered "Other" option (FREE_TEXT_OPTION), and picking
-# it prompts for the typed answer, which is returned as [FREE_TEXT, text].
-# In single-select mode typing "<Other number> <text>" on one line gives
-# the answer directly.
-# Bare typed text without selecting that option is NEVER treated as an
-# answer - like any other stray input it re-prompts, so a pasted line can
-# never be mistaken for a free-text answer.
+# CHOICE INPUT (issue #72): the choice line is OPTION NUMBERS ONLY -
+# bare "1", several numbers in one line ("1 3" or "1,3") when the dialog
+# allows it, or the cancel number plus a one-line reason
+# ("5 no, and because X"). Single-select IS multi-select with one number:
+# any text on the choice line that is NOT "<cancel> <reason>" is stray
+# input (a paste accident) and re-prompts - it is NEVER a selection, a
+# note, or a cancel (issue #155). There are no per-option inline notes.
 #
-# The user may attach a short NOTE to a choice by typing its option
-# number, whitespace, then the note (e.g. "1 seems fine"). By default
-# the dialog accepts notes on ANY choice and returns
-# [option value, 'seems fine'] so the context is not lost. Grant-style
-# dialogs (access confirmation) pass note_on_cancel_only: true, since a
-# granted choice is final and only a denial carries meaningful feedback
-# (issue #79): there, notes are kept only on the cancel choice (e.g.
-# "3 no, and because X" -> [CANCEL_VALUE, 'no, and because X']) and
-# ignored on other choices (bare value returned). A plain number (no
-# note) always returns the bare value.
+# A dialog can allow ADDITIONAL DETAILS: when free_text is enabled the
+# dialog gets an explicit numbered "Additional details" option (the
+# FREE_TEXT option), selectable ALONE, alongside other options, or
+# alongside Cancel ("2 3 4" = options 2+3 with a note; "5 4" = cancel
+# with a reason). Picking it enters a MULTI-LINE text block: type or
+# paste as many lines as you want, finish with a BLANK line; Ctrl-D (EOF)
+# cancels the whole dialog. An empty block re-prompts the choice. The
+# typed details ride along with the selection as [FREE_TEXT, text]
+# appended to the result, so possible return values are: the bare value,
+# an array of values (multi picks), [FREE_TEXT, text],
+# [value, [FREE_TEXT, text]], [:cancelled, 'reason'], or
+# [:cancelled, [FREE_TEXT, 'reason']].
 #
-# Multi-select dialogs (multi_select: true) accept several
-# option numbers in one line, separated by spaces and/or commas (e.g.
-# "1 3" or "1,3"). One selection returns the bare value; two or more
-# return an ARRAY of the selected values in the order typed. In
-# multi-select mode a note is only kept on the cancel choice; any other
-# "<number> <text>" line re-prompts (it is never taken as a selection or
-# a cancel). A multi-select dialog can combine with
-# free_text (issue #72): selecting the "Other" option - alone or mixed in
-# the selection - then prompts for the typed answer, which is returned as
-# [FREE_TEXT, text]. EOF still cancels the whole dialog.
+# CANCEL IS ALWAYS EXPLICIT (issue #155): only picking the cancel option
+# (alone or in a selection), an attached "<cancel number> <note>" line, or
+# EOF decides a dialog by cancelling it.
 #
 # An out-of-range option number (e.g. "5" when only 1..4 exist) is
 # rejected with an explanatory line and the dialog re-prompts, so a
 # mistyped choice is never silently reinterpreted as something else
 # (issue #73). Dismissing with EOF still cancels.
-#
-# CANCEL IS ALWAYS EXPLICIT (issue #155): only picking the cancel option,
-# an attached "<cancel number> <note>" line, or EOF decides a dialog by
-# cancelling it. ANY other non-numeric input - including pasted text - is
-# rejected with an explanatory line and the dialog re-prompts, so stray
-# keystrokes can never cause an accidental denial.
 #
 # Single-thread I/O rule (issue #40): when called from within a Task
 # thread, `show` routes the entire dialog interaction through the task's
@@ -74,21 +62,23 @@
 #   )
 #   choice = dialog.show                     # inside a Task thread: routed
 #   choice = dialog.show(ui: console)        # no task: direct I/O on it
-#     # => :file_only, [:file_only, 'note'], or :cancelled
+#     # => :file_only, or CANCEL_VALUE (or with details, e.g.
+#     #    [:cancelled, [UI::Dialog::FREE_TEXT, 'why not']])
 module UI
   class Dialog
     # Standard value returned when the user picks the cancel option (or
     # dismisses the dialog with EOF).
     CANCEL_VALUE = :cancelled
 
-    # Sentinel marker for free-text answers. A free-text response is
-    # returned as [FREE_TEXT, 'the typed text'], so callers can tell it
-    # apart from a plain option value (which is returned as-is).
+    # Sentinel marker for the free-text "additional details" answer. The
+    # typed details are returned as [FREE_TEXT, 'the typed text'], so
+    # callers can tell them apart from plain option values (which are
+    # returned as-is) and from a cancel one-line reason (a plain String).
     FREE_TEXT = :free_text
 
-    # Default title of the explicit free-text ("Other") option appended
+    # Default title of the explicit "Additional details" option appended
     # to free_text dialogs.
-    FREE_TEXT_OPTION = 'Other (type your own answer)'
+    FREE_TEXT_OPTION = 'Additional details'
 
     # A single selectable item in a dialog.
     class Option
@@ -110,21 +100,25 @@ module UI
     # title:   what the dialog is about (required, non-empty).
     # options: non-empty array of Option; the standard cancel option is
     #          appended automatically (and before it, when free_text is
-    #          enabled, the explicit "Other" free-text option).
+    #          enabled, the explicit "Additional details" option).
     # note:    optional context line(s) shown under the title (e.g. a
     #          warning, or an explanation of why the dialog was asked).
-    # free_text: let the user type their own short answer by picking the
-    #            explicit "Other" option (returned as [FREE_TEXT, text]).
-    # free_text_prompt: optional hint shown to the user about what kind of
-    #            free-text answer is expected.
-    # note_on_cancel_only: restrict notes to the cancel choice only (grant
-    #            dialogs, issue #79). Default false: notes on any choice.
-    # multi_select: allow selecting several options in one line by typing
-    #            their numbers separated by spaces and/or commas (e.g.
-    #            "1 3" or "1,3"). One selection returns the bare value;
+    # free_text: let the user type their own answer by selecting the
+    #            explicit "Additional details" option; the typed text is
+    #            returned as [FREE_TEXT, text], alone or appended to the
+    #            selected values - including with Cancel.
+    # free_text_prompt: optional hint used as the label of the "Additional
+    #            details" option and shown when asking for the typed
+    #            answer.
+    # multi_select: allow picking several options at once (their numbers
+    #            in one line, e.g. "1 3"). Without it, a selection line
+    #            may name at most ONE regular option: "Additional details"
+    #            still counts alongside it ("option X but blaa blaa"),
+    #            but Cancel does not (Cancel + anything else re-prompts;
+    #            cancel is explicit). One pick returns the bare value;
     #            two or more return an array of values.
     def initialize(title:, options:, note: nil, free_text: false, free_text_prompt: nil,
-                   note_on_cancel_only: false, multi_select: false)
+                   multi_select: false)
       raise ArgumentError, 'dialog title must be a non-empty string' if title.to_s.strip.empty?
       unless options.is_a?(Array) && !options.empty?
         raise ArgumentError, 'dialog requires a non-empty array of Dialog::Option'
@@ -139,32 +133,34 @@ module UI
       @free_text_prompt = free_text_prompt.to_s.strip.sub(/\Aor\s+/, '')
       options = options.dup
       if @free_text
-        # The explicit "Other" option: the hint (when given) IS the
-        # option's label, otherwise the generic default.
+        # The explicit "Additional details" option: the hint (when given)
+        # IS the option's label, otherwise the generic default.
         title = @free_text_prompt.empty? ? FREE_TEXT_OPTION : @free_text_prompt
         options << Option.new(title: title, value: FREE_TEXT)
       end
       options << Option.new(title: 'Cancel', value: CANCEL_VALUE)
       @options = options
-      @note_on_cancel_only = note_on_cancel_only ? true : false
       @multi_select = multi_select ? true : false
     end
 
     # Render the dialog and wait for the user's choice on stdin.
-    # Returns the VALUE of the selected option, [FREE_TEXT, text] when the
-    # user picks the "Other" option (free_text dialogs only), or CANCEL_VALUE
-    # when the user cancels (or stdin is closed).
+    # Returns the VALUE of the selected option (bare for a single pick,
+    # an ARRAY for two or more picks), the typed details as
+    # [FREE_TEXT, text] when only "Additional details" was selected, or
+    # CANCEL_VALUE / [:cancelled, reason] when the user cancels. The
+    # details pair rides along with any selection - see the class docs
+    # for all possible shapes.
     #
     # Single-thread I/O rule (issue #40): when called from within a Task
     # thread (Thread.current[:harness_task] is set), this routes through
-    # the task's request/response protocol and the MAIN THREAD services the
-    # I/O with the task's injected console (Task.run owns it). In that case
-    # pass nil - a caller on a task thread must NOT name $stdout/$stdin at
-    # all, since that would be direct global stream access from the wrong
-    # thread. When no Task is active (CLI main thread, tests), the ui
-    # object is used DIRECTLY and must be exactly the console the caller
-    # wants to use - deliberately no defaults and no global lookup: a
-    # dialog never silently talks to some stream nobody passed in.
+    # the task's request/response protocol and the MAIN THREAD services
+    # the I/O with the task's injected console (Task.run owns it). In that
+    # case pass nil - a caller on a task thread must NOT name $stdout/
+    # $stdin at all, since that would be direct global stream access from
+    # the wrong thread. When no Task is active (CLI main thread, tests),
+    # the ui object is used DIRECTLY and must be exactly the console the
+    # caller wants to use - deliberately no defaults and no global lookup:
+    # a dialog never silently talks to some stream nobody passed in.
     def show(ui: nil)
       # Guard keeps the load order independent: dialog can be loaded before
       # task (they only meet at runtime on the main thread).
@@ -208,10 +204,10 @@ module UI
 
       print_choice_prompt(ui)
 
-      # Skip blank lines: they are usually stale input (e.g. the user
-      # pressed Enter an extra time while sending the prompt, and that
-      # newline is still sitting in stdin). Only a real EOF dismisses the
-      # dialog without an answer.
+      # The choice is ONE line of option numbers (or a cancel number plus
+      # a one-line reason). Skip blank lines: they are usually stale input
+      # (an extra Enter while the prompt was sent), and only a real EOF
+      # dismisses the dialog without an answer.
       loop do
         line = ui.gets
         break if line.nil?
@@ -219,149 +215,157 @@ module UI
         answer = line.chomp.strip
         next if answer.empty?
 
-        # Multi-select: the whole line is selection input ("1 3", "1,2",
-        # "3 my answer", "4 no, because X"). Anything invalid - including
-        # stray text - re-prompts; only the cancel number cancels.
-        if @multi_select
-          chosen = handle_multi_line(answer, ui)
-          next if chosen.nil?
-          return chosen
-        end
-
-        # "<number> <note>": an option selected PLUS a free note on top.
-        # Grant dialogs (note_on_cancel_only, issue #79) keep the note only
-        # for a denial - a grant/selection is final there.
-        m = answer.match(/\A(\d+)\s+(.*)\z/m)
-        if m
-          idx = m[1].to_i - 1
-          if out_of_range?(idx)
-            reprompt_invalid(m[1], ui)
-            next
-          end
-
-          value = @options[idx].value
-          if value == FREE_TEXT
-            # "Other" with text on the same line ("3 my answer") is taken
-            # as the answer directly.
-            return [FREE_TEXT, m[2].strip]
-          end
-          keep_note = !@note_on_cancel_only || value == CANCEL_VALUE
-          return keep_note ? [value, m[2].strip] : value
-        end
-
-        # Plain number: the option's value, unchanged.
-        if answer.match?(/\A\d+\z/)
-          idx = answer.to_i - 1
-          if !out_of_range?(idx) && @options[idx].value != FREE_TEXT
-            return @options[idx].value
-          end
-
-          # Bare pick of the "Other" option: ask for the typed answer.
-          unless out_of_range?(idx)
-            return prompt_free_text(ui) if @options[idx].value == FREE_TEXT
-          end
-
-          reprompt_invalid(answer, ui)
-          next
-        end
-
-        # Not a valid option number: never an answer and never a cancel -
-        # stray input (including pasted text) re-prompts so a mistake can
-        # not be mistaken for a choice (issue #155). Only the explicit
-        # "Other" option leads to free-text input. EOF still cancels.
-        reprompt_invalid(answer, ui)
-        next
+        chosen = parse_choice_line(answer, ui)
+        next if chosen.nil?               # invalid line: re-prompted
+        result = finalize(chosen, ui)
+        next if result.nil?               # empty details block: re-prompt
+        return result
       end
       CANCEL_VALUE
     end
 
-    # Resolve a multi-select line to its result, or nil when the line was
-    # invalid (the dialog re-prompted). The whole line is selection input
-    # so "1 2", "3 my answer" and "4 no, because X" all work in one line;
-    # a line that does not START with a number is stray input (issue #155).
-    def handle_multi_line(answer, ui)
-      return reprompt_invalid(answer, ui) unless answer.match?(/\A\d/)
+    private
 
-      first, rest = answer.split(/\s+/, 2)
-      idx = first.to_i - 1
-      if out_of_range?(idx)
-        return reprompt_invalid(first, ui)
+    # Resolve one choice line to its selection or a noted cancel, or nil
+    # when the line was invalid (already re-prompted). Forms accepted:
+    #   * "<n>" / "<n> <n> ..." (spaces or commas) - option numbers; all
+    #     must be in range, and at most one regular option may be picked
+    #     in a non-multi-select dialog (option + "Additional details"
+    #     still works there).
+    #   * "<cancel n> <reason>" - cancel plus a one-line reason; the ONE
+    #     text-on-a-choice-line form (issue #79 denial feedback).
+    # Anything else is stray input (paste accident) - re-prompt, never
+    # select / note / cancel (issues #155 / #72).
+    def parse_choice_line(answer, ui)
+      tokens = answer.split(/[,\s]+/).reject(&:empty?)
+      if tokens.any? { |t| !t.match?(/\A\d+\z/) }
+        noted = cancel_with_reason?(answer)
+        return reprompt_invalid(answer, ui) if noted.nil?
+
+        return noted                       # "<cancel n> <reason>"
       end
 
-      value = @options[idx].value
-      # Picking "Other": the rest of the line (when present and not a
-      # number) is the typed answer; otherwise ask for it.
-      if value == FREE_TEXT
-        if rest && !rest.match?(/\A\d/)
-          return [FREE_TEXT, rest.strip]
+      numbers, bad = tokens.map(&:to_i).partition { |n| n >= 1 && n <= @options.size }
+      unless bad.empty?
+        return reprompt_invalid(bad.join(', '), ui)
+      end
+
+      if !@multi_select
+        regular = numbers.reject { |n| @options[n - 1].value == FREE_TEXT }
+        if regular.uniq.size > 1
+          reprompt("pick one option only (this dialog is not multi-select)", ui)
+          return nil
         end
-        return prompt_free_text(ui)
       end
 
-      # The rest of the line is either more selections ("2 3"), a note on
-      # the cancel choice ("4 no, because X"), or stray text (re-prompt -
-      # never a cancel).
-      if value == CANCEL_VALUE
-        return [value, rest.strip] unless rest.nil? || rest.strip.empty?
-        return value
+      seen = {}
+      numbers.each_with_object({ values: [] }) do |n, acc|
+        next if seen[n]
+
+        seen[n] = true
+        acc[:values] << @options[n - 1].value
+      end
+    end
+
+    # The ONE text-on-a-choice-line form (issue #79 denial feedback): a
+    # cancel number followed by a one-line reason. Returns the noted
+    # cancel, or nil when the line is not in that shape (stray input).
+    def cancel_with_reason?(answer)
+      m = answer.match(/\A(\d+)\s+(\D.*)\z/)
+      return nil unless m
+
+      n = m[1].to_i
+      return nil unless n >= 1 && n <= @options.size
+      return nil unless @options[n - 1].value == CANCEL_VALUE
+
+      [CANCEL_VALUE, m[2]]
+    end
+
+    # Assemble the dialog result from a parsed selection:
+    #   * a noted cancel -> [:cancelled, 'reason'] (from parse) or
+    #     [:cancelled, [FREE_TEXT, 'reason']] (cancel + details below).
+    #   * plain cancel -> :cancelled.
+    #   * "Additional details" among the picks -> enter the multi-line
+    #     text block, then append [FREE_TEXT, text] to the other values
+    #     (the selections keep working - issue #72). An empty block
+    #     re-prompts; an EOF inside it cancels the whole dialog.
+    #   * one number -> the bare value; more -> array of values.
+    def finalize(chosen, ui)
+      if chosen.is_a?(Array) && chosen.size == 2 &&
+         chosen[0] == CANCEL_VALUE && chosen[1].is_a?(String)
+        return chosen                     # "<cancel> <one-line reason>"
       end
 
-      # Anything beyond the first number that is not (more) numbers is
-      # stray text: a note only on the cancel choice, a free-text answer
-      # only after "Other". Re-prompt in every other case - never treat
-      # it as a selection or a cancel (issue #155).
-      unless rest.nil? || rest.match?(/\A\d+(?:[,\s]+\d+)*\z/)
-        return reprompt_invalid(answer, ui)
+      values = chosen[:values]
+      # Cancel anywhere in the selection cancels the dialog (issue #155):
+      # a mixed "1 4" or a bare cancel both return plain :cancelled.
+      # Exception: details picked in the SAME line (e.g. "3 4") - the
+      # typed reason block replaces the bare cancel (issue #72).
+      if values.include?(CANCEL_VALUE) && !values.include?(FREE_TEXT)
+        return CANCEL_VALUE
       end
 
-      numbers = "#{first} #{rest}".to_s.split(/\s*,\s*|\s+/).compact.map(&:to_i)
-      if numbers.any? { |n| n < 1 || n > @options.size }
-        bad = numbers.reject { |n| (1..@options.size).cover?(n) }
-        reprompt_invalid(bad.join(', '), ui)
-        return nil
+      if values.include?(FREE_TEXT)
+        detail = collect_details(ui)
+        return nil_reprompt(ui) if detail.nil?
+        # EOF mid-block (Ctrl-D inside the text block) cancels the whole
+        # dialog - bare :cancelled, no details pair.
+        return CANCEL_VALUE if detail == CANCEL_VALUE
+
+        others = values.reject { |v| v == FREE_TEXT || v == CANCEL_VALUE }
+        # Cancel with nothing but details is the reason form:
+        # "4 3" -> [:cancelled, [FREE_TEXT, 'why']].
+        return [CANCEL_VALUE, detail] \
+          if others.empty? && values.include?(CANCEL_VALUE)
+
+        values = others + [detail]
       end
 
-      values = numbers.map { |n| @options[n - 1].value }
-      # Picking "Other" mixed in makes the typed answer THE answer; an
-      # explicit cancel anywhere in the selection cancels the dialog.
-      return prompt_free_text(ui) if values.include?(FREE_TEXT)
-      return CANCEL_VALUE if values.include?(CANCEL_VALUE)
       values.size == 1 ? values.first : values
     end
 
-    private
-
-    def out_of_range?(idx)
-      idx < 0 || idx >= @options.size
-    end
-
-    # Ask for the typed free-text answer after the user picked the
-    # explicit "Other" option. Returns [FREE_TEXT, text]; EOF cancels.
-    def prompt_free_text(ui)
+    # Ask for the typed additional details after the user selected the
+    # "Additional details" option. Multi-line text block: type or paste
+    # as many lines as you want, finish with a BLANK line; Ctrl-D (EOF)
+    # cancels the whole dialog. Returns [FREE_TEXT, text], nil when the
+    # block was empty (the dialog re-prompts), or CANCEL_VALUE on EOF.
+    def collect_details(ui)
       ui.puts
-      hint = @free_text_prompt.empty? ? 'type your short answer' : @free_text_prompt
-      ui.print "             #{hint}: "
-      ui.flush
-
+      hint = @free_text_prompt.empty? ? 'type your answer' : @free_text_prompt
+      ui.puts "             #{hint} (blank line to finish, Ctrl-D cancels):"
+      lines = []
       loop do
         line = ui.gets
         return CANCEL_VALUE if line.nil?
 
-        text = line.chomp.strip
-        next if text.empty?
+        text = line.chomp
+        break if text.strip.empty?
 
-        return [FREE_TEXT, text]
+        lines << text.rstrip
       end
+
+      detail = lines.join("\n").strip
+      return nil if detail.empty?
+
+      [FREE_TEXT, detail]
+    end
+
+    # Re-prompt after an empty details block (selection discarded).
+    def nil_reprompt(ui)
+      ui.puts
+      ui.puts '             (no text entered - picking the option again)'
+      print_choice_prompt(ui)
+      nil
     end
 
     # Print the "Choice (...)" prompt line (shared by the first ask and
     # re-prompts after an invalid choice). ui is passed explicitly -
     # there is deliberately no console default.
     def print_choice_prompt(ui)
-      note_hint = @note_on_cancel_only ? 'cancel + short note' : '<number> + short note'
-      multi_hint = @multi_select ? 'or several numbers like "1 3" to select many' : ''
-      free_hint = @free_text ? ', or pick the "Other" option to type your own answer' : ''
-      ui.print "             Choice (1..#{@options.size}#{multi_hint}#{free_hint}, #{note_hint}): "
+      multi_hint   = @multi_select ? ', or several numbers like "1 3" to select many' : ''
+      details_hint = @free_text ? ', or pick the "Additional details" option for a typed answer' : ''
+      ui.print "             Choice (1..#{@options.size}#{multi_hint}#{details_hint}, " \
+               "<cancel> + reason): "
       ui.flush
     end
 
@@ -369,8 +373,13 @@ module UI
     # and ask again (issues #73 / #155). The user can still dismiss the
     # dialog with EOF.
     def reprompt_invalid(number, ui)
+      reprompt("invalid choice #{number} (valid: 1..#{@options.size})", ui)
+      nil
+    end
+
+    def reprompt(message, ui)
       ui.puts
-      ui.puts "             invalid choice #{number} (valid: 1..#{@options.size})"
+      ui.puts "             #{message}"
       print_choice_prompt(ui)
       nil
     end
