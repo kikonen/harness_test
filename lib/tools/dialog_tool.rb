@@ -10,21 +10,14 @@ require_relative '../ui/dialog'
 # description, and a value. The standard "Cancel" option is always present
 # (the user can dismiss the dialog without choosing).
 #
-# Optionally the dialog allows FREE TEXT: the user may type their own
-# short answer instead of picking an option: the dialog then shows an
-# explicit "Other" option, and picking it prompts for the typed answer,
-# which is returned to the model - good for questions that are not
-# black/white. The user must explicitly pick "Other"; stray typed text
-# is never taken as the answer.
-#
-# The user may also attach a short NOTE to any choice (e.g. "1 seems
-# fine"): the chosen option's value is still returned, with the note as
-# extra context on top of the selection.
+# EVERY model-asked dialog gets the "Additional details" option (issue #72):
+# picking it (alone or alongside other options) enters a multi-line text
+# block; the typed text rides along with the selection. The user may also
+# pick Cancel plus one line of reason ("4 no, and because X").
 #
 # Optionally the dialog is a MULTI-SELECT (issue #72): the user types
 # several option numbers in one line (e.g. "1 3") to pick several
-# options at once; all selected values are returned to the model. Can be
-# combined with free_text: picking "Other" then prompts for the answer.
+# options at once; all selected values are returned to the model.
 
 # The VALUE of the selected option (or the typed free-text answer) is
 # returned to the model as the tool result; a cancelled dialog returns
@@ -41,12 +34,10 @@ module Tools
                      'The dialog has a title (what it is about), an optional note (extra context or warning), ' \
                      'and a list of options; each option has a title, an optional description, and a value. ' \
                      'A standard "Cancel" option is always available to the user. ' \
-                     'Optionally enables free text so the user can type their own short answer instead of ' \
-                     'picking an option: the dialog then shows an explicit "Other" option, and picking it ' \
-                     'prompts for the typed answer. Use this when the question is not black/white but better ' \
-                     'expressed as a short note. ' \
+                     'The dialog always includes an "Additional details" option so the user can type ' \
+                     'their own answer alongside or instead of picking options. ' \
                      'Optionally enables multi-select so the user can pick SEVERAL options at once by ' \
-                     'typing their numbers in one line (e.g. "1 3"); it can be combined with free text. ' \
+                     'typing their numbers in one line (e.g. "1 3"). ' \
                      'Use this for questions where any combination of options is valid. ' \
                      'The VALUE of the selected option (or the typed free-text answer) is returned to you; ' \
                      'if the user cancels, you get ":cancelled". Use this to ask the user for a decision, ' \
@@ -78,23 +69,16 @@ module Tools
                 required: ['title', 'value']
               }
             },
-            free_text: {
-              type: 'boolean',
-              description: 'Let the user type their own short answer: the dialog shows an explicit "Other" ' \
-                           'option, and picking it prompts for the typed answer. ' \
-                           'Use for questions that are not black/white (e.g. "What should the error message say?").'
-            },
             free_text_prompt: {
               type: 'string',
-              description: 'Optional short hint used as the label of the "Other" option and shown when asking ' \
-                           'for the typed answer (only relevant when free_text is true).'
+              description: 'Optional short hint used as the label of the "Additional details" option. ' \
+                           'The dialog always allows typed details; this just customises the label.'
             },
             multi_select: {
               type: 'boolean',
               description: 'Let the user pick several options at once by typing their numbers in one line ' \
-                           '(e.g. "1 3"). The values of all selected options are returned. Can be combined ' \
-                           'with free_text. Use for ' \
-                           'questions where any combination of options is valid.'
+                           '(e.g. "1 3"). The values of all selected options are returned. ' \
+                           'Use for questions where any combination of options is valid.'
             }
           },
           required: ['title', 'options']
@@ -143,25 +127,43 @@ module Tools
         title: title,
         options: options,
         note: args['note'],
-        free_text: args['free_text'] == true,
+        free_text: true,
         free_text_prompt: args['free_text_prompt'],
         multi_select: args['multi_select'] == true
         # ui: nil - tools run on the Task thread, so the dialog is routed
         # through the task and the MAIN THREAD services the I/O (issue #40).
       ).show(ui: nil)
 
-      if choice.is_a?(Array) && choice.first == UI::Dialog::FREE_TEXT
-        # [FREE_TEXT, text]: the user typed their own answer.
-        "free text response from the user: \"#{choice[1]}\""
-      elsif choice.is_a?(Array) && choice.size == 2 && choice[1].is_a?(String)
-        # [option value, note]: an option was picked with a short note on top.
-        "selected: #{choice[0].inspect} (user's note: \"#{choice[1]}\")"
-      elsif choice.is_a?(Array)
-        # Multi-select (issue #72): two or more options were picked; the
-        # dialog returns an array of their values in the order typed.
-        "selected: #{choice.map(&:inspect).join(', ')}"
-      elsif choice == UI::Dialog::CANCEL_VALUE
+      format_choice(choice)
+    end
+
+    private
+
+    def format_choice(choice)
+      ft = UI::Dialog::FREE_TEXT
+      cv = UI::Dialog::CANCEL_VALUE
+
+      if choice == cv
         'cancelled (the user dismissed the dialog without choosing an option)'
+      elsif choice.is_a?(Array) && choice.size == 2 &&
+            choice[0] == cv && choice[1].is_a?(String)
+        # [:cancelled, 'one-line reason']
+        "cancelled (user's note: \"#{choice[1]}\")"
+      elsif choice.is_a?(Array) && choice.size == 2 &&
+            choice[0] == cv && choice[1].is_a?(Array) && choice[1][0] == ft
+        # [:cancelled, [FREE_TEXT, text]] - cancel + details block
+        "cancelled (user's details: \"#{choice[1][1]}\")"
+      elsif choice.is_a?(Array) && choice.size == 2 && choice[0] == ft
+        # [FREE_TEXT, text]: only "Additional details" was picked.
+        "free text response from the user: \"#{choice[1]}\""
+      elsif choice.is_a?(Array) && choice.last.is_a?(Array) &&
+            choice.last.size == 2 && choice.last[0] == ft
+        # [v1, v2, ..., [FREE_TEXT, text]]: selections + details.
+        vals = choice[0..-2].map(&:inspect).join(', ')
+        "selected: #{vals} (user's details: \"#{choice.last[1]}\")"
+      elsif choice.is_a?(Array)
+        # Multi-select without details: array of values.
+        "selected: #{choice.map(&:inspect).join(', ')}"
       else
         "selected: #{choice.inspect}"
       end

@@ -60,6 +60,11 @@ RSpec.describe Tools::DialogTool do
       expect(kwargs[:options][0].value).to eq(:a)
     end
 
+    it 'always enables free text (issue #72: every model dialog gets "Additional details")' do
+      _out, kwargs = run_tool(base_args, :a)
+      expect(kwargs[:free_text]).to be(true)
+    end
+
     it 'defaults multi_select to false' do
       _out, kwargs = run_tool(base_args, :a)
       expect(kwargs[:multi_select]).to be(false)
@@ -70,10 +75,9 @@ RSpec.describe Tools::DialogTool do
       expect(kwargs[:multi_select]).to be(true)
     end
 
-    it 'passes multi_select and free_text through when both are requested' do
-      _out, kwargs = run_tool(base_args.merge('multi_select' => true, 'free_text' => true), :a)
-      expect(kwargs[:multi_select]).to be(true)
-      expect(kwargs[:free_text]).to be(true)
+    it 'passes free_text_prompt through as the "Additional details" label hint' do
+      _out, kwargs = run_tool(base_args.merge('free_text_prompt' => 'or type a short note'), :a)
+      expect(kwargs[:free_text_prompt]).to eq('or type a short note')
     end
 
     it 'treats a truthy non-boolean multi_select as false' do
@@ -93,19 +97,33 @@ RSpec.describe Tools::DialogTool do
       expect(out).to eq("selected: :a, :c")
     end
 
-    it 'formats free text' do
+    it 'formats bare free text (only "Additional details" picked)' do
       out, = run_tool(base_args, [UI::Dialog::FREE_TEXT, 'my own answer'])
-      expect(out).to include('my own answer')
+      expect(out).to eq('free text response from the user: "my own answer"')
     end
 
-    it 'formats a choice with a note' do
-      out, = run_tool(base_args, [:b, 'prefer this one'])
-      expect(out).to eq("selected: :b (user's note: \"prefer this one\")")
+    it 'formats a selection with details riding along (issue #72)' do
+      out, = run_tool(base_args, [:b, [UI::Dialog::FREE_TEXT, 'prefer this one, because Z']])
+      expect(out)
+        .to eq("selected: :b (user's details: \"prefer this one, because Z\")")
     end
 
     it 'formats cancel' do
       out, = run_tool(base_args, UI::Dialog::CANCEL_VALUE)
       expect(out).to include('cancelled')
+    end
+
+    it 'formats cancel with a one-line reason' do
+      out, = run_tool(base_args, [UI::Dialog::CANCEL_VALUE, 'no, and because X'])
+      expect(out).to eq("cancelled (user's note: \"no, and because X\")")
+    end
+
+    it 'formats cancel with a details block (issue #72)' do
+      out, = run_tool(
+        base_args,
+        [UI::Dialog::CANCEL_VALUE, [UI::Dialog::FREE_TEXT, 'the options miss Z']]
+      )
+      expect(out).to eq("cancelled (user's details: \"the options miss Z\")")
     end
   end
 end

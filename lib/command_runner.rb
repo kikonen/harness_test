@@ -123,7 +123,6 @@ class CommandRunner
       title: format(@title_fmt, command, shown, timeout),
       options: options,
       note: note,
-      note_on_cancel_only: true,
       # Multi-select lets the user save several prefixes in one line
       # (e.g. "2 4") - issue #102. Only meaningful when there is at
       # least one grantable prefix.
@@ -165,8 +164,7 @@ class CommandRunner
   # into a multi-select line, which is contradictory - runs the command
   # without saving anything.
   def handle_choice(choice)
-    # A [value, note] pair (note is a String) means the user attached
-    # a note; with note_on_cancel_only it only survives on cancel.
+    # A [:cancelled, 'reason'] pair means the user cancelled with a one-line reason.
     if choice.is_a?(Array) && choice.size == 2 && choice[1].is_a?(String)
       return denial('user denied executing the command', note: choice[1]) \
              if choice[0] == UI::Dialog::CANCEL_VALUE
