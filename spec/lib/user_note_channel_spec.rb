@@ -12,7 +12,10 @@ RSpec.describe UserNoteChannel do
   # StringIO (its immediate nil is exactly the EOF we want).
 
   def wait_for(_target, message: 'timed out waiting for channel state')
-    deadline = Time.now + 2
+    # Generous deadline: the reader runs on a real thread reading through a
+    # pipe, and CI runners can be far slower than a local dev box (a tight
+    # 2s deadline flaked there once - seed 60967, pause/resume example).
+    deadline = Time.now + 10
     until yield
       raise message if Time.now > deadline
 
