@@ -368,6 +368,9 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
       def context_indicator_live(_messages = nil)
         "🧠 ctx ~1/1000 (0%)"
       end
+
+      # issue #36: the harness accumulates mid-turn steering notes here.
+      attr_accessor :user_notes
     end.new(session, client)
   end
   let(:manager) { described_class.new(harness, file_list) }
@@ -451,6 +454,29 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
     # Stale pre-compaction stats must be cleared, otherwise auto_compact_due?
     # would immediately trip again on the very tokens that caused compaction.
     expect(session.instance_variable_get(:@last_stats)).to be_nil
+  end
+
+  # issue #36: steering notes the user typed mid-turn already sit in the
+  # local working chain (Harness#call_llm appended them). An in-loop
+  # compaction REPLACES that chain, so the notes must be re-appended onto
+  # the fresh chain or they would silently vanish from the conversation.
+  it 're-appends user_notes onto the fresh post-compaction chain (issue #36)' do
+    allow_summary_response('HANDOFF TEXT')
+    messages = inloop_messages
+
+    expect(manager.check_inloop_compaction(messages, 1000,
+                                           user_notes: ['stop and fix the naming first']))
+      .to be(true)
+
+    # The note lands AFTER the continue prompt as its own user message, so
+    # the steering survives the replace exactly like a fresh turn.
+    expect(messages.map { |m| m[:role] }).to eq(%w[system user assistant user user])
+    expect(messages.last).to eq(
+      role: 'user', content: 'User note (mid-turn): stop and fix the naming first'
+    )
+    # The session must hold the exact same compacted chain (in place),
+    # notes included.
+    expect(session.messages).to eq(messages)
   end
   # issue #116: in-loop compaction runs from INSIDE Harness#call_llm, so the
   # send_session wait is still animating. The runner owns the spinner and
@@ -603,5 +629,66 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
         "user:\nThis is a summary of our previous conversation:\n\nHANDOFF"
       )
     end
+  end
+end
+
+# issue #36: steering notes typed mid-turn (collected by the harness, see
+# Harness#user_notes) are committed into the session as plain user messages
+# at every commit point (turn end, context-exceeded re-send) so they persist
+# across turns / auto-save / resume. commit_user_notes is idempotent within
+# a turn: the harness list is cleared after each commit.
+RSpec.describe SessionManager, 'commit_user_notes (issue #36)' do
+  let(:session) { Session.new('system prompt') }
+  let(:file_list) { FileList.new([], workdir: Dir.pwd) }
+  let(:harness) do
+    Class.new do
+      attr_reader :session, :user_notes
+
+      def initialize(session)
+        @session    = session
+        @user_notes = []
+      end
+    end.new(session)
+  end
+  let(:manager) { described_class.new(harness, file_list) }
+
+  it 'appends each note as a user message (in order) and clears the list' do
+    harness.instance_variable_set(:@user_notes, ['use ruby', 'skip the tests'])
+
+    manager.commit_user_notes
+
+    notes = session.messages.select { |m| m[:content].to_s.include?('User note (mid-turn)') }
+    expect(notes.map { |m| m[:content] }).to eq(
+      ['User note (mid-turn): use ruby', 'User note (mid-turn): skip the tests']
+    )
+    # All committed notes are plain user messages.
+    expect(session.messages.map { |m| m[:role] }.uniq).to eq(%w[system user])
+    expect(harness.user_notes).to be_empty
+  end
+
+  it 'is a no-op when there are no notes' do
+    session.add_user('hello')
+    before = session.messages.dup
+
+    manager.commit_user_notes
+
+    expect(session.messages).to eq(before)
+  end
+
+  it 'is idempotent: a second commit in the same turn appends nothing' do
+    harness.instance_variable_set(:@user_notes, ['once'])
+    manager.commit_user_notes
+    count_after_first = session.messages.count
+
+    manager.commit_user_notes
+
+    expect(session.messages.count).to eq(count_after_first)
+  end
+
+  it 'does nothing when the harness lacks the note API (older stubs)' do
+    old_harness = double('harness') # no user_notes method
+    old_manager = described_class.new(old_harness, file_list)
+
+    expect { old_manager.commit_user_notes }.not_to raise_error
   end
 end

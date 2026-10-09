@@ -372,4 +372,64 @@ RSpec.describe Harness do
       expect(harness.session.instance_variable_get(:@notes)).to be_nil
     end
   end
+
+  describe '#user_note / call_llm mid-turn note injection (issue #36)' do
+    # Fake LLM client: records every message chain it is called with and
+    # answers each call with a final (no tool calls) response.
+    class FakeLLMClient
+      attr_reader :calls
+
+      def initialize
+        @calls = []
+      end
+
+      def chat(messages, tools: nil)
+        @calls << messages.map { |m| m.dup }
+        { choices: [{ message: { content: 'done', reasoning: nil } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }
+      end
+    end
+
+    let(:harness) do
+      h = build_harness
+      h.instance_variable_set(:@client, FakeLLMClient.new)
+      h
+    end
+
+    it 'injects a pending note into the chain before the next LLM call' do
+      harness.session.add_user('original prompt')
+      harness.user_note_text = 'steer left'
+
+      harness.call_llm
+
+      sent = harness.client.calls.first
+      expect(sent.last).to eq({ role: 'user', content: 'User note (mid-turn): steer left' })
+    end
+
+    it 'tracks injected notes on #user_notes and clears the pending slot' do
+      harness.session.add_user('original prompt')
+      harness.user_note_text = 'steer left'
+
+      harness.call_llm
+
+      expect(harness.user_notes).to eq(['steer left'])
+      # The slot is consumed: a second turn injects nothing new.
+      harness.session.add_user('next prompt')
+      harness.call_llm
+
+      second = harness.client.calls.last
+      expect(second.map { |m| m[:content].to_s }).not_to include('User note (mid-turn): steer left')
+    end
+
+    it 'ignores blank notes (the setter clears the slot)' do
+      harness.user_note_text = '   '
+
+      harness.session.add_user('original prompt')
+      harness.call_llm
+
+      sent = harness.client.calls.first
+      expect(sent.map { |m| m[:content].to_s }).not_to include('User note (mid-turn):')
+      expect(harness.user_notes).to be_empty
+    end
+  end
 end

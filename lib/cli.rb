@@ -191,6 +191,10 @@ class CLI
     ui.puts "Tip: a line starting with ! runs a shell command locally (not sent " \
          "to the model)."
     ui.puts "Tip: a line starting with / is a command (executed immediately)."
+    # issue #36: steer a running turn instead of Ctrl+C - any line typed while
+    # the model works becomes a mid-turn note (see UserNoteChannel).
+    ui.puts "Tip: type a note while the model is working to steer it mid-turn " \
+         "(no Ctrl+C; see /help)."
     ui.puts
 
     begin

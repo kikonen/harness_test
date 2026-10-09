@@ -53,8 +53,18 @@
 #   (no background work survives the turn) and the Interrupt is re-raised
 #   for the CLI's cleanup path.
 
+# Mid-turn user notes (issue #36): when stdin is available (a TTY in
+# production, any stream in tests), Task.run starts a UserNoteChannel that
+# reads typed lines in the background while the task runs. The drain loop
+# flushes the buffer on every tick: the note is rendered as an ack line and
+# stored on the harness (Harness#user_note_text=), where Harness#call_llm
+# injects it into the chain before the next LLM call. A dialog PAUSES the
+# channel for its duration (the dialog owns stdin on the main thread, so a
+# second reader would race it); EOF ends the task (like :done).
+
 require_relative 'output_buffer'
 require_relative 'ui/spinner'
+require_relative 'user_note_channel'
 
 class Task
   # Default spinner message while the runner waits for the task thread.
@@ -70,11 +80,18 @@ class Task
   DEFAULT_POLL_TIMEOUT = 0.1
 
   # Event types handled by the drain loop as control flow (never stored or
-  # rendered): the task finished ([:done]) and a pending user request
+  # rendered): the task finished ([:done]), stdin hit EOF while reading
+  # mid-turn notes ([:note_eof], issue #36), and a pending user request
   # ([:__request__], answered on the main thread).
-  CONTROL_EVENTS = %i[error_ctrl __request__].freeze
+  CONTROL_EVENTS = %i[error_ctrl note_eof __request__].freeze
 
   attr_reader :thread, :buffer, :ui
+
+  # The mid-turn note channel (issue #36) and its owner harness: the channel
+  # is read-only (created by Task.run), the harness is assigned by Task.run
+  # so the drain loop's #flush_user_notes can store notes on it.
+  attr_accessor :note_channel
+  attr_accessor :harness
 
   def initialize(&block)
     @block   = block
@@ -85,6 +102,8 @@ class Task
     @thread  = nil
     @ui      = nil                 # set by Task.run before start
     @dialog_open = false           # true while perform_direct is on stdin
+    @note_channel = nil            # issue #36: mid-turn user notes
+    @harness      = nil
   end
 
   attr_writer :ui
@@ -176,7 +195,6 @@ class Task
   end
 
   # -- Task-thread output helpers --------------------------------------------
-  #
   # These find the current task via Thread.current and push events onto
   # ITS outbox (the single event queue). They NEVER write to a stream and
   # NEVER touch the buffer. Main-thread startup/shutdown output goes through
@@ -265,16 +283,30 @@ class Task
   )
     task = Task.new(&block)
     task.ui = ui
+    # Mid-turn user notes (issue #36): start the stdin reader when a stdin
+    # stream is available; the drain loop flushes its buffer every tick.
+    task.harness = harness
+    # Notes need a harness to land on; Task.run is called with harness: nil
+    # only from unit tests, so gate both the reader and the EOF shortcut.
+    start_note_channel(task) if ui.stdin && harness
     error_msg   = nil
     old_trap    = trap('INT') { raise Interrupt }
 
     begin
       task.start
 
+      # issue #36: a note may have been typed before the first outbox event;
+      # flush once so it is not lost on an immediate :done.
+      flush_user_notes(task)
+
       loop do
         # Spinner visible only while waiting on an EMPTY outbox. No data
         # means the task is silently working => animate.
         show_spinner_if_waiting(task)
+
+        # issue #36: lines typed mid-turn are flushed into the harness here,
+        # where Harness#call_llm injects them before the next LLM call.
+        flush_user_notes(task)
 
         # Wait for the next event on the SINGLE queue (blocks up to timeout).
         msg = task.poll
@@ -291,6 +323,15 @@ class Task
         loop do
           case msg[:type]
           when :done
+            finished = true
+            break
+          when :note_eof
+            # issue #36: stdin reached EOF (Ctrl-D) - abandon the turn.
+            # Flush first: a note typed just before Ctrl-D sits in the channel
+            # buffer and would be dropped by the stop below. The task thread
+            # must NOT keep working in the background (same rule as Ctrl+C).
+            flush_user_notes(task)
+            task.stop
             finished = true
             break
           when :error_ctrl
@@ -327,6 +368,7 @@ class Task
     ensure
       # Clean up the spinner and restore the pre-existing SIGINT handler.
       task.clear_all_spinners
+      task.note_channel&.stop  # issue #36: no reader survives the turn
       trap('INT', old_trap)
     end
   end
@@ -349,16 +391,43 @@ class Task
     task.visible_spinner&.render!
   end
 
-  # Handle a :__request__ control event on the main thread.
+  #
+  # issue #36: start the mid-turn note channel (stdin reader) for this turn
+  # when a stdin stream is available. The reader enqueues lines in the
+  # background; the drain loop flushes them via #flush_user_notes.
+  def self.start_note_channel(task)
+    task.note_channel = UserNoteChannel.new(task.ui.stdin, task).tap(&:start)
+  end
+
+  # issue #36: flush buffered mid-turn notes onto the harness (one per
+  # tick). Harness#call_llm injects the stored note into the chain before
+  # the next LLM call; an ack line confirms receipt to the user. Rendered
+  # here on the main thread - the single-thread I/O rule (issue #40).
+  def self.flush_user_notes(task)
+    channel = task.note_channel
+    return unless channel && !channel.closed?
+    return unless task.harness
+
+    note = channel.pending_notes
+    return if note.nil?
+
+    task.harness.user_note_text = note
+    ui = task.ui
+    ui.puts("  [note] got it - #{note}")
+    task.buffer.put(type: :text, origin: :user_note, content: "note received: #{note}")
+  end
+
   def self.handle_request(task, msg)
     if msg[:kind] == :dialog
       dialog = msg[:dialog]
       task.instance_variable_set(:@dialog_open, true)
       begin
+        task.note_channel&.pause  # issue #36: dialog owns stdin on this thread
         answer = dialog.perform_direct(ui: task.ui)
         task.respond(answer)
       ensure
         task.instance_variable_set(:@dialog_open, false)
+        task.note_channel&.resume unless task.note_channel&.closed?
       end
     else
       task.respond(nil)

@@ -81,9 +81,21 @@ module Commands
           * Paste: paste a multiline block directly at the prompt.
           * Type: end a line with a trailing backslash (\\) to continue.
 
+        Mid-turn steering notes (issue #36):
+          While the model is working, you can type a short note and press
+          Enter WITHOUT interrupting the turn. The note is delivered to the
+          model as a "User note (mid-turn)" message before its next step, so
+          it can course-correct on the fly - no Ctrl+C needed. The harness
+          prints "[note] got it - ..." when it receives one. Note: a line
+          typed mid-turn is ALWAYS a note, not a command or shell input (a
+          "/" or "!" prefix has no special meaning then). A dialog (grant
+          prompt / ui.dialog) pauses the note channel for its duration -
+          answer the dialog normally.
+
         Keys:
           Ctrl+C   Cancel the current input (or interrupt a running request)
-          Ctrl+D   Quit (on an empty prompt)
+          Ctrl+D   Quit (on an empty prompt); ends a RUNNING turn like
+                   Ctrl+C (a note typed just before it is still delivered)
           Up/Down  Browse command history
       HELP
     end
