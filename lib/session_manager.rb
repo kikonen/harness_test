@@ -206,11 +206,15 @@ class SessionManager
   # - The compacted chain is synced back into @harness.session IN PLACE and
   #   immediately persisted, so a crash mid-loop resumes with the complete
   #   (summarized) history, not a partial one.
+  # - user_notes (issue #36): steering notes the user typed mid-turn that
+  #   Harness#call_llm already appended to the WORKING chain - they are
+  #   carried past the replace so they survive exactly like ui.note facts
+  #   do (committed into the session at turn end).
   # Returns true when compaction ran (the caller must drop any
   # loop-specific state such as the 'loop_warning_injected' flag), false
   # otherwise (not due yet, too small to compact, or the summary call
   # failed - the turn then simply continues with the existing chain).
-  def check_inloop_compaction(messages, last_prompt_tokens)
+  def check_inloop_compaction(messages, last_prompt_tokens, user_notes: [])
     window  = @harness.options[:num_ctx] || LLMClient::NUM_CTX
     trigger = compact_trigger_tokens
     # issue #151: the trigger depends on the context size - min of the
@@ -245,6 +249,10 @@ class SessionManager
       { role: 'user', content: 'Continuing the in-progress task from the summary above. ' \
                                'Do not repeat steps that are already completed - pick up where it left off.' }
     ]
+    # issue #36: steering notes typed mid-turn already sit in the working
+    # chain; re-append them so they survive the replace (they are committed
+    # to the session at turn end, like ui.note facts).
+    Array(user_notes).each { |t| new_chain << { role: 'user', content: "User note (mid-turn): #{t}" } }
     before = messages.size # captured BEFORE the replace below
 
     # Sync back into the session (in place) and persist immediately, so a
@@ -291,8 +299,10 @@ class SessionManager
       # The request may have been rejected because the context window was
       # exceeded: compact and re-send once (the pending prompt is still in
       # the session). Anything else is re-raised for the caller to handle.
+      # issue #36: mid-turn steering notes must survive into the (re)try:
+      # commit them before compacting so they are in the chain being sent.
+      commit_user_notes
       raise unless context_exceeded_error?(e.message) && @harness.session.conversation_size >= 4
-
       Task.emit(:compact, origin: :session_manager,
                 content: '  [context window exceeded - compacting and re-sending...]')
       result = compact_session
@@ -304,6 +314,11 @@ class SessionManager
       end
       response = @harness.call_llm
     end
+
+    # issue #36: steering notes typed mid-turn were appended to the WORKING
+    # chain (Harness#call_llm) but never made it into @harness.session -
+    # commit them now so they persist across turns / auto-save / resume.
+    commit_user_notes
 
     # issue #131: the full reasoning and content of every response go to
     # harness.log ALWAYS (not gated on --verbose): the log is the
@@ -392,6 +407,21 @@ class SessionManager
     @harness.logger.info("retained after compaction:\n" + lines.join("\n"))
   end
 
+  # issue #36: move the steering notes collected during this turn (see
+  # Harness#user_notes) from the working chain into the session as plain
+  # user messages, in order. Idempotent within a turn: the harness list is
+  # cleared after each commit (and Harness resets it on every call_llm), so
+  # calling this twice in one turn never double-appends a note.
+  def commit_user_notes
+    # respond_to?: harness doubles in older specs lack the note API (issue #36).
+    return unless @harness.respond_to?(:user_notes)
+
+    notes = @harness.user_notes.dup
+    return if notes.empty?
+
+    notes.each { |note| @harness.session.add_user_note("User note (mid-turn): #{note}") }
+    @harness.instance_variable_set(:@user_notes, [])
+  end
   # -- Rules file (harness.md) ---------------------------------------------
 
   def build_system_prompt

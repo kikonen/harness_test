@@ -190,7 +190,7 @@ RSpec.describe Task do
       expect(events[0][:content]).to eq('[step 1] did a thing')
     end
 
-    it 'is a no-op when no task is active (CLI owns main-thread output)' do
+    it 'is a no-op when no task is active (nothing to drain for)' do
       expect { Task.emit(:stats, origin: :harness, content: '3 iterations') }.not_to raise_error
     end
 
@@ -349,6 +349,91 @@ RSpec.describe Task do
 
       expect(choice).to eq(:yes)
       expect(captured).to include('Test dialog')
+    end
+  end
+
+  describe 'Task.run mid-turn user notes (issue #36)' do
+    # Minimal harness double: stores the notes the drain loop hands over
+    # (blank/nil ignored, like the real setter).
+    let(:fake_harness) do
+      Class.new do
+        attr_reader :notes
+        def initialize
+          @notes = []
+        end
+
+        def user_note_text=(text)
+          return if text.to_s.strip.empty?
+
+          @notes << text
+        end
+      end.new
+    end
+
+    # Real pipe, not StringIO: gets() BLOCKS until data or a closed write
+    # end, so EOF cannot fire before we close the writer (StringIO hits EOF
+    # the moment its content is exhausted, which would end the turn early).
+    def with_stdin_pipe
+      reader, writer = IO.pipe
+      begin
+        yield reader, writer
+      ensure
+        writer.close unless writer.closed?
+        reader.close unless reader.closed?
+      end
+    end
+
+    it 'flushes a note typed before the turn onto the harness with an ack' do
+      io_out  = StringIO.new
+      harness = fake_harness
+
+      with_stdin_pipe do |io_in, writer|
+        writer.puts 'steer left' # "typed" before the task even starts
+        described_class.run(harness: harness,
+                            ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
+          Task.puts 'working'
+          sleep 0.3 # still running when the writer closes (EOF below)
+        end
+      end
+
+      expect(harness.notes).to eq(['steer left'])
+      # Both lines rendered: the ack (main thread) and the task output.
+      expect(io_out.string).to include('[note] got it - steer left')
+      expect(io_out.string).to include('working')
+    end
+
+    it 'ends the turn when stdin reaches EOF (:note_eof) and no work survives' do
+      io_out  = StringIO.new
+      harness = fake_harness
+      task    = nil
+
+      with_stdin_pipe do |io_in, writer|
+        described_class.run(harness: harness,
+                            ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |t|
+          Task.puts 'working'
+          task = t # captured by the block so we can assert it was stopped
+          sleep 5 # would hang forever if :note_eof never ended the turn
+        end
+      ensure
+        writer.close unless writer.closed? # EOF: the channel reader sees nil
+      end
+
+      expect(task).not_to be_nil
+      expect(task.alive?).to be(false) # thread stopped at EOF (no leak)
+      expect(io_out.string).to include('working')
+    end
+
+    it 'does not start a channel when the harness is nil (unit-test mode)' do
+      io_out = StringIO.new
+      task   = nil
+
+      described_class.run(harness: nil,
+                          ui: UI::Console.new(stdout: io_out, stdin: StringIO.new('note\n'))) do |t|
+        task = t
+        sleep 0.1
+      end
+
+      expect(task.note_channel).to be_nil
     end
   end
 end

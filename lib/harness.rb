@@ -66,10 +66,28 @@ class Harness
   attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager, :client
   attr_accessor :history
 
+  # issue #36: store a pending mid-turn steering note (set by the Task
+  # drain loop). Blank/nil clears the slot.
+  def user_note_text=(text)
+    @user_note = text.to_s.strip.empty? ? nil : text.to_s.strip
+  end
+
+  # issue #36: the steering notes injected into THIS turn's working chain,
+  # in order (committed to the session at turn end, see SessionManager).
+  def user_notes
+    @user_notes
+  end
+
   def initialize(options, file_list)
     @options       = options
     @file_list     = file_list
     @session       = Session.new(build_system_prompt)
+    # issue #36: mid-turn steering notes. A pending note (set by the Task
+    # drain loop from the UserNoteChannel buffer while the model works) is
+    # injected into the chain by #call_llm and tracked in @user_notes so
+    # SessionManager#send_session can commit it at turn end.
+    @user_note     = nil
+    @user_notes    = []
     # One-time migration of legacy state (.sessions/, .harness_history) into
     # the .harness directory. Best-effort: failures are reported but never
     # block startup (issue #120).
@@ -215,6 +233,7 @@ class Harness
   def call_llm
     messages = @session.messages.dup
 
+    @user_notes = []  # reset per turn: committed at turn end via #user_notes
     tools = tool_registry.empty? ? nil : tool_registry.to_openai
 
     iteration = 0
@@ -240,11 +259,23 @@ class Harness
       # letting the NEXT request fail server-side mid-turn. Only relevant
       # after at least one tool round (iteration 1 has nothing to summarize).
       if iteration > 1 && last_prompt_tokens > 0 &&
-         @session_manager.check_inloop_compaction(messages, last_prompt_tokens)
+         @session_manager.check_inloop_compaction(messages, last_prompt_tokens, user_notes: @user_notes)
         # Compaction rewrote the chain - any loop-detection state built on
         # the pre-compaction tool calls is stale and must be reset.
         consecutive_tool_calls = 0
         loop_warning_injected = false
+      end
+
+      # issue #36: a steering note the user typed mid-turn is injected into
+      # the working chain BEFORE the next LLM call, so the model can react
+      # to it immediately (course-correct a long tool loop). It is tracked
+      # in @user_notes and committed to the session at turn end.
+      if @user_note
+        note = @user_note
+        @user_note = nil
+        @user_notes << note
+        logger.info("user mid-turn note injected: #{note}")
+        messages << { role: 'user', content: "User note (mid-turn): #{note}" }
       end
 
       data    = @client.chat(messages, tools: tools)

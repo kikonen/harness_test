@@ -85,6 +85,15 @@ class Session
     self
   end
 
+  # issue #36: a steering note the user typed MID-TURN (while the model was
+  # already working) is committed at turn end as a plain user message, so it
+  # persists in the chain (across turns, auto-save, /resume). It does not
+  # count toward @user_prompts - it never arrived at the prompt.
+  def add_user_note(content)
+    @messages << { role: 'user', content: content }
+    self
+  end
+
   # issue #138: notes recorded with ui.note during a tool loop are held here
   # until the turn commits (then appended as system messages, see
   # SessionManager#send_session / #check_inloop_compaction). Tool-call
