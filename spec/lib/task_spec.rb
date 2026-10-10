@@ -352,7 +352,29 @@ RSpec.describe Task do
     end
   end
 
-  describe 'Task.run mid-turn user notes (issue #36)' do
+  # issue #36 / #198 phase 1: stdin fake exposing input_pending? alongside a
+  # normal gets(). The drain loop only PEEKS (input_pending?) and then reads
+  # on the main thread - there is no background reader thread anymore.
+  class FakePendingStdin
+    def initialize(io)
+      @io = io
+      @pending = false
+    end
+
+    attr_writer :pending
+
+    def input_pending?
+      @pending
+    end
+
+    def gets
+      line = @io.gets
+      @pending = false   # a line was consumed (canonical tty semantics)
+      line
+    end
+  end
+
+  describe 'Task.run mid-turn user notes (issue #36 / #198 phase 1)' do
     # Minimal harness double: stores the notes the drain loop hands over
     # (blank/nil ignored, like the real setter).
     let(:fake_harness) do
@@ -371,8 +393,7 @@ RSpec.describe Task do
     end
 
     # Real pipe, not StringIO: gets() BLOCKS until data or a closed write
-    # end, so EOF cannot fire before we close the writer (StringIO hits EOF
-    # the moment its content is exhausted, which would end the turn early).
+    # end (StringIO hits EOF the moment its content is exhausted).
     def with_stdin_pipe
       reader, writer = IO.pipe
       begin
@@ -383,70 +404,102 @@ RSpec.describe Task do
       end
     end
 
-    it 'flushes a note typed before the turn onto the harness with an ack' do
+    it 'commits a note typed before the turn onto the harness with an ack' do
       io_out  = StringIO.new
       harness = fake_harness
 
       with_stdin_pipe do |io_in, writer|
-        writer.puts 'steer left' # "typed" before the task even starts
+        stdin = FakePendingStdin.new(io_in)
+        writer.puts 'steer left' # typed before the turn even starts
+        stdin.pending = true
         described_class.run(harness: harness,
-                            ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
+                            ui: UI::Console.new(stdout: io_out, stdin: stdin)) do |_t|
           Task.puts 'working'
-          sleep 0.3 # still running when the writer closes (EOF below)
+          sleep 0.3
         end
       end
 
       expect(harness.notes).to eq(['steer left'])
-      # Both lines rendered: the ack (main thread) and the task output.
       expect(io_out.string).to include('[note] got it - steer left')
       expect(io_out.string).to include('working')
     end
 
-    it 'ends the turn when stdin reaches EOF (:note_eof) and no work survives' do
+    it 'drops a bare Enter (:empty) - no note, the turn continues' do
+      io_out  = StringIO.new
+      harness = fake_harness
+
+      with_stdin_pipe do |io_in, writer|
+        stdin = FakePendingStdin.new(io_in)
+        writer.puts '' # bare Enter: nothing typed, no note (T3 design)
+        stdin.pending = true
+        described_class.run(harness: harness,
+                            ui: UI::Console.new(stdout: io_out, stdin: stdin)) do |_t|
+          sleep 0.2
+        end
+      end
+
+      expect(harness.notes).to be_empty
+      expect(io_out.string).not_to include('[note]')
+    end
+
+    it 'aborts the turn when the editor sees EOF (Ctrl-D) and no work survives' do
       io_out  = StringIO.new
       harness = fake_harness
       task    = nil
 
-      with_stdin_pipe do |io_in, writer|
+      reader, writer = IO.pipe
+      stdin = FakePendingStdin.new(reader)
+      stdin.pending = true
+      begin
+        writer.close # immediate EOF: the editor read returns :eof
         described_class.run(harness: harness,
-                            ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |t|
-          Task.puts 'working'
-          task = t # captured by the block so we can assert it was stopped
-          sleep 5 # would hang forever if :note_eof never ended the turn
+                            ui: UI::Console.new(stdout: io_out, stdin: stdin)) do |t|
+          task = t # captured so we can assert the thread was stopped
+          sleep 5 # would hang forever if the EOF did not abort the turn
         end
       ensure
-        writer.close unless writer.closed? # EOF: the channel reader sees nil
+        reader.close unless reader.closed?
       end
 
       expect(task).not_to be_nil
       expect(task.alive?).to be(false) # thread stopped at EOF (no leak)
-      expect(io_out.string).to include('working')
     end
 
-    it 'does not start a channel when the harness is nil (unit-test mode)' do
+    it 'does not open the editor when the harness is nil (stdin never polled)' do
       io_out = StringIO.new
-      task   = nil
+      fake_in = Object.new
+      def fake_in.input_pending?
+        raise 'stdin must not be polled without a harness'
+      end
+      def fake_in.gets
+        raise 'stdin must not be read without a harness'
+      end
 
       described_class.run(harness: nil,
-                          ui: UI::Console.new(stdout: io_out, stdin: StringIO.new('note\n'))) do |t|
-        task = t
+                          ui: UI::Console.new(stdout: io_out, stdin: fake_in)) do |_t|
         sleep 0.1
       end
 
-      expect(task.note_channel).to be_nil
+      expect { fake_in.input_pending? }.to raise_error(/must not be polled/)
     end
 
-    it 'serves a dialog from the note channel FIFO (issue #198)' do
-      # The line typed before the dialog opens is the dialog's answer: it
-      # must go to the DIALOG first (FIFO order), not be flushed as a note.
+    it 'keeps FIFO: a pre-typed line is a note; the dialog gets the next' do
+      # The line already at the keyboard when the turn starts is a NOTE
+      # (typed for steering); the dialog's answer must be the NEXT line.
       io_out  = StringIO.new
       harness = fake_harness
       choice  = nil
 
       with_stdin_pipe do |io_in, writer|
-        writer.puts '1'   # typed before the dialog opens
+        stdin = FakePendingStdin.new(io_in)
+        writer.puts '1'   # at the keyboard before anything starts -> note
+        stdin.pending = true
+        Thread.new do
+          sleep 0.5
+          writer.puts '1' # the real dialog answer (Allow), typed while open
+        end
         described_class.run(harness: harness,
-                            ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |t|
+                            ui: UI::Console.new(stdout: io_out, stdin: stdin)) do |t|
           dialog = UI::Dialog.new(
             title: 'Grant test',
             options: [UI::Dialog::Option.new(title: 'Allow', value: :allow)]
@@ -455,14 +508,14 @@ RSpec.describe Task do
         end
       end
 
-      expect(choice).to eq(:allow) # the line reached the dialog, not a note
-      expect(harness.notes).to be_empty # it must NOT double up as a note
+      expect(harness.notes).to eq(['1']) # pre-typed line went to steering
+      expect(choice).to eq(:allow)       # the dialog got the NEXT line
     end
 
     it 'delivers lines typed WHILE a dialog is open to the dialog (no race)' do
-      # The bug scenario: user types at the prompt, a dialog appears. With
-      # two readers on the tty the line was stolen by one of them; now the
-      # channel is the sole reader and hands the line to the dialog.
+      # The bug scenario from issue #198: user types, a dialog appears. No
+      # reader thread exists during the turn (the drain loop only peeks),
+      # so the dialog's gets() has the keyboard to itself.
       io_out  = StringIO.new
       harness = fake_harness
       choice  = nil
@@ -474,8 +527,7 @@ RSpec.describe Task do
             title: 'Grant test',
             options: [UI::Dialog::Option.new(title: 'Allow', value: :allow)]
           )
-          # Simulate the user typing while the dialog is open: write to the
-          # stdin pipe from a helper thread once the request is serviced.
+          # Simulate the user typing while the dialog is open.
           Thread.new { sleep 0.5; writer.puts '1' }
           choice = t.request(:dialog, dialog: dialog)
         end

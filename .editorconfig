@@ -5,12 +5,13 @@ root = true
 
 # Unix-style newlines with a newline ending every file
 [*]
+# NOTE KI "auto" since in windows/msys mix of CRLF and LF fiels is almost unavoidable
 #end_of_line = lf
+end_of_line = auto
 insert_final_newline = true
 trim_trailing_whitespace = true
 indent_style = space
 charset = utf-8
-end_of_line = lf
 
 # 4 space indentation
 [*.rb]
@@ -20,8 +21,10 @@ indent_size = 2
 [Makefile]
 indent_style = tab
 
+# NOTE KI breaks them if not strictly CRLF
 [*.{bat,cmd}]
 end_of_line = crlf
 
+# NOTE KI breaks them if not strictly LF
 [*.{sh}]
 end_of_line = lf
