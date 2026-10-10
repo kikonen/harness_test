@@ -68,6 +68,11 @@ class Harness
 
   # issue #36: store a pending mid-turn steering note (set by the Task
   # drain loop). Blank/nil clears the slot.
+  #
+  # Only ONE note is in flight at a time: a new assignment REPLACES any
+  # earlier note that has not been injected yet - the user is correcting
+  # their course, so the latest line wins. A note already injected by
+  # #call_llm stays in the chain; this becomes the new pending one.
   def user_note_text=(text)
     @user_note = text.to_s.strip.empty? ? nil : text.to_s.strip
   end

@@ -431,5 +431,20 @@ RSpec.describe Harness do
       expect(sent.map { |m| m[:content].to_s }).not_to include('User note (mid-turn):')
       expect(harness.user_notes).to be_empty
     end
+
+    it 'keeps only the LATEST pending note (single slot in flight)' do
+      # The user corrects their course mid-turn: the second line replaces
+      # the first, so the model sees only the latest steering.
+      harness.session.add_user('original prompt')
+      harness.user_note_text = 'use ruby'
+      harness.user_note_text = 'no - use python'
+
+      harness.call_llm
+
+      sent = harness.client.calls.first
+      notes = sent.select { |m| m[:content].to_s.include?('User note (mid-turn):') }
+      expect(notes).to eq([{ role: 'user', content: 'User note (mid-turn): no - use python' }])
+      expect(harness.user_notes).to eq(['no - use python'])
+    end
   end
 end
