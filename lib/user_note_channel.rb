@@ -22,6 +22,16 @@
 # There is deliberately NO pause/drop mode: the reader never stops, never
 # closes the shared stream mid-turn, and never throws lines away.
 #
+# LIFECYCLE GUARANTEE (issue #198, stuck-dialog follow-up): the channel can
+# NEVER be left "open" while the reader is dead. A dialog blocks inside
+# #exclusive_line on @woken, so a channel with no live reader hangs it
+# forever - the exact run.command grant-dialog hang. The guard has two
+# layers: (1) every exit path of read_loop funnels through #mark_eof, and
+# (2) #exclusive_line re-checks reader liveness on each wait, closing the
+# channel and returning nil if the reader is gone - so a thread death that
+# slips past read_loop entirely (e.g. Thread#kill parked in a Windows
+# console read) still degrades to a clean dialog cancel, never a hang.
+#
 # Single-thread I/O rule (issue #40): the reader thread only ENQUEUES lines -
 # it never touches a stream for output and never writes anywhere. All visible
 # rendering happens on the main thread's drain loop, in outbox order.
@@ -29,8 +39,8 @@
 # #stop (task teardown) kills the reader and drops the buffer; on a dedicated
 # stream it also closes it to wake a blocked gets(). On the shared $stdin it
 # leaves the stream open - stop only happens at turn teardown and no dialog
-# is in flight. A zombie parked in an un-wakeable gets() cannot buffer: its
-# next gets() wakes on close/EOF and ends it (read_loop drops late lines).
+# is in flight. stop() and every read_loop exit all reach a terminal state,
+# so a zombie reader can never be left parked against an open channel.
 #
 # EOF (Ctrl-D while no prompt is shown) ends the task: the reader pushes the
 # :note_eof control event, which the drain loop treats like :done. A dialog
@@ -99,6 +109,15 @@ class UserNoteChannel
   def exclusive_line
     @mutex.synchronize do
       until closed? || (line = @lines.shift)
+        # LIFECYCLE GUARANTEE: if the reader thread is gone but the channel
+        # never reached a terminal state, waiting here would block forever
+        # (the run.command grant-dialog hang). Close and bail to nil so the
+        # dialog cancels cleanly instead of hanging.
+        unless reader_alive?
+          close_dead_channel
+          break
+        end
+
         # No line yet: wait for the reader's signal (or EOF/stop). wait
         # releases and re-acquires the mutex, so no race with enqueue.
         @woken.wait(@mutex)
@@ -155,7 +174,9 @@ class UserNoteChannel
     t = Thread.new { read_loop }
     # report_on_exception off: a kill from stop surfacing as an exception
     # must not spam the console (and can't be handled anyway - the read is
-    # interrupted mid-syscall on some platforms).
+    # interrupted mid-syscall on some platforms). The LIFECYCLE GUARANTEE
+    # in #exclusive_line means such a death still degrades to a clean dialog
+    # cancel, never a hang.
     t.report_on_exception = false
     @thread = t
   end
@@ -165,8 +186,19 @@ class UserNoteChannel
   # shared FIFO regardless of who will consume it (drain loop or dialog);
   # order is what matters. lines_read counts EVERY line read (blanks
   # included); blank lines are not buffered.
+  #
+  # Every exit path funnels through #mark_eof so the channel reaches a
+  # terminal state: a normal EOF falls through to it, and ANY exception -
+  # a stream error (IOError / EBADF / EIO) or a kill mid-syscall surfacing
+  # as an arbitrary exception - is caught and funnels through it too. This
+  # is what prevents the stuck-dialog bug: without it, a rescued stream
+  # error would end the thread while leaving the channel "open", and a
+  # later dialog's exclusive_line would wait on @woken forever. mark_eof
+  # is idempotent (guarded by closed?), so a stop() that raced first still
+  # wins. A zombie woken after stop() self-terminates on the next loop
+  # check instead of re-parking in gets() as a second stdin reader.
   def read_loop
-    until (line = safe_gets).nil?
+    until (line = safe_gets).nil? || closed?
       @mutex.synchronize { @lines_read += 1 }
       text = line.chomp.strip
       next if text.empty?
@@ -178,10 +210,12 @@ class UserNoteChannel
         @woken.signal      # wake an exclusive waiter (dialog) if any
       end
     end
+  rescue Exception
+    # Deliberately broad: a reader-thread death must NEVER be allowed to
+    # strand the channel open. Any exception here means we stop reading.
+    nil
+  ensure
     mark_eof
-  rescue IOError, Errno::EBADF, Errno::EIO
-    # close (from #stop) while gets() was blocked surfaces here: the
-    # lifecycle flags (@stopped/@eof) own what follows - no eof mark.
   end
 
   def safe_gets
@@ -196,6 +230,24 @@ class UserNoteChannel
     # Ctrl-D in raw mode can surface as an interrupt on the reader thread:
     # treat it as "stop reading" without killing the process.
     nil
+  end
+
+  # True while the reader thread exists and has not yet exited. Used by
+  # #exclusive_line as the second layer of the LIFECYCLE GUARANTEE: if this
+  # is false while the channel is still "open", the reader died without
+  # running its exit path, so we must not wait on it.
+  def reader_alive?
+    !@thread.nil? && @thread.alive?
+  end
+
+  # Mark an open-but-readerless channel terminal and wake any exclusive
+  # waiter (so a dialog's exclusive_line returns nil instead of hanging).
+  def close_dead_channel
+    return if closed?
+
+    @eof = true
+    @thread = nil
+    @woken.broadcast
   end
 
   def mark_eof
