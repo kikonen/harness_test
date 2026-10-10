@@ -2,6 +2,7 @@
 
 require 'user_note_channel'
 require 'task'
+require 'timeout'
 require 'stringio'
 
 RSpec.describe UserNoteChannel do
@@ -177,6 +178,44 @@ RSpec.describe UserNoteChannel do
 
       channel.claim_exclusive
       expect(channel.closed?).to be(true)
+      expect(channel.pending_notes).to be_nil
+    end
+  end
+
+  describe 'lifecycle guarantee (stuck-dialog follow-up, issue #198)' do
+    # The dialog blocks in exclusive_line on @woken: a channel left "open"
+    # with no live reader hangs it forever. Both guard layers are covered
+    # here: read_loop must funnel every exit path through mark_eof, and
+    # exclusive_line must bail when the reader is gone regardless.
+    it 'does not hang when the reader is gone but the channel stayed open' do
+      with_pipe do |read_io, _write_io|
+        channel = described_class.new(read_io)
+        channel.start
+        # Simulate the Windows kill-parked case: the thread is gone (or
+        # un-wakeable) WITHOUT read_loop's exit path having run - the
+        # channel was never marked terminal. Swap in a dead thread so the
+        # liveness check sees "no live reader".
+        dead = Thread.new { nil }
+        dead.join
+        channel.instance_variable_set(:@thread, dead)
+
+        # A regression here hangs forever: wrap in a timeout so the suite
+        # fails instead of freezing. exclusive_line must return nil (the
+        # dialog cancels cleanly) and close the channel.
+        line = nil
+        Timeout.timeout(5) { line = channel.exclusive_line }
+        expect(line).to be_nil
+        expect(channel.closed?).to be(true)
+      end
+    end
+
+    it 'closes the channel when the reader dies from a stream error' do
+      io = StringIO.new
+      def io.gets = raise(IOError, 'stream died')
+      channel = described_class.new(io)
+      channel.start
+
+      wait_for(channel) { channel.closed? } # read_loop exit path ran
       expect(channel.pending_notes).to be_nil
     end
   end
