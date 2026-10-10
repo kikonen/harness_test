@@ -446,5 +446,44 @@ RSpec.describe Harness do
       expect(notes).to eq([{ role: 'user', content: 'User note (mid-turn): no - use python' }])
       expect(harness.user_notes).to eq(['no - use python'])
     end
+
+    it 'shows a console ack that the note was sent to the model (issue #198)' do
+      task = Task.new { }
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+      harness.session.add_user('original prompt')
+      harness.user_note_text = 'steer left'
+      begin
+        harness.call_llm
+      ensure
+        Thread.current[:harness_task] = old_current
+      end
+
+      lines = []
+      loop do
+        m = task.poll(0); break unless m
+        lines << m[:content]
+      end
+      expect(lines).to include('  [note] sent to model')
+    end
+
+    it 'shows no "sent to model" ack when there is no note' do
+      task = Task.new { }
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+      harness.session.add_user('original prompt')
+      begin
+        harness.call_llm
+      ensure
+        Thread.current[:harness_task] = old_current
+      end
+
+      lines = []
+      loop do
+        m = task.poll(0); break unless m
+        lines << m[:content]
+      end
+      expect(lines).not_to include('  [note] sent to model')
+    end
   end
 end

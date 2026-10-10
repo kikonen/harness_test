@@ -82,20 +82,26 @@ module Commands
           * Type: end a line with a trailing backslash (\\) to continue.
 
         Mid-turn steering notes (issue #36):
-          While the model is working, you can type a short note and press
-          Enter WITHOUT interrupting the turn. The note is delivered to the
-          model as a "User note (mid-turn)" message before its next step, so
-          it can course-correct on the fly - no Ctrl+C needed. The harness
-          prints "[note] got it - ..." when it receives one. Note: a line
-          typed mid-turn is ALWAYS a note, not a command or shell input (a
-          "/" or "!" prefix has no special meaning then). A dialog (grant
-          prompt / ui.dialog) pauses the note channel for its duration -
-          answer the dialog normally.
+          While the model is working, any keypress opens a note editor on
+          the spot WITHOUT interrupting the turn. Finish the note and press
+          Enter: it is delivered to the model as a "User note (mid-turn)"
+          message before its next step, so it can course-correct on the fly -
+          no Ctrl+C needed. The harness prints "[note] got it - ..." when it
+          receives one. A bare Enter (empty line) commits nothing and just
+          returns to the spinner. Note: a line typed mid-turn is ALWAYS a
+          note, not a command or shell input (a "/" or "!" prefix has no
+          special meaning then). While a dialog (grant prompt / ui.dialog)
+          is open, the keyboard belongs to the dialog - answer it normally;
+          its answer is never mistaken for a note.
 
         Keys:
+          Esc      Idle prompt: cancel the line (drop it, fresh prompt).
+                   Note editor: keep the text as a draft for the next time
+                   the editor opens.
           Ctrl+C   Cancel the current input (or interrupt a running request)
-          Ctrl+D   Quit (on an empty prompt); ends a RUNNING turn like
-                   Ctrl+C (a note typed just before it is still delivered)
+          Ctrl+D   Quit (on an empty prompt); inside a note editor: abort the
+                   RUNNING turn like Ctrl+C (a note committed before it is
+                   still delivered)
           Up/Down  Browse command history
       HELP
     end

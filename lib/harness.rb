@@ -67,7 +67,8 @@ class Harness
   attr_accessor :history
 
   # issue #36: store a pending mid-turn steering note (set by the Task
-  # drain loop). Blank/nil clears the slot.
+  # drain loop's NoteEditor when input_pending? triggers). Blank/nil clears
+  # the slot.
   #
   # Only ONE note is in flight at a time: a new assignment REPLACES any
   # earlier note that has not been injected yet - the user is correcting
@@ -87,8 +88,8 @@ class Harness
     @options       = options
     @file_list     = file_list
     @session       = Session.new(build_system_prompt)
-    # issue #36: mid-turn steering notes. A pending note (set by the Task
-    # drain loop from the UserNoteChannel buffer while the model works) is
+    # issue #36 / #198 phase 1: mid-turn steering notes. A pending note
+    # (set by the Task drain loop's NoteEditor while the model works) is
     # injected into the chain by #call_llm and tracked in @user_notes so
     # SessionManager#send_session can commit it at turn end.
     @user_note     = nil
@@ -281,6 +282,10 @@ class Harness
         @user_notes << note
         logger.info("user mid-turn note injected: #{note}")
         messages << { role: 'user', content: "User note (mid-turn): #{note}" }
+        # issue #198: the commit ack ("[note] got it") fires the moment the
+        # user hits Enter; THIS line is the proof the model actually received
+        # the note, without reading harness.log or waiting for the reply.
+        Task.emit(:text, origin: :harness, content: '  [note] sent to model')
       end
 
       data    = @client.chat(messages, tools: tools)

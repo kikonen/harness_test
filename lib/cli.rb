@@ -10,6 +10,7 @@ require_relative 'file_list'
 require_relative 'history_manager'
 require_relative 'command_handler'
 require_relative 'ui'
+require_relative 'ui/note_editor'
 
 # -- CLI ------------------------------------------------------------------
 
@@ -191,8 +192,8 @@ class CLI
     ui.puts "Tip: a line starting with ! runs a shell command locally (not sent " \
          "to the model)."
     ui.puts "Tip: a line starting with / is a command (executed immediately)."
-    # issue #36: steer a running turn instead of Ctrl+C - any line typed while
-    # the model works becomes a mid-turn note (see UserNoteChannel).
+    # issue #36 / #198 phase 1: steer a running turn instead of Ctrl+C -
+    # any keypress while the model works opens the note editor (see /help).
     ui.puts "Tip: type a note while the model is working to steer it mid-turn " \
          "(no Ctrl+C; see /help)."
     ui.puts
@@ -344,6 +345,12 @@ class CLI
     end
 
     return nil if text.nil?
+
+    # issue #198 phase 1: NoteEditor installs the bare-Esc-cancels binding
+    # globally (mid-turn steering uses it), so at the idle prompt a bare Esc
+    # now cancels the read and returns the buffer. That is NOT a submission
+    # - drop it and show a fresh prompt (like bash's Ctrl+U for a line).
+    return nil if UI::NoteEditor.last_read_cancelled?
 
     # Normalize Windows line endings: always work with a single \n.
     text = text.gsub("\r\n", "\n")
