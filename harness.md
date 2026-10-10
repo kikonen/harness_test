@@ -48,7 +48,7 @@ Keep this in mind:
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.
 - Spec layout: tests live under `spec/` mirroring the tree they test -
-  e.g. `lib/dialog.rb` is tested by `spec/lib/dialog_spec.rb`, and tools
+  e.g. `lib/dialog.rb` is tested by `spec/lib/ui/dialog_spec.rb`, and tools
   in `lib/tools/` are tested in `spec/lib/tools/` (e.g.
   `lib/tools/file_read_tool.rb` ->
   `spec/lib/tools/file_read_tool_spec.rb`). Do NOT drop spec files into
@@ -60,6 +60,13 @@ Keep this in mind:
 
 ## PR Workflow
 
+- Never commit directly to `master`. Always create a feature/fix branch
+  first, commit there, open a PR, and merge with rebase. Committing on
+  `master` and re-branched afterwards is an ugly habit and risks pushing
+  unreviewed changes straight to `master`.
+- If work was already committed to `master` by mistake, it must be moved off:
+  reset `master` back and rebase the branch onto it. Ask before rewriting
+  any history that may have been pushed.
 - When merging a pull request, use **rebase** (`gh pr merge --rebase`)
   so commits land on `master` as a clean linear history - no merge
   commits. Only fall back to a regular merge if the rebase fails
