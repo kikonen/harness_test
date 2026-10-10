@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require 'ui/note_editor'
+require 'ui/editor'
 require 'stringio'
 
-RSpec.describe UI::NoteEditor do
+RSpec.describe UI::Editor do
   def result_text(r) = r.text
   def result_status(r) = r.status
 
@@ -33,6 +33,13 @@ RSpec.describe UI::NoteEditor do
       r = ed.read(prefill: 'old draft')
       expect(result_text(r)).to eq('real line')
     end
+
+    it 'ignores a custom prompt on the dumb path (no prompt is printed)' do
+      ed = described_class.new(StringIO.new("ok\n"))
+      r = ed.read(prompt: '> ')
+      expect(result_status(r)).to eq(:submitted)
+      expect(result_text(r)).to eq('ok')
+    end
   end
 
   describe 'streams without tty? (pipes)' do
@@ -56,7 +63,7 @@ RSpec.describe UI::NoteEditor do
   describe 'install_esc! (idempotent global Reline patch)' do
     it 'installs the LineEditor module only once' do
       expect { described_class.install_esc! }
-        .to change { Reline::LineEditor.ancestors.include?(UI::NoteEditor::RelineEscCancel) }
+        .to change { Reline::LineEditor.ancestors.include?(UI::Editor::RelineEscCancel) }
         .from(false).to(true)
 
       before = Reline::LineEditor.ancestors.count

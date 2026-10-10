@@ -67,7 +67,7 @@ class Harness
   attr_accessor :history
 
   # issue #36: store a pending mid-turn steering note (set by the Task
-  # drain loop's NoteEditor when input_pending? triggers). Blank/nil clears
+  # drain loop's UI::Editor when input_pending? triggers). Blank/nil clears
   # the slot.
   #
   # Only ONE note is in flight at a time: a new assignment REPLACES any
@@ -89,7 +89,7 @@ class Harness
     @file_list     = file_list
     @session       = Session.new(build_system_prompt)
     # issue #36 / #198 phase 1: mid-turn steering notes. A pending note
-    # (set by the Task drain loop's NoteEditor while the model works) is
+    # (set by the Task drain loop's UI::Editor while the model works) is
     # injected into the chain by #call_llm and tracked in @user_notes so
     # SessionManager#send_session can commit it at turn end.
     @user_note     = nil

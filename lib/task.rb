@@ -56,18 +56,20 @@
 # Mid-turn user notes (issue #36 / #198 phase 1): NO reader thread. On each
 # drain tick Task.run peeks `stdin.input_pending?` (cross-platform; nil when
 # the stream does not support it). When something is waiting on the keyboard
-# it opens a UI::NoteEditor ON THE MAIN THREAD: tty -> Reline (Enter commits,
+# it opens a UI::Editor ON THE MAIN THREAD: tty -> Reline (Enter commits,
 # Esc keeps the draft for the next trigger, bare Enter is a no-op, Ctrl-D
 # aborts the turn); non-tty -> plain gets(). The committed line is rendered
 # as an ack and stored on the harness (Harness#user_note_text=), where
 # Harness#call_llm injects it into the chain before the next LLM call.
 # Because the drain loop only ever peeks and then reads, no other thread can
-# be parked on stdin: dialogs (served by this same main-thread loop) read
-# task.ui.stdin directly with nothing to race for the keyboard - issue #198's
-# stuck-dialog / lost-line bug class is gone by construction.
+# be parked on stdin: dialogs (served by this same main-thread loop) route
+# their choice line through the SAME UI::Editor on a tty (issue #198 phase
+# 2), so every in-turn stdin read shares one code path with nothing to race
+# for the keyboard - issue #198's stuck-dialog / lost-line bug class is gone
+# by construction.
 
 require_relative 'output_buffer'
-require_relative 'ui/note_editor'
+require_relative 'ui/editor'
 require_relative 'ui/spinner'
 
 class Task
@@ -298,7 +300,7 @@ class Task
     # keyboard. Needs a harness to land notes on; Task.run is called with
     # harness: nil only from unit tests.
     task.harness = harness
-    task.note_editor = UI::NoteEditor.new(ui.stdin) if ui.stdin && harness
+    task.note_editor = UI::Editor.new(ui.stdin) if ui.stdin && harness
     error_msg   = nil
     old_trap    = trap('INT') { raise Interrupt }
 
@@ -452,9 +454,10 @@ class Task
       begin
         # issue #198 phase 1: no reader thread exists during the turn (the
         # drain loop only PEEKS stdin), so the dialog can read task.ui.stdin
-        # directly with nothing to race for the keyboard. The console wraps
-        # the task's streams so rendered text lands where everything else
-        # lands (same stream, single-thread I/O order).
+        # directly with nothing to race for the keyboard. Phase 2 routes
+        # its tty choice line through the SAME UI::Editor as steering notes.
+        # The console wraps the task's streams so rendered text lands where
+        # everything else lands (same stream, single-thread I/O order).
         ui = UI::Console.new(stdout: task.ui.stdout, stdin: task.ui.stdin)
         answer = dialog.perform_direct(ui: ui)
         task.respond(answer)
