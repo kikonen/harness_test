@@ -193,7 +193,9 @@ module UI
       unless Reline::LineEditor.ancestors.include?(RelineEscCancel)
         Reline::LineEditor.prepend(RelineEscCancel)
       end
-      if Reline::IOGate.is_a?(Reline::Windows)
+      # Reline::Windows exists only on the Windows IOGate (undefined on Unix),
+      # so it must be guarded before the is_a? check.
+      if defined?(Reline::Windows) && Reline::IOGate.is_a?(Reline::Windows)
         Reline::Windows.prepend(WindowsEscHook)
       else
         cfg = Reline.core.config

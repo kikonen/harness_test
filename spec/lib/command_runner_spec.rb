@@ -286,6 +286,33 @@ RSpec.describe CommandRunner do
       expect(elapsed).to be < 10
     end
   end
+
+  # If the running Ruby rejects the process-group spawn flag (older
+  # versions on POSIX), the runner falls back to a plain spawn and the
+  # command still runs.
+  it 'falls back to a plain spawn when group spawn is unsupported' do
+    Dir.mktmpdir do |dir|
+      seed_allowlist(dir, 'echo')
+      runner, = make_main_runner(dir, '1')
+
+      real_spawn = Process.method(:spawn)
+      group_key  = described_class::PGROUP_SPAWN_KEY
+      fell_back  = false
+      allow(Process).to receive(:spawn).and_wrap_original do |_m, cmd, *args|
+        opts = args.last.is_a?(Hash) ? args.last : {}
+        if opts.key?(group_key) && !fell_back
+          # Reject the grouped attempt like an older Ruby would.
+          fell_back = true
+          raise ArgumentError, 'wrong exec option symbol: pgroup'
+        end
+        real_spawn.call(cmd, *args)
+      end
+
+      out = runner.run('echo hi')
+      expect(out).to start_with('exit code: 0')
+    end
+  end
+
   it 'honors dry runs without executing' do
     Dir.mktmpdir do |dir|
       seed_allowlist(dir, 'echo hi')

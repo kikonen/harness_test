@@ -38,6 +38,11 @@ class CommandRunner
   DEFAULT_LIMIT   = 200   # output lines
   MAX_LIMIT       = 5000  # hard cap
 
+  # Spawn flag that puts the child in its own (process) group so the
+  # timeout kill reaches the whole tree. The spelling is platform- and
+  # Ruby-version-dependent: :new_pgroup on Windows, :pgroup on POSIX
+  # (same effect: pgid == pid). See spawn_in_group.
+  PGROUP_SPAWN_KEY = Gem.win_platform? ? :new_pgroup : :pgroup
   # Grace period after the kill before giving up on the wait: by then the
   # whole tree is gone (or nearly), so the subsequent wait cannot hang.
   KILL_GRACE_SECONDS = 5
@@ -297,8 +302,7 @@ class CommandRunner
   # then kept the harness' stdin/stdout open forever).
   def read_child_in_group(command, dir, timeout)
     out_r, out_w = IO.pipe
-    pid = Process.spawn('sh', '-c', command, chdir: dir, in: File::NULL,
-                        out: out_w, err: out_w, new_pgroup: true)
+    pid = spawn_in_group('sh', ['-c', command], dir, out_w)
     out_w.close
 
     output = +""
@@ -329,16 +333,34 @@ class CommandRunner
     [output, timed_out ? :timeout : waiter.value]
   end
 
+  # `sh -c` in its own (process) group: the spawn flag key is
+  # platform/version-dependent (:new_pgroup on Windows, :pgroup on POSIX).
+  # If the running Ruby rejects it (older versions), retry plain: the
+  # timeout kill then reaches only the direct child - still no hang, but
+  # grandchild trees would survive.
+  def spawn_in_group(cmd, args, dir, out_w)
+    Process.spawn(cmd, *args, chdir: dir, in: File::NULL,
+                  out: out_w, err: out_w, PGROUP_SPAWN_KEY => true)
+  rescue ArgumentError
+    status("note: process-group spawn unsupported by this Ruby; " \
+           "a timeout kill may not reach the child tree")
+    Process.spawn(cmd, *args, chdir: dir, in: File::NULL,
+                  out: out_w, err: out_w)
+  end
   # Kills `pid` and EVERYTHING it spawned. Windows: taskkill /T /F walks the
   # tree for us (no process groups to signal). POSIX: the child was spawned
-  # in its own pgroup (pgid == pid), so one group signal reaches all
-  # descendants; SIGKILL straight away is fine - by timeout the command is
-  # already dead to the user.
+  # in its own pgroup (pgid == pid), so a group signal reaches every
+  # descendant. TERM first so well-behaved tools can clean up, KILL after
+  # a short grace - by timeout the command is already dead to the user,
+  # but an unkillable-in-TERM zombie grandchild would otherwise keep the
+  # output pipe open past the wait below.
   def kill_process_tree(pid)
     if Gem.win_platform?
       system('taskkill', '/T', '/F', '/PID', pid.to_s,
              out: File::NULL, err: File::NULL)
     else
+      Process.kill(:TERM, -pid) rescue nil
+      sleep 1
       Process.kill(:KILL, -pid) rescue nil
     end
   end
