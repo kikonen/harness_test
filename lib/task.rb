@@ -58,9 +58,11 @@
 # reads typed lines in the background while the task runs. The drain loop
 # flushes the buffer on every tick: the note is rendered as an ack line and
 # stored on the harness (Harness#user_note_text=), where Harness#call_llm
-# injects it into the chain before the next LLM call. A dialog PAUSES the
-# channel for its duration (the dialog owns stdin on the main thread, so a
-# second reader would race it); EOF ends the task (like :done).
+# injects it into the chain before the next LLM call. The channel is the
+# SOLE stdin owner (issue #198 minimal fix): a dialog claims it as exclusive
+# and pulls its choice lines from the SAME FIFO instead of opening a second
+# gets() on the stream (two live readers on one tty race for every line).
+# EOF ends the task (like :done).
 
 require_relative 'output_buffer'
 require_relative 'ui/spinner'
@@ -422,12 +424,22 @@ class Task
       dialog = msg[:dialog]
       task.instance_variable_set(:@dialog_open, true)
       begin
-        task.note_channel&.pause  # issue #36: dialog owns stdin on this thread
-        answer = dialog.perform_direct(ui: task.ui)
+        # issue #198 minimal fix: the dialog does NOT open a second gets()
+        # on the shared stdin - it claims the note channel as exclusive and
+        # pulls its lines from the SAME FIFO (no race, total order intact).
+        task.note_channel&.claim_exclusive
+        # The dialog console reads lines FROM the channel (#gets pulls the
+        # shared FIFO); stdout stays the task's stream so the rendered text
+        # lands where the drain loop writes everything else.
+        # No channel (unit-test mode, harness nil): fall back to the
+        # console's own stdin as before.
+        ui = UI::Console.new(stdout: task.ui.stdout,
+                             stdin: task.note_channel || task.ui.stdin)
+        answer = dialog.perform_direct(ui: ui)
         task.respond(answer)
       ensure
         task.instance_variable_set(:@dialog_open, false)
-        task.note_channel&.resume unless task.note_channel&.closed?
+        task.note_channel&.release_exclusive
       end
     else
       task.respond(nil)
