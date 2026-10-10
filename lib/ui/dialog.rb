@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'editor'
+
 # -- UI::Dialog ---------------------------------------------------------------
 #
 # A generic user dialog (issue #74 / #13): a title (what it is about), a set
@@ -19,6 +21,18 @@
 # any text on the choice line that is NOT "<cancel> <reason>" is stray
 # input (a paste accident) and re-prompts - it is NEVER a selection, a
 # note, or a cancel (issue #155). There are no per-option inline notes.
+#
+# CHOICE-LINE EDITING (issue #198 phase 2): on a TTY the single-line
+# choice read goes through UI::Editor (the same Reline editor the steering
+# note uses), so every in-turn stdin read shares ONE code path: Enter
+# submits the line, a bare Enter re-prompts (same as the blank-line skip),
+# Esc keeps what was typed as a draft prefilled on the next re-prompt - it
+# NEVER cancels (cancel is explicit, issue #155) - and Ctrl-D on an empty
+# line cancels the dialog like EOF. Non-tty streams take the plain gets()
+# path with exactly the same behavior as before this change (pipes in
+# specs, dumb terminals). The multi-line "Additional details" block stays
+# gets()-based: its blank-line-finish / Ctrl-D-cancel semantics are a
+# different beast from a single-line read.
 #
 # A dialog can allow ADDITIONAL DETAILS: when free_text is enabled the
 # dialog gets an explicit numbered "Additional details" option (the
@@ -165,6 +179,7 @@ module UI
       # Guard keeps the load order independent: dialog can be loaded before
       # task (they only meet at runtime on the main thread).
       task = defined?(Task) ? Task.current : nil
+
       if task
         raise ArgumentError, 'dialog routed through a Task: pass ui: nil' \
           unless ui.nil?
@@ -205,26 +220,73 @@ module UI
       print_choice_prompt(ui)
 
       # The choice is ONE line of option numbers (or a cancel number plus
-      # a one-line reason). Skip blank lines: they are usually stale input
-      # (an extra Enter while the prompt was sent), and only a real EOF
-      # dismisses the dialog without an answer.
+      # a one-line reason). On a tty the line comes from UI::Editor (see
+      # read_choice_line); on non-tty streams it is a plain gets() with
+      # the classic skip-blanks semantics, and only a real EOF dismisses
+      # the dialog without an answer.
+      draft = nil
       loop do
-        line = ui.gets
-        break if line.nil?
+        res = read_choice_line(ui, draft)
+        # nil = non-tty stream EOF; :eof = Ctrl-D inside the tty editor.
+        return CANCEL_VALUE if res.nil? || res[:status] == :eof
 
-        answer = line.chomp.strip
+        # Esc: keep what was typed as a draft for the next round - it is
+        # NEVER a cancel (issue #155: cancel is always explicit). Any other
+        # round resets it so a submitted line is parsed as typed, not
+        # shadowed by a stale draft.
+        draft = res[:status] == :cancelled ? res[:text] : nil
+        next if draft && !draft.to_s.strip.empty? # re-prompt with the prefill
+
+        if res[:status] == :empty
+          # Bare Enter: stale input (an extra Enter while the prompt was
+          # sent) - re-prompt without touching the draft.
+          next
+        end
+
+        # .to_s + empty skip: a nil/blank submitted line gets bare-Enter
+        # semantics (re-prompt) instead of crashing or parsing as an
+        # empty selection - the editor returns :empty for blanks, but
+        # stubs and odd streams deserve the same fallback.
+        answer = res[:text].to_s.strip
         next if answer.empty?
-
         chosen = parse_choice_line(answer, ui)
         next if chosen.nil?               # invalid line: re-prompted
         result = finalize(chosen, ui)
         next if result.nil?               # empty details block: re-prompt
         return result
       end
-      CANCEL_VALUE
     end
 
     private
+
+    # issue #198 phase 2: read one choice line. tty -> UI::Editor (Reline:
+    # Enter submits, bare Enter is :empty, Esc is :cancelled with the
+    # draft intact, Ctrl-D is :eof); non-tty -> gets() (nil => EOF, blank
+    # => :empty, otherwise :submitted). The `> ` line printed above is the
+    # editor's prompt on tty (Reline's PROMPT) and the plain-prompt
+    # marker elsewhere. Returns {text:, status:} or nil on EOF.
+    def read_choice_line(ui, draft)
+      stdin = ui.stdin
+      return stdin.gets.then do |line|
+        if line.nil?
+          nil
+        elsif line.chomp.strip.empty?
+          { text: nil, status: :empty }
+        else
+          { text: line.chomp, status: :submitted }
+        end
+      end unless tty_input?(ui)
+
+      UI::Editor.new(stdin).read(prompt: UI::Editor::DIALOG_PROMPT, prefill: draft)
+        .then { |r| { text: r.text, status: r.status } }
+    end
+
+    # True when the console's stdin IS the process's real terminal stdin -
+    # UI::Editor's Reline path attaches to $stdin, so a fake tty? stream in
+    # tests must stay on the dumb gets() path (issue #202 bug class).
+    def tty_input?(ui)
+      !ui.stdin.nil? && UI::Editor.is_real_tty_stdin?(ui.stdin)
+    end
 
     # Resolve one choice line to its selection or a noted cancel, or nil
     # when the line was invalid (already re-prompted). Forms accepted:
@@ -376,6 +438,12 @@ module UI
       forms << "#{@options.size} <one line>    cancel + reason"
       ui.puts "             Choice (1..#{@options.size}):"
       forms.each { |f| ui.puts "               - #{f}" }
+      if tty_input?(ui)
+        # issue #198 phase 2: the Reline editor owns the keyboard; its
+        # prompt ("> ") replaces this line as the input marker.
+        return
+      end
+
       ui.print '             > '
       ui.flush
     end

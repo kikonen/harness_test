@@ -2,13 +2,18 @@
 
 require 'reline'
 
-# -- UI::NoteEditor ---------------------------------------------------------
+# -- UI::Editor -------------------------------------------------------------
 #
-# issue #36 / #198 phase 1: the mid-turn steering editor. The Task drain
-# loop peeks `stdin.input_pending?` on every tick (cross-platform, no reader
-# thread - see Task); on a hit it opens this editor ON THE MAIN THREAD, so
-# nothing can race for the keyboard (issue #198's stuck-dialog / lost-line
-# bug class dies by construction).
+# The shared single-line editor primitive (issue #36 / #198). Two users:
+#   * the mid-turn steering flow - the Task drain loop peeks
+#     `stdin.input_pending?` on every tick (cross-platform, no reader
+#     thread - see Task); on a hit it opens this editor ON THE MAIN THREAD
+#     with PROMPT 'note> ', so nothing can race for the keyboard
+#     (issue #198's stuck-dialog / lost-line bug class dies by
+#     construction).
+#   * UI::Dialog's choice line (issue #198 phase 2) - on a tty the dialog
+#     routes its single-line choice read through this editor too, so EVERY
+#     in-turn stdin read goes through one code path.
 #
 # Two read paths, chosen at read time:
 #   * tty: Reline single-line read. Esc keeps the draft (cancelled? + the
@@ -18,23 +23,38 @@ require 'reline'
 #   * non-tty (pipes in specs, dumb terminals): plain gets() - Enter
 #     commits, a blank/bare Enter is :empty, stream close is :eof.
 #
-# Returns a NoteResult(text, status); status is one of :submitted / :empty /
-# :cancelled / :eof.
+# Returns an EditorResult(text, status); status is one of :submitted /
+# :empty / :cancelled / :eof. Each caller interprets the statuses in its
+# own domain: the steering flow treats :empty as "no note" and :eof as
+# "abort turn"; a dialog treats :empty as "re-prompt" and :eof as
+# "cancel the dialog".
 
 module UI
-  class NoteEditor
-    PROMPT = 'note> '
-    NOTE_RESULT = Struct.new(:text, :status)
+  class Editor
+    DEFAULT_PROMPT = 'note> '
+    # Reline's PROMPT for dialog choice lines (the steering note uses
+    # DEFAULT_PROMPT).
+    DIALOG_PROMPT = '> '
+    EDITOR_RESULT = Struct.new(:text, :status)
 
     def initialize(stdin)
       @stdin = stdin
     end
 
-    # Read one line from stdin. `prefill` (a draft from a previously
-    # cancelled editor) is inserted into the Reline buffer on tty only.
-    def read(prefill: nil)
-      tty? ? reline_read(prefill) : dumb_read
+    # Read one line from stdin. `prompt` is the editor prompt string;
+    # `prefill` (a draft from a previously cancelled editor) is inserted
+    # into the Reline buffer on tty only.
+    def read(prompt: DEFAULT_PROMPT, prefill: nil)
+      tty? ? reline_read(prompt, prefill) : dumb_read
     end
+
+    # The single line of defense against Reline's real-$stdin attach: take
+    # the Reline path only when $stdin IS a terminal AND `io` is that same
+    # stream (same object, or the same file descriptor). A fake tty? stream
+    # with its own fileno therefore always falls to the dumb gets() path -
+    # a spec can never accidentally block on the real console (the bug
+    # class behind issue #202's "stuck" look; see UI::Editor routing tests).
+    def self.is_real_tty_stdin?(io) = tty_stream?($stdin) && real_io?(io, $stdin)
 
     # Shared Esc-state between the LineEditor patch and the Windows key
     # hook (they live on different objects; the hook signals the editor).
@@ -47,8 +67,8 @@ module UI
     end
 
     # Marks a bare Esc as "cancelled" instead of letting it act as an
-    # escape-prefix. The current buffer is left INTACT - the drain loop
-    # hands it back as a prefilled draft on the next trigger.
+    # escape-prefix. The current buffer is left INTACT - the caller hands
+    # it back as a prefilled draft on the next read.
     module RelineEscCancel
       def reset_variables(prompt = '')
         super
@@ -104,23 +124,41 @@ module UI
 
     private
 
-    # tty? is false for pipes/StringIO; streams without the method are
-    # treated as non-tty too (the dumb path only needs #gets).
+    # True when this stream IS the process's real terminal stdin: a tty AND
+    # the same IO (or same fileno) as $stdin. Reline.readline ignores the
+    # stream handed to the editor and attaches to $stdin, so a fake-tty
+    # stream in tests must never take this path.
     def tty?
-      @stdin.respond_to?(:tty?) && @stdin.tty?
+      self.class.is_real_tty_stdin?(@stdin)
+    end
+
+    def self.tty_stream?(io)
+      io.respond_to?(:tty?) && io.tty?
+    end
+
+    # True when two streams are the same IO: identical objects, or both
+    # real file descriptors pointing at the same fd (e.g. $stdin re-read
+    # through a wrapper). Non-file streams (StringIO, fakes) never match.
+    def self.real_io?(io, other)
+      return true if io.equal?(other)
+      return false unless io.respond_to?(:fileno) && other.respond_to?(:fileno)
+
+      a = io.fileno rescue nil
+      b = other.fileno rescue nil
+      !a.nil? && a == b
     end
 
     def dumb_read
       line = @stdin.gets
-      return NOTE_RESULT.new(nil, :eof) if line.nil?
+      return EDITOR_RESULT.new(nil, :eof) if line.nil?
 
       line = line.chomp
-      return NOTE_RESULT.new(line, :empty) if line.strip.empty?
+      return EDITOR_RESULT.new(line, :empty) if line.strip.empty?
 
-      NOTE_RESULT.new(line, :submitted)
+      EDITOR_RESULT.new(line, :submitted)
     end
 
-    def reline_read(prefill)
+    def reline_read(prompt, prefill)
       self.class.install_esc!
       if prefill && !prefill.empty?
         Reline.pre_input_hook = -> do
@@ -128,8 +166,8 @@ module UI
           Reline.pre_input_hook = nil
         end
       end
-      text = Reline.readline(PROMPT, false) # add_history: false - notes are not commands
-      return NOTE_RESULT.new(nil, :eof) if text.nil?
+      text = Reline.readline(prompt, false) # add_history: false - editor lines are not commands
+      return EDITOR_RESULT.new(nil, :eof) if text.nil?
 
       cancelled = Reline.line_editor.cancelled?
       status =
@@ -140,7 +178,7 @@ module UI
         else
           :submitted
         end
-      NOTE_RESULT.new(text, status)
+      EDITOR_RESULT.new(text, status)
     ensure
       Reline.pre_input_hook = nil
     end
@@ -166,7 +204,8 @@ module UI
 
     # True when the LAST Reline read was cancelled with Esc (the buffer
     # is still intact and readable via whole_buffer). CLI#get_command uses
-    # this to drop cancelled input instead of sending it to the model.
+    # this to drop cancelled input instead of sending it to the model;
+    # UI::Dialog uses it as a "draft kept" signal on re-prompt.
     def self.last_read_cancelled?
       Reline.line_editor.respond_to?(:cancelled?) ? !!Reline.line_editor.cancelled? : false
     end

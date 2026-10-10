@@ -413,5 +413,88 @@ RSpec.describe UI::Dialog do
         expect(capture).to include('pick one option only')
       end
     end
+
+    describe 'choice-line tty routing (issue #198 phase 2)' do
+      # The Reline path is taken ONLY for the process's real terminal stdin
+      # (UI::Editor.is_real_tty_stdin? - tested in editor_spec): anything else
+      # would make Reline.readline attach to the real console and block
+      # forever (the issue #202 "stuck" bug class). These tests are therefore
+      # environment-free: no $stdin swap, no fake tty?, no Reline - the routing
+      # predicate (tty_input?) is stubbed directly and the editor is stubbed,
+      # so they pass identically with or without a real terminal attached.
+
+      let(:tty_stream) { StringIO.new }
+      let(:tty_console) { UI::Console.new(stdout: io_out, stdin: tty_stream) }
+
+      def dialog_on_tty(results)
+        d = described_class.new(title: 't', options: options)
+        allow(d).to receive(:tty_input?).and_return(true)
+        stub_editor(results)
+        [d, d.show(ui: tty_console)]
+      end
+
+      # Stub the editor's read sequence ONCE, on a single shared double.
+      # Critical: perform_direct RE-CONSTRUCTS the editor on every re-prompt
+      # loop turn, so stubbing per new (and_wrap_original) would reset the
+      # sequence each iteration - and a non-terminating first element like
+      # :empty/:cancelled would spin forever. One instance + and_return gives
+      # one advancing stream of reads.
+      def stub_editor(results)
+        eof    = UI::Editor::EDITOR_RESULT.new(nil, :eof)
+        seq    = results.map { |t, st| UI::Editor::EDITOR_RESULT.new(t, st) }
+        editor = double('editor')
+        # and_return: elements in order, then the last value repeats once the
+        # list is exhausted (so a short stub never runs past its end).
+        allow(editor).to receive(:read).and_return(*(seq + [eof]))
+        allow(UI::Editor).to receive(:new).and_return(editor)
+      end
+
+      it 'submits the choice through the editor' do
+        expect(dialog_on_tty([['1', :submitted]]).last).to eq(:allow)
+      end
+
+      it 'Esc keeps the draft and re-prompts (never a cancel, issue #155)' do
+        expect(dialog_on_tty([['1 se', :cancelled], ['1', :submitted]]).last).to eq(:allow)
+      end
+
+      it 'bare Enter re-prompts without cancelling' do
+        expect(dialog_on_tty([['', :empty], ['2', :submitted]]).last).to eq(:deny)
+      end
+
+      it 'eof from the editor cancels the dialog like stream EOF' do
+        expect(dialog_on_tty([[nil, :eof]]).last).to eq(UI::Dialog::CANCEL_VALUE)
+      end
+
+      it 'suppresses the plain "> " marker line (the editor owns the prompt)' do
+        dialog_on_tty([[nil, :eof]])
+        expect(capture).to include('Choice (1..3):')
+        # The marker is its own line (print_choice_prompt); a bare "> "
+        # substring also appears inside the form list ("- 3 <one line>"),
+        # so anchor on the full line with its indentation.
+        expect(capture).not_to include("\n             > ")
+      end
+
+      it 'stays on the plain gets path when stdin is not a real tty' do
+        stub_stdin("1\n")
+        expect(show(described_class.new(title: 't', options: options))).to eq(:allow)
+        expect(capture).to include('> ')
+      end
+    end
+
+    describe 'tty routing guard (UI::Editor.is_real_tty_stdin?, issue #202)' do
+      it 'rejects a plain StringIO (the classic spec stream)' do
+        expect(UI::Editor.is_real_tty_stdin?(StringIO.new("1\n"))).to be(false)
+      end
+
+      it 'rejects a pipe endpoint even if the process has a real tty' do
+        reader, writer = IO.pipe
+        begin
+          expect(UI::Editor.is_real_tty_stdin?(reader)).to be(false)
+        ensure
+          writer.close unless writer.closed?
+          reader.close unless reader.closed?
+        end
+      end
+    end
   end
 end
