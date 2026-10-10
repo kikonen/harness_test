@@ -10,22 +10,21 @@
 # user_note_text=), where Harness#call_llm injects it into the message chain
 # before the next LLM call.
 #
+# SOLE STDIN OWNER (issue #198 minimal fix): the reader thread is the ONLY
+# consumer of the stdin stream - dialogs must never open a second gets() on
+# it, or every submitted line becomes a coin flip between two live readers
+# on one tty (the observed stuck-dialog bug). A dialog therefore claims the
+# channel as EXCLUSIVE (#claim_exclusive) and pulls its lines one at a time
+# (#exclusive_line): the reader keeps feeding the same FIFO queue, so lines
+# pre-buffered before the dialog drain to it first (issue #40 total-order
+# rule intact), and nothing races for the keyboard. After the dialog closes
+# (#release_exclusive) the line stream resumes serving steering notes.
+# There is deliberately NO pause/drop mode: the reader never stops, never
+# closes the shared stream mid-turn, and never throws lines away.
+#
 # Single-thread I/O rule (issue #40): the reader thread only ENQUEUES lines -
 # it never touches a stream for output and never writes anywhere. All visible
 # rendering happens on the main thread's drain loop, in outbox order.
-#
-# Dialog safety: a dialog (grant prompt, ui.dialog) reads stdin from the MAIN
-# thread with Reline. While one is open the channel must not RACE it for the
-# keyboard. #pause does this by SUPPRESSING DELIVERY, not by stopping the
-# reader: a gets() parked on the shared tty cannot be woken (Ruby 4.x has no
-# Thread#daemon, and Thread#kill only takes effect once the read returns -
-# a tty never returns until EOF), and closing stdin would either kill every
-# other reader of it or hand an EOF to the dialog (which the drain loop
-# treats as end-of-turn). So while paused the reader keeps running: lines it
-# READS are dropped, and buffered notes that predate the pause are delivered
-# on resume. In practice a dialog blocks in Reline BEFORE new input arrives,
-# so nothing is lost; a line already in flight at the pause moment (or typed
-# while the dialog is open) is dropped rather than leaked into the notes.
 #
 # #stop (task teardown) kills the reader and drops the buffer; on a dedicated
 # stream it also closes it to wake a blocked gets(). On the shared $stdin it
@@ -34,9 +33,10 @@
 # next gets() wakes on close/EOF and ends it (read_loop drops late lines).
 #
 # EOF (Ctrl-D while no prompt is shown) ends the task: the reader pushes the
-# :note_eof control event, which the drain loop treats like :done. The
-# channel stops itself permanently afterwards - it never reads again from a
-# closed stream (a later dialog simply gets nil from stdin too).
+# :note_eof control event, which the drain loop treats like :done. A dialog
+# served from a closed channel gets nil from #exclusive_line (dismiss/cancel
+# - same as its direct-stdin EOF path). The channel stops itself permanently
+# afterwards - it never reads again from a closed stream.
 
 require 'thread'
 
@@ -50,51 +50,77 @@ class UserNoteChannel
   #       thread-local task context, so a bare Task.emit would silently
   #       drop the event. nil in unit tests.
   def initialize(io, task = nil)
-    @io         = io
-    @task       = task
-    @mutex      = Mutex.new
-    @pending    = []
-    @eof        = false   # stream hit EOF: terminal, never reads again
-    @stopped    = false   # stop() called: terminal, never restarts
-    @paused     = false
-    @thread     = nil
+    @io      = io
+    @task    = task
+    @mutex   = Mutex.new
+    @lines   = []
+    @eof     = false   # stream hit EOF: terminal, never reads again
+    @stopped = false   # stop() called: terminal, never restarts
+    @thread  = nil
+    @woken   = ConditionVariable.new
+    @exclusive = false
     @lines_read = 0
   end
 
   # Start reading lines in the background. No-op when already running or
-  # closed (EOF / stopped). While paused, start does not spawn a reader -
-  # the existing one keeps running (it drops lines until resume; see
-  # #pause), and nothing new is needed because only ONE reader may own a
-  # stream at a time.
+  # closed (EOF / stopped). Only ONE reader may own a stream at a time.
   def start
     @mutex.synchronize { start_unlocked }
   end
 
-  # Suspend DELIVERY (a dialog is taking over stdin from the main thread).
-  # The reader keeps running but drops lines while paused - see the header
-  # for why it does not stop or close the shared stream. resume re-enables.
-  def pause
-    @mutex.synchronize { @paused = true }
+  # Claim the channel for a DIALOG (issue #198 minimal fix): while claimed,
+  # #pending_notes returns nil - steering flushes see nothing to deliver -
+  # and the dialog pulls its own lines via #exclusive_line in FIFO order.
+  # Re-claiming is harmless (nested servicing of one claim). Must be paired
+  # with a #release_exclusive when the dialog closes.
+  def claim_exclusive
+    @mutex.synchronize { @exclusive = true }
   end
 
-  # Resume delivery after a dialog closed. Lines typed while paused are in
-  # the kernel stdin buffer and are read now (or by the next prompt).
-  def resume
+  # Release an exclusive claim so the line stream serves steering notes
+  # again. Lines left in the queue stay - they are delivered on the next
+  # drain tick as a normal note (they were typed for the keyboard, not lost).
+  def release_exclusive
+    @mutex.synchronize { @exclusive = false }
+  end
+
+  # BLOCKING exclusive read for a dialog: returns the next line ("line\n")
+  # from the shared FIFO - including lines buffered BEFORE the claim (FIFO)
+  # - or nil once the channel is closed. Wakes on every reader enqueue via
+  # the condition variable, so nothing is lost and nothing races for stdin.
+  # IO-compatible alias: a dialog receives a console whose stdin IS this
+  # channel, so its usual `ui.gets` pulls from the shared FIFO instead of
+  # opening a second gets() on the real stream (issue #198 minimal fix).
+  def gets
+    exclusive_line
+  end
+
+  # Blocking read used by the dialog path (see #gets for why).
+  def exclusive_line
     @mutex.synchronize do
-      @paused = false
-      start_unlocked # covers pause-before-start: spawn now
+      until closed? || (line = @lines.shift)
+        # No line yet: wait for the reader's signal (or EOF/stop). wait
+        # releases and re-acquires the mutex, so no race with enqueue.
+        @woken.wait(@mutex)
+      end
+      return nil if line.nil?
+
+      line + "\n"
+    rescue ThreadError
+      nil # mutex already gone (channel stopped): closed path wins
     end
   end
 
   # Drain buffered lines into one note text (nil when nothing pending or
-  # paused). Consumes the buffer: a second call immediately after returns
-  # nil, so the caller can only ever deliver each line once.
+  # while a dialog owns the channel exclusively). Consumes the buffer: a
+  # second call immediately after returns nil, so the caller can only ever
+  # deliver each line once.
   def pending_notes
     @mutex.synchronize do
-      return nil if @paused || @pending.empty?
+      return nil if @exclusive || @lines.empty?
 
-      drained = @pending.join("\n")
-      @pending.clear
+      drained = @lines.join("\n")
+      @lines.clear
       drained
     end
   end
@@ -115,43 +141,41 @@ class UserNoteChannel
       return if closed?
 
       @stopped = true
-      @pending.clear
+      @lines.clear
       interrupt_reader
+      @woken.broadcast
     end
   end
 
   private
 
   def start_unlocked
-    return if closed? || @thread || @paused
+    return if closed? || @thread
+
     t = Thread.new { read_loop }
-    # report_on_exception off: a kill from pause/stop surfacing as an
-    # exception must not spam the console (and can't be handled anyway -
-    # the read is interrupted mid-syscall on some platforms).
+    # report_on_exception off: a kill from stop surfacing as an exception
+    # must not spam the console (and can't be handled anyway - the read is
+    # interrupted mid-syscall on some platforms).
     t.report_on_exception = false
     @thread = t
   end
 
   # Pull lines until EOF or death. Only enqueues - no output I/O here
-  # (issue #40 single-thread I/O rule). A line read while the channel is
-  # PAUSED is dropped rather than delivered: it may have been typed for the
-  # dialog (or at least raced it), and buffering it would leak dialog-time
-  # input into the model's note slot. Lines read AFTER resume are normal -
-  # which is where tty input held in the kernel buffer during a dialog
-  # lands (at resume or the next prompt start). lines_read counts EVERY
-  # line read (blanks included); dropped lines are not buffered.
+  # (issue #40 single-thread I/O rule). Every non-blank line lands in the
+  # shared FIFO regardless of who will consume it (drain loop or dialog);
+  # order is what matters. lines_read counts EVERY line read (blanks
+  # included); blank lines are not buffered.
   def read_loop
     until (line = safe_gets).nil?
       @mutex.synchronize { @lines_read += 1 }
       text = line.chomp.strip
       next if text.empty?
 
-      # Paused: the line raced the dialog - drop it. A stopped channel
-      # never buffers again (zombie hygiene).
       @mutex.synchronize do
-        next if @paused || closed?
+        break if closed?   # stop raced the read: drop late lines
 
-        @pending << text
+        @lines << text
+        @woken.signal      # wake an exclusive waiter (dialog) if any
       end
     end
     mark_eof
@@ -180,6 +204,7 @@ class UserNoteChannel
 
       @eof = true
       @thread = nil
+      @woken.broadcast   # wake any exclusive waiter: it sees closed? -> nil
     end
     return if @task.nil?
 

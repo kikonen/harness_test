@@ -7,14 +7,13 @@ require 'stringio'
 RSpec.describe UserNoteChannel do
   # NOTE: StringIO.gets does NOT block - it returns nil as soon as the
   # buffered content is exhausted, which the reader treats as EOF. Blocking
-  # scenarios (pause/stop mid-stream) therefore use real pipes, where gets
-  # waits until data or a closed write end. Empty-string EOF tests use
-  # StringIO (its immediate nil is exactly the EOF we want).
+  # scenarios (exclusive reads / stop mid-stream) therefore use real pipes,
+  # where gets waits until data or a closed write end. Empty-string EOF
+  # tests use StringIO (its immediate nil is exactly the EOF we want).
 
   def wait_for(_target, message: 'timed out waiting for channel state')
     # Generous deadline: the reader runs on a real thread reading through a
-    # pipe, and CI runners can be far slower than a local dev box (a tight
-    # 2s deadline flaked there once - seed 60967, pause/resume example).
+    # pipe, and CI runners can be far slower than a local dev box.
     deadline = Time.now + 10
     until yield
       raise message if Time.now > deadline
@@ -121,45 +120,62 @@ RSpec.describe UserNoteChannel do
     end
   end
 
-  describe 'pause / resume (dialog safety)' do
-    # Pause = suppress DELIVERY while the dialog owns the keyboard. Notes
-    # buffered BEFORE the pause must survive it, and the reader must keep
-    # working so lines typed AFTER resume arrive (the tty in production
-    # holds input in the kernel buffer until then). A line written DURING
-    # the pause is timing-race: if the reader's gets() was already parked
-    # before pause landed, it may legitimately be read and dropped - the
-    # contract never guarantees which of the two gates wins, so this spec
-    # does not assert on that line at all (it flaked on CI when it did).
-    it 'keeps buffered notes across pause and keeps reading after resume' do
+  describe 'exclusive claim (dialog safety, issue #198)' do
+    # The dialog CLAIMS the channel instead of opening a second gets() on
+    # the stream: while claimed, pending_notes returns nil (the drain loop
+    # delivers nothing) and gets/exclusive_line pull lines from the SAME
+    # FIFO. Lines buffered BEFORE the claim must reach the dialog first
+    # (FIFO order), and only after release does the next line become a
+    # steering note again.
+    it 'serves pre-claim lines to the dialog in FIFO order' do
       with_pipe do |read_io, write_io|
         channel = described_class.new(read_io)
         channel.start
-        write_io.puts 'before pause'
-        wait_for(channel) { channel.lines_read == 1 }
+        write_io.puts 'before claim'
+        write_io.puts 'dialog choice'
+        # Wait for BOTH lines to land in the FIFO before claiming, so gets
+        # below is never a blocking call (no poll-loop line stealing).
+        wait_for(channel) { channel.lines_read == 2 }
 
-        expect(channel.pending_notes).to eq('before pause')
-        channel.pause
-        write_io.puts 'held line' # typed "during the dialog" - dropped or
-                                  # raced-in (see above), asserted below
-        channel.resume
-        write_io.puts 'after resume'
-        notes = nil
-        wait_for(channel) do
-          notes = channel.pending_notes
-          notes.to_s.include?('after resume')
-        end
-        expect(notes).to include('after resume')
-        expect(channel.pending_notes).to be_nil # drain is one-shot
-        expect(channel.closed?).to be(false)    # reader survived pause/resume
+        channel.claim_exclusive
+        # FIFO: both pre-claim lines go to the dialog, in order.
+        expect(channel.gets).to eq("before claim\n")
+        expect(channel.gets).to eq("dialog choice\n")
+
+        channel.release_exclusive
       end
     end
 
-    it 'resume after EOF does nothing (channel stays closed)' do
+    it 'suppresses steering notes while claimed and serves them after release' do
+      with_pipe do |read_io, write_io|
+        channel = described_class.new(read_io)
+        channel.start
+        write_io.puts 'steer left'
+        wait_for(channel) { channel.lines_read == 1 }
+
+        channel.claim_exclusive
+        expect(channel.pending_notes).to be_nil # dialog owns the line stream
+
+        expect(channel.gets).to eq("steer left\n")  # FIFO: line goes to dialog
+        channel.release_exclusive
+
+        write_io.puts 'steer right'
+        notes = nil
+        wait_for(channel) do
+          notes = channel.pending_notes
+          notes == 'steer right'
+        end
+        expect(notes).to eq('steer right') # back to steering after release
+        expect(channel.closed?).to be(false)    # reader survived the claim
+      end
+    end
+
+    it 'claim after EOF does nothing (channel stays closed)' do
       channel = described_class.new(StringIO.new) # immediate EOF
       channel.start
       wait_for(channel) { channel.closed? }
 
-      channel.resume
+      channel.claim_exclusive
       expect(channel.closed?).to be(true)
       expect(channel.pending_notes).to be_nil
     end

@@ -435,5 +435,53 @@ RSpec.describe Task do
 
       expect(task.note_channel).to be_nil
     end
+
+    it 'serves a dialog from the note channel FIFO (issue #198)' do
+      # The line typed before the dialog opens is the dialog's answer: it
+      # must go to the DIALOG first (FIFO order), not be flushed as a note.
+      io_out  = StringIO.new
+      harness = fake_harness
+      choice  = nil
+
+      with_stdin_pipe do |io_in, writer|
+        writer.puts '1'   # typed before the dialog opens
+        described_class.run(harness: harness,
+                            ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |t|
+          dialog = UI::Dialog.new(
+            title: 'Grant test',
+            options: [UI::Dialog::Option.new(title: 'Allow', value: :allow)]
+          )
+          choice = t.request(:dialog, dialog: dialog)
+        end
+      end
+
+      expect(choice).to eq(:allow) # the line reached the dialog, not a note
+      expect(harness.notes).to be_empty # it must NOT double up as a note
+    end
+
+    it 'delivers lines typed WHILE a dialog is open to the dialog (no race)' do
+      # The bug scenario: user types at the prompt, a dialog appears. With
+      # two readers on the tty the line was stolen by one of them; now the
+      # channel is the sole reader and hands the line to the dialog.
+      io_out  = StringIO.new
+      harness = fake_harness
+      choice  = nil
+
+      with_stdin_pipe do |io_in, writer|
+        described_class.run(harness: harness,
+                            ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |t|
+          dialog = UI::Dialog.new(
+            title: 'Grant test',
+            options: [UI::Dialog::Option.new(title: 'Allow', value: :allow)]
+          )
+          # Simulate the user typing while the dialog is open: write to the
+          # stdin pipe from a helper thread once the request is serviced.
+          Thread.new { sleep 0.5; writer.puts '1' }
+          choice = t.request(:dialog, dialog: dialog)
+        end
+      end
+
+      expect(choice).to eq(:allow) # dialog received the typed line
+    end
   end
 end
