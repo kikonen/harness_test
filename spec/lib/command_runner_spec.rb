@@ -224,8 +224,7 @@ RSpec.describe CommandRunner do
         expect(messages[0]).to start_with('shell command failed:')
         expect(messages[0]).to include('command: false')
         expect(messages[0]).to include('status: exit 1')
-        expect(messages[0]).to include("--- stdout ---\n(none)")
-        expect(messages[0]).to include("--- stderr ---\n(none)")
+        expect(messages[0]).to include("--- output ---\n(none)")
       end
     end
 
@@ -236,7 +235,7 @@ RSpec.describe CommandRunner do
         runner = described_class.new(FileList.new([], workdir: dir), {},
                                      harness: harness_with(logger))
         allow_any_instance_of(described_class).to receive(:run_in_shell)
-                  .and_raise(Timeout::Error, 'timeout')
+                  .and_return(['', :timeout])
 
         runner.run('sleep 120', timeout: 60)
         expect(messages.size).to eq(1)
@@ -262,15 +261,31 @@ RSpec.describe CommandRunner do
     Dir.mktmpdir do |dir|
       seed_allowlist(dir, 'sleep 120')
       runner = make_tool_runner(dir)
-      # Simulate the timeout instead of actually sleeping.
       allow_any_instance_of(described_class).to receive(:run_in_shell)
-                .and_raise(Timeout::Error, 'timeout')
+                .and_return(['', :timeout])
 
       out = runner.run('sleep 120', timeout: 60)
       expect(out).to eq('error: command timed out after 60s')
     end
   end
 
+  # REAL timeout (no stubbing): proves issue #202 - the runner must ALWAYS
+  # return promptly with :timeout and the whole process tree must be dead
+  # afterwards, so a hung command can never wedge the harness again. Calls
+  # read_child_in_group directly because run() clamps timeout up to 60 s.
+  it 'kills the command tree on timeout and returns without hanging' do
+    Dir.mktmpdir do |dir|
+      runner = make_tool_runner(dir)
+
+      started = Time.now
+      _out, status = runner.send(:read_child_in_group, 'sleep 99', dir, 2)
+      elapsed = Time.now - started
+
+      expect(status).to eq(:timeout)
+      # The tree must be killed, not waited out: well under the 99 s.
+      expect(elapsed).to be < 10
+    end
+  end
   it 'honors dry runs without executing' do
     Dir.mktmpdir do |dir|
       seed_allowlist(dir, 'echo hi')
@@ -288,7 +303,7 @@ RSpec.describe CommandRunner do
       runner = make_tool_runner(dir)
       allow_any_instance_of(described_class).to receive(:run_in_shell) do
         stdout = (1..50).map { |i| "line #{i}" }.join("\n") + "\n"
-        [stdout, '', Struct.new(:exitstatus).new(0)]
+        [stdout, Struct.new(:exitstatus).new(0)]
       end
 
       out = runner.run('seq 50', limit: 10)

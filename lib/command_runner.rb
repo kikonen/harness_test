@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
-require 'open3'
 require 'bundler'
-require 'timeout'
 
 require_relative 'tool'
 require_relative 'command_allowlist'
@@ -27,7 +25,10 @@ require_relative 'ui/dialog'
 #     the tool writes .harness/allowed_commands.yml, bang syntax writes
 #     .harness/shell_commands.yml - one never auto-approves for the other.
 #   - Commands run under a timeout (default 60 s, cap 300 s) so a hung
-#     process can never block the session indefinitely.
+#     process can never block the session indefinitely (issue #202).
+#     The child runs in its OWN process group; on timeout the whole tree is
+#     killed (taskkill /T on Windows, SIGKILL to the pgroup elsewhere), so a
+#     hung command can never hold the harness' streams open again.
 #   - Output is truncated to a line limit (default 200, max 5000); that
 #     limit exists because the tool path returns output into the LLM
 #     context window - the bang path prints it as-is.
@@ -36,6 +37,10 @@ class CommandRunner
   MAX_TIMEOUT     = 300   # hard cap
   DEFAULT_LIMIT   = 200   # output lines
   MAX_LIMIT       = 5000  # hard cap
+
+  # Grace period after the kill before giving up on the wait: by then the
+  # whole tree is gone (or nearly), so the subsequent wait cannot hang.
+  KILL_GRACE_SECONDS = 5
 
   TOOL_TITLE = "The model is requesting to run a shell command:\n" \
                "$ %s\ncwd: %s (timeout: %ss)"
@@ -71,8 +76,8 @@ class CommandRunner
   end
 
   # Run a command after any required user consent. Returns the formatted
-  # result string: "exit code: N (Xs)" + stdout/stderr sections, or an
-  # "error: ..." string on denial / failure.
+  # result string: "exit code: N (Xs)" + output section, or an
+  # "error: ..." string on denial / timeout.
   def run(command, cwd: nil, timeout: DEFAULT_TIMEOUT, limit: DEFAULT_LIMIT)
     command = command.to_s.strip
     return "error: 'command' must be a non-empty shell command" if command.empty?
@@ -204,8 +209,7 @@ class CommandRunner
       denial: Tool.denial_error("error: #{message}", note ? { note: note } : nil) }
   end
 
-  # Runs the command (after any required confirmation) and formats the
-  # result. Raises Timeout::Error when the command exceeds its timeout.
+  # Runs the command (after any required confirmation) and formats the result.
   def execute(command, dir, shown, timeout, limit)
     if @options&.dig(:dry_run)
       status("~ #{command} (dry run)")
@@ -213,12 +217,19 @@ class CommandRunner
     end
 
     started = Time.now
-    stdout, stderr, result = run_in_shell(command, dir, timeout)
+    output, status = run_in_shell(command, dir, timeout)
+    # Symbol (not Process::Status) signals the timeout path.
+    if status == :timeout
+      # The tree was already killed by run_in_shell (issue #202); nothing
+      # more can hang here.
+      status("✗ #{command} (timed out after #{timeout}s)")
+      log_failure(command, "TIMED OUT after #{timeout}s", output)
+      return "error: command timed out after #{timeout}s"
+    end
     elapsed = (Time.now - started).round(2)
-    code    = result.exitstatus
+    code    = status.exitstatus
 
-    out            = truncate(stdout, limit)[0]
-    err            = truncate(stderr, limit)[0] unless stderr.strip.empty?
+    out            = truncate(output, limit)[0]
 
     if code.zero?
       status("✓ #{command} (exit 0, #{elapsed}s)")
@@ -226,46 +237,37 @@ class CommandRunner
       status("✗ #{command} (exit #{code}, #{elapsed}s)")
     end
 
-    format_result(command, code, elapsed, stdout, stderr, out, err)
-  rescue Timeout::Error
-    status("✗ #{command} (timed out after #{timeout}s)")
-    log_failure(command, "TIMED OUT after #{timeout}s")
-    "error: command timed out after #{timeout}s"
+    format_result(command, code, elapsed, output, out)
   end
 
   # Builds the formatted result string. A FAILED command that produced no
-  # stdout AND no stderr leaves only the bare "exit code:" line - which is
-  # exactly the trace-less failure of issue #185 (e.g. a missing binary
-  # prints nothing on some platforms). Name it in the result so the model
-  # sees WHY there is no output, and log the full raw output to
-  # harness.log so the failure is always recoverable from the log.
-  def format_result(command, code, elapsed, stdout, stderr, out, err)
+  # output at all leaves only the bare "exit code:" line - exactly the
+  # trace-less failure of issue #185 (e.g. a missing binary prints nothing
+  # on some platforms). Name it in the result so the model sees WHY there
+  # is no output, and log the full raw output to harness.log so the
+  # failure is always recoverable from the log.
+  def format_result(command, code, elapsed, stdout, out)
     msg = "exit code: #{code} (#{elapsed}s)\n"
-    msg += "--- stdout ---\n#{out}\n" if out.strip != ''
-    msg += "--- stderr ---\n#{err}\n" if err&.strip&.!= ''
-    if !code.zero? && stdout.strip.empty? && stderr.strip.empty?
+    msg += "--- output ---\n#{out}\n" if out.strip != ''
+    if !code.zero? && stdout.strip.empty?
       msg += "(the command produced no output - nothing to inspect)\n"
     end
-    log_failure(command, "exit #{code}", stdout, stderr) unless code.zero?
+    log_failure(command, "exit #{code}", stdout) unless code.zero?
     msg
   end
 
   # issue #185: every FAILED command (non-zero exit or timeout) gets an
-  # entry in the session's harness.log with the command, its status and
-  # the full UNTRUNCATED stdout/stderr - so a failure always leaves a
-  # trace even when the returned result had none. Empty streams are
-  # labeled "(none)" rather than omitted. No-op without a harness
-  # (specs construct the runner standalone).
-  def log_failure(command, why, stdout = nil, stderr = nil)
+  # entry in the session's harness.log with the command, its status and the
+  # full UNTRUNCATED output - so a failure always leaves a trace even when
+  # the returned result had none. Empty streams are labeled "(none)". No-op
+  # without a harness (specs construct the runner standalone).
+  def log_failure(command, why, stdout = nil)
     logger = @harness&.logger
     return unless logger
 
     parts = ["command: #{command}", "status: #{why}"]
     if stdout
-      parts << "--- stdout ---\n#{stdout.strip.empty? ? '(none)' : stdout}"
-    end
-    if stderr
-      parts << "--- stderr ---\n#{stderr.strip.empty? ? '(none)' : stderr}"
+      parts << "--- output ---\n#{stdout.strip.empty? ? '(none)' : stdout}"
     end
     logger.warn("shell command failed:\n" + parts.join("\n"))
   end
@@ -277,11 +279,67 @@ class CommandRunner
   # in the command would resolve against the wrong Gemfile and fail with
   # cryptic "can't find executable" errors. Stripped, `bundle exec` falls
   # back to the CWD's Gemfile - which is what callers expect.
+  #
+  # Result shape: [combined_output, exit_code_or_:timeout]. The child's
+  # stderr is merged into stdout (2>&1) - one stream is enough for the LLM
+  # context path and halves the plumbing.
   def run_in_shell(command, dir, timeout)
     Bundler.with_unbundled_env do
-      Timeout.timeout(timeout) do
-        Open3.capture3('sh', '-c', command, chdir: dir)
+      read_child_in_group(command, dir, timeout)
+    end
+  end
+
+  # Runs `command` in `sh -c` in its OWN process group and reads its output
+  # until it exits or `timeout` seconds pass. On timeout the whole process
+  # tree is killed and :timeout is returned, so this method ALWAYS returns -
+  # a hung command can never block the caller (issue #202: Open3.capture3 +
+  # Timeout.timeout only raised in the parent and abandoned the child, which
+  # then kept the harness' stdin/stdout open forever).
+  def read_child_in_group(command, dir, timeout)
+    out_r, out_w = IO.pipe
+    pid = Process.spawn('sh', '-c', command, chdir: dir, in: File::NULL,
+                        out: out_w, err: out_w, new_pgroup: true)
+    out_w.close
+
+    output = +""
+    reader = Thread.new do
+      Thread.current.report_on_exception = false
+      loop { output << out_r.readpartial(64 * 1024) }
+    rescue EOFError, IOError
+      # EOF when the whole tree exits; out_r#close below unblocks a
+      # read stuck because a surviving grandchild still held the pipe.
+    end
+
+    waiter = Process.detach(pid)
+    deadline = Time.now + timeout
+    timed_out = false
+    until waiter.join(0.1)
+      if Time.now >= deadline
+        timed_out   = true
+        kill_process_tree(pid)
+        waiter.join(KILL_GRACE_SECONDS) # the tree is gone, or nearly
+        break
       end
+    end
+
+    out_r.close # unblocks the reader if a grandchild kept the pipe open
+    reader.join
+    # waiter has always been joined here (kill + grace join on timeout),
+    # so value never blocks.
+    [output, timed_out ? :timeout : waiter.value]
+  end
+
+  # Kills `pid` and EVERYTHING it spawned. Windows: taskkill /T /F walks the
+  # tree for us (no process groups to signal). POSIX: the child was spawned
+  # in its own pgroup (pgid == pid), so one group signal reaches all
+  # descendants; SIGKILL straight away is fine - by timeout the command is
+  # already dead to the user.
+  def kill_process_tree(pid)
+    if Gem.win_platform?
+      system('taskkill', '/T', '/F', '/PID', pid.to_s,
+             out: File::NULL, err: File::NULL)
+    else
+      Process.kill(:KILL, -pid) rescue nil
     end
   end
 
