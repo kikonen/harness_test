@@ -52,12 +52,20 @@ module UI
     # The submit key: ESC then CR. The Windows IOGate maps Ctrl+Enter and
     # Shift+Enter to these bytes; Unix terminals produce them with
     # Alt+Enter (Ctrl/Shift+Enter there are indistinguishable from a plain
-    # Enter, so that is the documented platform split). CAVEAT: a remote
-    # Linux host seen through Windows Terminal (ssh / WSL2) gets NEITHER -
-    # Windows Terminal consumes Alt+Enter for its fullscreen toggle and
-    # Ctrl+Enter has no extended-keyboard encoding there by default, so the
-    # CSI_CTRL_ENTER_SEQ binding below is the portable fallback (issue #198).
+    # Enter, so that is the documented platform split). AltGr+Enter sends
+    # the same bytes on most layouts (AltGr is ESC-prefixed, like Meta).
+    # CAVEAT: a remote host seen through Windows Terminal (ssh / WSL2) gets
+    # neither plain Alt+Enter (fullscreen toggle) nor a default Ctrl+Enter;
+    # but Ctrl+Enter arrives as LF (CTRL_ENTER_LF_BYTE below) and AltGr+
+    # Enter works when the keyboard has one - both are bound (issue #198).
     SUBMIT_KEY_SEQ = [ESC_KEY_BYTE, CR_KEY_BYTE].freeze
+    # Probe finding (issue #198, showkey over ssh / WSL2): plain Enter
+    # arrives as CR (byte 13) but Ctrl+Enter arrives as LF (byte 10) - the
+    # two are distinguishable at the Reline level. Bound to force-submit
+    # with a paste guard (see install_esc!), so Ctrl+Enter submits on the
+    # remote-via-Windows-Terminal setups where no other submit key reaches
+    # the pty.
+    CTRL_ENTER_LF_BYTE = 10.freeze
     # CSI Ctrl+Enter ("ESC [ 1 3 ~"), sent for Ctrl+Enter by terminals with
     # an extended keyboard protocol (kitty/kamadb/kcm mode - e.g. recent
     # Windows Terminal + kitty keyboard enhancement). Harmless to bind on
@@ -65,8 +73,39 @@ module UI
     # submit key when running a remote host via Windows Terminal (issue #198).
     CSI_CTRL_ENTER_SEQ = [27, 91, 49, 51, 126].freeze
 
+    # Opt-in fallback for setups where NO submit key reaches the terminal
+    # (a remote host seen through Windows Terminal - issue #198): with
+    # `submit_on_enter` set, Enter on an EMPTY LAST LINE submits the whole
+    # buffer. Every other Enter inserts a newline as usual. Pasted line
+    # breaks are excluded (RelineEnterPolicy's paste guard) so pasted
+    # blank lines cannot submit mid-paste. Only multiline reads are
+    # affected; single-line reads and vi mode keep Reline's behaviour.
+
+    # Process-global switch for the opt-in Enter policy (default off -
+    # plain Enter always inserts a newline). Set once at startup from the
+    # 'double_enter_submit' config key (see CLI); covers the idle prompt
+    # and the mid-turn note editor alike.
+    def self.submit_on_enter=(value)
+      EnterState.enabled = value
+    end
+
+    def self.submit_on_enter?
+      !!EnterState.enabled
+    end
+
     def initialize(stdin)
       @stdin = stdin
+    end
+
+    # Shared state for the opt-in Enter policy (RelineEnterPolicy lives on
+    # a different object - the LineEditor - so the flag rides on a module,
+    # like EscState).
+    module EnterState
+      class << self
+        attr_writer :enabled
+
+        def enabled? = !!@enabled
+      end
     end
 
     # Read one line from stdin. `prompt` is the editor prompt string;
@@ -142,6 +181,82 @@ module UI
       def cancel_input(_key)
         @cancelled = true
         finish
+      end
+    end
+
+    # Opt-in "double Enter submits" policy (issue #198 fallback for setups
+    # where no submit key reaches the terminal - e.g. a remote host seen
+    # through Windows Terminal). When `submit_on_enter` is enabled, Enter
+    # on an EMPTY LAST LINE of a multiline emacs-mode buffer submits it;
+    # every other Enter inserts a newline as usual. Pasted text never
+    # triggers it: with bracketed paste the whole blob arrives at once so
+    # ed_newline is not consulted for pasted breaks, and without bracketed
+    # paste the PASTE_GRACE window after any observed paste suppresses the
+    # policy (doc/reline_cursor_and_enter_handling.md section 6). Trade-off:
+    # the buffer cannot END with a blank line as content while enabled.
+    module RelineEnterPolicy
+      PASTE_GRACE = 0.05
+
+      class PasteGuard
+        @last_seen = nil
+
+        class << self
+          def mark
+            @last_seen = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          end
+
+          def clear!
+            @last_seen = nil
+          end
+
+          def recent?
+            return false if @last_seen.nil?
+
+            now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            now - @last_seen < PASTE_GRACE
+          end
+        end
+      end
+
+      def input_key(key)
+        PasteGuard.mark if @in_pasting
+        super
+      end
+
+      private
+
+      def ed_newline(key)
+        return super unless submit_on_empty_last_line?
+
+        process_insert(force: true)
+        finish
+      end
+
+      def submit_on_empty_last_line?
+        return false unless EnterState.enabled?
+        return false unless @is_multiline
+        return false unless @config.editing_mode_is?(:emacs)
+        return false if @in_pasting || PasteGuard.recent?
+
+        @line_index == @buffer_of_lines.size - 1 &&
+          @buffer_of_lines.last.to_s.strip.empty?
+      end
+    end
+    # Ctrl+Enter submit (issue #198): byte 10 (LF) is Reline's default
+    # mapping for a plain line break; on Windows Terminal reaching a remote
+    # host (ssh / WSL2) Ctrl+Enter arrives as exactly this byte while Enter
+    # sends CR (verified via showkey). The action respects the paste guard
+    # (doc/reline_cursor_and_enter_handling.md section 7): an LF inside
+    # pasted text without bracketed paste would otherwise submit at the
+    # first line break.
+    module RelineLFSubmit
+      private
+
+      def lf_force_submit(key)
+        return key_newline(key) if @in_pasting || \
+          RelineEnterPolicy::PasteGuard.recent?
+
+        ed_force_submit(key)
       end
     end
 
@@ -272,15 +387,32 @@ module UI
       unless Reline::LineEditor.ancestors.include?(RelineEscCancel)
         Reline::LineEditor.prepend(RelineEscCancel)
       end
+      # Opt-in double-Enter submit (issue #198): inert until
+      # `submit_on_enter` is enabled - see the module's own docs.
+      unless Reline::LineEditor.ancestors.include?(RelineEnterPolicy)
+        Reline::LineEditor.prepend(RelineEnterPolicy)
+      end
+      # Ctrl+Enter submit on remote hosts seen through Windows Terminal:
+      # Ctrl+Enter arrives as LF (byte 10) where plain Enter sends CR.
+      unless Reline::LineEditor.ancestors.include?(RelineLFSubmit)
+        Reline::LineEditor.prepend(RelineLFSubmit)
+      end
       cfg = Reline.core.config
       cfg.keyseq_timeout = 100
       # SUBMIT_KEY_SEQ: submit the whole multiline buffer. The Windows
       # IOGate maps Ctrl+Enter/Shift+Enter to these bytes; Unix terminals
       # produce them with Alt+Enter (see doc/reline_cursor_and_enter_
-      # handling.md, section 7). Neither key reaches a remote host seen
-      # through Windows Terminal (ssh / WSL2) - see CSI_CTRL_ENTER_SEQ.
+      # handling.md, section 7). On a remote host seen through Windows
+      # Terminal (ssh / WSL2) plain Alt+Enter and Ctrl+Enter never arrive,
+      # but AltGr+Enter does - and the CSI binding below covers kcm setups.
       # add is idempotent for a repeated key -> action pair.
       cfg.add_default_key_binding_by_keymap(:emacs, SUBMIT_KEY_SEQ, :ed_force_submit)
+      # CTRL_ENTER_LF_BYTE: on those same remote setups Ctrl+Enter arrives
+      # as LF (byte 10) while Enter sends CR (showkey-verified). Replaces
+      # Reline's default ed_newline mapping; the guard keeps pasted LFs
+      # from submitting (doc section 7 side note).
+      cfg.add_default_key_binding_by_keymap(:emacs, [CTRL_ENTER_LF_BYTE],
+                                           :lf_force_submit)
       # CSI_CTRL_ENTER_SEQ: the portable submit key (issue #198). Sent for
       # Ctrl+Enter only by terminals with an extended keyboard protocol;
       # everywhere else it is never received and stays an inert binding.

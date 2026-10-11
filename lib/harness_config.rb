@@ -40,6 +40,7 @@ require_relative 'harness_error'
 #   retry:
 #     count: 3                  # total attempts for transient network errors
 #     delay: 2                  # base delay (seconds) between retries
+#   double_enter_submit: false # Enter on an empty last line submits the multiline buffer (issue #198)
 #   system: |                   # full system prompt (overrides the built-in)
 #     You are a precise code editor...
 #
@@ -89,6 +90,11 @@ class HarnessConfig
       count: 3                 # total attempts (1 initial + N-1 retries)
       delay: 2                 # base delay in seconds (exponential backoff)
 
+    # Enter on an EMPTY last line submits the multiline buffer (issue #198,
+    # for setups where no submit key reaches the terminal - e.g. remote via
+    # Windows Terminal). Pasted blank lines never trigger it. Default: false.
+    # double_enter_submit: true
+
     # Full system prompt override (uncomment to use).
     # --system-file still takes precedence.
     # system: |
@@ -104,6 +110,7 @@ class HarnessConfig
     @default_model = nonblank(data['default_model'])
     @system       = nonblank(data['system'])
     @auto_save    = data['auto_save'].nil? ? true : data['auto_save']
+    @double_enter_submit = data['double_enter_submit'] == true
     @compact      = {
       recent_messages: int_or_nil(data.dig('compact', 'recent_messages')),
       auto_threshold:  float_or_nil(data.dig('compact', 'auto_threshold')),
@@ -181,6 +188,13 @@ class HarnessConfig
   # Whether the session is auto-saved at every prompt boundary (default true).
   def auto_save_enabled
     @auto_save == true
+  end
+
+  # Opt-in double-Enter submit for the multiline editor (issue #198):
+  # Enter on an empty last line submits the buffer. Default false - plain
+  # Enter always inserts a newline.
+  def double_enter_submit_enabled
+    @double_enter_submit == true
   end
 
   # Number of recent messages retained verbatim after compaction (or nil).
