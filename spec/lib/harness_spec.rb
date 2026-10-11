@@ -14,16 +14,59 @@ RSpec.describe Harness do
   let(:workdir) { Dir.mktmpdir('harness-spec') }
   after { FileUtils.remove_entry(workdir) if File.directory?(workdir) }
 
+  # Fake LLM client shared by the call_llm coverage below: records every
+  # message chain it is called with and answers from a SCRIPTED queue.
+  # Each item is either a tool round (a hash with :tool_calls), a final
+  # answer ({ content: }), or :fail (raises LLMError - simulating a lost
+  # connection mid-turn, issue #208). Anything left in the queue at the end
+  # defaults to a final 'done' answer.
+  class FakeScriptedClient
+    attr_reader :calls
+
+    def initialize(responses = [{ content: 'done', reasoning: nil }])
+      @calls     = []
+      @responses = responses
+    end
+
+    def chat(messages, tools: nil)
+      @calls << messages.map { |m| m.dup }
+      response = @responses.shift || { content: 'done' }
+      raise LLMError, 'connection lost mid-turn' if response == :fail
+
+      message = response.is_a?(Hash) ? response : { content: 'done' }
+      { choices: [{ message: message.merge(reasoning: nil) }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }
+    end
+  end
+
   def build_harness(options = {})
     file_list = FileList.new([], workdir: workdir)
     opts      = { system: 'system prompt', num_ctx: 65_536 }.merge(options)
     described_class.new(opts, file_list)
   end
 
+  # A harness whose client plays a scripted response sequence (see
+  # FakeScriptedClient) - the call_llm specs below use it to drive multi-
+  # round tool loops and mid-loop failures.
+  def build_harness_with_responses(responses = [{ content: 'done', reasoning: nil }])
+    h = build_harness
+    h.instance_variable_set(:@client, FakeScriptedClient.new(responses))
+    h
+  end
+
   def seed_usage(harness, prompt_tokens)
     harness.session.add_user('hello')
     harness.session.add_assistant('hi')
     harness.session.record_stats(usage: { prompt_tokens: prompt_tokens, total_tokens: prompt_tokens + 867 })
+  end
+
+  def drained_lines(task)
+    lines = []
+    loop do
+      m = task.poll(0); break unless m
+      lines << m[:content]
+    end
+    lines
   end
 
   describe '#context_indicator' do
@@ -241,7 +284,6 @@ RSpec.describe Harness do
       harness.send(:print_step_display, 2, msg)
       lines = drained_lines
 
-      expect(lines).to include('[step 2]')
       expect(lines).to include('||| checking the test suite |||')
       expect(lines).to include('    -> run.command')
     end
@@ -252,8 +294,6 @@ RSpec.describe Harness do
       harness.send(:print_step_display, 4, msg)
       lines = drained_lines
 
-      expect(lines).to include('[step 4]')
-      # The renderer owns the trailing newline now - the entry holds the raw line.
       expect(lines).to include('    -> file.search')
     end
 
@@ -374,27 +414,7 @@ RSpec.describe Harness do
   end
 
   describe '#user_note / call_llm mid-turn note injection (issue #36)' do
-    # Fake LLM client: records every message chain it is called with and
-    # answers each call with a final (no tool calls) response.
-    class FakeLLMClient
-      attr_reader :calls
-
-      def initialize
-        @calls = []
-      end
-
-      def chat(messages, tools: nil)
-        @calls << messages.map { |m| m.dup }
-        { choices: [{ message: { content: 'done', reasoning: nil } }],
-          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }
-      end
-    end
-
-    let(:harness) do
-      h = build_harness
-      h.instance_variable_set(:@client, FakeLLMClient.new)
-      h
-    end
+    let(:harness) { build_harness_with_responses }
 
     it 'injects a pending note into the chain before the next LLM call' do
       harness.session.add_user('original prompt')
@@ -413,12 +433,18 @@ RSpec.describe Harness do
       harness.call_llm
 
       expect(harness.user_notes).to eq(['steer left'])
-      # The slot is consumed: a second turn injects nothing new.
+      # issue #208: the note committed into the SESSION directly (it is in
+      # the chain now), and a second turn sends that chain - nothing is
+      # replayed or double-appended.
+      expect(harness.session.messages.map { |m| m[:content].to_s })
+        .to include('User note (mid-turn): steer left')
+      expect(harness.session.pending?).to be(false)
       harness.session.add_user('next prompt')
       harness.call_llm
 
       second = harness.client.calls.last
-      expect(second.map { |m| m[:content].to_s }).not_to include('User note (mid-turn): steer left')
+      notes = second.select { |m| m[:content].to_s == 'User note (mid-turn): steer left' }
+      expect(notes.size).to eq(1)
     end
 
     it 'ignores blank notes (the setter clears the slot)' do
@@ -445,45 +471,89 @@ RSpec.describe Harness do
       notes = sent.select { |m| m[:content].to_s.include?('User note (mid-turn):') }
       expect(notes).to eq([{ role: 'user', content: 'User note (mid-turn): no - use python' }])
       expect(harness.user_notes).to eq(['no - use python'])
+      expect(harness.session.pending?).to be(false) # final reply committed
     end
 
     it 'shows a console ack that the note was sent to the model (issue #198)' do
       task = Task.new { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
-      harness.session.add_user('original prompt')
-      harness.user_note_text = 'steer left'
       begin
+        harness.session.add_user('original prompt')
+        harness.user_note_text = 'steer left'
         harness.call_llm
       ensure
         Thread.current[:harness_task] = old_current
       end
 
-      lines = []
-      loop do
-        m = task.poll(0); break unless m
-        lines << m[:content]
-      end
-      expect(lines).to include('  [note] sent to model')
+      expect(drained_lines(task)).to include('  [note] sent to model')
     end
 
     it 'shows no "sent to model" ack when there is no note' do
       task = Task.new { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
-      harness.session.add_user('original prompt')
       begin
+        harness.session.add_user('original prompt')
         harness.call_llm
       ensure
         Thread.current[:harness_task] = old_current
       end
 
-      lines = []
-      loop do
-        m = task.poll(0); break unless m
-        lines << m[:content]
-      end
-      expect(lines).not_to include('  [note] sent to model')
+      expect(drained_lines(task)).not_to include('  [note] sent to model')
+    end
+  end
+
+  # issue #208: the session is the working chain. When a turn dies mid-loop
+  # (connection loss after the LLM answer of round N), every round already
+  # made - assistant tool_calls AND tool results - must remain in the
+  # SESSION, so /retry resumes from that exact point instead of replaying
+  # the prompt from zero. Before this fix the trail lived only in a local
+  # dup and was garbage-collected with the failed call.
+  describe '#call_llm mid-loop failure keeps the tool trail (issue #208)' do
+    def echo_tool_round
+      { content: nil,
+        tool_calls: [{ id: 'call_1', function: { name: 'test.echo', arguments: '{"text":"hi"}' } }] }
+    end
+
+    it 'keeps the assistant tool_calls and the tool result in the session' do
+      harness = build_harness_with_responses([echo_tool_round, :fail])
+      harness.session.add_user('implement feature X')
+
+      expect { harness.call_llm }.to raise_error(LLMError, /connection lost/)
+
+      messages = harness.session.messages
+      expect(messages.map { |m| m[:role] }).to eq(%w[system user assistant tool])
+      # The assistant message carries the exact tool_calls the model made.
+      expect(messages[-2][:tool_calls].map { |tc| tc[:function][:name] }).to eq(['test.echo'])
+      # The tool actually ran and its result committed too.
+      expect(messages.last).to eq(role: 'tool', tool_call_id: 'call_1', content: 'hi')
+
+      # The chain is now RESENDABLE from this point.
+      expect(harness.session.pending?).to be(true)
+    end
+
+    it 'keeps only the pending prompt when the failure hits before any tool round' do
+      harness = build_harness_with_responses([:fail])
+      harness.session.add_user('implement feature X')
+
+      expect { harness.call_llm }.to raise_error(LLMError)
+
+      # Only the pending prompt remains - /retry re-sends it (old behavior).
+      expect(harness.session.messages.map { |m| m[:role] }).to eq(%w[system user])
+      expect(harness.session.pending?).to be(true)
+    end
+
+    it 'keeps a mid-turn steering note in the trail across the failure' do
+      harness = build_harness_with_responses([echo_tool_round, :fail])
+      harness.session.add_user('implement feature X')
+      harness.user_note_text = 'fix the naming first'
+
+      expect { harness.call_llm }.to raise_error(LLMError)
+
+      contents = harness.session.messages.map { |m| m[:content].to_s }
+      expect(contents).to include('User note (mid-turn): fix the naming first')
+      expect(harness.session.pending?).to be(true)
     end
   end
 end

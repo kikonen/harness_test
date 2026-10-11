@@ -13,7 +13,8 @@ module Commands
                          (run.command tool and shell (!), kept separate)
           /clear         Remove all grants from the list
 
-          /retry         Re-send the session message chain (after a failed request)
+          /retry         Re-send the chain after a failed request; tool work
+                         already done is kept, so the turn resumes from there
           /session       Show a summary of the current session
           /session-clear Reset the session (drop all conversation messages)
           /compact       Compact the session (summarize conversation to free context)
@@ -55,8 +56,9 @@ module Commands
 
         Session:
           Prompts are accumulated in a session, so the model sees the whole
-          conversation. If a request to the LLM fails, the prompt stays in the
-          session - use /retry to re-send the chain. /session shows a summary,
+          conversation. If a request to the LLM fails mid-turn, the tool work
+          already done stays in the session - use /retry to resume the turn
+          from there instead of starting over. /session shows a summary,
           /session-clear starts a fresh conversation. /compact summarizes the
           conversation to free up context window space.
 

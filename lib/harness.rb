@@ -79,7 +79,9 @@ class Harness
   end
 
   # issue #36: the steering notes injected into THIS turn's working chain,
-  # in order (committed to the session at turn end, see SessionManager).
+  # in order. issue #208: with the session as the working chain they are
+  # committed DIRECTLY (each note is a message in @session.messages), so
+  # this list only serves specs and observability.
   def user_notes
     @user_notes
   end
@@ -90,8 +92,9 @@ class Harness
     @session       = Session.new(build_system_prompt)
     # issue #36 / #198 phase 1: mid-turn steering notes. A pending note
     # (set by the Task drain loop's UI::Editor while the model works) is
-    # injected into the chain by #call_llm and tracked in @user_notes so
-    # SessionManager#send_session can commit it at turn end.
+    # injected into the chain by #call_llm (issue #208: that chain IS
+    # @session.messages, so the note commits with it) and tracked in
+    # @user_notes for specs and observability.
     @user_note     = nil
     @user_notes    = []
     # One-time migration of legacy state (.sessions/, .harness_history) into
@@ -233,13 +236,19 @@ class Harness
   # -- LLM call logic -------------------------------------------------------
 
   # Sends the current session message chain to the LLM (with the tool loop).
-  # On success the final assistant reply is appended to the session and the
-  # stats are recorded. On failure the session is left untouched (the pending
-  # user message stays in the chain) so it can be retried.
+  # issue #208: the session IS the working chain - every round (assistant
+  # tool_calls + tool results, steering notes) is appended to
+  # @session.messages AS IT HAPPENS, so a turn that fails or is killed
+  # mid-loop keeps every round already made and /retry resumes from exactly
+  # that point instead of replaying the prompt from zero. On success the
+  # final assistant reply is appended and the stats are recorded.
   def call_llm
-    messages = @session.messages.dup
+    messages = @session.messages
 
-    @user_notes = []  # reset per turn: committed at turn end via #user_notes
+    # issue #36 / #208: steering notes injected this turn - with the
+    # session as the working chain they ARE committed (they are messages in
+    # @session.messages); the list is kept for specs and observability.
+    @user_notes = []
     tools = tool_registry.empty? ? nil : tool_registry.to_openai
 
     iteration = 0
@@ -265,7 +274,7 @@ class Harness
       # letting the NEXT request fail server-side mid-turn. Only relevant
       # after at least one tool round (iteration 1 has nothing to summarize).
       if iteration > 1 && last_prompt_tokens > 0 &&
-         @session_manager.check_inloop_compaction(messages, last_prompt_tokens, user_notes: @user_notes)
+         @session_manager.check_inloop_compaction(messages, last_prompt_tokens)
         # Compaction rewrote the chain - any loop-detection state built on
         # the pre-compaction tool calls is stale and must be reset.
         consecutive_tool_calls = 0
@@ -273,13 +282,13 @@ class Harness
       end
 
       # issue #36: a steering note the user typed mid-turn is injected into
-      # the working chain BEFORE the next LLM call, so the model can react
-      # to it immediately (course-correct a long tool loop). It is tracked
-      # in @user_notes and committed to the session at turn end.
+      # the working chain (= the session chain, issue #208) BEFORE the next
+      # LLM call, so the model can react to it immediately (course-correct a
+      # long tool loop). It is tracked in @user_notes as well.
       if @user_note
         note = @user_note
         @user_note = nil
-        @user_notes << note
+        @user_notes << note  # still tracked for specs / observability
         logger.info("user mid-turn note injected: #{note}")
         messages << { role: 'user', content: "User note (mid-turn): #{note}" }
         # issue #198: the commit ack ("[note] got it") fires the moment the
@@ -331,7 +340,7 @@ class Harness
         # Append assistant message with tool_calls
         assistant_msg = { role: 'assistant', content: message[:content] }
         assistant_msg[:tool_calls] = message[:tool_calls]
-        messages << assistant_msg
+        @session.add_assistant_message(assistant_msg)
 
         # Execute each tool call and append results
         message[:tool_calls].each do |tc|

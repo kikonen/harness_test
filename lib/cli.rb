@@ -212,7 +212,8 @@ class CLI
           ui.puts "  [error] #{e.message}"
         rescue LLMError => e
           ui.puts "  [LLM error] #{e.message}"
-          ui.puts "  (the prompt is kept in the session - type /retry to re-send it)"
+          ui.puts "  (everything up to this point is kept in the session - type /retry"
+          ui.puts "   to resume from exactly there, including tool work already done)"
         rescue ToolLoopError => e
           ui.puts "  [tool loop] #{e.message}"
         rescue StandardError => e
