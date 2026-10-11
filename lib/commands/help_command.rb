@@ -70,8 +70,9 @@ module Commands
 
         Saving / resuming sessions:
           The session (conversation history AND the access list) is
-          auto-saved to .harness/sessions/ inside the working directory at
-          every prompt boundary (before each send and after each reply) and
+          auto-saved to its own directory inside the working directory
+          (.harness/sessions/<session-id>/session.json) at every prompt
+          boundary (before each send and after each reply) and
           again on exit, so a crash loses at most one in-flight request.
           /save stores it manually at any time. Disable auto-save with the
           --no-auto-save flag or 'auto_save: false' in the config.

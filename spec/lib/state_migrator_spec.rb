@@ -18,7 +18,10 @@ RSpec.describe StateMigrator do
 
       described_class.run(workdir, '.harness')
 
-      expect(File.file?(File.join(workdir, '.harness', 'sessions', 'a.json'))).to be true
+      # issue #207: the legacy <id>.json is also moved INSIDE the session
+      # dir as session.json.
+      expect(File.file?(File.join(workdir, '.harness', 'sessions', 'a', 'session.json')))
+        .to be true
       expect(File.directory?(src)).to be false
     end
 
@@ -44,6 +47,43 @@ RSpec.describe StateMigrator do
 
       expect(File.file?(File.join(workdir, 'harness.log'))).to be true
       expect(File.directory?(File.join(workdir, '.harness'))).to be false
+    end
+  end
+
+  describe '#migrate - session JSON into the session dir (issue #207)' do
+    def seed_legacy_json(sid)
+      sessions = File.join(workdir, '.harness', 'sessions')
+      FileUtils.mkdir_p(sessions)
+      File.write(File.join(sessions, "#{sid}.json"), '{}')
+    end
+
+    it 'moves <id>.json into <id>/session.json' do
+      seed_legacy_json('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+
+      described_class.run(workdir, '.harness')
+
+      target = File.join(workdir, '.harness/sessions', 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'session.json')
+      expect(File.file?(target)).to be true
+    end
+
+    it 'never overwrites an existing destination' do
+      seed_legacy_json('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+      existing = File.join(workdir, '.harness/sessions',
+                           'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'session.json')
+      FileUtils.mkdir_p(File.dirname(existing))
+      File.write(existing, '{"kept":true}')
+
+      described_class.run(workdir, '.harness')
+
+      expect(File.read(existing)).to eq('{"kept":true}')
+    end
+
+    it 'is a no-op when there are no legacy session files' do
+      FileUtils.mkdir_p(File.join(workdir, '.harness', 'sessions'))
+
+      described_class.run(workdir, '.harness')
+
+      expect(Dir.children(File.join(workdir, '.harness/sessions'))).to be_empty
     end
   end
 

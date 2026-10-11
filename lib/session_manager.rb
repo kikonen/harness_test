@@ -11,6 +11,9 @@ require_relative 'harness_error'
 class SessionManager
   HARNESS_DIR  = '.harness'
   SESSIONS_DIR = File.join(HARNESS_DIR, 'sessions')
+  # issue #207: the session JSON lives INSIDE the session's own directory
+  # (.harness/sessions/<id>/session.json), alongside its log and history.
+  SESSION_FILE = 'session.json'
   RULES_FILE   = 'harness.md'
   # Minimum seconds between two auto-saves inside the same run_prompt cycle
   # (de-dups the pre-send and post-turn saves when the round trip is fast).
@@ -537,16 +540,26 @@ class SessionManager
     File.join(@file_list.workdir, SESSIONS_DIR)
   end
 
+  # issue #207: the saved JSON of a session lives INSIDE its own directory
+  # (next to the log and history), not alongside the per-session dirs.
+  def session_file_path(id)
+    File.join(sessions_dir, id, SESSION_FILE)
+  end
+
+  # All saved session files (issue #207 layout: <sessions>/<id>/session.json).
+  def session_files
+    Dir.glob(File.join(sessions_dir, '*', SESSION_FILE)).select { |p| File.file?(p) }
+  end
+
   # Save the current session (conversation + file list) to disk.
   def save_session
-    FileUtils.mkdir_p(sessions_dir)
+    id = @harness.session.session_id
+    path = session_file_path(id)
+    FileUtils.mkdir_p(File.dirname(path))
 
     data = @harness.session.to_h(@file_list)
     data[:active_model] = @harness.options[:active_model]
     json = JSON.generate(data)
-
-    id   = @harness.session.session_id
-    path = File.join(sessions_dir, "#{id}.json")
 
     File.write(path, json)
     @harness.logger.info("session saved: #{id} (#{path})")
@@ -572,7 +585,8 @@ class SessionManager
     @harness.history&.bind_session(@harness.session.session_id)
     restore_session_model(data[:active_model])
     reset_rules_mtime
-    @harness.logger.info("session resumed: #{File.basename(path, '.json')} (#{path})")
+    # issue #207: the id is the directory name (the file is session.json).
+    @harness.logger.info("session resumed: #{File.basename(File.dirname(path))} (#{path})")
     path
   end
 
@@ -582,17 +596,19 @@ class SessionManager
   def newest_session_path
     return nil unless File.directory?(sessions_dir)
 
-    Dir.glob(File.join(sessions_dir, '*.json')).max_by { |p| File.mtime(p) }
+    session_files.max_by { |p| File.mtime(p) }
   end
 
   # List saved sessions, newest first.
   def list_sessions
     return [] unless File.directory?(sessions_dir)
 
-    Dir.glob(File.join(sessions_dir, '*.json')).sort_by { |p| File.mtime(p) }.reverse.map do |path|
+    session_files.sort_by { |p| File.mtime(p) }.reverse.map do |path|
       data = JSON.parse(File.read(path), symbolize_names: true)
       {
-        id:       File.basename(path, '.json'),
+        # issue #207: the file is <sessions>/<id>/session.json - the id is
+        # the DIRECTORY name, not the file name.
+        id:       File.basename(File.dirname(path)),
         path:     path,
         saved_at: File.mtime(path),
         messages: (data[:messages] || []).size,
@@ -625,15 +641,17 @@ class SessionManager
   def find_session_file(id)
     raise HarnessError, "invalid session id: #{id}" unless id =~ /\A[0-9a-fA-F-]+\Z/
 
-    matches = Dir.glob(File.join(sessions_dir, '*.json')).select do |p|
-      File.basename(p, '.json').downcase.start_with?(id.downcase)
+    # issue #207: the id is the session DIRECTORY name (the file inside it
+    # is always session.json).
+    matches = session_files.select do |p|
+      File.basename(File.dirname(p)).downcase.start_with?(id.downcase)
     end
 
     case matches.size
     when 0 then nil
     when 1 then matches.first
     else
-      raise HarnessError, "ambiguous session id '#{id}' - matches: #{matches.map { |p| File.basename(p) }.join(', ')}"
+      raise HarnessError, "ambiguous session id '#{id}' - matches: #{matches.map { |p| File.basename(File.dirname(p)) }.join(', ')}"
     end
   end
 end

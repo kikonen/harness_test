@@ -20,9 +20,10 @@ scoped to a working directory you choose.
   full command before running it and requires an explicit "Allow" every
   single time.
 - **Sessions** - the conversation plus the access list is auto-saved to
-  `.harness/sessions/` at every prompt boundary (before each send and after
-  each reply) and again on exit; resume any saved session later, or pick up
-  the newest one with `--continue`.
+  `.harness/sessions/<id>/session.json` (its own directory, issue #207) at
+  every prompt boundary (before each send and after each reply) and again on
+  exit; resume any saved session later, or pick up the newest one with
+  `--continue`.
 - **Per-session logs** - each session writes its request/tool log to its
   own directory, so concurrent sessions do not interleave (issue #113).
 - **Multi-model config** - named model profiles in one YAML file, switch
@@ -163,9 +164,11 @@ All harness state lives in `.harness/` inside the working directory:
 .harness/
   config.yml        # your configuration (template created on first run)
   harness_history   # prompt history
-  sessions/*.json   # saved sessions (conversation + access list)
-  sessions/<id>/    # one directory per session, holding its state (issue #113)
-    harness.log     # that session's request/tool log
+  sessions/         # saved sessions (one directory per session, issue #113)
+    <id>/           # all of a session's state lives in here (issue #207)
+      session.json  # the saved session (conversation + access list)
+      harness.log   # that session's request/tool log
+      harness_history  # that session's prompt history (issue #119)
 ```
 
 Ignore it from git with a single `.harness/` entry.

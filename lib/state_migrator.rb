@@ -1,11 +1,14 @@
 # frozen_string_literal: true
 
 require 'fileutils'
+require_relative 'session_manager'
 
 # One-time migration of harness state that used to live scattered in the
 # working directory into the .harness directory:
 #   .sessions/          -> .harness/sessions/
 #   .harness_history    -> .harness/harness_history
+# issue #207: the session JSON moved INSIDE the session's own directory:
+#   .harness/sessions/<id>.json -> .harness/sessions/<id>/session.json
 #
 # The legacy shared harness.log is NOT migrated (issue #120): logs are
 # per-session now (issue #113), so the old file has no session to belong
@@ -30,6 +33,7 @@ class StateMigrator
   def migrate
     migrate_step(:sessions) { migrate_sessions }
     migrate_step(:history)  { migrate_history }
+    migrate_step(:session_json_layout) { migrate_session_json_layout }
   end
 
   private
@@ -58,6 +62,22 @@ class StateMigrator
     if File.file?(old) && !File.exist?(new)
       FileUtils.mkdir_p(@harness_dir)
       FileUtils.mv(old, new)
+    end
+  end
+
+  # issue #207: old saves put the session JSON next to the per-session
+  # dirs (<id>.json); the new layout stores it inside them as
+  # <id>/session.json. Each file is moved into its own directory; a
+  # pre-existing destination wins (never overwritten).
+  def migrate_session_json_layout
+    sessions = File.join(@harness_dir, 'sessions')
+    return unless File.directory?(sessions)
+
+    Dir.glob(File.join(sessions, '*.json')).each do |path|
+      id     = File.basename(path, '.json')
+      target = File.join(sessions, id, SessionManager::SESSION_FILE)
+      FileUtils.mkdir_p(File.dirname(target))
+      FileUtils.mv(path, target) unless File.exist?(target)
     end
   end
 end
