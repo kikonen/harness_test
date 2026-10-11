@@ -187,8 +187,9 @@ class CLI
     # and which id a later /save or --resume would refer to.
     ui.puts "Session: #{harness.session.session_id} (log: #{session_log_path_display})"
     ui.puts "Tip: type a plain message (no /) to send it directly to the model."
-    ui.puts "Tip: Enter adds a newline; paste multiline text directly. Press " \
-         "Ctrl+Enter (Windows) / Alt+Enter (terminal) to send the input."
+    ui.puts "Tip: Enter adds a newline; paste multiline text directly. The " \
+         "submit key sends the whole buffer: Ctrl+Enter (Windows) or " \
+         "Alt+Enter (Unix terminal). See /help for remote setups."
     ui.puts "Tip: a line starting with ! runs a shell command locally (not sent " \
          "to the model)."
     ui.puts "Tip: a line starting with / is a command (executed immediately)."
@@ -295,7 +296,9 @@ class CLI
   #   submit key SUBMITS the whole buffer (Reline's ed_force_submit on the
   #              [27,13] binding, bound by UI::Editor.install_esc!):
   #              Ctrl+Enter / Shift+Enter on Windows, Alt+Enter on most Unix
-  #              terminals (see doc/reline_cursor_and_enter_handling.md)
+  #              terminals, CSI 13 from kcm/kitty-protocol terminals such as
+  #              a remote host seen through Windows Terminal (see doc/
+  #              reline_cursor_and_enter_handling.md)
   #   Esc        cancels the read; the buffer is kept as a DRAFT and prefilled
   #              at the next prompt (instead of being dropped as before)
   #   Ctrl+C     raises Interrupt (rescued in the run loop); the draft is

@@ -83,15 +83,23 @@ module Commands
         Multiline input (issue #198 phase 3 / #91):
           * Enter adds a NEWLINE inside the prompt - it never submits, so a
             multiline block can be typed or pasted without any tricks.
-          * Submit key sends the whole buffer: Ctrl+Enter or Shift+Enter on
-            Windows; Alt+Enter in most Unix terminals (Ctrl/Shift+Enter are
-            indistinguishable from Enter there). See the startup banner.
+          * Submit key sends the whole buffer - by platform:
+              - Windows console / Terminal on the host: Ctrl+Enter or
+                Shift+Enter
+              - a normal Unix terminal: Alt+Enter (Ctrl/Shift+Enter are
+                indistinguishable from Enter there)
+              - a remote host reached THROUGH Windows Terminal (ssh, WSL2):
+                Alt+Enter is consumed by Windows Terminal and Ctrl+Enter has
+                no encoding there by default. Use a terminal that forwards
+                it as CSI 13 (kitty / kcm keyboard protocol) - that is
+                bound too - or quickly tap ESC then Enter (the same bytes,
+                within ~100 ms). See the startup banner.
 
         Mid-turn steering notes (issue #36):
           While the model is working, any keypress opens a note editor on
           the spot WITHOUT interrupting the turn. Finish the note and press
-          the submit key (Ctrl/Shift+Enter on Windows, Alt+Enter in most
-          Unix terminals): it is delivered to the model as a "User note
+          the submit key (same keys as above - see Multiline input for
+          remote setups): it is delivered to the model as a "User note
           (mid-turn)" message before its next step, so it can course-correct
           on the fly - no Ctrl+C needed. Enter inserts a NEWLINE inside the
           note, so multiline text can be typed or pasted as one note (issue

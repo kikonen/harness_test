@@ -295,12 +295,17 @@ cursor-based default for Enter:
 Reline.core.config.add_default_key_binding_by_keymap(:emacs, [27, 13], :ed_force_submit)
 ```
 
+The harness (`UI::Editor#install_esc!`) binds a SECOND sequence too:
+CSI Ctrl+Enter, `ESC [ 1 3 ~` (bytes `[27, 91, 49, 51, 126]`), to the same
+action. See the remote-setup note in the platform table below.
+
 Which physical keys produce that sequence depends on the platform:
 
 | Platform                           | Keys that produce `[27, 13]`                              |
 |------------------------------------|-----------------------------------------------------------|
 | Windows console / Windows Terminal | **Ctrl+Enter**, **Shift+Enter**                           |
-| Unix terminals                     | **Alt+Enter** (Ctrl/Shift+Enter usually send a plain CR, indistinguishable from Enter) |
+| Unix terminal reached DIRECTLY     | **Alt+Enter** (Ctrl/Shift+Enter usually send a plain CR, indistinguishable from Enter) |
+| Remote host THROUGH Windows Terminal (ssh, WSL2) | **Neither.** Windows Terminal consumes Alt+Enter (settings / fullscreen toggle) and has no Ctrl+Enter encoding by default - the key never reaches the remote program. |
 
 - **Windows:** Reline's Windows backend has a key map that translates
   Ctrl+Enter and Shift+Enter into `"\e\r"`; a comment in the source says it
@@ -310,6 +315,21 @@ Which physical keys produce that sequence depends on the platform:
 - **Unix:** terminals send Alt+Enter as ESC CR. Most terminals send the same
   CR for Ctrl+Enter, Shift+Enter and Enter, so those cannot be told apart
   without extended keyboard protocols.
+- **Remote via Windows Terminal:** the user's *local* terminal is Windows
+  Terminal, so its key handling applies - but the program runs on a remote
+  Linux host whose Reline only sees whatever bytes the local terminal
+  forwards over ssh. In that topology:
+  - Alt+Enter toggles fullscreen (the F11 action) and never reaches the
+    remote pty.
+  - Ctrl+Enter produces nothing by default (no extended keyboard protocol).
+  - ESC then Enter *does* arrive as `[27, 13]` - Reline only accepts it when
+    the two bytes land within its `keyseq_timeout` (100 ms in the harness),
+    so "tap ESC and Enter quickly" works but is nearly undiscoverable.
+  - A terminal with an **extended keyboard protocol** (kitty / kamadb, or
+    xterm's `kcm` mode) sends Ctrl+Enter as CSI `ESC [ 1 3 ~`; that sequence
+    is bound to `ed_force_submit` as well (verified against Reline 0.7.0:
+    `config.add_default_key_binding_by_keymap(:emacs, [27, 91, 49, 51, 126], :ed_force_submit)`).
+    On terminals that never emit it the binding is inert.
 - Ctrl+Enter is a familiar "send" key from chat and mail apps, which makes it
   a natural choice on Windows.
 - Without this binding, Reline's default for `[27, 13]` is to insert a line

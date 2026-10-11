@@ -110,5 +110,15 @@ RSpec.describe UI::Editor do
       described_class.install_esc!
       expect(kb.get(UI::Editor::SUBMIT_KEY_SEQ)).to eq(:ed_force_submit)
     end
+
+    # issue #198 (remote host via Windows Terminal, ssh / WSL2): neither
+    # Alt+Enter nor a default Ctrl+Enter encoding reaches the remote pty, so
+    # CSI Ctrl+Enter ("ESC [ 1 3 ~", sent by terminals with the kitty/kcm
+    # extended keyboard protocol) is bound to the same submit action.
+    it 'binds CSI Ctrl+Enter to :ed_force_submit in emacs mode' do
+      described_class.install_esc!
+      kb = Reline.core.config.editing_mode
+      expect(kb.get(UI::Editor::CSI_CTRL_ENTER_SEQ)).to eq(:ed_force_submit)
+    end
   end
 end
