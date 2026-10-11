@@ -15,7 +15,8 @@ require 'reline'
 #     routes its single-line choice read through this editor too.
 #   * the CLI idle prompt (issue #198 phase 3) - multiline input
 #     (#read_multiline): Enter inserts a newline (typed or pasted),
-#     Ctrl+Enter submits the whole buffer (issue #91: no backslash or
+#     the submit key (Ctrl+Enter family, see SUBMIT_KEY_SEQ /
+#     CSI_CTRL_ENTER_SEQ) submits the whole buffer (issue #91: no backslash or
 #     paste-speed tricks, so a paste can never submit mid-block), and an
 #     Esc'd draft is NOT discarded - it is prefilled on the next prompt.
 #
@@ -51,8 +52,18 @@ module UI
     # The submit key: ESC then CR. The Windows IOGate maps Ctrl+Enter and
     # Shift+Enter to these bytes; Unix terminals produce them with
     # Alt+Enter (Ctrl/Shift+Enter there are indistinguishable from a plain
-    # Enter, so that is the documented platform split).
+    # Enter, so that is the documented platform split). CAVEAT: a remote
+    # Linux host seen through Windows Terminal (ssh / WSL2) gets NEITHER -
+    # Windows Terminal consumes Alt+Enter for its fullscreen toggle and
+    # Ctrl+Enter has no extended-keyboard encoding there by default, so the
+    # CSI_CTRL_ENTER_SEQ binding below is the portable fallback (issue #198).
     SUBMIT_KEY_SEQ = [ESC_KEY_BYTE, CR_KEY_BYTE].freeze
+    # CSI Ctrl+Enter ("ESC [ 1 3 ~"), sent for Ctrl+Enter by terminals with
+    # an extended keyboard protocol (kitty/kamadb/kcm mode - e.g. recent
+    # Windows Terminal + kitty keyboard enhancement). Harmless to bind on
+    # terminals that never send it; on the ones that do it is the only
+    # submit key when running a remote host via Windows Terminal (issue #198).
+    CSI_CTRL_ENTER_SEQ = [27, 91, 49, 51, 126].freeze
 
     def initialize(stdin)
       @stdin = stdin
@@ -69,9 +80,9 @@ module UI
     # (issue #198 phase 3). Same status contract as #read, plus:
     #   * tty: Reline.readmultiline - bracketed paste, line editing; ENTER
     #     inserts a real newline (typed or pasted); the submit key (see
-    #     SUBMIT_KEY_SEQ, bound to Reline's ed_force_submit by install_esc!;
-    #     Ctrl/Shift+Enter on Windows, Alt+Enter on most Unix terminals)
-    #     commits the whole buffer. Backslashes are content - never
+    #     SUBMIT_KEY_SEQ / CSI_CTRL_ENTER_SEQ, bound to Reline's
+    #     ed_force_submit by install_esc!) commits the whole buffer.
+    #     Backslashes are content - never
     #     continuation markers
     #     (issue #91). Committed text lands in Reline::HISTORY so
     #     HistoryManager persists it.
@@ -266,9 +277,16 @@ module UI
       # SUBMIT_KEY_SEQ: submit the whole multiline buffer. The Windows
       # IOGate maps Ctrl+Enter/Shift+Enter to these bytes; Unix terminals
       # produce them with Alt+Enter (see doc/reline_cursor_and_enter_
-      # handling.md, section 7). add is idempotent for a repeated key ->
-      # action pair.
+      # handling.md, section 7). Neither key reaches a remote host seen
+      # through Windows Terminal (ssh / WSL2) - see CSI_CTRL_ENTER_SEQ.
+      # add is idempotent for a repeated key -> action pair.
       cfg.add_default_key_binding_by_keymap(:emacs, SUBMIT_KEY_SEQ, :ed_force_submit)
+      # CSI_CTRL_ENTER_SEQ: the portable submit key (issue #198). Sent for
+      # Ctrl+Enter only by terminals with an extended keyboard protocol;
+      # everywhere else it is never received and stays an inert binding.
+      cfg.add_default_key_binding_by_keymap(:emacs,
+                                           CSI_CTRL_ENTER_SEQ,
+                                           :ed_force_submit)
       # Reline::Windows exists only on the Windows IOGate (undefined on Unix),
       # so it must be guarded before the is_a? check.
       if defined?(Reline::Windows) && Reline::IOGate.is_a?(Reline::Windows)
