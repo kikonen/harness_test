@@ -8,8 +8,10 @@ require_relative 'llm/ollama_backend'
 # clients in lib/llm/. The backend is selected per model profile via the
 # 'api' config key (:openai default / :ollama). Both backends return the
 # same normalized response shape, so Harness does not care which one is
-# active. Constants kept as compat aliases (referenced from harness.rb and
-# session_manager.rb).
+# active. Timeouts/retry constants are aliased for harness.rb and
+# session_manager.rb; NUM_CTX is the built-in context window (client-side
+# accounting when the config sets no num_ctx). Sampling values have no
+# alias: the config owns them, and an unset key is not sent (issue #215).
 class LLMClient
   DEFAULT_OPEN_TIMEOUT = LLM::DEFAULT_OPEN_TIMEOUT
   DEFAULT_READ_TIMEOUT = LLM::DEFAULT_READ_TIMEOUT
@@ -17,15 +19,7 @@ class LLMClient
   RETRYABLE_ERRORS     = LLM::RETRYABLE_ERRORS
   RETRY_COUNT          = LLM::RETRY_COUNT
   RETRY_DELAY          = LLM::RETRY_DELAY
-  NUM_PREDICT          = LLM::NUM_PREDICT
   NUM_CTX              = LLM::NUM_CTX
-  REASONING_EFFORT     = LLM::REASONING_EFFORT
-  TEMPERATURE          = LLM::TEMPERATURE
-  TOP_P                = LLM::TOP_P
-  TOP_K                = LLM::TOP_K
-  MIN_P                = LLM::MIN_P
-  PRESENCE_PENALTY     = LLM::PRESENCE_PENALTY
-  REPEAT_PENALTY       = LLM::REPEAT_PENALTY
 
   # The backend currently selected for options[:api]. Public so the specs
   # (and /model switching) can observe which API type is active.

@@ -14,25 +14,45 @@ module LLM
 
     def endpoint_path = '/api/chat'
 
+    # issue #215: the native /api/chat models tool-call arguments as JSON
+    # OBJECTS (ToolCallFunctionArguments unmarshals into an ordered map),
+    # not the OpenAI string form. Convert the session's string args on the
+    # wire; the stored history keeps the canonical string shape.
+    def serialize_messages(messages)
+      messages.map { |m| m[:tool_calls] ? (m.merge(tool_calls: tool_call_args(m))) : m }
+    end
+
+    def serialize_args(args)
+      args.is_a?(String) ? JSON.parse(args) : (args || {})
+    rescue JSON::ParserError
+      {}
+    end
+
     def build_body(messages, tools)
-      body = {
-        model: @options[:model],
-        messages: messages,
-        stream: false,
-        options: {
-          num_ctx: sample(:num_ctx, LLM::NUM_CTX),
-          num_predict: sample(:num_predict, LLM::NUM_PREDICT),
-          temperature: sample(:temperature, LLM::TEMPERATURE),
-          top_p: sample(:top_p, LLM::TOP_P),
-          top_k: sample(:top_k, LLM::TOP_K),
-          min_p: sample(:min_p, LLM::MIN_P),
-          presence_penalty: sample(:presence_penalty, LLM::PRESENCE_PENALTY),
-          repeat_penalty: sample(:repeat_penalty, LLM::REPEAT_PENALTY),
-          reasoning_effort: sample(:reasoning_effort, LLM::REASONING_EFFORT)
-        }
-      }
+      body = { model: @options[:model], messages: messages, stream: false,
+               options: sampling_options }
       body[:tools] = tools if tools && !tools.empty?
+      # issue #215: the native API has no 'reasoning_effort' option
+      # (Options.FromMap warns and drops it); thinking is the top-level
+      # 'think' field. An unknown level is tolerated server-side: it
+      # resolves to the model's default.
+      body[:think] = cfg(:reasoning_effort) if cfg(:reasoning_effort)
       body
+    end
+
+    # The native `options` map: sampling + generation limits, sent ONLY
+    # when configured (issue #215). num_ctx is always sent - the built-in
+    # window is its purpose here (the whole point of this backend).
+    def sampling_options
+      options = { num_ctx: ctx_window }
+      options[:num_predict]        = cfg(:num_predict) if cfg(:num_predict)
+      options[:temperature]        = cfg(:temperature) if cfg(:temperature)
+      options[:top_p]              = cfg(:top_p)       if cfg(:top_p)
+      options[:top_k]              = cfg(:top_k)       if cfg(:top_k)
+      options[:min_p]              = cfg(:min_p)       if cfg(:min_p)
+      options[:presence_penalty]   = cfg(:presence_penalty) if cfg(:presence_penalty)
+      options[:repeat_penalty]     = cfg(:repeat_penalty)   if cfg(:repeat_penalty)
+      options
     end
 
     # Native /api/chat returns the assistant message at the top level:

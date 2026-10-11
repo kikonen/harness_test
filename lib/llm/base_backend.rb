@@ -45,7 +45,9 @@ module LLM
       req = Net::HTTP::Post.new(uri.request_uri)
       req['Content-Type'] = 'application/json'
       req['Authorization'] = "Bearer #{@options[:token]}" if @options[:token]
-      req.body = JSON.generate(build_body(messages, tools))
+      # Convert the backend-agnostic message chain to this endpoint's wire
+      # shape before building the body (see #serialize_messages).
+      req.body = JSON.generate(build_body(serialize_messages(messages), tools))
 
       attempts = retry_count
       attempts.times do |attempt|
@@ -71,6 +73,10 @@ module LLM
             sleep(delay)
             next
           end
+          # issue #215: a client error (4xx) is terminal for the request -
+          # log the server's body before raising so the failure is in
+          # harness.log, not only on the console.
+          @logger.warn("LLM error (HTTP #{resp.code}):\n#{resp.body}")
           raise LLMError, "LLM error (HTTP #{resp.code}):\n#{resp.body}"
         end
 
@@ -100,21 +106,53 @@ module LLM
     # Subclasses: build the request body (a Hash serializable to JSON).
     def build_body(_messages, _tools) = raise NotImplementedError
 
+    # Wire shape for one tool-call's arguments. Default: the OpenAI schema
+    # wants a JSON string (what the session already stores). OllamaBackend
+    # overrides this to return an object.
+    def serialize_args(args) = args.is_a?(String) ? args : JSON.generate(args || {})
+
+    # issue #215: the session history is backend-agnostic and stores tool-call
+    # arguments as STRINGS (what the OpenAI schema sends and what
+    # execute_tool_call parses). Each endpoint wants a DIFFERENT shape for
+    # them, so convert on the wire instead of mutating the session:
+    #   OpenAI  -> string (kept as-is)
+    #   Ollama  -> JSON object (ToolCallFunctionArguments unmarshals into a map)
+    # Re-sending string args to /api/chat after a /model switch is what made
+    # the native endpoint reject the whole request with a JSON parse error.
+    # Messages are plain hashes; they return unchanged, so this is safe for
+    # both backends and needs no changes in Harness.
+    def serialize_messages(messages) = messages
+
+    # The tool-call arguments of one message, converted to this endpoint's
+    # expected shape (nil when the message carries none). Shared by the
+    # backend overrides of #serialize_messages.
+    def tool_call_args(message)
+      tcs = message[:tool_calls]
+      return nil if tcs.nil?
+
+      tcs.map do |tc|
+        fn = tc[:function] || {}
+        { id: tc[:id].to_s, function: { name: fn[:name], arguments: serialize_args(fn[:arguments]) } }
+      end
+    end
+
     # Subclasses: raw parsed JSON -> the normalized response shape.
     def parse_response(_json) = raise NotImplementedError
 
-    # The base_url is the server ROOT (e.g. https://llm.ikari.fi or
-    # http://localhost:11434). A legacy trailing '/v1' (from configs written
-    # before the backend split) is stripped so both backends can append
-    # their own path.
-    def base_url
-      @options[:base_url].to_s.sub(%r{/v1\z}, '').chomp('/')
-    end
+    # The URL configured for the profile, used AS-IS (no rewriting): each
+    # backend appends its own path to exactly this URL, so what is
+    # configured is what gets called. openai profiles point at the
+    # /v1-compatible base (e.g. http://localhost:11434/v1); ollama
+    # profiles point at the server root (http://localhost:11434).
+    def base_url = @options[:base_url]
 
-    # Sampling parameter with built-in default.
-    def sample(key, default)
-      @options[key] || default
-    end
+    # A config-owned option value. Returns nil when unset: the caller
+    # OMITS the key from the request so the server's own default applies
+    # (issue #215: no hidden code-side defaults).
+    def cfg(key) = @options[key]
+
+    # Keep num_ctx sent on the native path even when unset (see NUM_CTX).
+    def ctx_window = cfg(:num_ctx) || LLM::NUM_CTX
 
     def retry_count
       @options[:retry_count] || LLM::RETRY_COUNT

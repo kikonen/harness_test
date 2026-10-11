@@ -14,15 +14,19 @@ require_relative 'harness_error'
 # Precedence for every setting is:
 #   CLI flag  >  config file  >  built-in default (constants in harness.rb)
 #
-# Config file schema (every key is optional; missing keys fall back to the
-# built-in defaults):
+# Config file schema (every key is optional). Sampling / generation values
+# are OWNED BY THE CONFIG: a missing key is NOT sent to the API, so the
+# server's own default applies (issue #215).
 #
 #   models:                     # one or more named model profiles
 #     - name: local             # selection key (used by -m / default_model)
 #       url: http://localhost:11434/v1
-#       api: openai             # endpoint type: openai (default) | ollama (issue #197)
+#       api: openai             # endpoint type: openai (default) | ollama (issue #197).
+#                               # url is the base for the endpoint's path:
+#                               # openai -> .../v1, ollama -> server root.
 #       model: qwen2.5-coder:32b
 #       token: sk-...           # optional bearer token
+#       num_predict: -1         # same, native ollama name - omit = server default
 #       num_ctx: 65536          # optional context window size (tokens)
 #       reasoning_effort: medium
 #       temperature: 0.6
@@ -48,60 +52,10 @@ require_relative 'harness_error'
 class HarnessConfig
   HARNESS_DIR = '.harness'
 
-  # Template written to the default config location on first run (when no
-  # config file is found anywhere), so the user has something concrete to
-  # edit instead of discovering the schema from the docs. Values mirror the
-  # built-in defaults in harness.rb, so auto-creation changes nothing.
-  DEFAULT_TEMPLATE = <<~YAML
-    # Harness configuration (YAML).
-    #
-    # Precedence for every setting: CLI flag > this file > built-in default.
-    # Every key is optional - missing keys fall back to built-in defaults.
-
-    # One or more named model profiles.
-    models:
-      - name: local            # selection key (used by -m / default_model)
-        url: http://localhost:11434/v1
-        api: openai            # endpoint type: openai (default) | ollama (issue #197)
-        model: qwen2.5-coder:32b
-        # token: sk-...        # optional bearer token
-        num_ctx: 65536         # context window size (tokens)
-        reasoning_effort: medium
-        temperature: 0.6
-        top_p: 0.95
-        top_k: 20              # sampling top-k (integer)
-        min_p: 0               # minimum probability threshold
-        presence_penalty: 1.0  # penalty for already-present tokens
-        repeat_penalty: 1.05   # penalty for repeated tokens
-
-    # Model used when -m is not given on the command line.
-    default_model: local
-
-    # Session compaction (/compact).
-    compact:
-      recent_messages: 6       # messages retained verbatim after /compact
-      auto_threshold: 88       # auto-compact when context usage reaches this % of the window
-      max_size: 500            # max length (words) of the compaction summary
-      reserved_tokens: 8192    # absolute headroom (tokens) kept free before auto-compact (issue #151)
-
-    # Auto-save the session at every prompt boundary (crash-proof, issue #107).
-    auto_save: true
-
-    # Automatic retries for transient network errors.
-    retry:
-      count: 3                 # total attempts (1 initial + N-1 retries)
-      delay: 2                 # base delay in seconds (exponential backoff)
-
-    # Enter on an EMPTY last line submits the multiline buffer (issue #198,
-    # for setups where no submit key reaches the terminal - e.g. remote via
-    # Windows Terminal). Pasted blank lines never trigger it. Default: false.
-    # double_enter_submit: true
-
-    # Full system prompt override (uncomment to use).
-    # --system-file still takes precedence.
-    # system: |
-    #   You are a precise code editor...
-  YAML
+  # The config template lives in the repo (config/config.example.yml), not
+  # embedded in this file: it is the single source for both the committed
+  # example and what a first run writes to .harness/config.yml.
+  TEMPLATE_FILE = File.expand_path('../config/config.example.yml', __dir__)
 
   attr_reader :models, :default_model, :system
 
@@ -147,9 +101,14 @@ class HarnessConfig
   # Write the default template to path (creating parent directories).
   # Never overwrites an existing file. Returns true when written.
   def self.write_default_template(path)
+    return false unless File.file?(TEMPLATE_FILE)
+
     FileUtils.mkdir_p(File.dirname(path))
-    File.write(path, DEFAULT_TEMPLATE)
+    File.write(path, File.read(TEMPLATE_FILE))
     true
+  rescue Errno::ENOENT => e
+    warn "  [config] template #{TEMPLATE_FILE} is missing - no config written"
+    false
   rescue SystemCallError => e
     warn "  [config] could not write default config to #{path}: #{e.message}"
     false
@@ -264,6 +223,8 @@ class HarnessConfig
         model:            nonblank(m['model']),
         token:            nonblank(m['token']),
         num_ctx:          int_or_nil(m['num_ctx']),
+        max_tokens:       int_or_nil(m['max_tokens']),
+        num_predict:      int_or_nil(m['num_predict']),
         reasoning_effort: nonblank(m['reasoning_effort']),
         temperature:      float_or_nil(m['temperature']),
         top_p:            float_or_nil(m['top_p']),

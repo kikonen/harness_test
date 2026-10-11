@@ -32,7 +32,7 @@ RSpec.describe LLM::OllamaBackend do
       expect(b[:stream]).to be(false)
     end
 
-    it 'includes num_ctx in the native options block with the default window' do
+    it 'includes num_ctx in the native options block (built-in window when unset)' do
       b = body([{}])
       expect(b.dig(:options, :num_ctx)).to eq(LLM::NUM_CTX)
     end
@@ -42,17 +42,76 @@ RSpec.describe LLM::OllamaBackend do
       expect(body([{}]).dig(:options, :num_ctx)).to eq(32_768)
     end
 
-    it 'includes the full native sampling set with defaults' do
+    # issue #215: the config owns every sampling/generation value. A key
+    # that is not set is NOT sent, so the server's own default applies -
+    # num_ctx alone keeps a built-in (it is this backend's raison d'etre).
+    it 'sends only num_ctx when nothing else is configured' do
       opts = body([{}])[:options]
-      expect(opts[:num_predict]).to eq(LLM::NUM_PREDICT)
-      expect(opts[:temperature]).to eq(LLM::TEMPERATURE)
-      expect(opts[:top_p]).to eq(LLM::TOP_P)
-      expect(opts[:top_k]).to eq(LLM::TOP_K)
-      expect(opts[:min_p]).to eq(LLM::MIN_P)
-      expect(opts[:presence_penalty]).to eq(LLM::PRESENCE_PENALTY)
-      expect(opts[:repeat_penalty]).to eq(LLM::REPEAT_PENALTY)
-      expect(opts[:reasoning_effort]).to eq(LLM::REASONING_EFFORT)
+      expect(opts).to eq(num_ctx: LLM::NUM_CTX)
+      # issue #215: no reasoning_effort in options - the native API has no
+      # such option (Options.FromMap warns + drops it).
+      expect(opts).not_to have_key(:reasoning_effort)
     end
+
+    it 'sends sampling fields only when configured' do
+      options[:num_predict]  = 512
+      options[:temperature]  = 0.9
+      options[:repeat_penalty] = 1.05
+      opts = body([{}])[:options]
+      expect(opts[:num_predict]).to eq(512)
+      expect(opts[:temperature]).to eq(0.9)
+      expect(opts[:repeat_penalty]).to eq(1.05)
+      expect(opts).not_to have_key(:top_p)
+      expect(opts).not_to have_key(:top_k)
+    end
+
+    it 'sends think (not reasoning_effort) at the top level when configured' do
+      options[:reasoning_effort] = 'high'
+      b = body([{}])
+      expect(b[:think]).to eq('high')
+      expect(b.dig(:options, :reasoning_effort)).to be_nil
+    end
+
+    it 'omits think when reasoning_effort is not configured' do
+      expect(body([{}])).not_to have_key(:think)
+    end
+  describe 'message serialization (issue #215)' do
+    def assistant_with_calls
+      {
+        role: 'assistant', content: nil,
+        tool_calls: [
+          { id: 'c1', function: { name: 'f', arguments: '{"a":1}' } },
+          { id: 'c2', function: { name: 'g', arguments: '{}' } }
+        ]
+      }
+    end
+
+    it 'converts string tool-call arguments to JSON objects for /api/chat' do
+      out = backend.send(:serialize_messages, [assistant_with_calls])
+      args = out.first[:tool_calls].map { |tc| tc[:function][:arguments] }
+      # The parsed JSON carries STRING keys, as JSON objects do on the wire.
+      expect(args).to eq([{ 'a' => 1 }, {}])
+    end
+
+    it 'leaves messages without tool calls untouched' do
+      m = [{ role: 'user', content: 'hi' }]
+      expect(backend.send(:serialize_messages, m)).to eq(m)
+    end
+
+    it 'tolerates already-parsed (object) arguments from a native response' do
+      m = [{ role: 'assistant', content: nil,
+             tool_calls: [{ id: 'c1', function: { name: 'f', arguments: { 'a' => 1 } } }] }]
+      out = backend.send(:serialize_messages, m)
+      expect(out.first[:tool_calls].first[:function][:arguments]).to eq({ 'a' => 1 })
+    end
+
+    it 'falls back to an empty object for unparsable arguments' do
+      m = [{ role: 'assistant', content: nil,
+             tool_calls: [{ id: 'c1', function: { name: 'f', arguments: '{not json' } }] }]
+      out = backend.send(:serialize_messages, m)
+      expect(out.first[:tool_calls].first[:function][:arguments]).to eq({})
+    end
+  end
 
     it 'honours profile overrides for sampling parameters' do
       options[:temperature] = 0.9

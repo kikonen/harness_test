@@ -24,8 +24,10 @@ RSpec.describe LLM::OpenAIBackend do
   end
 
   describe 'request body (issue #197)' do
-    it 'targets /v1/chat/completions' do
-      expect(backend.send(:endpoint_path)).to eq('/v1/chat/completions')
+    it 'targets /chat/completions (appended to the configured base url)' do
+      # The base url carries the /v1 prefix (Ollama's /v1-compatible server);
+      # the backend appends ONLY /chat/completions - no URL rewriting.
+      expect(backend.send(:endpoint_path)).to eq('/chat/completions')
     end
 
     it 'includes model and messages' do
@@ -38,11 +40,34 @@ RSpec.describe LLM::OpenAIBackend do
       expect(body([{ role: 'user', content: 'hi' }])).not_to have_key(:options)
     end
 
-    it 'includes standard OpenAI sampling fields with defaults' do
+    # issue #215: the config owns every sampling/generation value. A key
+    # that is not set is NOT sent, so the server's own default applies -
+    # there are no code-side defaults to leak into the request.
+    it 'omits all sampling fields when none are configured' do
       b = body([{ role: 'user', content: 'hi' }])
-      expect(b[:temperature]).to eq(LLM::TEMPERATURE)
-      expect(b[:top_p]).to eq(LLM::TOP_P)
-      expect(b[:max_tokens]).to eq(LLM::NUM_PREDICT)
+      %i[temperature top_p top_k min_p presence_penalty repeat_penalty
+         max_tokens reasoning_effort].each do |key|
+        expect(b).not_to have_key(key), "expected #{key} to be omitted"
+      end
+    end
+
+    it 'sends sampling fields only when configured' do
+      options[:temperature] = 0.6
+      options[:max_tokens]  = 4096
+      b = body([{ role: 'user', content: 'hi' }])
+      expect(b[:temperature]).to eq(0.6)
+      expect(b[:max_tokens]).to eq(4096)
+      expect(b).not_to have_key(:top_p)
+    end
+
+    it 'sends reasoning_effort at the top level when configured (issue #215: the OpenAI schema reads it there)' do
+      options[:reasoning_effort] = 'high'
+      b = body([{ role: 'user', content: 'hi' }])
+      expect(b[:reasoning_effort]).to eq('high')
+    end
+
+    it 'omits reasoning_effort when not configured' do
+      expect(body([{ role: 'user', content: 'hi' }])).not_to have_key(:reasoning_effort)
     end
 
     it 'honours profile overrides for sampling parameters' do
@@ -52,6 +77,14 @@ RSpec.describe LLM::OpenAIBackend do
       expect(b[:temperature]).to eq(0.9)
       expect(b[:top_p]).to eq(0.5)
     end
+
+  describe 'message serialization (issue #215)' do
+    it 'keeps string tool-call arguments as-is (the OpenAI wire shape)' do
+      m = [{ role: 'assistant', content: nil,
+             tool_calls: [{ id: 'c1', function: { name: 'f', arguments: '{"a":1}' } }] }]
+      expect(backend.send(:serialize_messages, m)).to eq(m)
+    end
+  end
 
     it 'includes tools when provided' do
       tools = [{ type: 'function', function: { name: 't', parameters: {} } }]
@@ -107,14 +140,20 @@ RSpec.describe LLM::OpenAIBackend do
   end
 
   describe 'base_url normalization' do
-    it 'strips a legacy trailing /v1 (issue #197: base_url is the server root)' do
+    it 'uses the configured url as-is (no rewriting; issue #215 follow-up)' do
       options[:base_url] = 'http://localhost:11434/v1'
+      expect(backend.send(:base_url)).to eq('http://localhost:11434/v1')
+    end
+
+    it 'leaves a root url as-is too' do
+      options[:base_url] = 'http://localhost:11434'
       expect(backend.send(:base_url)).to eq('http://localhost:11434')
     end
 
-    it 'does not double-append /v1 for a root url' do
-      options[:base_url] = 'http://localhost:11434'
-      expect(backend.send(:base_url)).to eq('http://localhost:11434')
+    it 'composes base url + endpoint path into the request url (no /v1 in between)' do
+      options[:base_url] = 'http://localhost:11434/v1'
+      expect(URI("#{backend.send(:base_url)}#{backend.send(:endpoint_path)}").to_s)
+        .to eq('http://localhost:11434/v1/chat/completions')
     end
   end
 end
