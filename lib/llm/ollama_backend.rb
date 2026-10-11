@@ -10,9 +10,11 @@ module LLM
   class OllamaBackend < BaseBackend
     def api_type = LLM::OLLAMA
 
-    private
-
+    # issue #217: public (like BaseBackend#endpoint_path) so the UI can
+    # show the actual call target.
     def endpoint_path = '/api/chat'
+
+    private
 
     # issue #215: the native /api/chat models tool-call arguments as JSON
     # OBJECTS (ToolCallFunctionArguments unmarshals into an ordered map),

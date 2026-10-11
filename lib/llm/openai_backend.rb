@@ -16,9 +16,11 @@ module LLM
   class OpenAIBackend < BaseBackend
     def api_type = LLM::OPENAI
 
-    private
-
+    # issue #217: public (like BaseBackend#endpoint_path) so the UI can
+    # show the actual call target.
     def endpoint_path = '/chat/completions'
+
+    private
 
     def build_body(messages, tools)
       body = { model: @options[:model], messages: messages }

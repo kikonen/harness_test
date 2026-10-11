@@ -92,8 +92,27 @@ RSpec.describe SessionManager do
     end.new(session, client)
   end
 
-  let(:client) { double('client', chat: nil) }
+  let(:backend) { double('backend', api_type: :openai, endpoint_path: '/chat/completions') }
+  let(:client) { double('client', chat: nil, backend: backend) }
   let(:manager) { described_class.new(harness, file_list) }
+
+  # issue #217: the UI (spinner, /model, /models, startup banner) shows
+  # WHERE a call goes via target_display - api type + endpoint path.
+  describe '#target_display' do
+    it 'shows the openai target' do
+      expect(backend).to receive(:api_type).and_return(:openai)
+      expect(backend).to receive(:endpoint_path).and_return('/chat/completions')
+
+      expect(manager.target_display).to eq('openai /chat/completions')
+    end
+
+    it 'shows the ollama target' do
+      allow(backend).to receive(:api_type).and_return(:ollama)
+      allow(backend).to receive(:endpoint_path).and_return('/api/chat')
+
+      expect(manager.target_display).to eq('ollama /api/chat')
+    end
+  end
 
   # Simulate a session whose last response already used past the threshold.
   def make_session_over_threshold
@@ -411,7 +430,8 @@ end
 RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
   let(:session) { Session.new('system prompt') }
   let(:file_list) { FileList.new([], workdir: Dir.pwd) }
-  let(:client) { double('client', chat: nil) }
+  let(:backend) { double('backend', api_type: :openai, endpoint_path: '/chat/completions') }
+  let(:client) { double('client', chat: nil, backend: backend) }
   let(:harness) do
     Class.new do
       attr_accessor :session, :client
@@ -715,7 +735,8 @@ end
 RSpec.describe SessionManager, '#retry (issue #208)' do
   let(:session) { Session.new('system prompt') }
   let(:file_list) { FileList.new([], workdir: Dir.pwd) }
-  let(:client) { double('client', chat: nil) }
+  let(:backend) { double('backend', api_type: :openai, endpoint_path: '/chat/completions') }
+  let(:client) { double('client', chat: nil, backend: backend) }
   let(:sent_chains) { [] }
   let(:harness) do
     Class.new do
