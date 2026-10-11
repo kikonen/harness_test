@@ -83,17 +83,26 @@ module Commands
         Multiline input (issue #198 phase 3 / #91):
           * Enter adds a NEWLINE inside the prompt - it never submits, so a
             multiline block can be typed or pasted without any tricks.
-          * Submit key sends the whole buffer - by platform:
-              - Windows console / Terminal on the host: Ctrl+Enter or
-                Shift+Enter
-              - a normal Unix terminal: Alt+Enter (Ctrl/Shift+Enter are
-                indistinguishable from Enter there)
-              - a remote host reached THROUGH Windows Terminal (ssh, WSL2):
-                Alt+Enter is consumed by Windows Terminal and Ctrl+Enter has
-                no encoding there by default. Use a terminal that forwards
-                it as CSI 13 (kitty / kcm keyboard protocol) - that is
-                bound too - or quickly tap ESC then Enter (the same bytes,
-                within ~100 ms). See the startup banner.
+          * The submit key sends the whole buffer: Ctrl+Enter or Shift+Enter
+            on a Windows console; Alt+Enter in a normal Unix terminal
+            (Ctrl/Shift+Enter are indistinguishable from Enter there).
+            AltGr+Enter sends the SAME bytes as Alt+Enter on most layouts -
+            it works wherever the local terminal forwards ESC prefix.
+          * Remote host reached THROUGH Windows Terminal (ssh, WSL2):
+            plain Alt+Enter is consumed by Windows Terminal (fullscreen
+            toggle). What still reaches the remote pty:
+              - Ctrl+Enter: arrives as LF (byte 10, showkey-verified) and
+                is bound to submit - paste-guarded, so pasted line breaks
+                cannot submit it mid-paste
+              - AltGr+Enter (ESC prefix + CR) if your keyboard has one
+              - a quick ESC-then-Enter tap (the two bytes must land within
+                ~100 ms)
+              - Ctrl+Enter sent as CSI 13 by terminals with the kitty/kcm
+                extended keyboard protocol (also bound)
+          * Optional fallback: 'double_enter_submit: true' in the config -
+            then Enter on an EMPTY last line submits the buffer (pasted
+            blank lines never trigger it; the buffer just cannot end with
+            a trailing blank line while enabled).
 
         Mid-turn steering notes (issue #36):
           While the model is working, any keypress opens a note editor on

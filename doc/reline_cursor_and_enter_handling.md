@@ -304,8 +304,8 @@ Which physical keys produce that sequence depends on the platform:
 | Platform                           | Keys that produce `[27, 13]`                              |
 |------------------------------------|-----------------------------------------------------------|
 | Windows console / Windows Terminal | **Ctrl+Enter**, **Shift+Enter**                           |
-| Unix terminal reached DIRECTLY     | **Alt+Enter** (Ctrl/Shift+Enter usually send a plain CR, indistinguishable from Enter) |
-| Remote host THROUGH Windows Terminal (ssh, WSL2) | **Neither.** Windows Terminal consumes Alt+Enter (settings / fullscreen toggle) and has no Ctrl+Enter encoding by default - the key never reaches the remote program. |
+| Unix terminal reached DIRECTLY     | **Alt+Enter** and **AltGr+Enter** (Ctrl/Shift+Enter usually send a plain CR, indistinguishable from Enter) |
+| Remote host THROUGH Windows Terminal (ssh, WSL2) | **Ctrl+Enter** (arrives as LF, byte 10), **AltGr+Enter** (if the keyboard has one), a quick ESC+Enter tap, or CSI 13 from an extended-protocol terminal. Plain Alt+Enter does NOT reach it - see below. |
 
 - **Windows:** Reline's Windows backend has a key map that translates
   Ctrl+Enter and Shift+Enter into `"\e\r"`; a comment in the source says it
@@ -319,9 +319,16 @@ Which physical keys produce that sequence depends on the platform:
   Terminal, so its key handling applies - but the program runs on a remote
   Linux host whose Reline only sees whatever bytes the local terminal
   forwards over ssh. In that topology:
-  - Alt+Enter toggles fullscreen (the F11 action) and never reaches the
-    remote pty.
-  - Ctrl+Enter produces nothing by default (no extended keyboard protocol).
+  - **AltGr+Enter DOES work** (verified in a real setup, Windows layout +
+    WSL2/ssh): on most layouts AltGr is a dead-key modifier that the
+    terminal encodes by prepending ESC, exactly like Meta/Alt - so
+    AltGr+Enter arrives as `[27, 13]` and submits. Plain Alt+Enter is a
+    different story: Windows Terminal binds it to its fullscreen toggle
+    (the F11 action) and consumes it before the bytes are emitted.
+  - **Ctrl+Enter works via the LF binding** (showkey-verified in exactly
+    this topology): plain Enter arrives as CR (byte 13) but Ctrl+Enter
+    arrives as **LF (byte 10)** - distinct bytes, so byte 10 is bound to a
+    paste-guarded force submit (see the side note below).
   - ESC then Enter *does* arrive as `[27, 13]` - Reline only accepts it when
     the two bytes land within its `keyseq_timeout` (100 ms in the harness),
     so "tap ESC and Enter quickly" works but is nearly undiscoverable.
@@ -345,8 +352,13 @@ practically every terminal: it is sent as LF (byte 10), while Enter sends CR
 (byte 13). By default Reline maps byte 10 to `ed_newline`, the same as Enter,
 so it would need its own binding.
 
-It is listed here for awareness only. As a "submit" key it is close to
-undiscoverable for users, so it is not part of the recommended setup.
+**The harness binds byte 10 to force submit** (with the paste guard below):
+the showkey probe found that Windows Terminal sends Ctrl+Enter as LF when
+reaching a remote host over ssh / WSL2, which makes this "unintuitive" byte
+the *only* key that needs no special terminal configuration there. The user
+has confirmed `add_default_key_binding_by_keymap(:emacs, [10], :ed_force_submit)`
+submits the buffer on both remote linux and WSL2; the harness routes it
+through a guarded action instead of the bare binding:
 
 If it is ever used, bind it to an action that respects the paste guard.
 Without bracketed paste, pasted text with LF line endings arrives as byte 10
@@ -375,6 +387,16 @@ Resulting behaviour:
 | Enter typed by the user          | Policy decides: new line or submit, based on cursor       |
 | Ctrl+Enter / Shift+Enter (Windows), Alt+Enter (Unix) | Always submit                         |
 | ESC                              | Cancel (draft and cursor kept for resume)                 |
+
+**Double-Enter submit (harness opt-in, `double_enter_submit: true`).** For
+topologies where NO submit key is reachable (the Windows Terminal ssh/WSL2
+case above without AltGr or an extended protocol), the harness can fall back
+to a cursor policy: Enter submits ONLY on an empty last line. It overrides
+`ed_newline` (section 5 pattern) with a paste guard: pasted text arrives via
+bracketed paste as one blob (`@in_pasting`, never through `ed_newline`), and
+without bracketed paste the PASTE_GRACE window suppresses the policy, so a
+pasted blank line can never submit mid-paste. Trade-off: while enabled the
+buffer cannot END with a blank line as content. Verified against Reline 0.7.0.
 
 ---
 

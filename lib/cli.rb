@@ -163,6 +163,12 @@ class CLI
     opts[:retry_count] = config.retry_count
     opts[:retry_delay] = config.retry_delay
 
+    # issue #198: opt-in double-Enter submit for the multiline editor
+    # (remote setups where no submit key reaches the terminal). Applied
+    # to the shared UI::Editor switch so idle prompt AND mid-turn notes
+    # honour it. Default off - Enter always inserts a newline.
+    opts[:double_enter_submit] = config.double_enter_submit_enabled
+
     unless opts[:model] || opts[:list_sessions]
       raise HarnessError, '-m / --model is required (or set default_model in the config)'
     end
@@ -179,6 +185,10 @@ class CLI
   def run
     @history.load
 
+    # issue #198: the double-Enter submit switch is process-global and
+    # covers every UI::Editor read (idle prompt, notes, dialogs).
+    UI::Editor.submit_on_enter = !!@options[:double_enter_submit]
+
     ui.puts "Harness ready. Type /help for commands, /exit to quit."
     ui.puts "Model: #{harness.session_manager.active_model_name} (@ #{@options[:base_url]})"
     ui.puts "Working directory: #{@file_list.workdir}"
@@ -188,8 +198,9 @@ class CLI
     ui.puts "Session: #{harness.session.session_id} (log: #{session_log_path_display})"
     ui.puts "Tip: type a plain message (no /) to send it directly to the model."
     ui.puts "Tip: Enter adds a newline; paste multiline text directly. The " \
-         "submit key sends the whole buffer: Ctrl+Enter (Windows) or " \
-         "Alt+Enter (Unix terminal). See /help for remote setups."
+         "submit key sends the whole buffer: Ctrl+Enter (Windows console, or " \
+         "to a remote host via Windows Terminal) or Alt/AltGr+Enter (Unix " \
+         "terminal). See /help for details."
     ui.puts "Tip: a line starting with ! runs a shell command locally (not sent " \
          "to the model)."
     ui.puts "Tip: a line starting with / is a command (executed immediately)."

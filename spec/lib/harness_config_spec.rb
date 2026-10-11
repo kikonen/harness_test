@@ -27,6 +27,23 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  describe '#double_enter_submit_enabled (issue #198)' do
+    it 'defaults to false when the key is absent (Enter never submits)' do
+      expect(described_class.new({}).double_enter_submit_enabled).to be(false)
+      expect(described_class.new('double_enter_submit' => nil)
+                             .double_enter_submit_enabled).to be(false)
+    end
+
+    it 'honours an explicit true (opt-in double-Enter submit)' do
+      expect(described_class.new('double_enter_submit' => true)
+                             .double_enter_submit_enabled).to be(true)
+    end
+
+    it 'mentions the key in the default template (commented out)' do
+      expect(described_class::DEFAULT_TEMPLATE).to include('double_enter_submit')
+    end
+  end
+
   describe '#compact_reserved_tokens (issue #151)' do
     it 'defaults to nil when the key is absent (built-in default applies)' do
       expect(described_class.new({}).compact_reserved_tokens).to be_nil
