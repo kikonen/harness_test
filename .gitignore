@@ -3,5 +3,6 @@
 .env
 .emacs*
 tmp/**
+!tmp/.gitkeep
 *_copy.rb
 .harness/**
