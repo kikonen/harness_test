@@ -56,10 +56,12 @@
 # Mid-turn user notes (issue #36 / #198 phase 1): NO reader thread. On each
 # drain tick Task.run peeks `stdin.input_pending?` (cross-platform; nil when
 # the stream does not support it). When something is waiting on the keyboard
-# it opens a UI::Editor ON THE MAIN THREAD: tty -> Reline (Enter commits,
-# Esc keeps the draft for the next trigger, bare Enter is a no-op, Ctrl-D
-# aborts the turn); non-tty -> plain gets(). The committed line is rendered
-# as an ack and stored on the harness (Harness#user_note_text=), where
+# it opens a UI::Editor ON THE MAIN THREAD: tty -> Reline multiline (issue
+# #198 phase 4: Enter inserts a newline, the submit key commits the whole
+# block as ONE note, Esc keeps the draft for the next trigger, Ctrl-D on an
+# empty buffer aborts the turn); non-tty -> plain gets() (one line per read -
+# a pipe has no submit key). The committed note is rendered as an ack and
+# stored on the harness (Harness#user_note_text=), where
 # Harness#call_llm injects it into the chain before the next LLM call.
 # Because the drain loop only ever peeks and then reads, no other thread can
 # be parked on stdin: dialogs (served by this same main-thread loop) route
@@ -402,13 +404,16 @@ class Task
     task.visible_spinner&.render!
   end
 
-  # issue #36: poll for a mid-turn steering note. input_pending? only PEEKS
-  # (never consumes), so it is safe to call on every tick: no reader thread
-  # exists, and while the editor is open THIS thread owns stdin - nothing
-  # else can read from it. The editor returns immediately when the user
-  # cancels (Esc -> draft kept for the next trigger) or sends a bare Enter
-  # (:empty - nothing to do), so the task keeps running; Ctrl-D inside the
-  # editor raises NoteAbort, which Task.run turns into a turn abort.
+  # issue #36 / #198 phase 4: poll for a mid-turn steering note. The read is
+  # MULTILINE (read_multiline): on tty Enter inserts a newline and the
+  # submit key commits the whole block as ONE note; non-tty streams keep
+  # one line per read. input_pending? only PEEKS (never consumes), so it is
+  # safe to call on every tick: no reader thread exists, and while the
+  # editor is open THIS thread owns stdin - nothing else can read from it.
+  # The editor returns immediately when the user cancels (Esc -> draft kept
+  # for the next trigger) or submits nothing (:empty), so the task keeps
+  # running; Ctrl-D inside the editor raises NoteAbort, which Task.run
+  # turns into a turn abort.
   def self.poll_for_note(task)
     return unless task.note_editor && task.harness
 
@@ -420,7 +425,7 @@ class Task
     # on the next tick once the editor returns).
     task.clear_all_spinners
 
-    result = task.note_editor.read(prefill: task.instance_variable_get(:@note_draft))
+    result = task.note_editor.read_multiline(prefill: task.instance_variable_get(:@note_draft))
     case result.status
     when :submitted
       task.instance_variable_set(:@note_draft, nil)

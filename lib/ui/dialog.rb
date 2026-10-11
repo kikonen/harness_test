@@ -30,9 +30,13 @@ require_relative 'editor'
 # NEVER cancels (cancel is explicit, issue #155) - and Ctrl-D on an empty
 # line cancels the dialog like EOF. Non-tty streams take the plain gets()
 # path with exactly the same behavior as before this change (pipes in
-# specs, dumb terminals). The multi-line "Additional details" block stays
-# gets()-based: its blank-line-finish / Ctrl-D-cancel semantics are a
-# different beast from a single-line read.
+# specs, dumb terminals).
+# FREE TEXT (issue #198 phase 4): the "Additional details" block is
+# MULTILINE through the same shared editor - on a tty it is UI::Editor's
+# multiline read (Enter inserts a newline, the submit key commits the whole
+# block as ONE note, Esc keeps the buffer and re-asks, Ctrl-D cancels the
+# dialog); non-tty streams stay gets()-based (blank line finishes, EOF
+# cancels).
 #
 # A dialog can allow ADDITIONAL DETAILS: when free_text is enabled the
 # dialog gets an explicit numbered "Additional details" option (the
@@ -387,13 +391,33 @@ module UI
     end
 
     # Ask for the typed additional details after the user selected the
-    # "Additional details" option. Multi-line text block: type or paste
-    # as many lines as you want, finish with a BLANK line; Ctrl-D (EOF)
-    # cancels the whole dialog. Returns [FREE_TEXT, text], nil when the
-    # block was empty (the dialog re-prompts), or CANCEL_VALUE on EOF.
+    # "Additional details" option. TTY (issue #198 phase 4): one shared
+    # editor read - Enter inserts a newline (typed or pasted), the submit
+    # key commits the whole block as ONE note, Esc keeps the buffer as a
+    # draft and re-asks, Ctrl-D cancels the whole dialog. Non-tty: the
+    # classic gets() block (blank line finishes, EOF cancels). Returns
+    # [FREE_TEXT, text], nil when the block was empty (the dialog
+    # re-prompts), or CANCEL_VALUE on EOF.
     def collect_details(ui)
       ui.puts
       hint = @free_text_prompt.empty? ? 'type your answer' : @free_text_prompt
+      if tty_input?(ui)
+        ui.puts "             #{hint} (submit key to finish, Esc keeps it, Ctrl-D cancels):"
+        draft = nil
+        loop do
+          res = UI::Editor.new(ui.stdin).read_multiline(prefill: draft)
+          return CANCEL_VALUE if res.status == :eof
+          # Esc: the buffer is the draft for the next round - it is never
+          # a cancel (issue #155).
+          draft = res.status == :cancelled ? res.text.to_s : nil
+          next unless res.status == :submitted
+
+          text = res.text.to_s.strip
+          next if text.empty? # bare submit: re-ask (no details -> re-prompt)
+
+          return [FREE_TEXT, text]
+        end
+      end
       ui.puts "             #{hint} (blank line to finish, Ctrl-D cancels):"
       lines = []
       loop do

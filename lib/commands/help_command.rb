@@ -87,15 +87,18 @@ module Commands
         Mid-turn steering notes (issue #36):
           While the model is working, any keypress opens a note editor on
           the spot WITHOUT interrupting the turn. Finish the note and press
-          Enter: it is delivered to the model as a "User note (mid-turn)"
-          message before its next step, so it can course-correct on the fly -
-          no Ctrl+C needed. The harness prints "[note] got it - ..." when it
-          receives one. A bare Enter (empty line) commits nothing and just
-          returns to the spinner. Note: a line typed mid-turn is ALWAYS a
-          note, not a command or shell input (a "/" or "!" prefix has no
-          special meaning then). While a dialog (grant prompt / ui.dialog)
-          is open, the keyboard belongs to the dialog - answer it normally;
-          its answer is never mistaken for a note.
+          the submit key (Ctrl/Shift+Enter on Windows, Alt+Enter in most
+          Unix terminals): it is delivered to the model as a "User note
+          (mid-turn)" message before its next step, so it can course-correct
+          on the fly - no Ctrl+C needed. Enter inserts a NEWLINE inside the
+          note, so multiline text can be typed or pasted as one note (issue
+          #198 phase 4). The harness prints "[note] got it - ..." when it
+          receives one. A submit on an empty note commits nothing and just
+          returns to the spinner. Note: text typed mid-turn is ALWAYS a note,
+          not a command or shell input (a "/" or "!" prefix has no special
+          meaning then). While a dialog (grant prompt / ui.dialog) is open,
+          the keyboard belongs to the dialog - answer it normally; its answer
+          is never mistaken for a note.
 
         Keys:
           Esc      Idle prompt: cancel the read; the text is KEPT as a draft

@@ -481,6 +481,60 @@ RSpec.describe UI::Dialog do
       end
     end
 
+    # issue #198 phase 4: the "Additional details" block is MULTILINE through
+    # the shared editor on a tty (read_multiline): Enter inserts a newline,
+    # the submit key commits the whole block as ONE note, Esc keeps the
+    # buffer and re-asks (never a cancel), Ctrl-D cancels the dialog. The
+    # CHOICE line above it stays on the single-line #read path - so the
+    # editor double below stubs BOTH: :read for the choice, :read_multiline
+    # for the details. Environment-free like the choice-line block: the
+    # routing predicate is stubbed directly, no Reline, no $stdin swap.
+    describe 'free-text tty multiline (issue #198 phase 4)' do
+      let(:tty_stream) { StringIO.new }
+      let(:tty_console) { UI::Console.new(stdout: io_out, stdin: tty_stream) }
+
+      def free_text_dialog_on_tty(choice_results, details_results)
+        d = described_class.new(
+          title: 't', options: options,
+          free_text: true, free_text_prompt: 'or type a short note'
+        )
+        allow(d).to receive(:tty_input?).and_return(true)
+
+        eof = UI::Editor::EDITOR_RESULT.new(nil, :eof)
+        editor = double('editor')
+        allow(editor).to receive(:read)
+          .and_return(*choice_results.map { |t, st| UI::Editor::EDITOR_RESULT.new(t, st) } + [eof])
+        allow(editor).to receive(:read_multiline)
+          .and_return(*details_results.map { |t, st| UI::Editor::EDITOR_RESULT.new(t, st) } + [eof])
+        allow(UI::Editor).to receive(:new).and_return(editor)
+
+        [d, d.show(ui: tty_console)]
+      end
+
+      it 'commits the whole pasted block as ONE multiline note' do
+        # "3" picks Additional details; read_multiline commits the buffer.
+        result = free_text_dialog_on_tty(
+          [['3', :submitted]],
+          [["line one\nline two with spaces", :submitted]]
+        ).last
+        expect(result).to eq([UI::Dialog::FREE_TEXT, "line one\nline two with spaces"])
+      end
+
+      it 'Esc keeps the draft and re-asks (never a cancel, issue #155)' do
+        result = free_text_dialog_on_tty(
+          [['3', :submitted]],
+          [['partial', :cancelled], ['partial done', :submitted]]
+        ).last
+        expect(result).to eq([UI::Dialog::FREE_TEXT, 'partial done'])
+      end
+
+      it 'eof from the editor cancels the whole dialog' do
+        result = free_text_dialog_on_tty(
+          [['3', :submitted]], [[nil, :eof]]
+        ).last
+        expect(result).to eq(UI::Dialog::CANCEL_VALUE)
+      end
+    end
     describe 'tty routing guard (UI::Editor.is_real_tty_stdin?, issue #202)' do
       it 'rejects a plain StringIO (the classic spec stream)' do
         expect(UI::Editor.is_real_tty_stdin?(StringIO.new("1\n"))).to be(false)
