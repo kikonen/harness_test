@@ -65,13 +65,22 @@ module UI
     # with a paste guard (see install_esc!), so Ctrl+Enter submits on the
     # remote-via-Windows-Terminal setups where no other submit key reaches
     # the pty.
-    CTRL_ENTER_LF_BYTE = 10.freeze
+    CTRL_ENTER_LF_BYTE = 10
+    # CSI (Control Sequence Introducer) pieces of the "ESC [ 1 3 ~"
+    # sequence: [ is 0x5b (91), '1'/'3' are their digit bytes, ~ is 0x7e
+    # (126). Kept as named bytes because a CSI sequence is exactly this:
+    # ESC, '[', parameters, terminator.
+    CSI_OPEN_BYTE   = 91   # '[' - starts the CSI parameter field
+    DIGIT_1_BYTE    = 49   # '1'
+    DIGIT_3_BYTE    = 51   # '3'
+    CSI_END_TILDE   = 126  # '~' - terminates this CSI sequence
     # CSI Ctrl+Enter ("ESC [ 1 3 ~"), sent for Ctrl+Enter by terminals with
     # an extended keyboard protocol (kitty/kamadb/kcm mode - e.g. recent
     # Windows Terminal + kitty keyboard enhancement). Harmless to bind on
     # terminals that never send it; on the ones that do it is the only
     # submit key when running a remote host via Windows Terminal (issue #198).
-    CSI_CTRL_ENTER_SEQ = [27, 91, 49, 51, 126].freeze
+    CSI_CTRL_ENTER_SEQ = [ESC_KEY_BYTE, CSI_OPEN_BYTE, DIGIT_1_BYTE,
+                         DIGIT_3_BYTE, CSI_END_TILDE].freeze
 
     # Opt-in fallback for setups where NO submit key reaches the terminal
     # (a remote host seen through Windows Terminal - issue #198): with
