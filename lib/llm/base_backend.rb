@@ -29,6 +29,18 @@ module LLM
     # Subclasses: the LLM::OPENAI / LLM::OLLAMA type this backend serves.
     def api_type = raise NotImplementedError
 
+    # Subclasses: the path appended to the base URL (issue #217: public
+    # together with #base_url so the UI can show the ACTUAL call target,
+    # e.g. "openai /v1/chat/completions" vs "ollama /api/chat" - after a
+    # /model switch between API types nothing in the console or the log
+    # said which endpoint a call went to).
+    def endpoint_path = raise NotImplementedError
+
+    # The base URL this backend sends to, used as-is (no rewriting) with
+    # #endpoint_path appended: what is configured is what gets called
+    # (openai profiles -> .../v1 base, ollama profiles -> server root).
+    def base_url = @options[:base_url]
+
     # issue #113: re-point the logger after a session resume swaps in a
     # different session id. KeepAliveHTTP reads it on every request.
     attr_accessor :logger
@@ -100,9 +112,6 @@ module LLM
 
     private
 
-    # Subclasses: the path appended to the normalized base URL.
-    def endpoint_path = raise NotImplementedError
-
     # Subclasses: build the request body (a Hash serializable to JSON).
     def build_body(_messages, _tools) = raise NotImplementedError
 
@@ -138,13 +147,6 @@ module LLM
 
     # Subclasses: raw parsed JSON -> the normalized response shape.
     def parse_response(_json) = raise NotImplementedError
-
-    # The URL configured for the profile, used AS-IS (no rewriting): each
-    # backend appends its own path to exactly this URL, so what is
-    # configured is what gets called. openai profiles point at the
-    # /v1-compatible base (e.g. http://localhost:11434/v1); ollama
-    # profiles point at the server root (http://localhost:11434).
-    def base_url = @options[:base_url]
 
     # A config-owned option value. Returns nil when unset: the caller
     # OMITS the key from the request so the server's own default applies

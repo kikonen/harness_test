@@ -24,7 +24,10 @@ module Commands
         marks << 'default' if default_name && (name == default_name || p[:model] == default_name)
         marks << 'active'  if name == current
         suffix = marks.empty? ? '' : "   [#{marks.join(', ')}]"
-        @ui.puts "  #{name}  ->  #{p[:model]} @ #{p[:url] || CLI::DEFAULT_BASE_URL}#{suffix}"
+        # issue #217: tag the API type so it is obvious which endpoint a
+        # profile hits (openai -> /v1-compatible, ollama -> native /api/chat).
+        api = p[:api] || 'openai'
+        @ui.puts "  #{name}  ->  #{p[:model]} @ #{p[:url] || CLI::DEFAULT_BASE_URL} (#{api})#{suffix}"
       end
       @ui.puts
       @ui.puts "Switch with: /model <name>   (current: #{current})"

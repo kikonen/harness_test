@@ -291,10 +291,10 @@ class SessionManager
   def send_session
     # issue #115 / #126: show the LIVE context usage estimate next to the
     # spinner (re-evaluated each frame from the current chain, not a snapshot).
-    # We describe the wait; the runner decides when to show / hide the
-    # spinner (always while waiting on us).
+    # issue #217: include WHERE the call goes (API type + path) so a /model
+    # switch between backends is visible at a glance without opening the log.
     Task.emit(:spinner_detail, origin: :session_manager,
-              content: { message: "Sending to #{@harness.options[:model]}",
+              content: { message: "Sending to #{@harness.options[:model]} (#{target_display})",
                          suffix: -> { @harness.context_indicator_live } })
 
     response = nil
@@ -458,6 +458,16 @@ class SessionManager
   # Name (or id) of the currently active model, or nil.
   def active_model_name
     @harness.options[:active_model] || @harness.options[:model]
+  end
+
+  # Where the active backend actually sends its calls: the API type and the
+  # endpoint path it appends to the configured base URL, e.g.
+  # "openai /v1/chat/completions" or "ollama /api/chat". Shown by the UI
+  # (send spinner, /model, /models, startup banner) so a /model switch
+  # between API types is visible without reading harness.log (issue #217).
+  def target_display
+    backend = @harness.client.backend
+    "#{backend.api_type} #{backend.endpoint_path}"
   end
 
   # Switch to a configured model profile by name (or raw model id).
