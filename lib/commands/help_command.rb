@@ -77,9 +77,12 @@ module Commands
           conversation and access list. To pick up the newest saved session
           in a new run, start the harness with --continue.
 
-        Multiline input:
-          * Paste: paste a multiline block directly at the prompt.
-          * Type: end a line with a trailing backslash (\\) to continue.
+        Multiline input (issue #198 phase 3 / #91):
+          * Enter adds a NEWLINE inside the prompt - it never submits, so a
+            multiline block can be typed or pasted without any tricks.
+          * Submit key sends the whole buffer: Ctrl+Enter or Shift+Enter on
+            Windows; Alt+Enter in most Unix terminals (Ctrl/Shift+Enter are
+            indistinguishable from Enter there). See the startup banner.
 
         Mid-turn steering notes (issue #36):
           While the model is working, any keypress opens a note editor on
@@ -95,7 +98,8 @@ module Commands
           its answer is never mistaken for a note.
 
         Keys:
-          Esc      Idle prompt: cancel the line (drop it, fresh prompt).
+          Esc      Idle prompt: cancel the read; the text is KEPT as a draft
+                   and prefilled at the next prompt (submit key sends it).
                    Note editor: keep the text as a draft for the next time
                    the editor opens.
           Ctrl+C   Cancel the current input (or interrupt a running request)
