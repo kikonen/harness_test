@@ -4,6 +4,10 @@ require 'spec_helper'
 require 'harness_config'
 
 RSpec.describe HarnessConfig do
+  # The template is the repo file config/config.example.yml (issue #215
+  # follow-up): no embedded copy in the code to drift from it.
+  let(:template) { File.read(described_class::TEMPLATE_FILE) }
+
   describe '#auto_save_enabled (issue #107)' do
     it 'defaults to true when the key is absent' do
       expect(described_class.new({}).auto_save_enabled).to be(true)
@@ -23,7 +27,7 @@ RSpec.describe HarnessConfig do
     end
 
     it 'includes the auto_save key in the default template' do
-      expect(described_class::DEFAULT_TEMPLATE).to include('auto_save: true')
+      expect(template).to include('auto_save: true')
     end
   end
 
@@ -40,7 +44,7 @@ RSpec.describe HarnessConfig do
     end
 
     it 'mentions the key in the default template (commented out)' do
-      expect(described_class::DEFAULT_TEMPLATE).to include('double_enter_submit')
+      expect(template).to include('double_enter_submit')
     end
   end
 
@@ -55,7 +59,7 @@ RSpec.describe HarnessConfig do
     end
 
     it 'includes reserved_tokens in the default template' do
-      expect(described_class::DEFAULT_TEMPLATE).to include('reserved_tokens: 8192')
+      expect(template).to include('reserved_tokens: 8192')
     end
   end
 

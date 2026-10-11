@@ -46,24 +46,16 @@ module LLM
   RETRY_COUNT = 3
   RETRY_DELAY = 2
 
-  # Ollama generation limits. -1 means "no limit" (generate until the model
-  # stops on its own). NUM_CTX is the context window size (65K tokens); it
-  # is honoured ONLY by the native Ollama endpoint - the OpenAI-compatible
-  # schema has no num_ctx field (issue #197).
-  NUM_PREDICT = -1
-  NUM_CTX     = 65536
+  # Default context window size (tokens) when the config does not set one.
+  # Honoured by the native Ollama endpoint; for the OpenAI-compatible
+  # endpoint it drives the client-side context accounting only
+  # (issue #197: that schema has no num_ctx field).
+  NUM_CTX = 65536
 
-  # Default reasoning effort.
-  REASONING_EFFORT = "medium"
-
-  # Sampling parameters (defaults). temperature controls randomness
-  # (lower = more deterministic); top_p is nucleus sampling.
-  TEMPERATURE      = 0.2
-  TOP_P            = 0.9
-  TOP_K            = 20
-  MIN_P            = 0
-  PRESENCE_PENALTY = 1.0
-  REPEAT_PENALTY   = 1.05
+  # Sampling parameters (temperature, top_p, ...), max_tokens/num_predict
+  # and reasoning_effort are NOT constants: the config file owns their
+  # values. When a key is absent (nil) it is NOT sent to the API, so the
+  # server's own default applies.
 
   # Backend API types selectable per model profile ('api' config key).
   OPENAI  = :openai   # default: /v1/chat/completions (OpenAI-compatible)

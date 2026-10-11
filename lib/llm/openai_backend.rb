@@ -6,7 +6,9 @@ require_relative 'base_backend'
 
 module LLM
   # OpenAI-compatible backend (default, issue #197): POST /v1/chat/completions.
-  # The request uses the standard OpenAI schema. NOTE: that schema has NO
+  # The path is appended to the configured base URL as-is, so an
+  # http://localhost:11434/v1 base (Ollama's /v1-compatible server) ends up
+  # at the right place without any URL rewriting. NOTE: the OpenAI schema
   # num_ctx field - a server cannot be told the context window through this
   # endpoint, so the configured window only affects the client-side context
   # accounting (see issue #197). For real num_ctx control use an 'ollama'
@@ -16,20 +18,24 @@ module LLM
 
     private
 
-    def endpoint_path = '/v1/chat/completions'
+    def endpoint_path = '/chat/completions'
 
     def build_body(messages, tools)
-      body = {
-        model: @options[:model],
-        messages: messages,
-        temperature: sample(:temperature, LLM::TEMPERATURE),
-        top_p: sample(:top_p, LLM::TOP_P),
-        top_k: sample(:top_k, LLM::TOP_K),
-        min_p: sample(:min_p, LLM::MIN_P),
-        presence_penalty: sample(:presence_penalty, LLM::PRESENCE_PENALTY),
-        repeat_penalty: sample(:repeat_penalty, LLM::REPEAT_PENALTY),
-        max_tokens: LLM::NUM_PREDICT
-      }
+      body = { model: @options[:model], messages: messages }
+
+      # Config owns the sampling values: send each key ONLY when set
+      # (issue #215), so the server default applies to anything omitted.
+      body[:temperature]        = cfg(:temperature) if cfg(:temperature)
+      body[:top_p]              = cfg(:top_p)       if cfg(:top_p)
+      body[:top_k]              = cfg(:top_k)       if cfg(:top_k)
+      body[:min_p]              = cfg(:min_p)       if cfg(:min_p)
+      body[:presence_penalty]   = cfg(:presence_penalty) if cfg(:presence_penalty)
+      body[:repeat_penalty]     = cfg(:repeat_penalty)   if cfg(:repeat_penalty)
+      body[:max_tokens]         = cfg(:max_tokens)    if cfg(:max_tokens)
+      # issue #215: the OpenAI endpoint reads reasoning_effort at TOP LEVEL
+      # (openai.go ReasoningEffort -> Think); it is NOT an options key.
+      body[:reasoning_effort]   = cfg(:reasoning_effort) if cfg(:reasoning_effort)
+
       body[:tools] = tools if tools && !tools.empty?
       body
     end

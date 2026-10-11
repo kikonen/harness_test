@@ -46,7 +46,10 @@ require_relative 'state_migrator'
 # -- Harness --------------------------------------------------------------
 
 class Harness
-  SYSTEM_PROMPT = File.read(File.join(__dir__, 'system_prompt.txt'))
+  # The built-in system prompt lives in config/ with the other config-owned
+  # defaults (config/system_prompt.txt); --system-file and the config
+  # 'system' key override it.
+  SYSTEM_PROMPT = File.read(File.join(__dir__, '../config', 'system_prompt.txt'))
 
   # issue #158: 100 was too low for long multi-step tasks (bumped to 200).
   MAX_TOOL_ITERATIONS = 200

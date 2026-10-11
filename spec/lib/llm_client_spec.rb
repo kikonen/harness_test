@@ -35,10 +35,53 @@ RSpec.describe LLMClient do
     end
   end
 
-  describe 'compat aliases (referenced by harness.rb / session_manager.rb)' do
-    it 'exposes NUM_CTX and the other legacy constants' do
+  describe 'built-in constants' do
+    # issue #215: sampling values are NOT constants anymore - the config
+    # file owns them. Only NUM_CTX keeps a built-in (client-side accounting).
+    it 'exposes NUM_CTX (the only sampling-related built-in)' do
       expect(described_class::NUM_CTX).to eq(65536)
-      expect(described_class::TEMPERATURE).to eq(0.2)
+      expect(described_class).not_to respond_to(:TEMPERATURE)
+      expect(described_class).not_to respond_to(:REASONING_EFFORT)
+    end
+  end
+
+  # issue #215: a terminal HTTP error (4xx) must reach harness.log, not just
+  # the console - before the fix only --verbose logged response bodies at
+  # all, and a failed request logged nothing.
+  describe 'error logging' do
+    let(:options) { { base_url: 'http://127.0.0.1:11434', model: 'test-model' } }
+    let(:client)  { described_class.new(options, logger) }
+
+    def stub_error!(code, body)
+      resp = double('resp', is_a?: false, code: code.to_s, body: body)
+      http = double('http', request: resp)
+
+      expect(KeepAliveHTTP).to receive(:new).and_return(http)
+      allow(http).to receive(:logger=)
+      allow(http).to receive(:use_ssl=)
+      allow(http).to receive(:open_timeout=)
+      allow(http).to receive(:read_timeout=)
+      allow(http).to receive(:keep_alive_timeout=)
+
+      warns = []
+      logger.define_singleton_method(:warn) { |*args| warns << args }
+      allows_logger_info!
+      warns
+    end
+
+    # silence the verbose/separator info lines - we only assert on warn.
+    def allows_logger_info!
+      allow(logger).to receive(:info)
+      allow(logger).to receive(:error)
+    end
+
+    it 'logs the server error body on a 4xx response before raising' do
+      warns = stub_error!(400, '{"error":"bad request"}')
+
+      expect { client.chat([{ role: 'user', content: 'hi' }]) }
+        .to raise_error(LLMError, /HTTP 400/)
+      expect(warns.join("\n")).to include('HTTP 400')
+      expect(warns.join("\n")).to include('bad request')
     end
   end
 

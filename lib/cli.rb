@@ -123,6 +123,8 @@ class CLI
       opts[:api]              = profile[:api]
       opts[:token]            = profile[:token]
       opts[:num_ctx]          = profile[:num_ctx]
+      opts[:max_tokens]       = profile[:max_tokens]
+      opts[:num_predict]      = profile[:num_predict]
       opts[:reasoning_effort] = profile[:reasoning_effort]
       opts[:temperature]      = profile[:temperature]
       opts[:top_p]            = profile[:top_p]
