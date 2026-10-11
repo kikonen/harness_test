@@ -274,4 +274,51 @@ RSpec.describe Session do
       expect(session.messages.size).to eq(3)
     end
   end
+
+  # issue #208: the session is the working chain, so a turn that died
+  # mid-loop ends on a `tool` result or on an assistant message with
+  # unanswered tool_calls. /retry must be able to resume from all of those
+  # shapes (before it only recognized a trailing user prompt and lost the
+  # tool trail - "give continue and figure it out yourself").
+  describe '#pending? (issue #208)' do
+    it 'is false for a bare system prompt' do
+      expect(session.pending?).to be(false)
+    end
+
+    it 'is true for an unanswered user prompt' do
+      session.add_user('do the thing')
+      expect(session.pending?).to be(true)
+    end
+
+    it 'is false once the assistant replied (nothing to retry)' do
+      session.add_user('do the thing')
+      session.add_assistant('done')
+      expect(session.pending?).to be(false)
+    end
+
+    it 'is true when a turn died on a tool result (mid-loop failure)' do
+      session.add_user('do the thing')
+      session.add_assistant_message(
+        { role: 'assistant', content: nil,
+          tool_calls: [{ id: 't1', function: { name: 'file.read', arguments: '{}' } }] }
+      )
+      session.messages << { role: 'tool', tool_call_id: 't1', content: 'sha256: abc' }
+      expect(session.pending?).to be(true)
+    end
+
+    it 'is true when the chain ends on an assistant message with unanswered tool_calls' do
+      session.add_user('do the thing')
+      session.add_assistant_message(
+        { role: 'assistant', content: nil,
+          tool_calls: [{ id: 't1', function: { name: 'file.read', arguments: '{}' } }] }
+      )
+      expect(session.pending?).to be(true)
+    end
+
+    it 'is false for an assistant message with NO tool_calls' do
+      session.add_user('do the thing')
+      session.messages << { role: 'assistant', content: nil }
+      expect(session.pending?).to be(false)
+    end
+  end
 end

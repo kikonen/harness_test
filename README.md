@@ -109,7 +109,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 |---|---|
 | `/grant` | Show all current grants (file/dir access + command allowlist) |
 | `/clear` | Remove all grants |
-| `/retry` | Re-send the session chain (after a failed request) |
+| `/retry` | Re-send the chain after a failed request; tool work already done is kept, so the turn resumes from there |
 | `/session` | Show a summary of the current session |
 | `/session-clear` | Drop all conversation messages |
 | `/compact` | Summarize the conversation to free context |

@@ -368,15 +368,12 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
       def context_indicator_live(_messages = nil)
         "🧠 ctx ~1/1000 (0%)"
       end
-
-      # issue #36: the harness accumulates mid-turn steering notes here.
-      attr_accessor :user_notes
     end.new(session, client)
   end
   let(:manager) { described_class.new(harness, file_list) }
 
-  # A local working chain as it looks mid tool-loop: system + prompt + a
-  # completed assistant/tool round (the part NOT yet in session.messages).
+  # issue #208: with the session as the working chain, this IS the session's
+  # own message array (there is no separate local copy to sync back).
   def inloop_messages
     [
       { role: 'system', content: 'system prompt' },
@@ -425,12 +422,12 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
     result = manager.check_inloop_compaction(messages, 1000)
     expect(result).to be(true)
 
-    # The summarization call must see the ENTIRE local working chain (minus
+    # The summarization call must see the ENTIRE working chain (minus
     # the system message, plus the instruction prompt) - including the
-    # mid-turn tool trail that does not exist in session.messages yet.
+    # mid-turn tool trail already committed into it as it happened.
     expect(captured.size).to eq(inloop_messages.size - 1 + 1)
     expect(captured.last[:content]).to match(/Keep it under \d+ words/)
-    # The local working chain is replaced with a compacted form - the tail
+    # The working chain is replaced with a compacted form - the tail
     # (last N messages) is deliberately NOT retained, because retaining it
     # here would drop the rest of the work trail from both the live chain
     # and the persisted session (issue #107).
@@ -449,34 +446,28 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
     expect(messages.map { |m| m[:role] }).to eq(%w[system user assistant user])
     expect(messages[1][:content]).to include('HANDOFF TEXT')
     expect(messages.last[:content]).to match(/do not repeat/i)
-    # The session must hold the exact same compacted chain (in place).
+    # The session IS the working chain - the replace lands in place.
     expect(session.messages).to eq(messages)
     # Stale pre-compaction stats must be cleared, otherwise auto_compact_due?
     # would immediately trip again on the very tokens that caused compaction.
     expect(session.instance_variable_get(:@last_stats)).to be_nil
   end
-
-  # issue #36: steering notes the user typed mid-turn already sit in the
-  # local working chain (Harness#call_llm appended them). An in-loop
-  # compaction REPLACES that chain, so the notes must be re-appended onto
-  # the fresh chain or they would silently vanish from the conversation.
-  it 're-appends user_notes onto the fresh post-compaction chain (issue #36)' do
-    allow_summary_response('HANDOFF TEXT')
+  # issue #36 / #208: a mid-turn steering note is already a message in the
+  # working chain (= the session's, since the session IS that chain), so the
+  # summarization call must see it - no separate carry-over step anymore.
+  it 'summarizes a mid-turn steering note that sits in the chain' do
     messages = inloop_messages
+    messages << { role: 'user', content: 'User note (mid-turn): fix the naming first' }
 
-    expect(manager.check_inloop_compaction(messages, 1000,
-                                           user_notes: ['stop and fix the naming first']))
-      .to be(true)
+    captured = nil
+    allow(client).to receive(:chat) do |msgs|
+      captured = msgs
+      { choices: [{ message: { content: 'HANDOFF TEXT' } }] }
+    end
 
-    # The note lands AFTER the continue prompt as its own user message, so
-    # the steering survives the replace exactly like a fresh turn.
-    expect(messages.map { |m| m[:role] }).to eq(%w[system user assistant user user])
-    expect(messages.last).to eq(
-      role: 'user', content: 'User note (mid-turn): stop and fix the naming first'
-    )
-    # The session must hold the exact same compacted chain (in place),
-    # notes included.
-    expect(session.messages).to eq(messages)
+    expect(manager.check_inloop_compaction(messages, 1000)).to be(true)
+    expect(captured.map { |m| m[:content].to_s })
+      .to include('User note (mid-turn): fix the naming first')
   end
   # issue #116: in-loop compaction runs from INSIDE Harness#call_llm, so the
   # send_session wait is still animating. The runner owns the spinner and
@@ -632,63 +623,96 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
   end
 end
 
-# issue #36: steering notes typed mid-turn (collected by the harness, see
-# Harness#user_notes) are committed into the session as plain user messages
-# at every commit point (turn end, context-exceeded re-send) so they persist
-# across turns / auto-save / resume. commit_user_notes is idempotent within
-# a turn: the harness list is cleared after each commit.
-RSpec.describe SessionManager, 'commit_user_notes (issue #36)' do
+# issue #208: /retry must be able to RESUME a turn that died mid-loop. The
+# session is the working chain, so the trail (assistant tool_calls + tool
+# results) is already in it when the LLM call fails - before this fix only a
+# trailing user prompt counted as "pending" and /retry replayed the prompt
+# from zero ("give continue and figure out what you were doing yourself").
+RSpec.describe SessionManager, '#retry (issue #208)' do
   let(:session) { Session.new('system prompt') }
   let(:file_list) { FileList.new([], workdir: Dir.pwd) }
+  let(:client) { double('client', chat: nil) }
+  let(:sent_chains) { [] }
   let(:harness) do
     Class.new do
-      attr_reader :session, :user_notes
+      attr_reader :session, :client, :logger
 
-      def initialize(session)
-        @session    = session
-        @user_notes = []
+      def initialize(session, client, logger, sent_chains)
+        @session = session
+        @client  = client
+        @options = { num_ctx: 65_536 }
+        @logger  = logger
+        @sent    = sent_chains
       end
-    end.new(session)
+
+      attr_reader :options
+
+      def compact_auto_threshold
+        Session::AUTO_COMPACT_THRESHOLD
+      end
+
+      def compact_reserved_tokens
+        Session::COMPACT_RESERVED_TOKENS
+      end
+
+      def call_llm
+        @sent << @session.messages.dup
+        { reasoning: nil, content: 'ok', stats: {} }
+      end
+
+      def print_stats(_stats); end
+    end.new(session, client, Logger.new(File::NULL), sent_chains)
   end
   let(:manager) { described_class.new(harness, file_list) }
 
-  it 'appends each note as a user message (in order) and clears the list' do
-    harness.instance_variable_set(:@user_notes, ['use ruby', 'skip the tests'])
-
-    manager.commit_user_notes
-
-    notes = session.messages.select { |m| m[:content].to_s.include?('User note (mid-turn)') }
-    expect(notes.map { |m| m[:content] }).to eq(
-      ['User note (mid-turn): use ruby', 'User note (mid-turn): skip the tests']
+  def seed_midloop_failure
+    session.add_user('implement feature X')
+    session.add_assistant_message(
+      { role: 'assistant', content: nil,
+        tool_calls: [{ id: 'call_1', function: { name: 'file.read', arguments: '{}' } }] }
     )
-    # All committed notes are plain user messages.
-    expect(session.messages.map { |m| m[:role] }.uniq).to eq(%w[system user])
-    expect(harness.user_notes).to be_empty
+    session.messages << { role: 'tool', tool_call_id: 'call_1', content: 'line 1' }
   end
 
-  it 'is a no-op when there are no notes' do
-    session.add_user('hello')
-    before = session.messages.dup
+  it 'still retries an unanswered user prompt' do
+    session.add_user('do the thing')
 
-    manager.commit_user_notes
-
-    expect(session.messages).to eq(before)
+    expect { manager.retry }.not_to raise_error
+    expect(sent_chains.size).to eq(1)
   end
 
-  it 'is idempotent: a second commit in the same turn appends nothing' do
-    harness.instance_variable_set(:@user_notes, ['once'])
-    manager.commit_user_notes
-    count_after_first = session.messages.count
+  it 'refuses to retry a chain that ends on an answered reply' do
+    session.add_user('do the thing')
+    session.add_assistant('done')
 
-    manager.commit_user_notes
-
-    expect(session.messages.count).to eq(count_after_first)
+    expect { manager.retry }.to raise_error(HarnessError, /answered reply/)
+    expect(sent_chains).to be_empty
   end
 
-  it 'does nothing when the harness lacks the note API (older stubs)' do
-    old_harness = double('harness') # no user_notes method
-    old_manager = described_class.new(old_harness, file_list)
+  it 'resumes a turn that died on a tool result (the trail is re-sent)' do
+    seed_midloop_failure
+    allow(session).to receive(:auto_compact_due?).and_return(false)
 
-    expect { old_manager.commit_user_notes }.not_to raise_error
+    manager.retry
+
+    expect(sent_chains.size).to eq(1)
+    sent = sent_chains.first
+    expect(sent.map { |m| m[:role] })
+      .to eq(%w[system user assistant tool])
+    expect(sent.last).to eq(role: 'tool', tool_call_id: 'call_1', content: 'line 1')
+  end
+
+  it 'resumes a turn that died right after an unanswered tool_calls answer' do
+    session.add_user('implement feature X')
+    session.add_assistant_message(
+      { role: 'assistant', content: nil,
+        tool_calls: [{ id: 'call_1', function: { name: 'file.read', arguments: '{}' } }] }
+    )
+    allow(session).to receive(:auto_compact_due?).and_return(false)
+
+    manager.retry
+
+    expect(sent_chains.first.map { |m| m[:role] })
+      .to eq(%w[system user assistant])
   end
 end

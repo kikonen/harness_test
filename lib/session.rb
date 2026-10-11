@@ -74,23 +74,25 @@ class Session
   end
 
   # True when the chain ends with a user message that has not been answered
-  # yet (e.g. after a failed request) - i.e. there is something to retry.
+  # yet (e.g. after a failed request), or with an INTERRUPTED tool round
+  # (issue #208): the session IS the working chain, so a turn that died
+  # mid-loop ends on a `tool` result (the model has pending calls it must
+  # finish) or on an assistant message carrying tool_calls with no results
+  # yet (the request failed after the model answered but before/while the
+  # tools ran). In all those shapes /retry can resume from exactly that
+  # point instead of losing the trail.
   def pending?
-    @messages.last[:role] == 'user'
+    last = @messages.last
+    case last[:role]
+    when 'user' then true
+    when 'tool' then true
+    else last[:role] == 'assistant' && Array(last[:tool_calls]).any?
+    end
   end
 
   def add_user(content)
     @messages << { role: 'user', content: content }
     @user_prompts += 1
-    self
-  end
-
-  # issue #36: a steering note the user typed MID-TURN (while the model was
-  # already working) is committed at turn end as a plain user message, so it
-  # persists in the chain (across turns, auto-save, /resume). It does not
-  # count toward @user_prompts - it never arrived at the prompt.
-  def add_user_note(content)
-    @messages << { role: 'user', content: content }
     self
   end
 
@@ -120,6 +122,16 @@ class Session
 
   def add_assistant(content)
     @messages << { role: 'assistant', content: content }
+    self
+  end
+
+  # issue #208: append an assistant message WITH its tool_calls verbatim.
+  # The session is the working chain of a turn, so each round (this message
+  # plus the tool results that follow) commits as it happens - a failed or
+  # killed mid-turn run keeps every round already made, and /retry resumes
+  # from there instead of starting the prompt over.
+  def add_assistant_message(message)
+    @messages << message
     self
   end
 
