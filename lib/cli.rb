@@ -238,7 +238,7 @@ class CLI
     id = auto_save_session
     ui.puts "Goodbye."
     if id
-      ui.puts "Session saved as #{id} (#{harness.session_manager.sessions_dir}/#{id}.json)."
+      ui.puts "Session saved as #{id} (#{harness.session_manager.session_file_path(id)})."
       ui.puts "Resume it later with: #{commands.resume_command(id)}"
     end
   end
@@ -256,7 +256,8 @@ class CLI
   def resume_from_cli
     id   = @options[:resume]
     path = @harness.session_manager.resume_session(id)
-    name = File.basename(path, '.json')
+    # issue #207: the id is the session DIRECTORY name.
+    name = File.basename(File.dirname(path))
     ui.puts "Resumed session #{name} (conversation and file list restored - see /session)."
   end
 
@@ -266,7 +267,8 @@ class CLI
     path = @harness.session_manager.newest_session_path
     raise HarnessError, 'no saved sessions in this workdir to continue (use /sessions to list any)' unless path
 
-    name = File.basename(path, '.json')
+    # issue #207: the id is the session DIRECTORY name.
+    name = File.basename(File.dirname(path))
     @harness.session_manager.resume_session(name)
     ui.puts "Continued session #{name} (the newest saved in #{@file_list.workdir}/.harness/sessions/)."
   end

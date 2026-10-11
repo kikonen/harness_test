@@ -210,11 +210,10 @@ RSpec.describe SessionManager do
     it 'persists the session when auto_save is on and there is content' do
       with_tmp_manager do |manager, _, dir|
         session.add_user('hello')
-        sessions = File.join(dir, '.harness/sessions')
-        FileUtils.mkdir_p(sessions)
+        # issue #207: the JSON lives INSIDE the session's own directory.
+        path = manager.session_file_path(session.session_id)
         expect(manager).to receive(:save_session).and_call_original
-        expect { manager.maybe_auto_save('test') }
-          .to change { Dir.children(sessions).size }.from(0).to(1)
+        expect { manager.maybe_auto_save('test') }.to change { File.file?(path) }.from(false).to(true)
       end
     end
 
@@ -246,9 +245,12 @@ RSpec.describe SessionManager do
       it 'returns the most recently modified session file' do
         with_tmp_manager do |manager, _, dir|
           sessions = File.join(dir, '.harness/sessions')
-          FileUtils.mkdir_p(sessions)
-          older = File.join(sessions, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.json')
-          newer = File.join(sessions, 'ffffffff-0000-1111-2222-333333333333.json')
+          # issue #207: files live inside per-session directories.
+          older_dir = File.join(sessions, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+          newer_dir = File.join(sessions, 'ffffffff-0000-1111-2222-333333333333')
+          FileUtils.mkdir_p([older_dir, newer_dir])
+          older = File.join(older_dir, 'session.json')
+          newer = File.join(newer_dir, 'session.json')
           File.write(older, '{}')
           File.write(newer, '{}')
           # Force distinct mtimes: put the "older" one clearly in the past.
@@ -262,12 +264,13 @@ RSpec.describe SessionManager do
   describe '#resume_session (issue #113)' do
     it 're-points the logger at the resumed session id' do
       Dir.mktmpdir do |dir|
-        sessions = File.join(dir, '.harness/sessions')
-        FileUtils.mkdir_p(sessions)
+        # issue #207: the JSON lives inside the session's own directory.
         sid = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+        sessions = File.join(dir, '.harness/sessions', sid)
+        FileUtils.mkdir_p(sessions)
         saved = session.to_h(file_list)
         saved[:session_id] = sid # the file on disk carries the resumed id
-        File.write(File.join(sessions, "#{sid}.json"), JSON.generate(saved))
+        File.write(File.join(sessions, 'session.json'), JSON.generate(saved))
 
         file_list = FileList.new([], workdir: dir)
         manager   = described_class.new(harness, file_list)
@@ -285,14 +288,21 @@ RSpec.describe SessionManager do
   # history manager at the new session id so up/down arrows (and the saved
   # file) follow the resumed session instead of mixing entries across ids.
   describe '#resume_session (issue #119)' do
+    # issue #207: seed a saved session in the per-directory layout
+    # (<sessions>/<id>/session.json).
+    def seed_saved_session(dir)
+      sid = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      sessions = File.join(dir, '.harness/sessions', sid)
+      FileUtils.mkdir_p(sessions)
+      saved = session.to_h(file_list)
+      saved[:session_id] = sid
+      File.write(File.join(sessions, 'session.json'), JSON.generate(saved))
+      sid
+    end
+
     it 're-binds the history manager to the resumed session id' do
       Dir.mktmpdir do |dir|
-        sessions = File.join(dir, '.harness/sessions')
-        FileUtils.mkdir_p(sessions)
-        sid = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-        saved = session.to_h(file_list)
-        saved[:session_id] = sid
-        File.write(File.join(sessions, "#{sid}.json"), JSON.generate(saved))
+        sid = seed_saved_session(dir)
 
         file_list = FileList.new([], workdir: dir)
         manager   = described_class.new(harness, file_list)
@@ -307,18 +317,92 @@ RSpec.describe SessionManager do
 
     it 'does not break resume when no history manager is attached' do
       Dir.mktmpdir do |dir|
-        sessions = File.join(dir, '.harness/sessions')
-        FileUtils.mkdir_p(sessions)
-        sid = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-        saved = session.to_h(file_list)
-        saved[:session_id] = sid
-        File.write(File.join(sessions, "#{sid}.json"), JSON.generate(saved))
+        sid = seed_saved_session(dir)
 
         file_list = FileList.new([], workdir: dir)
         manager   = described_class.new(harness, file_list)
         harness.history = nil
 
         expect { manager.resume_session(sid) }.not_to raise_error
+      end
+    end
+  end
+
+  # issue #207: the session JSON lives INSIDE the session's own directory
+  # (.harness/sessions/<id>/session.json), alongside its log and history -
+  # not as <id>.json next to the per-session dirs.
+  describe 'session JSON in the session dir (issue #207)' do
+    let(:sid) { 'f7931611-30b4-4b4b-aec6-f7083ef2942a' }
+
+    def seed_saved_session(dir)
+      sessions = File.join(dir, '.harness/sessions', sid)
+      FileUtils.mkdir_p(sessions)
+      saved = session.to_h(file_list)
+      saved[:session_id] = sid
+      File.write(File.join(sessions, 'session.json'), JSON.generate(saved))
+      sessions
+    end
+
+    it '#session_file_path points inside the session dir' do
+      Dir.mktmpdir do |dir|
+        file_list = FileList.new([], workdir: dir)
+        manager   = described_class.new(harness, file_list)
+
+        expect(manager.session_file_path(sid))
+          .to eq(File.join(dir, '.harness/sessions', sid, 'session.json'))
+      end
+    end
+
+    it '#save_session writes into the session dir (no stray <id>.json)' do
+      Dir.mktmpdir do |dir|
+        file_list = FileList.new([], workdir: dir)
+        manager   = described_class.new(harness, file_list)
+        session.add_user('hello')
+
+        expect(manager.save_session).to eq(session.session_id)
+
+        path = manager.session_file_path(session.session_id)
+        expect(File.file?(path)).to be true
+        # The old layout's file must NOT appear next to the session dirs.
+        expect(File.exist?(File.join(dir, '.harness/sessions', "#{session.session_id}.json")))
+          .to be false
+      end
+    end
+
+    it '#list_sessions reads sessions from the new layout (id = dir name)' do
+      Dir.mktmpdir do |dir|
+        seed_saved_session(dir)
+
+        file_list = FileList.new([], workdir: dir)
+        manager   = described_class.new(harness, file_list)
+
+        # eq() does not unwrap hash matchers - use match_array for that.
+        expect(manager.list_sessions)
+          .to match_array([hash_including(id: sid, messages: 1)])
+      end
+    end
+
+    it '#newest_session_path finds sessions in the new layout' do
+      Dir.mktmpdir do |dir|
+        seed_saved_session(dir)
+
+        file_list = FileList.new([], workdir: dir)
+        manager   = described_class.new(harness, file_list)
+
+        expect(manager.newest_session_path)
+          .to eq(File.join(dir, '.harness/sessions', sid, 'session.json'))
+      end
+    end
+
+    it '#resume_session resolves an abbreviated id by directory name' do
+      Dir.mktmpdir do |dir|
+        seed_saved_session(dir)
+
+        file_list = FileList.new([], workdir: dir)
+        manager   = described_class.new(harness, file_list)
+
+        expect { manager.resume_session(sid[0, 8]) }.not_to raise_error
+        expect(session.session_id).to eq(sid)
       end
     end
   end
