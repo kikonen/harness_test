@@ -42,6 +42,28 @@ RSpec.describe UI::Editor do
     end
   end
 
+  # issue #198 phase 3: the idle prompt's read_multiline on a non-tty stream
+  # is a plain one-line read (a pipe has no submit key): backslashes are
+  # content, blank line is :empty, exhausted stream is :eof.
+  describe '#read_multiline on a non-tty stream' do
+    it 'reads one line and keeps backslashes as content' do
+      ed = described_class.new(StringIO.new("line with \\\n"))
+      r = ed.read_multiline
+      expect(result_status(r)).to eq(:submitted)
+      expect(result_text(r)).to eq('line with \\')
+    end
+
+    it 'returns :empty for a blank line' do
+      expect(described_class.new(StringIO.new("\n"))
+                    .read_multiline.status).to eq(:empty)
+    end
+
+    it 'returns :eof when the stream is exhausted' do
+      expect(described_class.new(StringIO.new)
+                    .read_multiline.status).to eq(:eof)
+    end
+  end
+
   describe 'streams without tty? (pipes)' do
     it 'takes the dumb path (pipes have no tty? method behavior we rely on)' do
       reader, writer = IO.pipe
@@ -61,14 +83,32 @@ RSpec.describe UI::Editor do
   end
 
   describe 'install_esc! (idempotent global Reline patch)' do
-    it 'installs the LineEditor module only once' do
-      expect { described_class.install_esc! }
-        .to change { Reline::LineEditor.ancestors.include?(UI::Editor::RelineEscCancel) }
-        .from(false).to(true)
+    it 'installs the LineEditor module once and stays idempotent' do
+      described_class.install_esc!
+      expect(Reline::LineEditor.ancestors)
+        .to include(UI::Editor::RelineEscCancel)
 
       before = Reline::LineEditor.ancestors.count
       described_class.install_esc!
       expect(Reline::LineEditor.ancestors.count).to eq(before)
+    end
+
+    # issue #91: the submit key sequence (Ctrl+Enter / Shift+Enter on
+    # Windows, Alt+Enter on most Unix terminals) commits the multiline
+    # buffer via Reline's built-in ed_force_submit.
+    it 'binds the submit key sequence to :ed_force_submit in emacs mode' do
+      described_class.install_esc!
+      kb = Reline.core.config.editing_mode
+      expect(kb.get(UI::Editor::SUBMIT_KEY_SEQ)).to eq(:ed_force_submit)
+      # Plain Enter stays a newline - it never submits at the idle prompt.
+      expect(kb.get([13])).to eq(:ed_newline)
+    end
+
+    it 'is idempotent for key bindings (no accumulation on re-call)' do
+      described_class.install_esc!
+      kb = Reline.core.config.editing_mode
+      described_class.install_esc!
+      expect(kb.get(UI::Editor::SUBMIT_KEY_SEQ)).to eq(:ed_force_submit)
     end
   end
 end

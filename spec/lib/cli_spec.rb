@@ -47,4 +47,55 @@ RSpec.describe CLI do
       cli.run
     end
   end
+
+  # issue #198 phase 3: the idle prompt keeps an Esc'd buffer as a draft
+  # (prefilled at the next prompt), re-prompts on bare Enter, and only
+  # returns a submitted command or nil (Ctrl-D eof => quit).
+  describe '#get_command' do
+    let(:cli) { build_cli }
+    let(:editor) { instance_double(UI::Editor) }
+    let(:stdin_io) { StringIO.new }
+
+    before do
+      allow(ui).to receive(:puts)
+      allow(ui).to receive(:stdin).and_return(stdin_io)
+      allow(ui).to receive(:flush)
+      allow(cli.harness.session_manager).to receive(:active_model_name)
+                                        .and_return('test-model')
+      allow(cli.harness).to receive(:context_indicator).and_return(nil)
+      @result_class = UI::Editor::EDITOR_RESULT
+      allow(UI::Editor).to receive(:new).with(stdin_io).and_return(editor)
+    end
+
+    def editor_result(text, status)
+      @result_class.new(text, status)
+    end
+
+    it 'returns the submitted text and clears the draft' do
+      allow(editor).to receive(:read_multiline).and_return(
+        editor_result('hello world', :submitted))
+
+      expect(cli.send(:get_command)).to eq('hello world')
+    end
+
+    it 'keeps a cancelled buffer as the draft and re-prompts' do
+      allow(editor).to receive(:read_multiline).and_return(
+        editor_result('partial', :cancelled),
+        editor_result('partial done', :submitted))
+
+      expect(cli.send(:get_command)).to eq('partial done')
+      expect(editor).to have_received(:read_multiline)
+                     .with(prompt: '  ', prefill: nil)
+      expect(editor).to have_received(:read_multiline)
+                     .with(prompt: '  ', prefill: 'partial')
+    end
+
+    it 're-prompts on a bare Enter without touching the draft' do
+      allow(editor).to receive(:read_multiline).and_return(
+        editor_result('', :empty),
+        editor_result('cmd', :submitted))
+
+      expect(cli.send(:get_command)).to eq('cmd')
+    end
+  end
 end

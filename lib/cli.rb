@@ -46,6 +46,9 @@ class CLI
     # dir - the dummy-dir-on-every-resume symptom.
     @harness.history = @history
     list_sessions_and_exit if @options[:list_sessions]
+    # issue #198 phase 3: draft of an Esc-cancelled idle-prompt read (the
+    # buffer is prefilled at the next prompt instead of being dropped).
+    @idle_draft = nil
     resume_from_cli if @options[:resume]
     continue_from_cli if @options[:continue]
     # issue #119: command history is per session - bind it to the active
@@ -84,16 +87,14 @@ class CLI
         opts[:continue] = true
       end
       o.on('--list-sessions',
-           'List saved sessions and exit (no model needed)') do
-        opts[:list_sessions] = true
-      end
+           'List saved sessions and exit (no model needed)') { |v| opts[:list_sessions] = v }
       o.on('--no-auto-save',
            'Disable periodic auto-save of the session at prompt boundaries ' \
            '(issue #107). Overrides the config \'auto_save\' key.') do
         opts[:no_auto_save] = true
       end
       o.on('-v', '--verbose',
-           'Show full prompt and raw response') { |v| opts[:verbose] = true }
+           'Show full prompt and raw response') { |v| opts[:verbose] = v }
       o.on('-h', '--help') { puts o; exit }
     end
     parser.parse!
@@ -186,8 +187,8 @@ class CLI
     # and which id a later /save or --resume would refer to.
     ui.puts "Session: #{harness.session.session_id} (log: #{session_log_path_display})"
     ui.puts "Tip: type a plain message (no /) to send it directly to the model."
-    ui.puts "Tip: paste multiline text directly, or end a line with a backslash (\\) " \
-         "to continue."
+    ui.puts "Tip: Enter adds a newline; paste multiline text directly. Press " \
+         "Ctrl+Enter (Windows) / Alt+Enter (terminal) to send the input."
     ui.puts "Tip: a line starting with ! runs a shell command locally (not sent " \
          "to the model)."
     ui.puts "Tip: a line starting with / is a command (executed immediately)."
@@ -269,7 +270,7 @@ class CLI
   end
 
   # Auto-save the session on exit (best-effort). Returns the session id,
-  # or nil if there was nothing to save or saving failed.
+  # or nil when there was nothing to save or saving failed.
   def auto_save_session
     return nil if @harness.session.empty?
 
@@ -279,82 +280,58 @@ class CLI
     nil
   end
 
-  # Reads a full command from stdin using Reline (the same library IRB uses).
-  # Reline handles everything the old hand-rolled raw-mode code tried to do:
-  #   * multiline input (a line ending in `\` continues; unbalanced quotes
-  #     also continue),
-  #   * pasted multiline text (bracketed paste - newlines inside a paste are
-  #     inserted into the buffer instead of sending the input),
-  #   * line editing (arrows, kill, word movement),
-  #   * history (up/down arrows), persisted via HistoryManager.
+  # Reads a full command from stdin through UI::Editor (issue #198 phase 3:
+  # the idle prompt is the editor's third user, sharing ONE code path with
+  # steering notes and dialog choice lines). On a tty that is Reline
+  # multiline mode; on a pipe (specs) it is a plain line read (a pipe has no
+  # submit key, so one line per read).
   #
-  # The block below is Reline's "keep reading" predicate. Two independent
-  # termination logics coexist:
-  #   * Quick slash-command detection: if the first line starts with "/"
-  #     (first character, no stripping) and the last line does NOT end with
-  #     "\", the input is presumed to be a command to be executed now
-  #     (reading stops).
-  #   * Paste detection: if the time between the last two linefeeds is
-  #     shorter than PASTE_LF_INTERVAL, the input was pasted (not typed),
-  #     so reading stops. Otherwise Reline keeps reading lines (backslash
-  #     continuation, unbalanced quotes, etc.).
+  # Key model (robust base - no paste heuristics, no backslash continuation):
+  #   Enter      inserts a newline (typed or pasted - always a real newline)
+  #   submit key SUBMITS the whole buffer (Reline's ed_force_submit on the
+  #              [27,13] binding, bound by UI::Editor.install_esc!):
+  #              Ctrl+Enter / Shift+Enter on Windows, Alt+Enter on most Unix
+  #              terminals (see doc/reline_cursor_and_enter_handling.md)
+  #   Esc        cancels the read; the buffer is kept as a DRAFT and prefilled
+  #              at the next prompt (instead of being dropped as before)
+  #   Ctrl+C     raises Interrupt (rescued in the run loop); the draft is
+  #              cleared so a fresh prompt starts clean
+  #   Ctrl+D on an empty buffer returns nil (EOF => quit)
   #
-  # Ctrl+C raises Interrupt (rescued in the run loop); Ctrl+D on an empty
-  # line returns nil (EOF => quit).
-  #
-  # The input is kept as an array of lines in @last_lines so that future work
-  # (cursor movement between lines, editing existing lines, inserting new
-  # lines) can operate on the structured form rather than a flat string.
-  PASTE_LF_INTERVAL = 0.05
+  # Re-prompts on :cancelled and :empty instead of returning, so the run
+  # loop only ever sees a submitted command or nil (quit). The draft lives
+  # in @idle_draft for the life of the process.
   def get_command
-    # issue #156: show the active model in the modeline so the current
-    # profile is visible at a glance (e.g. after a /model switch).
-    # The ctx indicator (issue #63) is merged into the SAME line to save a
-    # line of vertical space every turn; it is omitted until there is a
-    # conversation (nothing to measure yet). The old "harness:" label is
-    # dropped - with the model name on the line it adds no information.
-    model  = @harness.session_manager.active_model_name
-    # Bracketed model name keeps the prompt visually distinct from replies.
-    prefix = model ? "[#{model}] > " : '> '
-    ctx = @harness.context_indicator
-    ui.puts ctx ? "#{ctx} #{prefix}" : prefix
-    ui.flush
+    loop do
+      # issue #156: show the active model in the modeline so the current
+      # profile is visible at a glance (e.g. after a /model switch).
+      # The ctx indicator (issue #63) is merged into the SAME line to save a
+      # line of vertical space every turn; it is omitted until there is a
+      # conversation (nothing to measure yet). The old "harness:" label is
+      # dropped - with the model name on the line it adds no information.
+      model  = @harness.session_manager.active_model_name
+      # Bracketed model name keeps the prompt visually distinct from replies.
+      prefix = model ? "[#{model}] > " : '> '
+      ctx = @harness.context_indicator
+      ui.puts ctx ? "#{ctx} #{prefix}" : prefix
+      ui.flush
 
-    last_lf_time = nil
+      result = UI::Editor.new(ui.stdin)
+                         .read_multiline(prompt: '  ', prefill: @idle_draft)
 
-    text = Reline.readmultiline(
-      "  ",
-      add_history: true,
-      rprompt: "  ") do |multiline_input|
-
-      # Normalize Windows line endings: always work with a single \n.
-      multiline_input = multiline_input.gsub("\r\n", "\n")
-
-      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-
-      if multiline_input.start_with?("/")
-        true
-      elsif multiline_input.end_with?("\\\n")
-        false
-      else
-        pasted = !last_lf_time || (now - last_lf_time) < PASTE_LF_INTERVAL
-        last_lf_time = now
-        !pasted
+      case result.status
+      when :eof
+        return nil                     # Ctrl-D on an empty buffer => quit
+      when :cancelled
+        @idle_draft = result.text.to_s # Esc: keep the buffer, prefill next
+        ui.puts '  (cancelled - draft kept; press the submit key to send)'
+        next
+      when :empty
+        next                           # bare Enter: re-prompt, draft untouched
       end
+
+      @idle_draft = nil
+      return result.text.to_s.gsub("\r\n", "\n")
     end
-
-    return nil if text.nil?
-
-    # UI::Editor installs the bare-Esc-cancels binding globally (mid-turn
-    # steering and dialog choice lines use it), so at the idle prompt a
-    # bare Esc now cancels the read and returns the buffer. That is NOT a
-    # submission - drop it and show a fresh prompt (like bash's Ctrl+U).
-    return nil if UI::Editor.last_read_cancelled?
-
-    # Normalize Windows line endings: always work with a single \n.
-    text = text.gsub("\r\n", "\n")
-
-    @last_lines = text.split("\n", -1)
-    text
   end
 end
