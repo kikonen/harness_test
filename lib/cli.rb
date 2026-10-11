@@ -193,7 +193,10 @@ class CLI
     UI::Editor.submit_on_enter = !!@options[:double_enter_submit]
 
     ui.puts "Harness ready. Type /help for commands, /exit to quit."
-    ui.puts "Model: #{harness.session_manager.active_model_name} (@ #{@options[:base_url]})"
+    # issue #217: show WHERE calls go (API type + endpoint path + base url),
+    # not just the base url - a profile switch can change the API type.
+    ui.puts "Model: #{harness.session_manager.active_model_name} " \
+            "(#{harness.session_manager.target_display} @ #{@options[:base_url]})"
     ui.puts "Working directory: #{@file_list.workdir}"
     # issue #189: show the session id at startup so the user knows WHERE
     # this session's log is written (.harness/sessions/<id>/harness.log) -
