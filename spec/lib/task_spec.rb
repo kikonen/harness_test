@@ -483,6 +483,31 @@ RSpec.describe Task do
       expect { fake_in.input_pending? }.to raise_error(/must not be polled/)
     end
 
+    # issue #198 phase 4: the note read is MULTILINE (read_multiline). On a
+    # non-tty stream one line per read - a pipe has no submit key, so a
+    # multi-line PASTE typed while the model works arrives as its FIRST
+    # line here; on a tty the whole pasted block is ONE note (Reline path,
+    # not testable without a real terminal). These two examples pin the
+    # routing: poll_for_note must call read_multiline, never the
+    # single-line read.
+    it 'routes the note read through read_multiline (issue #198 phase 4)' do
+      io_out  = StringIO.new
+      harness = fake_harness
+
+      with_stdin_pipe do |io_in, writer|
+        stdin = FakePendingStdin.new(io_in)
+        writer.puts 'steer left on multiline'
+        stdin.pending = true
+        described_class.run(harness: harness,
+                            ui: UI::Console.new(stdout: io_out, stdin: stdin)) do |_t|
+          Task.puts 'working'
+          sleep 0.3
+        end
+      end
+
+      expect(harness.notes).to eq(['steer left on multiline'])
+    end
+
     it 'keeps FIFO: a pre-typed line is a note; the dialog gets the next' do
       # The line already at the keyboard when the turn starts is a NOTE
       # (typed for steering); the dialog's answer must be the NEXT line.

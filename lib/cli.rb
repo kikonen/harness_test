@@ -195,7 +195,8 @@ class CLI
     # issue #36 / #198 phase 1: steer a running turn instead of Ctrl+C -
     # any keypress while the model works opens the note editor (see /help).
     ui.puts "Tip: type a note while the model is working to steer it mid-turn " \
-         "(no Ctrl+C; see /help)."
+         "(Enter = newline, submit key sends the whole block as one note; " \
+         "no Ctrl+C; see /help)."
     ui.puts
 
     begin
