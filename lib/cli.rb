@@ -120,6 +120,7 @@ class CLI
     if profile
       opts[:base_url]         = profile[:url] || DEFAULT_BASE_URL
       opts[:model]           ||= profile[:model]
+      opts[:api]              = profile[:api]
       opts[:token]            = profile[:token]
       opts[:num_ctx]          = profile[:num_ctx]
       opts[:reasoning_effort] = profile[:reasoning_effort]

@@ -58,4 +58,21 @@ RSpec.describe HarnessConfig do
       expect(described_class::DEFAULT_TEMPLATE).to include('reserved_tokens: 8192')
     end
   end
+
+  describe 'model profile api key (issue #197)' do
+    it 'reads the api key from a model profile' do
+      cfg = described_class.new('models' => [
+        { 'name' => 'oll', 'url' => 'http://localhost:11434',
+          'model' => 'qwen', 'api' => 'ollama' }
+      ])
+      expect(cfg.models.first[:api]).to eq('ollama')
+    end
+
+    it 'leaves api nil when the key is absent (client defaults to openai)' do
+      cfg = described_class.new('models' => [
+        { 'name' => 'open', 'url' => 'http://localhost:11434/v1', 'model' => 'qwen' }
+      ])
+      expect(cfg.models.first[:api]).to be_nil
+    end
+  end
 end

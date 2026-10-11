@@ -488,6 +488,7 @@ class SessionManager
   def apply_profile(profile)
     opts = @harness.options
     opts[:base_url]         = profile[:url] || opts[:base_url]
+    opts[:api]              = profile[:api]
     opts[:model]            = profile[:model]
     opts[:token]            = profile[:token]
     opts[:num_ctx]          = profile[:num_ctx]

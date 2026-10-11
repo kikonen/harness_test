@@ -1,173 +1,71 @@
 # frozen_string_literal: true
 
-require 'net/http'
-require 'uri'
-require 'json'
+require_relative 'llm/shared'
+require_relative 'llm/openai_backend'
+require_relative 'llm/ollama_backend'
 
-require_relative 'keep_alive_http'
-require_relative 'harness_error'
-
-# HTTP client for the LLM API: builds the request, manages the connection
-# (timeouts, keep-alive), retries transient network errors, and parses
-# the response. Extracted from Harness to keep the LLM-call logic focused.
+# Public LLM client (issue #197): a thin dispatcher over the per-backend
+# clients in lib/llm/. The backend is selected per model profile via the
+# 'api' config key (:openai default / :ollama). Both backends return the
+# same normalized response shape, so Harness does not care which one is
+# active. Constants kept as compat aliases (referenced from harness.rb and
+# session_manager.rb).
 class LLMClient
-  # Generous HTTP timeouts for local / slow model servers.
-  # open_timeout: how long to wait for the TCP connection to establish.
-  # read_timeout: how long to wait between bytes of the response (per read).
-  DEFAULT_OPEN_TIMEOUT = 120
-  DEFAULT_READ_TIMEOUT = 1800
+  DEFAULT_OPEN_TIMEOUT = LLM::DEFAULT_OPEN_TIMEOUT
+  DEFAULT_READ_TIMEOUT = LLM::DEFAULT_READ_TIMEOUT
+  KEEP_ALIVE_TIMEOUT   = LLM::KEEP_ALIVE_TIMEOUT
+  RETRYABLE_ERRORS     = LLM::RETRYABLE_ERRORS
+  RETRY_COUNT          = LLM::RETRY_COUNT
+  RETRY_DELAY          = LLM::RETRY_DELAY
+  NUM_PREDICT          = LLM::NUM_PREDICT
+  NUM_CTX              = LLM::NUM_CTX
+  REASONING_EFFORT     = LLM::REASONING_EFFORT
+  TEMPERATURE          = LLM::TEMPERATURE
+  TOP_P                = LLM::TOP_P
+  TOP_K                = LLM::TOP_K
+  MIN_P                = LLM::MIN_P
+  PRESENCE_PENALTY     = LLM::PRESENCE_PENALTY
+  REPEAT_PENALTY       = LLM::REPEAT_PENALTY
 
-  # How long (seconds) an idle keep-alive connection may sit unused before
-  # Net::HTTP closes it and re-establishes a new one. The default is only
-  # 2 seconds, which is too short for the tool loop (tool execution between
-  # requests easily exceeds it), so we raise it.
-  KEEP_ALIVE_TIMEOUT = 60
+  # The backend currently selected for options[:api]. Public so the specs
+  # (and /model switching) can observe which API type is active.
+  def backend = current_backend
 
-  # Transient network errors that are safe to retry (the request was never
-  # completed, so re-sending it is idempotent from the server's perspective).
-  RETRYABLE_ERRORS = [
-    Errno::ECONNRESET,
-    Errno::EPIPE,
-    Errno::ECONNREFUSED,
-    Errno::ETIMEDOUT,
-    Errno::EHOSTUNREACH,
-    OpenSSL::SSL::SSLError,
-    IOError,
-    Net::OpenTimeout,
-    Net::ReadTimeout
-  ].freeze
-
-  # Automatic retry settings for transient network errors.
-  # RETRY_COUNT: total number of attempts (1 initial + N-1 retries).
-  # RETRY_DELAY: base delay in seconds (exponential backoff: 2s, 4s, 8s, ...).
-  RETRY_COUNT = 3
-  RETRY_DELAY = 2
-
-  # Ollama generation limits. -1 means "no limit" (generate until the model
-  # stops on its own). num_ctx is the context window size (65K tokens).
-  NUM_PREDICT = -1
-  NUM_CTX     = 65536
-
-  # Default reasoning effort (NOTE KI default for qwen is xhigh)
-  REASONING_EFFORT = "medium"
-
-  # Sampling parameters (defaults). temperature controls randomness
-  # (lower = more deterministic); top_p is nucleus sampling.
-  TEMPERATURE      = 0.2
-  TOP_P            = 0.9
-  TOP_K            = 20
-  MIN_P            = 0
-  PRESENCE_PENALTY = 1.0
-  REPEAT_PENALTY   = 1.05
-
-  # options: hash with :base_url, :model, :token and the sampling/retry
+  # options: hash with :base_url (server root), :model, :token, :api
+  # ('openai' | 'ollama', default 'openai') and the sampling/retry
   # parameters (read on every request so model switches take effect).
   def initialize(options, logger)
     @options = options
-    @logger  = logger
+    @backend = build_backend(logger)
   end
 
   # issue #113: re-point the logger after a session resume swaps in a
-  # different session id (the log path is per-session). KeepAliveHTTP reads
-  # this on every request, so updating it here is enough.
-  attr_writer :logger
-
-  # Sends one chat completion request. Returns the parsed response hash
-  # (symbolized keys). Raises LLMError when all attempts fail.
-  def chat(messages, tools: nil, timeout: DEFAULT_READ_TIMEOUT)
-    base_url = @options[:base_url]
-    model    = @options[:model]
-
-    uri  = URI("#{base_url}/chat/completions")
-    http = KeepAliveHTTP.new(uri.host, uri.port)
-    http.logger       = @logger
-    http.use_ssl      = (uri.scheme == 'https')
-    http.open_timeout = DEFAULT_OPEN_TIMEOUT
-    http.read_timeout = timeout
-    http.keep_alive_timeout = KEEP_ALIVE_TIMEOUT
-
-    body = build_body(messages, tools)
-
-    req = Net::HTTP::Post.new(uri.request_uri)
-    req['Content-Type'] = 'application/json'
-    req['Authorization'] = "Bearer #{@options[:token]}" if @options[:token]
-    req.body = JSON.generate(body)
-
-    attempts = retry_count
-    attempts.times do |attempt|
-      begin
-        resp = http.request(req)
-      rescue *RETRYABLE_ERRORS => e
-        if attempt < attempts - 1
-          delay = retry_delay * (2 ** attempt)
-          @logger.warn("network error (attempt #{attempt + 1}/#{attempts}): #{e.class}: #{e.message} - retrying in #{delay}s")
-          sleep(delay)
-          next
-        end
-        raise LLMError, "LLM request failed after #{attempts} attempts: #{e.message}"
-      end
-
-      unless resp.is_a?(Net::HTTPSuccess)
-        if resp.code.to_i >= 500 && attempt < attempts - 1
-          delay = retry_delay * (2 ** attempt)
-          @logger.warn("HTTP #{resp.code} (attempt #{attempt + 1}/#{attempts}) - retrying in #{delay}s")
-          sleep(delay)
-          next
-        end
-        raise LLMError, "LLM error (HTTP #{resp.code}):\n#{resp.body}"
-      end
-
-      # issue #131: the raw API response body is troubleshooting-only - it
-      # goes to harness.log with --verbose, while the parsed reasoning/
-      # content sections (SessionManager#log_response) are ALWAYS logged so
-      # the log can be followed without the flag.
-      if @options[:verbose]
-        @logger.info("=" * 50)
-        @logger.info(resp.body)
-        @logger.info("=" * 50)
-      end
-
-      begin
-        return JSON.parse(resp.body, symbolize_names: true)
-      rescue JSON::ParserError => e
-        raise LLMError, "LLM returned invalid JSON: #{e.message}"
-      end
-    end
-    nil
+  # different session id. KeepAliveHTTP reads it on every request.
+  def logger=(value)
+    @backend.logger = value
   end
+
+  # Sends one chat completion request. Returns the normalized response
+  # hash (symbolized keys, {choices: [...], usage: {...}}). Raises LLMError
+  # when all attempts fail.
+  def chat(*args, **kwargs) = current_backend.chat(*args, **kwargs)
 
   private
 
-  def build_body(messages, tools)
-    body = {
-      model: @options[:model],
-      messages: messages,
-      temperature: sample(:temperature, TEMPERATURE),
-      top_p: sample(:top_p, TOP_P),
-      top_k: sample(:top_k, TOP_K),
-      min_p: sample(:min_p, MIN_P),
-      presence_penalty: sample(:presence_penalty, PRESENCE_PENALTY),
-      repeat_penalty: sample(:repeat_penalty, REPEAT_PENALTY),
-      max_tokens: NUM_PREDICT,
-      reasoning_effort: @options[:reasoning_effort] || REASONING_EFFORT,
-      options: {
-        num_predict: NUM_PREDICT,
-        num_ctx: @options[:num_ctx] || NUM_CTX
-      }
-    }
-    body[:tools] = tools if tools && !tools.empty?
-    body
+  # A /model switch mutates the shared options hash in place (the same
+  # object the backends were built from), so sampling parameters and
+  # base_url always apply - but :api selects the backend class and must
+  # trigger a rebuild. Checked lazily before every request: cheap (a symbol
+  # compare) and keeps the /model wiring untouched.
+  def current_backend
+    return @backend if LLM.backend_type(@options[:api]) == @backend.api_type
+
+    @backend = build_backend(@backend.logger)
   end
 
-  def sample(key, default)
-    @options[key] || default
-  end
-
-  def retry_count
-    @options[:retry_count] || RETRY_COUNT
-  end
-
-  def retry_delay
-    @options[:retry_delay] || RETRY_DELAY
+  def build_backend(logger)
+    LLM.backend_type(@options[:api]) == LLM::OLLAMA ?
+      LLM::OllamaBackend.new(@options, logger) :
+      LLM::OpenAIBackend.new(@options, logger)
   end
 end
