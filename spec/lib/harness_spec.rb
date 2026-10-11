@@ -231,7 +231,8 @@ RSpec.describe Harness do
       harness.session.instance_variable_set(:@session_id, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
       harness.rebind_logger
 
-      expect(harness.client.instance_variable_get(:@logger)).to equal(harness.logger)
+      # issue #197: the client is a dispatcher; the backend holds the logger.
+      expect(harness.client.backend.logger).to equal(harness.logger)
     end
   end
 

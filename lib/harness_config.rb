@@ -20,6 +20,7 @@ require_relative 'harness_error'
 #   models:                     # one or more named model profiles
 #     - name: local             # selection key (used by -m / default_model)
 #       url: http://localhost:11434/v1
+#       api: openai             # endpoint type: openai (default) | ollama (issue #197)
 #       model: qwen2.5-coder:32b
 #       token: sk-...           # optional bearer token
 #       num_ctx: 65536          # optional context window size (tokens)
@@ -61,6 +62,7 @@ class HarnessConfig
     models:
       - name: local            # selection key (used by -m / default_model)
         url: http://localhost:11434/v1
+        api: openai            # endpoint type: openai (default) | ollama (issue #197)
         model: qwen2.5-coder:32b
         # token: sk-...        # optional bearer token
         num_ctx: 65536         # context window size (tokens)
@@ -258,6 +260,7 @@ class HarnessConfig
       {
         name:             nonblank(m['name']),
         url:              nonblank(m['url']),
+        api:              nonblank(m['api']),
         model:            nonblank(m['model']),
         token:            nonblank(m['token']),
         num_ctx:          int_or_nil(m['num_ctx']),
