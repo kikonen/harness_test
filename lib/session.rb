@@ -66,6 +66,9 @@ class Session
     # untouched by compaction (a compacted file is still the same file).
     @file_cache    = SessionFileCache.new
     @messages      = [system_message]
+    # issue #216: anchor for live estimates (set when the server reports
+    # prompt tokens for the chain as it was at that moment).
+    @token_anchor  = nil
   end
 
   # True when the session holds nothing but the system message.
@@ -139,6 +142,21 @@ class Session
     @last_stats = stats
   end
 
+  # issue #216: remember the server-reported prompt tokens for the chain
+  # AS IT WAS SENT (chain_size = its message count at that moment) as the
+  # anchor for live estimates (see #anchored_estimate): a frozen snapshot
+  # of the chain prefix is stored so estimates stay pure (the session
+  # chain may be replaced by compaction in the meantime). Called from
+  # Harness#call_llm right after each response, BEFORE the assistant
+  # reply / tool results are appended, so the anchor always describes
+  # exactly the chain the server saw.
+  def record_prompt_tokens(tokens, chain_size)
+    return unless tokens.to_i.positive?
+
+    prefix = @messages[0, chain_size]
+    @token_anchor = { tokens: tokens.to_i, size: chain_size, prefix: prefix&.freeze }
+  end
+
   # Store the reasoning text of the last LLM response (issue #98), so it
   # can be shown on demand with /reasoning. nil when the model did not
   # return any reasoning for that response.
@@ -154,6 +172,9 @@ class Session
   def reset_stats
     @last_stats     = nil
     @last_reasoning = nil
+    # issue #216: the anchor measured the OLD chain - the compacted one no
+    # longer starts with it, and is far smaller, so it must not survive.
+    @token_anchor   = nil
     self
   end
 
@@ -164,6 +185,7 @@ class Session
     @last_stats   = nil
     @last_reasoning = nil
     @notes        = []
+    @token_anchor = nil # issue #216: a fresh conversation has no anchor
     # issue #170: a fresh conversation has read nothing - the cache is stale.
     @file_cache.clear_all
     @created_at   = Time.now
@@ -260,12 +282,13 @@ class Session
   # reported stats. This is what the spinner shows so it always reflects the
   # chain being sent NOW rather than the previous response's number (issue
   # #126) - including mid-turn tool results that are not yet in last_stats.
+  # Anchored to the last server-reported count when one exists (issue #216).
   # Returns nil when there is no conversation yet and nothing to estimate.
   def context_estimate
     conversation = @messages[1..]
     return nil if conversation.nil? || conversation.empty?
 
-    { tokens: estimate_tokens(@messages), estimated: true }
+    { tokens: anchored_estimate(@messages), estimated: true }
   end
 
   # Pure rough token estimate for an explicit message chain (system message
@@ -275,6 +298,28 @@ class Session
   def estimate_tokens(messages)
     chars = messages.sum { |m| m[:content].to_s.length }
     (chars / EST_CHARS_PER_TOKEN).ceil
+  end
+
+  # Token estimate for an explicit chain, ANCHORED to the last
+  # server-reported count when one exists (issue #216): the raw chars/4
+  # estimate disagrees with the server's tokenizer by tens of percent, so a
+  # from-scratch estimate of the same chain the compact trigger measured
+  # (via prompt_tokens) would show two different "current" sizes. When the
+  # chain starts with the exact prefix the server measured (its anchor),
+  # the estimate is anchor tokens + a raw estimate of only the NEW messages
+  # - growing live from a true number instead of a wildly different one.
+  # Without an anchor (fresh session, right after compaction) or when the
+  # chain does not extend the anchored one, it degrades to the raw
+  # estimate.
+  def anchored_estimate(messages)
+    anchor = @token_anchor
+    if anchor && messages.size >= anchor[:size] &&
+       anchor[:prefix] && messages.first(anchor[:size]) == anchor[:prefix]
+      new_msgs = messages[anchor[:size]..]
+      return anchor[:tokens] + estimate_tokens(new_msgs)
+    end
+
+    estimate_tokens(messages)
   end
 
   # Context usage as an integer percentage of the window size (0-100,

@@ -116,11 +116,34 @@ RSpec.describe Harness do
     end
 
     it 'always estimates an explicit chain (mid-turn / in-loop compaction)' do
-      harness = build_harness
+      harness = build_harness_with_responses
       seed_usage(harness, 5_915)
+      # seed_usage records stats only (no anchor), and this explicit chain
+      # is not an extension of the session chain, so this is a plain raw
+      # estimate - always marked '~' regardless of last_stats.
       chain = [{ role: 'user', content: 'a' * 400 }]
 
       expect(harness.context_indicator_live(chain)).to include('~')
+    end
+    # issue #216: after a turn, the server-reported prompt_tokens anchor the
+    # live estimate, so a mid-turn chain that EXTENDS the session chain
+    # shows the true number + new messages - not a from-scratch chars/4
+    # re-estimate of the whole chain (which was wildly different).
+    it 'anchors the live estimate to the server-reported count after a turn' do
+      harness = build_harness_with_responses
+      harness.session.add_user('hello')
+      harness.call_llm # scripted client reports prompt_tokens: 10 -> anchor
+
+      # The session chain (system + user + assistant 'done') is anchored at
+      # 10. Extend it with a mid-turn tool result and re-estimate.
+      extended = harness.session.messages.dup
+      extended << { role: 'tool', tool_call_id: 't1', content: 'x' * 2000 }
+
+      line = harness.context_indicator_live(extended)
+      expect(line).to include('~')
+      # 10 (anchor) + ceil((4 + 2000)/4) for the new assistant+tool
+      # messages = 511, NOT a from-scratch re-estimate of the whole chain.
+      expect(line).to include('511/')
     end
   end
 

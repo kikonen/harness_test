@@ -317,6 +317,11 @@ class Harness
         last_prompt_tokens              = data[:usage][:prompt_tokens].to_i
       end
 
+      # issue #216: anchor the live estimate to the server-reported size of
+      # THIS chain (its message count right now, before the reply below is
+      # appended) so spinner numbers grow from the true count (issue #216).
+      @session.record_prompt_tokens(last_prompt_tokens, messages.size)
+
       if message[:tool_calls]
         # -- Tool-loop detection --
         current_tool_name = message[:tool_calls].first[:function][:name]
@@ -473,7 +478,9 @@ class Harness
   def context_indicator_live(messages = nil)
     window = options[:num_ctx] || LLMClient::NUM_CTX
     if messages
-      tokens  = @session.estimate_tokens(messages)
+      # issue #216: anchored to the last server-reported count when this
+      # chain extends it (see Session#anchored_estimate).
+      tokens  = @session.anchored_estimate(messages)
       label   = '~'
     else
       used    = @session.context_used
