@@ -22,6 +22,7 @@ require_relative 'commands/sessions_command'
 require_relative 'commands/tools_command'
 require_relative 'commands/models_command'
 require_relative 'commands/model_command'
+require_relative 'commands/param_command'
 require_relative 'commands/help_command'
 require_relative 'commands/exit_command'
 
@@ -50,6 +51,7 @@ class CommandHandler
     'tools'         => Commands::ToolsCommand,
     'models'        => Commands::ModelsCommand,
     'model'         => Commands::ModelCommand,
+    'param'         => Commands::ParamCommand,
     'help'          => Commands::HelpCommand,
     'exit'          => Commands::ExitCommand,
   }.freeze

@@ -334,8 +334,11 @@ class CLI
       # conversation (nothing to measure yet). The old "harness:" label is
       # dropped - with the model name on the line it adds no information.
       model  = @harness.session_manager.active_model_name
+      # issue #219: the effective reasoning effort is visible in the modeline
+      # so a /param tweak (or the profile default) is visible at a glance.
+      effort = @harness.session_manager.param_overrides.reasoning_effort_display
       # Bracketed model name keeps the prompt visually distinct from replies.
-      prefix = model ? "[#{model}] > " : '> '
+      prefix = "[#{model ? "#{model} (#{effort})" : effort}] > "
       ctx = @harness.context_indicator
       ui.puts ctx ? "#{ctx} #{prefix}" : prefix
       ui.flush

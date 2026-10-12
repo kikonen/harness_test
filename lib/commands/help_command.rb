@@ -30,6 +30,10 @@ module Commands
           /models        List configured models (marks the default and active one)
           /model <name>  Switch the active model for this run (remembered in the session)
           /model         Show the currently active model
+          /param         Show all model parameters (with session overrides)
+          /param <key>   Show one parameter
+          /param <key> <value>  Set a session-level override (e.g. reasoning_effort, num_ctx)
+          /param <key> default  Reset a parameter back to the profile (config) value
           /help          Show this help
           /exit          Exit the harness
 

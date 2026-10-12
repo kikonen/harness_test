@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'logger'
 require 'stringio'
+require 'param_overrides'
 require 'ui/spinner'
 require 'output_buffer'
 require 'session_manager'
@@ -427,6 +428,95 @@ RSpec.describe SessionManager do
   end
 end
 
+RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
+  let(:session) { Session.new('system prompt') }
+  let(:file_list) { FileList.new([], workdir: Dir.pwd) }
+  let(:backend) { double('backend', api_type: :openai, endpoint_path: '/chat/completions') }
+  let(:client) { double('client', chat: nil, backend: backend) }
+  let(:options) do
+    {
+      num_ctx: 65_536,
+      auto_save: false,
+      reasoning_effort: 'medium',
+      model_profiles: [
+        { name: 'local', model: 'qwen', reasoning_effort: 'medium', num_ctx: 65_536 }
+      ],
+      active_model: 'local'
+    }
+  end
+  let(:harness) do
+    Class.new do
+      attr_accessor :session, :client, :history
+      def initialize(session, client, options)
+        @session = session
+        @client  = client
+        @options = options
+        @logger  = Logger.new(File::NULL)
+        @history = nil
+      end
+      attr_reader :options, :logger
+      def rebind_logger; @logger; end
+      def compact_recent_messages; 6; end
+      def compact_auto_threshold; 88; end
+      def compact_reserved_tokens; 8192; end
+      def compact_trigger_tokens
+        @session.compact_trigger(@options[:num_ctx], compact_auto_threshold,
+                                 reserved_tokens: compact_reserved_tokens)
+      end
+      def compact_max_size; nil; end
+      def context_indicator; nil; end
+      def context_indicator_live(_m = nil); nil; end
+    end.new(session, client, options)
+  end
+  let(:manager) { described_class.new(harness, file_list) }
+
+  it '#param_overrides is memoized (same instance across calls)' do
+    expect(manager.param_overrides).to equal(manager.param_overrides)
+  end
+
+  it 'setting an override updates options immediately' do
+    manager.param_overrides.set('reasoning_effort', 'low')
+    expect(options[:reasoning_effort]).to eq('low')
+  end
+
+  it 're-applies overrides after a profile change (apply_profile)' do
+    manager.param_overrides.set('reasoning_effort', 'low')
+    # Simulate: profile resets the option, then restore! is called.
+    options[:reasoning_effort] = 'medium'
+    manager.param_overrides.restore!
+    expect(options[:reasoning_effort]).to eq('low')
+  end
+
+  it 'save_session includes param_overrides in the JSON' do
+    Dir.mktmpdir do |dir|
+      fl = FileList.new([], workdir: dir)
+      mgr = described_class.new(harness, fl)
+      mgr.param_overrides.set('reasoning_effort', 'low')
+      session.add_user('hello')
+      mgr.save_session
+
+      path = mgr.session_file_path(session.session_id)
+      data = JSON.parse(File.read(path))
+      expect(data['param_overrides']).to include('reasoning_effort')
+    end
+  end
+
+  it 'resume_session restores and re-applies param_overrides' do
+    Dir.mktmpdir do |dir|
+      fl = FileList.new([], workdir: dir)
+      mgr = described_class.new(harness, fl)
+      mgr.param_overrides.set('reasoning_effort', 'low')
+      session.add_user('hello')
+      mgr.save_session
+
+      # Simulate: the option was reset (new profile applied).
+      options[:reasoning_effort] = 'medium'
+
+      mgr.resume_session(session.session_id[0, 8])
+      expect(options[:reasoning_effort]).to eq('low')
+    end
+  end
+end
 RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
   let(:session) { Session.new('system prompt') }
   let(:file_list) { FileList.new([], workdir: Dir.pwd) }
