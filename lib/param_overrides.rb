@@ -50,13 +50,19 @@ class ParamOverrides
 
   # The full parameter listing (a header line plus one line per parameter),
   # shared by the /param and /model commands so their output is identical
-  # (issue #219). Each line shows the parameter, its effective value (a
-  # session override when one is set, else the config/profile value), and an
-  # "(override)" mark when a session-level override is in place.
+  # (issue #219). Each line shows the parameter and its effective value (a
+  # session override when one is set, else the config/profile value). When a
+  # session override is in place the line also shows the config value it
+  # overrides, e.g. "num_ctx  20000 (override, config: 65536)".
   def list_display
     lines = ["Model parameters (adjust with /param <key> <value>, reset with 'default'):"]
     keys.each do |key|
-      mark   = overridden?(key) ? ' (override)' : ''
+      mark =
+        if overridden?(key)
+          " (override, config: #{display_value(profile_value(key))})"
+        else
+          ''
+        end
       lines << "  #{key.to_s.ljust(16)} #{display_value(effective(key))}#{mark}"
     end
     lines

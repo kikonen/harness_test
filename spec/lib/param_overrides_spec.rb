@@ -183,7 +183,9 @@ RSpec.describe ParamOverrides do
       line  = line_for(lines, 'reasoning_effort')
 
       expect(line).to include('low')
-      expect(line).to include('(override)')
+      # Marked as an override, and the config value it overrides is still
+      # visible too.
+      expect(line).to include('(override, config: medium)')
     end
   end
 end
