@@ -40,6 +40,10 @@ compact:
 # Auto-save the session at every prompt boundary (crash-proof, issue #107).
 auto_save: true
 
+# Max tool-loop iterations for a single turn before the loop is aborted
+# (issue #226). Built-in default: 200.
+# max_tool_iterations: 200
+
 # Automatic retries for transient network errors.
 retry:
   count: 3                 # total attempts (1 initial + N-1 retries)

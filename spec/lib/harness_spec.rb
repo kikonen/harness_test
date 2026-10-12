@@ -528,6 +528,52 @@ RSpec.describe Harness do
     end
   end
 
+  describe '#format_elapsed (issue #226)' do
+    it 'returns seconds with 2dp when under 60s' do
+      expect(build_harness.format_elapsed(42.37)).to eq('42.37s')
+    end
+
+    it 'returns a bare integer seconds value' do
+      expect(build_harness.format_elapsed(5)).to eq('5.0s')
+    end
+
+    it 'returns minutes + seconds (comma decimal) at 60s and above' do
+      expect(build_harness.format_elapsed(60.0)).to eq('1m 00,00s')
+    end
+
+    it 'handles the canonical 5099.17s from issue #226' do
+      expect(build_harness.format_elapsed(5099.17)).to eq('84m 59,17s')
+    end
+
+    it 'rounds the sub-minute remainder to 2dp' do
+      expect(build_harness.format_elapsed(61.004)).to eq('1m 01,00s')
+    end
+  end
+
+  describe '#max_tool_iterations (issue #226)' do
+    it 'defaults to 200 when the option is not set' do
+      expect(build_harness.max_tool_iterations).to eq(200)
+    end
+
+    it 'reads from options when set' do
+      expect(build_harness(max_tool_iterations: 50).max_tool_iterations).to eq(50)
+    end
+
+    it 'raises ToolLoopError once the configurable limit is exceeded' do
+      # The scripted client plays endless tool rounds; with a limit of 2 the
+      # loop is aborted before the third iteration.
+      rounds = [
+        { content: nil, tool_calls: [{ id: 'c1', function: { name: 'test.echo', arguments: '{"text":"a"}' } }] },
+        { content: nil, tool_calls: [{ id: 'c2', function: { name: 'test.echo', arguments: '{"text":"b"}' } }] },
+        { content: nil, tool_calls: [{ id: 'c3', function: { name: 'test.echo', arguments: '{"text":"c"}' } }] }
+      ]
+      harness = build_harness_with_responses(rounds)
+      harness.options[:max_tool_iterations] = 2
+
+      expect { harness.call_llm }.to raise_error(ToolLoopError, /exceeded max tool iterations \(2\)/)
+    end
+  end
+
   # issue #208: the session is the working chain. When a turn dies mid-loop
   # (connection loss after the LLM answer of round N), every round already
   # made - assistant tool_calls AND tool results - must remain in the
