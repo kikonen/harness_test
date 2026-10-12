@@ -32,15 +32,12 @@ module Commands
     private
 
     # issue #219: show every parameter for the active model with its current
-    # (effective) value, marking which ones are session-level overrides.
+    # (effective) value, marking which ones are session-level overrides. The
+    # listing is shared with /param (ParamOverrides#list_display) so both
+    # commands print the exact same format.
     def print_params
       param = @harness.session_manager.param_overrides
-      @ui.puts "Parameters:"
-      param.keys.each do |key|
-        eff   = param.effective(key)
-        mark  = param.overridden?(key) ? ' (override)' : ''
-        @ui.puts "  #{key.to_s.ljust(16)} #{param.display_value(eff)}#{mark}"
-      end
+      param.list_display.each { |line| @ui.puts line }
     end
   end
 end

@@ -30,14 +30,7 @@ module Commands
     private
 
     def list_all
-      keys = param.keys
-      @ui.puts "Model parameters (adjust with /param <key> <value>, reset with 'default'):"
-      keys.each do |key|
-        eff    = param.effective(key)
-        mark   = param.overridden?(key) ? 'override' : 'default'
-        shown  = mark == 'override' ? " #{mark}" : ''
-        @ui.puts "  #{key.to_s.ljust(16)} #{param.display_value(eff)}#{shown}"
-      end
+      param.list_display.each { |line| @ui.puts line }
     end
 
     def show_one(key)

@@ -48,6 +48,20 @@ class ParamOverrides
     PARAM_KEYS.keys
   end
 
+  # The full parameter listing (a header line plus one line per parameter),
+  # shared by the /param and /model commands so their output is identical
+  # (issue #219). Each line shows the parameter, its effective value (a
+  # session override when one is set, else the config/profile value), and an
+  # "(override)" mark when a session-level override is in place.
+  def list_display
+    lines = ["Model parameters (adjust with /param <key> <value>, reset with 'default'):"]
+    keys.each do |key|
+      mark   = overridden?(key) ? ' (override)' : ''
+      lines << "  #{key.to_s.ljust(16)} #{display_value(effective(key))}#{mark}"
+    end
+    lines
+  end
+
   def overrideable?(key)
     PARAM_KEYS.key?(key.to_sym)
   end
