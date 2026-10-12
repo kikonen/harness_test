@@ -52,6 +52,7 @@ class Harness
   SYSTEM_PROMPT = File.read(File.join(__dir__, '../config', 'system_prompt.txt'))
 
   # issue #158: 100 was too low for long multi-step tasks (bumped to 200).
+  # issue #226: configurable via the 'max_tool_iterations' config key.
   MAX_TOOL_ITERATIONS = 200
   # After this many consecutive tool-call iterations, inject a "stop looping" message
   TOOL_LOOP_WARN_THRESHOLD = 10
@@ -223,6 +224,11 @@ class Harness
     options[:compact_max_size]
   end
 
+  # issue #226: max tool-loop iterations for a single turn (config key).
+  def max_tool_iterations
+    options[:max_tool_iterations] || MAX_TOOL_ITERATIONS
+  end
+
   # The effective auto-compact usage level (tokens) for the active window:
   # min(threshold_pct% of window, window - reserved tokens). nil when no
   # valid window size is configured. Shared by every auto-compact decision
@@ -268,9 +274,10 @@ class Harness
     last_prompt_tokens = 0
     start_time = Time.now
 
+    max_iters = max_tool_iterations
     loop do
       iteration += 1
-      raise ToolLoopError, "exceeded max tool iterations (#{MAX_TOOL_ITERATIONS})" if iteration > MAX_TOOL_ITERATIONS
+      raise ToolLoopError, "exceeded max tool iterations (#{max_iters})" if iteration > max_iters
 
       # issue #108: in-loop compaction. The context window may already be
       # exhausted by the LAST call's prompt_tokens; compact now rather than
@@ -435,7 +442,7 @@ class Harness
     iters   = stats[:iterations]
     usage   = stats[:usage]
 
-    parts = ["⏱ #{elapsed}s"]
+    parts = ["⏱ #{format_elapsed(elapsed)}"]
     parts << "🔄 #{iters} iteration#{'s' if iters != 1}"
     if usage && usage[:total_tokens] > 0
       parts << "📊 #{usage[:prompt_tokens]}→#{usage[:completion_tokens]} tokens (#{usage[:total_tokens]} total)"
@@ -446,6 +453,18 @@ class Harness
     # issue #40 follow-up: structured output sink - emit to the Task-owned
     # buffer; the drain loop renders it on the main thread.
     Task.emit(:stats, origin: :harness, content: "  [#{parts.join(' | ')}]")
+  end
+
+  # issue #226: format elapsed seconds for the stats line. Under 60s the
+  # bare value is fine (e.g. "42.37s"); at 60s or above the minutes are
+  # factored out (e.g. "84m 59,17s") so the line stays compact.
+  def format_elapsed(seconds)
+    s = seconds.to_f
+    return "#{s.round(2)}s" if s < 60
+
+    mins = (s / 60).floor
+    secs = format('%05.2f', s - mins * 60).sub('.', ',')
+    "#{mins}m #{secs}s"
   end
 
   # Context-usage indicator, e.g. "🧠 ctx 42133/65536 (64%)". Shown on every

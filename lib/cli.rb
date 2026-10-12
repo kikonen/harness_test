@@ -166,6 +166,10 @@ class CLI
     opts[:retry_count] = config.retry_count
     opts[:retry_delay] = config.retry_delay
 
+    # issue #226: max tool-loop iterations for a turn (config key).
+    # nil here lets Harness fall back to its built-in default.
+    opts[:max_tool_iterations] = config.max_tool_iterations
+
     # issue #198: opt-in double-Enter submit for the multiline editor
     # (remote setups where no submit key reaches the terminal). Applied
     # to the shared UI::Editor switch so idle prompt AND mid-turn notes

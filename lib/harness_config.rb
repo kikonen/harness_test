@@ -42,6 +42,7 @@ require_relative 'harness_error'
 #     max_size: 500             # max length (words) of the compaction summary
 #     reserved_tokens: 8192     # absolute headroom (tokens) kept free before auto-compact (issue #151)
 #   auto_save: true             # auto-save the session at every prompt boundary (issue #107)
+#   max_tool_iterations: 200    # max tool-loop iterations for one turn (issue #226)
 #   retry:
 #     count: 3                  # total attempts for transient network errors
 #     delay: 2                  # base delay (seconds) between retries
@@ -62,20 +63,21 @@ class HarnessConfig
   def initialize(data = {})
     data          = {} if data.nil?
     @raw          = data
-    @models       = normalize_models(Array(data['models']))
-    @default_model = nonblank(data['default_model'])
-    @system       = nonblank(data['system'])
-    @auto_save    = data['auto_save'].nil? ? true : data['auto_save']
-    @double_enter_submit = data['double_enter_submit'] == true
+    @models       = normalize_models(Array(data[:models]))
+    @default_model = nonblank(data[:default_model])
+    @system       = nonblank(data[:system])
+    @auto_save    = data[:auto_save].nil? ? true : data[:auto_save]
+    @double_enter_submit = data[:double_enter_submit] == true
+    @max_tool_iterations = int_or_nil(data[:max_tool_iterations])
     @compact      = {
-      recent_messages: int_or_nil(data.dig('compact', 'recent_messages')),
-      auto_threshold:  float_or_nil(data.dig('compact', 'auto_threshold')),
-      max_size:        int_or_nil(data.dig('compact', 'max_size')),
-      reserved_tokens: int_or_nil(data.dig('compact', 'reserved_tokens'))
+      recent_messages: int_or_nil(data.dig(:compact, :recent_messages)),
+      auto_threshold:  float_or_nil(data.dig(:compact, :auto_threshold)),
+      max_size:        int_or_nil(data.dig(:compact, :max_size)),
+      reserved_tokens: int_or_nil(data.dig(:compact, :reserved_tokens))
     }
     @retry        = {
-      count: int_or_nil(data.dig('retry', 'count')),
-      delay: float_or_nil(data.dig('retry', 'delay'))
+      count: int_or_nil(data.dig(:retry, :count)),
+      delay: float_or_nil(data.dig(:retry, :delay))
     }
   end
 
@@ -134,9 +136,11 @@ class HarnessConfig
     nil
   end
 
-  # Parse a YAML config file into a plain hash.
+  # Parse a YAML config file into a plain hash with symbol keys. Symbolizing
+  # here (once, at parse time) means every accessor below works with symbol
+  # keys at every nesting level - no per-key symbolize/aliasing.
   def self.parse(path)
-    YAML.safe_load(File.read(path)) || {}
+    YAML.safe_load(File.read(path), symbolize_names: true) || {}
   rescue Psych::SyntaxError => e
     raise HarnessError, "invalid config file #{path}: #{e.message}"
   end
@@ -156,6 +160,11 @@ class HarnessConfig
   # Enter always inserts a newline.
   def double_enter_submit_enabled
     @double_enter_submit == true
+  end
+
+  # Max tool-loop iterations for one turn (or nil; the built-in default then applies).
+  def max_tool_iterations
+    @max_tool_iterations
   end
 
   # Number of recent messages retained verbatim after compaction (or nil).
@@ -217,21 +226,21 @@ class HarnessConfig
       raise HarnessError, "each entry in 'models' must be a mapping" unless m.is_a?(Hash)
 
       {
-        name:             nonblank(m['name']),
-        url:              nonblank(m['url']),
-        api:              nonblank(m['api']),
-        model:            nonblank(m['model']),
-        token:            nonblank(m['token']),
-        num_ctx:          int_or_nil(m['num_ctx']),
-        max_tokens:       int_or_nil(m['max_tokens']),
-        num_predict:      int_or_nil(m['num_predict']),
-        reasoning_effort: nonblank(m['reasoning_effort']),
-        temperature:      float_or_nil(m['temperature']),
-        top_p:            float_or_nil(m['top_p']),
-        top_k:            int_or_nil(m['top_k']),
-        min_p:            float_or_nil(m['min_p']),
-        presence_penalty: float_or_nil(m['presence_penalty']),
-        repeat_penalty:   float_or_nil(m['repeat_penalty'])
+        name:             nonblank(m[:name]),
+        url:              nonblank(m[:url]),
+        api:              nonblank(m[:api]),
+        model:            nonblank(m[:model]),
+        token:            nonblank(m[:token]),
+        num_ctx:          int_or_nil(m[:num_ctx]),
+        max_tokens:       int_or_nil(m[:max_tokens]),
+        num_predict:      int_or_nil(m[:num_predict]),
+        reasoning_effort: nonblank(m[:reasoning_effort]),
+        temperature:      float_or_nil(m[:temperature]),
+        top_p:            float_or_nil(m[:top_p]),
+        top_k:            int_or_nil(m[:top_k]),
+        min_p:            float_or_nil(m[:min_p]),
+        presence_penalty: float_or_nil(m[:presence_penalty]),
+        repeat_penalty:   float_or_nil(m[:repeat_penalty])
       }
     end
   end
