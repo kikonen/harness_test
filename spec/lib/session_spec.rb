@@ -62,6 +62,56 @@ RSpec.describe Session do
     end
   end
 
+  # issue #216: the live estimate is ANCHORED to the last server-reported
+  # prompt-token count so the spinner shows numbers in the same ballpark as
+  # the compact trigger (which uses prompt_tokens), not a wildly different
+  # from-scratch chars/4 estimate of the same chain.
+  describe '#anchored_estimate (issue #216)' do
+    it 'falls back to the raw estimate when no anchor is recorded' do
+      session.add_user('a' * 160)
+      expect(session.anchored_estimate(session.messages))
+        .to eq(session.estimate_tokens(session.messages))
+    end
+
+    it 'grows live from the server-reported count (anchor + new messages)' do
+      session.add_user('hello')
+      session.add_assistant('hi')
+      # Server saw these 3 messages (system + user + assistant) and reported
+      # 127446 tokens for them (the issue's scenario).
+      session.record_prompt_tokens(127_446, session.messages.size)
+
+      before = session.anchored_estimate(session.messages)
+      expect(before).to eq(127_446)
+
+      # A mid-turn tool result (800 chars -> 200 tokens at 4 chars/token) is
+      # appended: the estimate grows from the TRUE 127446, not a from-scratch
+      # re-estimate (~33000) of the whole chain.
+      session.messages << { role: 'tool', tool_call_id: 't1', content: 'x' * 800 }
+      expect(session.anchored_estimate(session.messages)).to eq(127_446 + 200)
+    end
+
+    it 'ignores a non-positive count (no anchor set)' do
+      session.add_user('hello')
+      session.record_prompt_tokens(0, session.messages.size)
+
+      expect(session.instance_variable_get(:@token_anchor)).to be_nil
+    end
+
+    it 'degrades to the raw estimate when the chain no longer starts with the anchored prefix' do
+      session.add_user('original')
+      session.record_prompt_tokens(50_000, session.messages.size)
+
+      # Simulate in-loop compaction: the chain is replaced with a shorter,
+      # different chain. The anchor prefix no longer matches, so the raw
+      # estimate applies (anchoring to 50000 would be absurdly wrong).
+      session.messages.replace([{ role: 'system', content: 'system prompt' },
+                                { role: 'user', content: 'short' }])
+
+      expect(session.anchored_estimate(session.messages))
+        .to eq(session.estimate_tokens(session.messages))
+    end
+  end
+
   describe '#reset_stats (issue #108)' do
     it 'clears the last stats and reasoning' do
       session.add_user('hello')
