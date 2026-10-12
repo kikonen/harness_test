@@ -152,4 +152,38 @@ RSpec.describe ParamOverrides do
       expect(po.display_value('low')).to eq('low')
     end
   end
+
+  # issue #219: /param and /model share this listing, so the format must be
+  # identical for both. It shows the config/profile value when a parameter is
+  # not overridden (not just the overridden ones), and marks overrides.
+  describe '#list_display (issue #219: shared by /param and /model)' do
+    # The line for a given key (whitespace-tolerant).
+    def line_for(lines, key)
+      lines.find { |line| line.include?(key + ' ') }
+    end
+
+    it 'lists every parameter with the config value when not overridden' do
+      po = build({ reasoning_effort: 'medium', num_ctx: 65_536 },
+                 prof: profile(value: { reasoning_effort: 'medium', num_ctx: 65_536 }))
+
+      lines = po.list_display
+
+      expect(lines.first).to start_with('Model parameters')
+      expect(line_for(lines, 'reasoning_effort')).to include('medium')
+      expect(line_for(lines, 'num_ctx')).to include('65536')
+      expect(lines).not_to include('(override)')
+    end
+
+    it 'shows the overridden value and marks it when a session override is set' do
+      po = build({ reasoning_effort: 'medium' },
+                 prof: profile(value: { reasoning_effort: 'medium' }))
+      po.set('reasoning_effort', 'low')
+
+      lines = po.list_display
+      line  = line_for(lines, 'reasoning_effort')
+
+      expect(line).to include('low')
+      expect(line).to include('(override)')
+    end
+  end
 end
