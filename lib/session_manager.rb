@@ -4,6 +4,7 @@ require 'json'
 require 'fileutils'
 
 require_relative 'harness_error'
+require_relative 'param_overrides'
 
 # Manages all session-related logic: prompt flow, compaction, rules file,
 # model switching, and persistence (save/resume/list).
@@ -512,6 +513,10 @@ class SessionManager
     opts[:presence_penalty] = profile[:presence_penalty]
     opts[:repeat_penalty]   = profile[:repeat_penalty]
     opts[:active_model]     = profile[:name] || profile[:model]
+    # issue #219: a profile change resets the parameter values above - re-
+    # apply any session-level overrides so they keep winning (a /model
+    # switch should not silently undo /param tweaks made this session).
+    param_overrides.restore!
   end
 
   # Restore the model saved in a session.
@@ -527,6 +532,17 @@ class SessionManager
     end
 
     apply_profile(match)
+  end
+
+  # -- Session-level parameter overrides (issue #219) --------------------
+  #
+  # The override logic itself lives in ParamOverrides (issue #219) - it owns
+  # the adjustable-parameter set, value parsing, and the effective/default
+  # lookup. SessionManager only wires it in: a single instance shared with
+  # the /param and /model commands, re-applied after a profile change, and
+  # persisted/restored with the session.
+  def param_overrides
+    @param_overrides ||= ParamOverrides.new(@harness.options, profile: -> { find_profile(active_model_name) })
   end
 
   # -- Prompt building -----------------------------------------------------
@@ -572,6 +588,9 @@ class SessionManager
 
     data = @harness.session.to_h(@file_list)
     data[:active_model] = @harness.options[:active_model]
+    # issue #219: session-level parameter overrides survive a save/resume
+    # round trip, like the active model.
+    data[:param_overrides] = param_overrides.to_h
     json = JSON.generate(data)
 
     File.write(path, json)
@@ -597,6 +616,10 @@ class SessionManager
     # manager so up/down arrows and the saved file follow the new session.
     @harness.history&.bind_session(@harness.session.session_id)
     restore_session_model(data[:active_model])
+    # issue #219: bring the saved session-level parameter overrides back
+    # and re-apply them on top of the restored profile so they win again.
+    param_overrides.load(data[:param_overrides])
+    param_overrides.restore!
     reset_rules_mtime
     # issue #207: the id is the directory name (the file is session.json).
     @harness.logger.info("session resumed: #{File.basename(File.dirname(path))} (#{path})")

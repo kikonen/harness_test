@@ -4,7 +4,8 @@ require_relative '../command'
 
 module Commands
   # /model <name> - switch the active model for this run.
-  # /model        - show the currently active model.
+  # /model        - show the currently active model and its parameters
+  #                 (issue #219: every parameter plus the session overrides).
   class ModelCommand < Command
     def handle(args)
       name = args.strip
@@ -13,7 +14,9 @@ module Commands
         # backend is visible at a glance.
         @ui.puts "Current model: #{@harness.session_manager.active_model_name} " \
                  "(#{@harness.session_manager.target_display} @ #{@options[:base_url]})"
-        @ui.puts "List models with /models, switch with /model <name>."
+        print_params
+        @ui.puts "List models with /models, switch with /model <name>, " \
+                 'adjust parameters with /param.'
         return
       end
 
@@ -23,6 +26,21 @@ module Commands
       # issue #217: the API type can CHANGE with the profile - say it.
       @ui.puts "Switched to model: #{display} (#{profile[:model]} @ #{url}) " \
                "-> #{@harness.session_manager.target_display}"
+      print_params
+    end
+
+    private
+
+    # issue #219: show every parameter for the active model with its current
+    # (effective) value, marking which ones are session-level overrides.
+    def print_params
+      param = @harness.session_manager.param_overrides
+      @ui.puts "Parameters:"
+      param.keys.each do |key|
+        eff   = param.effective(key)
+        mark  = param.overridden?(key) ? ' (override)' : ''
+        @ui.puts "  #{key.to_s.ljust(16)} #{param.display_value(eff)}#{mark}"
+      end
     end
   end
 end
