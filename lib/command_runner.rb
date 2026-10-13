@@ -5,6 +5,7 @@ require 'bundler'
 require_relative 'tool'
 require_relative 'command_allowlist'
 require_relative 'ui/dialog'
+require_relative 'safety_check'
 
 # Shared consent + execution logic for shell commands (issue #129).
 #
@@ -16,6 +17,15 @@ require_relative 'ui/dialog'
 #   * CommandHandler bang syntax (`! cmd`) - user-typed, runs on the main
 #     thread directly. The dialog is served in place (perform_direct on
 #     the console) and the output is printed verbatim by the caller.
+#
+# issue #224: MODEL SELF-CHECK (advisory only, opt-in via the
+# 'command_safety_check' config key). When the model requests an unapproved
+# command, the harness MAY have already asked the model itself (a forked
+# one-shot LLM call, one per batch - see Harness#precheck_batch_safety and
+# SafetyCheck) whether the command looks safe; the verdict is shown as a
+# "MODEL VERDICT (advisory):" note line in the confirmation dialog. It
+# NEVER auto-approves, never widens the allowlist, and never bypasses the
+# user's explicit Allow.
 #
 # SAFETY MODEL:
 #   - The FULL command string is displayed to the user before anything runs;
@@ -75,6 +85,7 @@ class CommandRunner
     @label     = label
     @title_fmt = title_fmt
     @ui        = ui
+    @safety_client = nil
     @harness   = harness
     @allowlist = CommandAllowlist.new(file_list.workdir,
                                       file: LISTS.fetch(list.to_sym))
@@ -105,6 +116,11 @@ class CommandRunner
       return execute(command, dir, shown, timeout, limit)
     end
 
+    # issue #224: consume a pre-batched verdict when the harness ran one
+    # for this command, otherwise (single run.command call) run the check
+    # here. Advisory text only - consent proceeds exactly as before.
+    verdict = safety_verdict_for(command)
+
     # Not in allowlist - ask the user. One "Always allow" option per
     # candidate prefix length of each segment (issue #102); candidates
     # already subsumed by a stored grant are filtered out up front so
@@ -132,6 +148,11 @@ class CommandRunner
       label = CommandAllowlist.classify_unsafe(command)
       note  = label ? "UNSAFE: #{label} cannot be auto-approved" : UNSAFETY_NOTE
     end
+
+    # issue #224: the model's own safety verdict (advisory) leads the note
+    # so it is seen first; the deterministic UNSAFETY line (when present)
+    # is kept after it. No verdict -> note unchanged.
+    note = verdict ? prepend_safety_verdict(note, verdict) : note
 
     dialog = UI::Dialog.new(
       title: format(@title_fmt, command, shown, timeout),
@@ -202,6 +223,61 @@ class CommandRunner
     saved = values.select { |v| v.is_a?(Hash) && v[:always_allow] }
                 .map { |v| v[:always_allow] }
     { saved: saved }
+  end
+
+  # issue #224: the verdict for THIS command. Priority: a batch pre-check
+  # verdict cached on options by the harness (Harness#precheck_batch_safety
+  # removes it after first use), else a single-command check right here
+  # (a lone run.command in its batch has no pre-check). Returns nil when
+  # the check is disabled or produced nothing.
+  def safety_verdict_for(command)
+    return nil unless @options.is_a?(Hash) && @options[:command_safety_check] == true
+
+    cached = @options[:safety_verdicts]
+    if cached.is_a?(Hash)
+      @options[:safety_verdicts] = cached.reject { |k, _v| k == command }
+      return cached[command]
+    end
+
+    # run_safety_check returns nil on failure (degrade: plain dialog).
+    verdict = run_safety_check([command])
+    verdict && verdict[command]
+  end
+
+  # One forked LLM call for the given commands. Returns {command =>
+  # verdict-or-nil}; nil on any error (a failed check must NEVER break the
+  # consent flow - the dialog just shows without a verdict).
+  def run_safety_check(commands)
+    results = SafetyCheck.run(safety_client, session_chain, commands)
+    verdicts = results.values.compact
+    if verdicts.any?
+      status("✓ model verdict: #{verdicts.join(' | ')}")
+    end
+    results
+  rescue StandardError => e
+    logger = @harness&.logger
+    logger&.info("command safety check failed (#{e.class}: #{e.message}) - no verdict")
+    nil
+  end
+
+  # The active LLM client (owned by the harness; the runner has no client
+  # of its own). nil without a harness - no check possible then.
+  def safety_client
+    @safety_client ||= @harness&.client
+  end
+
+  # The live conversation chain to fork from (issue #208: the session IS
+  # the working chain). At dialog time it ends on the unresolved
+  # assistant tool_calls - SafetyCheck#truncate_for_check drops that.
+  def session_chain
+    @harness&.session&.messages
+  end
+
+  # The model's own verdict as the FIRST note line (advisory label keeps
+  # it distinct from the deterministic UNSAFETY line, which stays second).
+  def prepend_safety_verdict(note, verdict)
+    line = "MODEL VERDICT (advisory): #{verdict}"
+    note ? "#{line}\n#{note}" : line
   end
 
   def denial(message, note: nil)

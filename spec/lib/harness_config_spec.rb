@@ -100,6 +100,21 @@ RSpec.describe HarnessConfig do
       expect(described_class.new(system_prompt_file: '   ').system_prompt_file).to be_nil
     end
   end
+  describe '#command_safety_check (issue #224)' do
+    it 'defaults to disabled when the key is absent' do
+      expect(described_class.new({}).command_safety_check_enabled).to be false
+    end
+
+    it 'reads the command_safety_check key' do
+      expect(described_class.new(command_safety_check: true)
+                            .command_safety_check_enabled).to be true
+    end
+
+    it 'treats any non-true value as disabled' do
+      expect(described_class.new(command_safety_check: 'yes').command_safety_check_enabled)
+        .to be(false)
+    end
+  end
 
   describe 'model profile api key (issue #197)' do
     it 'reads the api key from a model profile' do

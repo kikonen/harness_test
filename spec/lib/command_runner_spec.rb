@@ -40,8 +40,8 @@ RSpec.describe CommandRunner do
     [runner, stdout]
   end
 
-  def make_tool_runner(dir, options = {})
-    described_class.new(FileList.new([], workdir: dir), options)
+  def make_tool_runner(dir, options = {}, harness: nil)
+    described_class.new(FileList.new([], workdir: dir), options, harness: harness)
   end
 
   # -- CommandRunner ---------------------------------------------------------
@@ -253,6 +253,90 @@ RSpec.describe CommandRunner do
 
         runner.run('echo hi')
         expect(messages).to be_empty
+      end
+    end
+  end
+
+  # issue #224: the model's own safety verdict, shown as an advisory note in
+  # the consent dialog for an unapproved command. Never auto-approves.
+  context 'command safety check (issue #224)' do
+    # Fake LLM client: records requests, answers one scripted verdict line
+    # per command (in order).
+    def fake_client(*lines)
+      client = double('client')
+      allow(client).to receive(:chat) do |chain, tools: nil, timeout: nil|
+        client.instance_variable_get(:@calls) << { chain: chain, tools: tools }
+        { choices: [{ message: { content: lines.join("\n") } }] }
+      end
+      client.instance_variable_set(:@calls, [])
+      client
+    end
+
+    def harness_with(client, chain)
+      double('harness', client: client, logger: nil, session: double('session', messages: chain))
+    end
+
+    def chain_mid_tool_loop
+      [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'do it' },
+        { role: 'assistant', content: nil,
+          tool_calls: [{ id: 'c1', function: { name: 'run.command', arguments: '{}' } }] }
+      ]
+    end
+
+    it 'shows the verdict as the first dialog note line (advisory)' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('safe: read-only syntax check')
+        runner = make_tool_runner(dir, { command_safety_check: true },
+                                  harness: harness_with(client, chain_mid_tool_loop))
+        out = drive_dialog(['1'])
+        result = runner.run('echo hi')
+        expect(result).to start_with('exit code: 0')
+
+        expect(out.string).to include('MODEL VERDICT (advisory): safe: read-only syntax check')
+        # The status line goes over the Task outbox in production
+        # (no task in this spec); the dialog note is the user-facing artifact.
+      end
+    end
+
+    it 'keeps the deterministic UNSAFETY note alongside the verdict' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('safe: just writes to tmp/')
+        runner = make_tool_runner(dir, { command_safety_check: true },
+                                  harness: harness_with(client, chain_mid_tool_loop))
+        out = drive_dialog(['2']) # Allow(1), Cancel(2)
+        result = runner.run('echo hi > tmpfile')
+
+        expect(out.string).to include('MODEL VERDICT (advisory): safe: just writes to tmp/')
+        expect(out.string).to include('UNSAFE: redirect to file ("> tmpfile") cannot be auto-approved')
+        expect(result).to start_with('error: user denied')
+      end
+    end
+
+    it 'is skipped when the option is not enabled (default off)' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('safe')
+        runner = make_tool_runner(dir, {}, harness: harness_with(client, chain_mid_tool_loop))
+        out = drive_dialog(['1'])
+        result = runner.run('echo hi')
+        expect(result).to start_with('exit code: 0')
+
+        expect(out.string).not_to include('MODEL VERDICT')
+        expect(client.instance_variable_get(:@calls)).to be_empty
+      end
+    end
+
+    it 'degrades to the plain dialog when the check call fails' do
+      Dir.mktmpdir do |dir|
+        client = double('client')
+        allow(client).to receive(:chat).and_raise(LLMError, 'offline')
+        runner = make_tool_runner(dir, { command_safety_check: true },
+                                  harness: harness_with(client, chain_mid_tool_loop))
+        out = drive_dialog(['1'])
+
+        expect(out.string).not_to include('MODEL VERDICT')
+        expect(runner.run('echo hi')).to start_with('exit code: 0')
       end
     end
   end
