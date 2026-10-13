@@ -15,7 +15,7 @@ RSpec.describe CLI do
       workdir:   workdir,
       base_url:  'http://localhost:11434/v1',
       model:     'test-model',
-      system:    'system prompt'
+      system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE
     }
   end
 

@@ -41,7 +41,10 @@ RSpec.describe Harness do
 
   def build_harness(options = {})
     file_list = FileList.new([], workdir: workdir)
-    opts      = { system: 'system prompt', num_ctx: 65_536 }.merge(options)
+    # system_file points at the built-in default so the base prompt file is
+    # resolved (issue #223); num_ctx fixed so context indicators are stable.
+    opts      = { system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE,
+                  num_ctx: 65_536 }.merge(options)
     described_class.new(opts, file_list)
   end
 
@@ -492,7 +495,10 @@ RSpec.describe Harness do
       harness.call_llm
 
       sent = harness.client.calls.first
-      notes = sent.select { |m| m[:content].to_s.include?('User note (mid-turn):') }
+      # Restrict to user messages: the built-in system prompt itself
+      # documents the "User note (mid-turn):" prefix, so a substring match
+      # over the whole chain would also catch the system message.
+      notes = sent.select { |m| m[:role] == 'user' && m[:content].to_s.include?('User note (mid-turn):') }
       expect(notes).to eq([{ role: 'user', content: 'User note (mid-turn): no - use python' }])
       expect(harness.user_notes).to eq(['no - use python'])
       expect(harness.session.pending?).to be(false) # final reply committed
@@ -525,6 +531,30 @@ RSpec.describe Harness do
       end
 
       expect(drained_lines(task)).not_to include('  [note] sent to model')
+    end
+  end
+
+  describe '#read_system_prompt (issue #223)' do
+    it 'reads the built-in default file when no system_file option is set' do
+      harness = build_harness(system_file: nil)
+
+      expect(harness.send(:read_system_prompt))
+        .to eq(File.read(Harness::DEFAULT_SYSTEM_PROMPT_FILE))
+    end
+
+    it 'reads the configured system_file when it exists' do
+      path = File.join(workdir, 'my_prompt.txt')
+      File.write(path, "custom prompt #{path}")
+      harness = build_harness(system_file: path)
+
+      expect(harness.send(:read_system_prompt)).to eq("custom prompt #{path}")
+    end
+
+    it 'falls back to the built-in default when the configured file is missing' do
+      harness = build_harness(system_file: File.join(workdir, 'does_not_exist.txt'))
+
+      expect(harness.send(:read_system_prompt))
+        .to eq(File.read(Harness::DEFAULT_SYSTEM_PROMPT_FILE))
     end
   end
 

@@ -86,6 +86,21 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  describe '#system_prompt_file (issue #223)' do
+    it 'defaults to nil when the key is absent (built-in default file is used)' do
+      expect(described_class.new({}).system_prompt_file).to be_nil
+    end
+
+    it 'reads the system_prompt_file key' do
+      expect(described_class.new(system_prompt_file: 'prompts/my.txt')
+                            .system_prompt_file).to eq('prompts/my.txt')
+    end
+
+    it 'normalises a blank value to nil' do
+      expect(described_class.new(system_prompt_file: '   ').system_prompt_file).to be_nil
+    end
+  end
+
   describe 'model profile api key (issue #197)' do
     it 'reads the api key from a model profile' do
       cfg = described_class.new(models: [

@@ -54,7 +54,7 @@ retry:
 # Windows Terminal). Pasted blank lines never trigger it. Default: false.
 # double_enter_submit: true
 
-# Full system prompt override (uncomment to use).
-# --system-file still takes precedence.
-# system: |
-#   You are a precise code editor...
+# Full system prompt override: a FILE containing the prompt text (issue #223).
+# Do NOT embed the prompt in this YAML - point at a file instead.
+# --system-file still takes precedence over this key.
+# system_prompt_file: prompts/my_system.txt

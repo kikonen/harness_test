@@ -46,10 +46,11 @@ require_relative 'state_migrator'
 # -- Harness --------------------------------------------------------------
 
 class Harness
-  # The built-in system prompt lives in config/ with the other config-owned
-  # defaults (config/system_prompt.txt); --system-file and the config
-  # 'system' key override it.
-  SYSTEM_PROMPT = File.read(File.join(__dir__, '../config', 'system_prompt.txt'))
+  # Built-in system prompt (issue #223): the default file is referenced by
+  # path and read on demand (not loaded at class load time) so a /reload
+  # after editing it takes effect without a restart. --system-file and the
+  # config system_prompt_file key override it.
+  DEFAULT_SYSTEM_PROMPT_FILE = File.expand_path('../config/system_prompt.txt', __dir__)
 
   # issue #158: 100 was too low for long multi-step tasks (bumped to 200).
   # issue #226: configurable via the 'max_tool_iterations' config key.
@@ -115,10 +116,13 @@ class Harness
     @session_manager = SessionManager.new(self, file_list)
   end
 
-  # Base system prompt (from config or built-in default) plus optional
-  # project-specific rules from a harness.md file in the working directory.
+  # Build the system prompt: the base prompt (read from options[:system_file]
+  # when set, else the built-in default file) plus the project-specific rules
+  # from a harness.md file in the working directory, when present. The base
+  # is read fresh each call (issue #223) so a /reload after editing the file
+  # picks up the change without a restart.
   def build_system_prompt
-    base = options[:system]
+    base = read_system_prompt
     project_file = File.join(@file_list.workdir, 'harness.md')
     if File.file?(project_file)
       content = File.read(project_file).strip
@@ -567,6 +571,17 @@ class Harness
 
   def step_display_disabled?
     ENV.fetch('HARNESS_STEP_DISPLAY', '') == 'off' || options[:step_display] == false
+  end
+
+  # The base system prompt text: the configured file (options[:system_file],
+  # set from --system-file or the config system_prompt_file key) when it
+  # exists, else the built-in default file. issue #223: read on demand so
+  # an edited file takes effect on the next /reload without a restart.
+  def read_system_prompt
+    path = options[:system_file]
+    return File.read(path) if path && File.file?(path)
+
+    File.read(DEFAULT_SYSTEM_PROMPT_FILE)
   end
 
   def execute_tool_call(tool_call)

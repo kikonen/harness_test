@@ -47,8 +47,8 @@ require_relative 'harness_error'
 #     count: 3                  # total attempts for transient network errors
 #     delay: 2                  # base delay (seconds) between retries
 #   double_enter_submit: false # Enter on an empty last line submits the multiline buffer (issue #198)
-#   system: |                   # full system prompt (overrides the built-in)
-#     You are a precise code editor...
+#   system_prompt_file: prompts/my.txt  # file with the full system prompt (issue #223)
+#                                       # overrides the built-in config/system_prompt.txt
 #
 class HarnessConfig
   HARNESS_DIR = '.harness'
@@ -58,14 +58,14 @@ class HarnessConfig
   # example and what a first run writes to .harness/config.yml.
   TEMPLATE_FILE = File.expand_path('../config/config.example.yml', __dir__)
 
-  attr_reader :models, :default_model, :system
+  attr_reader :models, :default_model, :system_prompt_file
 
   def initialize(data = {})
     data          = {} if data.nil?
     @raw          = data
     @models       = normalize_models(Array(data[:models]))
     @default_model = nonblank(data[:default_model])
-    @system       = nonblank(data[:system])
+    @system_prompt_file = nonblank(data[:system_prompt_file])
     @auto_save    = data[:auto_save].nil? ? true : data[:auto_save]
     @double_enter_submit = data[:double_enter_submit] == true
     @max_tool_iterations = int_or_nil(data[:max_tool_iterations])

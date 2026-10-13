@@ -71,6 +71,9 @@ Keep this in mind:
   so commits land on `master` as a clean linear history - no merge
   commits. Only fall back to a regular merge if the rebase fails
   (e.g. conflicts) and say so explicitly.
+- Do NOT merge a PR automatically. Open the PR, then stop and let the
+  user test the changes first - merge only after the user explicitly
+  says to.
 - The PR body should state that it will be merged with rebase.
 
 ## Tunable Constants
