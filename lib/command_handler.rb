@@ -3,6 +3,7 @@
 require_relative 'harness'
 require_relative 'file_list'
 require_relative 'task'
+require_relative 'task_runner'
 require_relative 'command_runner'
 require_relative 'command'
 
@@ -29,6 +30,8 @@ require_relative 'commands/exit_command'
 # Thin dispatcher: checks if input starts with "/", extracts the first word,
 # looks up the command class in a registry map, and delegates.
 class CommandHandler
+  include TaskRunner
+
   attr_reader :harness,
     :file_list,
     :ui,
@@ -156,12 +159,10 @@ class CommandHandler
   # I/O rule): the task thread emits typed entries to its OutputBuffer via
   # Task.emit (or posts blocking requests for dialogs), and the drain loop
   # renders everything on the main thread - including spinner frames.
+  # The shared wrapper lives in TaskRunner (issue #235: /retry reuses it).
   def run_direct_prompt(text)
-    ui.puts
-    error, _task = Task.run(harness:, ui:) do |_t|
+    run_on_task do |_t|
       @harness.session_manager.run_prompt(text)
     end
-    ui.puts "  [task error] #{error}" if error
-    ui.puts
   end
 end
