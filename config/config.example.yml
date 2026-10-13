@@ -58,3 +58,9 @@ retry:
 # Do NOT embed the prompt in this YAML - point at a file instead.
 # --system-file still takes precedence over this key.
 # system_prompt_file: prompts/my_system.txt
+
+# Before the consent dialog for an UNAPPROVED shell command, ask the model
+# itself (one cache-warm forked call per command batch) whether it looks
+# safe; the verdict is shown as a NOTE in the dialog. Advisory only: it
+# never auto-approves, never widens the allowlist, never bypasses "Allow".
+# command_safety_check: true

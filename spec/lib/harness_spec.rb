@@ -28,7 +28,7 @@ RSpec.describe Harness do
       @responses = responses
     end
 
-    def chat(messages, tools: nil)
+    def chat(messages, tools: nil, timeout: nil)
       @calls << messages.map { |m| m.dup }
       response = @responses.shift || { content: 'done' }
       raise LLMError, 'connection lost mid-turn' if response == :fail
@@ -654,6 +654,82 @@ RSpec.describe Harness do
       contents = harness.session.messages.map { |m| m[:content].to_s }
       expect(contents).to include('User note (mid-turn): fix the naming first')
       expect(harness.session.pending?).to be(true)
+    end
+  end
+
+  # issue #224: a tool batch with SEVERAL run.command calls is checked with
+  # ONE forked LLM call (one verdict line per command) BEFORE the first
+  # consent dialog. Advisory only; errors degrade to a verdict-less flow.
+  describe '#precheck_batch_safety (issue #224)' do
+    def run_command_calls(*commands)
+      commands.each_with_index.map do |c, i|
+        { id: "c#{i + 1}",
+          function: { name: 'run.command',
+                      arguments: JSON.dump(command: c) } }
+      end
+    end
+
+    let(:harness) { build_harness(command_safety_check: true) }
+
+    it 'is a no-op when the option is disabled' do
+      off = build_harness(command_safety_check: false)
+      expect(off.precheck_batch_safety(run_command_calls('a', 'b')))
+        .to be_nil
+    end
+
+    it 'is a no-op for a batch with fewer than two run.command calls' do
+      expect(harness.precheck_batch_safety(run_command_calls('echo hi')))
+        .to be_nil
+      expect(harness.options[:safety_verdicts]).to be_nil
+    end
+
+    it 'caches {command => verdict} in options when the batch has two or more' do
+      client = instance_double('client')
+      allow(client).to receive(:chat)
+        .and_return({ choices: [{ message: { content:
+          "safe: syntax check\nsafe: writes to tmp only" } }], usage: {} })
+      harness.instance_variable_set(:@client, client)
+      harness.session.add_user('go')
+
+      verdicts = harness.precheck_batch_safety(
+        run_command_calls('ruby -c lib/a.rb', 'bundle exec rspec'))
+
+      expect(verdicts).to eq('ruby -c lib/a.rb' => 'safe: syntax check',
+                             'bundle exec rspec' => 'safe: writes to tmp only')
+      expect(harness.options[:safety_verdicts]).to eq(verdicts)
+    end
+
+    it 'sends one check request without tools, forked from the live chain' do
+      client = instance_double('client')
+      captured = []
+      allow(client).to receive(:chat) do |chain, tools: nil, timeout: nil|
+        captured << { chain: chain, tools: tools, timeout: timeout }
+        { choices: [{ message: { content: "safe\nsafe" } }], usage: {} }
+      end
+      harness.instance_variable_set(:@client, client)
+      harness.session.add_user('go')
+
+      harness.precheck_batch_safety(
+        run_command_calls('ruby -c lib/a.rb', 'bundle exec rspec'))
+
+      expect(captured.size).to eq(1)
+      expect(captured[0][:tools]).to be_nil
+      expect(captured[0][:timeout]).to eq(SafetyCheck::DEFAULT_TIMEOUT)
+      forked = captured[0][:chain]
+      expect(forked.map { |m| m[:role] }).to eq(%w[system user user])
+      expect(forked.last[:content]).to include('1. ruby -c lib/a.rb')
+      expect(forked.last[:content]).to include('2. bundle exec rspec')
+    end
+
+    it 'returns nil (no verdicts) when the check call fails' do
+      client = instance_double('client')
+      allow(client).to receive(:chat).and_raise(LLMError, 'offline')
+      harness.instance_variable_set(:@client, client)
+      harness.session.add_user('go')
+
+      expect(harness.precheck_batch_safety(
+               run_command_calls('a', 'b'))).to be_nil
+      expect(harness.options[:safety_verdicts]).to be_nil
     end
   end
 end

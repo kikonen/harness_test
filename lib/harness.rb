@@ -42,6 +42,7 @@ require_relative 'tools/tools_search_tool'
 require_relative 'tool_registry'
 require_relative 'session_manager'
 require_relative 'state_migrator'
+require_relative 'safety_check'
 
 # -- Harness --------------------------------------------------------------
 
@@ -233,6 +234,46 @@ class Harness
     options[:max_tool_iterations] || MAX_TOOL_ITERATIONS
   end
 
+  # issue #224: opt-in pre-dialog command safety check (config
+  # 'command_safety_check'). Advisory only: the verdict is shown in the
+  # confirmation dialog, it never auto-approves or bypasses user consent.
+  def command_safety_check
+    options[:command_safety_check] == true
+  end
+
+  # issue #224: one check call covering ALL run.command calls of a tool
+  # batch (never one call per command). Returns {command => verdict} on
+  # success, nil on LLM error/timeout (consent flow simply continues
+  # without a verdict). Purity: SafetyCheck never touches Session, so it
+  # cannot trigger in-loop compaction or token anchoring.
+  def precheck_batch_safety(message_calls)
+    return nil unless command_safety_check
+
+    commands = run_command_batch_commands(message_calls)
+    return nil if commands.size < 2
+
+    logger.info("safety pre-check (#{commands.size} run.command in batch)")
+    Task.emit(:text, origin: :harness,
+              content: "  [safety] checking #{commands.size} commands before the consent dialog...")
+    options[:safety_verdicts] =
+      SafetyCheck.run(client, session.messages, commands)
+  rescue StandardError => e
+    logger.info("safety pre-check failed (#{e.class}: #{e.message}) - continuing without verdicts")
+    nil
+  end
+
+  # The run.command commands of one tool batch, in order (empty when the
+  # batch has none). Duplicate commands are kept - the verdict map handles
+  # them fine and the batch order must stay intact.
+  def run_command_batch_commands(message_calls)
+    calls = Array(message_calls)
+    calls.filter_map do |tc|
+      next unless tc.dig(:function, :name) == 'run.command'
+
+      JSON.parse(tc.dig(:function, :arguments).to_s) rescue {}
+    end.map { |a| a['command'].to_s }.reject(&:empty?)
+  end
+
   # The effective auto-compact usage level (tokens) for the active window:
   # min(threshold_pct% of window, window - reserved tokens). nil when no
   # valid window size is configured. Shared by every auto-compact decision
@@ -362,6 +403,11 @@ class Harness
         @session.add_assistant_message(assistant_msg)
 
         # Execute each tool call and append results
+        # issue #224: when a batch holds SEVERAL run.command calls, ask the
+        # model ONE safety-check call for all of them BEFORE the first
+        # consent dialog (one line per command); single calls check
+        # themselves inside CommandRunner.
+        precheck_batch_safety(message[:tool_calls])
         message[:tool_calls].each do |tc|
           result = execute_tool_call(tc)
           record_note(tc, result)

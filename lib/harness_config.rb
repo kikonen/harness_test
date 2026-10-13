@@ -49,6 +49,8 @@ require_relative 'harness_error'
 #   double_enter_submit: false # Enter on an empty last line submits the multiline buffer (issue #198)
 #   system_prompt_file: prompts/my.txt  # file with the full system prompt (issue #223)
 #                                       # overrides the built-in config/system_prompt.txt
+#   command_safety_check: true  # model self-check for unapproved shell commands
+#                                       # (advisory note in the consent dialog, issue #224)
 #
 class HarnessConfig
   HARNESS_DIR = '.harness'
@@ -67,6 +69,7 @@ class HarnessConfig
     @default_model = nonblank(data[:default_model])
     @system_prompt_file = nonblank(data[:system_prompt_file])
     @auto_save    = data[:auto_save].nil? ? true : data[:auto_save]
+    @command_safety_check = data[:command_safety_check] == true
     @double_enter_submit = data[:double_enter_submit] == true
     @max_tool_iterations = int_or_nil(data[:max_tool_iterations])
     @compact      = {
@@ -160,6 +163,12 @@ class HarnessConfig
   # Enter always inserts a newline.
   def double_enter_submit_enabled
     @double_enter_submit == true
+  end
+
+  # issue #224: opt-in model self-check for unapproved shell commands -
+  # an advisory verdict in the consent dialog, never an auto-approval.
+  def command_safety_check_enabled
+    @command_safety_check == true
   end
 
   # Max tool-loop iterations for one turn (or nil; the built-in default then applies).

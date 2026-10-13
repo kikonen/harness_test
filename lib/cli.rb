@@ -152,6 +152,10 @@ class CLI
     # /reload after editing it takes effect without a restart.
     opts[:system_file] ||= config.system_prompt_file
 
+    # issue #224: opt-in model self-check for unapproved shell commands
+    # (advisory verdict in the consent dialog; never auto-approves).
+    opts[:command_safety_check] = config.command_safety_check_enabled
+
     opts[:compact_recent]   ||= config.compact_recent_messages
     opts[:compact_auto_threshold] = config.compact_auto_threshold
     opts[:compact_max_size] = config.compact_max_size
