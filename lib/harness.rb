@@ -296,25 +296,39 @@ class Harness
   # success, nil on LLM error/timeout (consent flow simply continues
   # without a verdict). Purity: SafetyCheck never touches Session, so it
   # cannot trigger in-loop compaction or token anchoring.
+  # issue #241: commands the allowlist already auto-approves never reach a
+  # consent dialog (CommandRunner#run runs them right away and never
+  # consumes a verdict), so the model is never asked about them.
   def precheck_batch_safety(message_calls)
     return nil unless command_safety_check
 
     commands = run_command_batch_commands(message_calls)
     return nil if commands.size < 2
+    unapproved = commands.reject { |c| tool_allowlist.allowed?(c) }
+    return nil if unapproved.size < 2
+    skipped = commands.size - unapproved.size
+    logger.info("safety pre-check: #{skipped} allowlisted command(s) skipped") if skipped.positive?
 
-    logger.info("safety pre-check (#{commands.size} run.command in batch)")
+    logger.info("safety pre-check (#{unapproved.size} run.command in batch)")
     Task.emit(:text, origin: :harness,
-              content: "  [safety] checking #{commands.size} commands before the consent dialog...")
+              content: "  [safety] checking #{unapproved.size} commands before the consent dialog...")
     # issue #224 follow-up: re-point the spinner so it is clear the wait
     # is the model safety check (the mode badge is appended separately by
     # the Task spinner and keeps showing the current posture).
     Task.emit(:spinner_detail, origin: :harness,
-              content: { message: "Model safety check (#{commands.size} commands)" })
+              content: { message: "Model safety check (#{unapproved.size} commands)" })
     options[:safety_verdicts] =
-      SafetyCheck.run(client, session.messages, commands)
+      SafetyCheck.run(client, session.messages, unapproved)
   rescue StandardError => e
     logger.info("safety pre-check failed (#{e.class}: #{e.message}) - continuing without verdicts")
     nil
+  end
+
+  # The run.command allowlist as the tool runner consults it (issue #241:
+  # the precheck must skip exactly the commands the runner will
+  # auto-approve - same list, same matching). Read-only here.
+  def tool_allowlist
+    CommandAllowlist.new(file_list.workdir, file: CommandAllowlist::TOOL_FILENAME)
   end
 
   # The run.command commands of one tool batch, in order (empty when the
