@@ -785,5 +785,61 @@ RSpec.describe Harness do
                run_command_calls('a', 'b'))).to be_nil
       expect(harness.options[:safety_verdicts]).to be_nil
     end
+
+    # issue #241: allowlisted commands never reach a consent dialog (the
+    # runner auto-approves them), so the model must not be asked about
+    # them - only the unapproved commands are checked.
+    def allowlist(*prefixes)
+      FileUtils.mkdir_p(File.join(workdir, '.harness'))
+      File.write(File.join(workdir, '.harness', 'allowed_commands.yml'),
+                 YAML.dump(prefixes))
+    end
+
+    it 'skips allowlisted commands - only the unapproved ones are checked' do
+      allowlist('ruby')
+      client = instance_double('client')
+      captured = []
+      allow(client).to receive(:chat) do |chain, **|
+        captured << chain
+        { choices: [{ message: { content: "safe: tests\nsafe: git only" } }], usage: {} }
+      end
+      harness.instance_variable_set(:@client, client)
+      harness.session.add_user('go')
+
+      verdicts = harness.precheck_batch_safety(
+        run_command_calls('ruby -c lib/a.rb', 'bundle exec rspec', 'git status'))
+
+      expect(verdicts).to eq('bundle exec rspec' => 'safe: tests',
+                             'git status' => 'safe: git only')
+      expect(captured.size).to eq(1)
+      expect(captured.first.last[:content]).to include('1. bundle exec rspec')
+      expect(captured.first.last[:content]).to include('2. git status')
+      expect(captured.first.last[:content]).not_to include('ruby -c lib/a.rb')
+    end
+
+    it 'makes no model call when every command in the batch is allowlisted' do
+      allowlist('ruby', 'bundle exec rspec')
+      client = instance_double('client')
+      allow(client).to receive(:chat)
+      harness.instance_variable_set(:@client, client)
+      harness.session.add_user('go')
+
+      expect(harness.precheck_batch_safety(
+               run_command_calls('ruby -c lib/a.rb', 'bundle exec rspec'))).to be_nil
+      expect(client).not_to have_received(:chat)
+    end
+
+    it 'makes no batch call when only one command is left after filtering' do
+      allowlist('ruby')
+      client = instance_double('client')
+      allow(client).to receive(:chat)
+      harness.instance_variable_set(:@client, client)
+      harness.session.add_user('go')
+
+      expect(harness.precheck_batch_safety(
+               run_command_calls('ruby -c lib/a.rb', 'ruby -c lib/b.rb',
+                                 'bundle exec rspec'))).to be_nil
+      expect(client).not_to have_received(:chat)
+    end
   end
 end
