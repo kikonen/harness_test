@@ -64,3 +64,11 @@ retry:
 # safe; the verdict is shown as a NOTE in the dialog. Advisory only: it
 # never auto-approves, never widens the allowlist, never bypasses "Allow".
 # command_safety_check: true
+
+# With command_safety_check on, the INITIAL command consent posture: when
+# true, commands the model verdicts "safe:" skip the consent dialog
+# ("dangerous:" verdicts and missing verdicts still ask). Manual consent
+# (false) is the default. During a session the posture is toggled live
+# with Ctrl+A (note editor or idle prompt); the spinner always shows the
+# current mode as a [cmd: ...] badge (issue #224 follow-up).
+# command_safety_auto_approve: false

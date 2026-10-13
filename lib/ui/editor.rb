@@ -193,6 +193,61 @@ module UI
       end
     end
 
+    # issue #224 follow-up: shared state for the Ctrl+A mode toggle. The
+    # RelineCtrlAToggle patch (prepended on LineEditor) fires the toggle
+    # when Ctrl+A is pressed while a read is open; the reader
+    # (reline_read_multiline) then clears it and hands the resulting MODE
+    # label back to the caller so the Task can print an ack line.
+    module CtrlAState
+      class << self
+        attr_accessor :fired, :label
+
+        def reset!
+          @fired = false
+          @label = nil
+        end
+
+        def fire!(label)
+          @fired = true
+          @label = label
+        end
+      end
+    end
+
+    # Ctrl+A toggles the command consent MODE (issue #224 follow-up).
+    # Detected in #input_key - the same hook point as Esc-cancel - so it
+    # works in the tty multiline read (note editor / idle prompt). Ctrl+A
+    # is Reline's "beginning of line" cursor move; we CONSUME it and CLOSE
+    # the read (finish) so the editor does not stay open after the toggle.
+    # The MODE label produced is parked on CtrlAState for the reader to
+    # hand back. A harness with no toggle (unit tests) makes the key a
+    # no-op (label = nil) but still closes the read.
+    module RelineCtrlAToggle
+      # Ctrl+A arrives as a single byte (char == 1) - distinct from a
+      # plain "a" (char == 97) and from ESC-prefixed keys.
+      CTRL_A_CHAR = 1
+
+      def input_key(key)
+        if key.char == CTRL_A_CHAR
+          CtrlAState.fire!(run_mode_toggle)
+          finish
+          return false
+        end
+        super
+      end
+
+      private
+
+      # Flip the MODE on the shared harness (if one is reachable) and
+      # return the new label (nil when there is no harness / no toggle).
+      def run_mode_toggle
+        harness = ::Task.current&.harness
+        harness.respond_to?(:toggle_command_mode) ? harness.toggle_command_mode : nil
+      rescue StandardError
+        nil
+      end
+    end
+
     # Opt-in "double Enter submits" policy (issue #198 fallback for setups
     # where no submit key reaches the terminal - e.g. a remote host seen
     # through Windows Terminal). When `submit_on_enter` is enabled, Enter
@@ -405,6 +460,11 @@ module UI
       # Ctrl+Enter arrives as LF (byte 10) where plain Enter sends CR.
       unless Reline::LineEditor.ancestors.include?(RelineLFSubmit)
         Reline::LineEditor.prepend(RelineLFSubmit)
+      end
+      # Ctrl+A command-consent mode toggle (issue #224 follow-up): works in
+      # any tty read; the reader surfaces the fired state to its caller.
+      unless Reline::LineEditor.ancestors.include?(RelineCtrlAToggle)
+        Reline::LineEditor.prepend(RelineCtrlAToggle)
       end
       cfg = Reline.core.config
       cfg.keyseq_timeout = 100

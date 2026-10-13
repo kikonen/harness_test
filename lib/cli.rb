@@ -156,6 +156,11 @@ class CLI
     # (advisory verdict in the consent dialog; never auto-approves).
     opts[:command_safety_check] = config.command_safety_check_enabled
 
+    # issue #224 follow-up: initial command consent posture for the safety
+    # check (MANUAL / AUTO-APPROVE; toggled live with Ctrl+A during a run).
+    # Only effective with command_safety_check on.
+    opts[:command_safety_auto_approve] = config.command_safety_auto_approve_enabled
+
     opts[:compact_recent]   ||= config.compact_recent_messages
     opts[:compact_auto_threshold] = config.compact_auto_threshold
     opts[:compact_max_size] = config.compact_max_size
@@ -353,6 +358,17 @@ class CLI
 
       result = UI::Editor.new(ui.stdin)
                          .read_multiline(prompt: '  ', prefill: @idle_draft)
+
+      # Ctrl+A toggled the command-consent mode while the prompt was open:
+      # ack it and re-prompt (no command was typed). The spinner badge for
+      # the next turn shows the new mode (issue #224 follow-up).
+      if UI::Editor::CtrlAState.fired
+        label = UI::Editor::CtrlAState.label
+        UI::Editor::CtrlAState.reset!
+        ui.puts label.nil? ? '  (command mode toggle unavailable - safety check off)' \
+                            : "  [cmd: mode is now #{label}]"
+        next
+      end
 
       case result.status
       when :eof

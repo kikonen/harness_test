@@ -258,6 +258,60 @@ RSpec.describe Task do
     end
   end
 
+  # issue #224 follow-up: the spinner badge ALWAYS shows the command
+  # consent mode (live, re-read every frame) when the harness exposes it.
+  describe 'Task.ensure_spinner_running mode badge (issue #224 follow-up)' do
+    def mode_harness(label)
+      h = Class.new do
+        define_method(:command_mode_label) { label }
+      end.new
+      h
+    end
+
+    it 'installs a live badge callable when the harness has a mode label' do
+      task = described_class.new { |_t| }
+      task.ui = UI::Console.new(stdout: StringIO.new)
+      task.harness = mode_harness('AUTO-APPROVE')
+
+      described_class.ensure_spinner_running(task)
+
+      expect(task.visible_spinner.badge).to respond_to(:call)
+      expect(task.visible_spinner.badge.call).to eq('[cmd: AUTO-APPROVE]')
+    end
+
+    it 'installs no badge for a harness without a mode (unit-test harness)' do
+      task = described_class.new { |_t| }
+      task.ui = UI::Console.new(stdout: StringIO.new)
+      task.harness = Object.new # no command_mode_label
+
+      described_class.ensure_spinner_running(task)
+
+      expect(task.visible_spinner.badge).to be_nil
+    end
+
+    it 'mode_badge is nil when the label is nil (safety check off)' do
+      expect(described_class.mode_badge(mode_harness(nil))).to be_nil
+    end
+
+    it 'mode_badge brackets the label for display' do
+      expect(described_class.mode_badge(mode_harness('MANUAL')))
+        .to eq('[cmd: MANUAL]')
+      expect(described_class.mode_badge(mode_harness('AUTO-APPROVE')))
+        .to eq('[cmd: AUTO-APPROVE]')
+    end
+
+    it 'does not replace an already running spinner' do
+      task = described_class.new { |_t| }
+      task.ui = UI::Console.new(stdout: StringIO.new)
+      task.harness = mode_harness('MANUAL')
+
+      described_class.ensure_spinner_running(task)
+      first = task.spinner
+      described_class.ensure_spinner_running(task)
+      expect(task.spinner).to equal(first)
+    end
+  end
+
   describe 'Task.run (drain loop, issue #40)' do
     it 'runs the block and drains all output' do
       io_out = StringIO.new

@@ -115,6 +115,11 @@ class Harness
     @tool_registry = build_tool_registry
     @client        = LLMClient.new(options, @logger)
     @session_manager = SessionManager.new(self, file_list)
+    # issue #224 follow-up: session-level auto-approve toggle for the
+    # command safety check. NOT persisted with the session - it is a
+    # per-run consent posture (toggled live with Ctrl+A), so every
+    # fresh run starts with the config default.
+    @command_safety_auto_approve = options[:command_safety_auto_approve] == true
   end
 
   # Build the system prompt: the base prompt (read from options[:system_file]
@@ -235,10 +240,55 @@ class Harness
   end
 
   # issue #224: opt-in pre-dialog command safety check (config
-  # 'command_safety_check'). Advisory only: the verdict is shown in the
-  # confirmation dialog, it never auto-approves or bypasses user consent.
+  # 'command_safety_check'). The model's verdict is shown as an advisory
+  # note in the consent dialog (and, when auto-approve is on, can skip
+  # the dialog for commands the model calls safe - see
+  # #command_safety_auto_approve).
   def command_safety_check
     options[:command_safety_check] == true
+  end
+
+  # issue #224 follow-up: session-level auto-approve toggle. When ON, a
+  # command the model verdicts as "safe:" skips the consent dialog and
+  # runs immediately. It NEVER widens the allowlist and it is inert
+  # without command_safety_check (no verdict, no auto-approve). Toggled
+  # live with Ctrl+A (the note editor / idle prompt consume the key);
+  # not persisted with the session - a consent posture, not conversation
+  # state.
+  def command_safety_auto_approve
+    @command_safety_auto_approve
+  end
+
+  def command_safety_auto_approve=(val)
+    @command_safety_auto_approve = (val == true)
+  end
+
+  # The auto-approve posture only makes sense with the safety check on:
+  # without a verdict there is nothing to auto-approve from.
+  def command_safety_auto_approve_effective?
+    command_safety_check && command_safety_auto_approve
+  end
+
+  # issue #224 follow-up: the command consent MODE as a short label the
+  # spinner always shows (so the current posture is visible at a glance,
+  # even when the safety check is off). Shown only when the safety check
+  # is on - with it off there is no mode to switch.
+  def command_mode_label
+    return nil unless command_safety_check
+
+    command_safety_auto_approve ? 'AUTO-APPROVE' : 'MANUAL'
+  end
+
+  # issue #224 follow-up: flip the command consent MODE live (Ctrl+A).
+  # Returns the new MODE as a label ("AUTO-APPROVE" / "MANUAL"), or nil
+  # when the safety check is off (there is no mode to switch, so the
+  # toggle is a no-op). The state change is immediate - the spinner's
+  # live badge re-reads it on the very next frame.
+  def toggle_command_mode
+    return nil unless command_safety_check
+
+    @command_safety_auto_approve = !@command_safety_auto_approve
+    command_safety_auto_approve ? 'AUTO-APPROVE' : 'MANUAL'
   end
 
   # issue #224: one check call covering ALL run.command calls of a tool
@@ -255,6 +305,11 @@ class Harness
     logger.info("safety pre-check (#{commands.size} run.command in batch)")
     Task.emit(:text, origin: :harness,
               content: "  [safety] checking #{commands.size} commands before the consent dialog...")
+    # issue #224 follow-up: re-point the spinner so it is clear the wait
+    # is the model safety check (the mode badge is appended separately by
+    # the Task spinner and keeps showing the current posture).
+    Task.emit(:spinner_detail, origin: :harness,
+              content: { message: "Model safety check (#{commands.size} commands)" })
     options[:safety_verdicts] =
       SafetyCheck.run(client, session.messages, commands)
   rescue StandardError => e

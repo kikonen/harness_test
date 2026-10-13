@@ -51,6 +51,9 @@ require_relative 'harness_error'
 #                                       # overrides the built-in config/system_prompt.txt
 #   command_safety_check: true  # model self-check for unapproved shell commands
 #                                       # (advisory note in the consent dialog, issue #224)
+#   command_safety_auto_approve: true  # with the check on: commands the model
+#                                       # calls "safe:" skip the consent dialog
+#                                       # (toggled live with Ctrl+A, issue #224 follow-up)
 #
 class HarnessConfig
   HARNESS_DIR = '.harness'
@@ -70,6 +73,7 @@ class HarnessConfig
     @system_prompt_file = nonblank(data[:system_prompt_file])
     @auto_save    = data[:auto_save].nil? ? true : data[:auto_save]
     @command_safety_check = data[:command_safety_check] == true
+    @command_safety_auto_approve = data[:command_safety_auto_approve] == true
     @double_enter_submit = data[:double_enter_submit] == true
     @max_tool_iterations = int_or_nil(data[:max_tool_iterations])
     @compact      = {
@@ -169,6 +173,13 @@ class HarnessConfig
   # an advisory verdict in the consent dialog, never an auto-approval.
   def command_safety_check_enabled
     @command_safety_check == true
+  end
+
+  # issue #224 follow-up: the initial command consent posture for the
+  # safety check (MANUAL or AUTO-APPROVE; toggled live with Ctrl+A during
+  # a session). Only meaningful with command_safety_check on.
+  def command_safety_auto_approve_enabled
+    @command_safety_auto_approve == true
   end
 
   # Max tool-loop iterations for one turn (or nil; the built-in default then applies).
