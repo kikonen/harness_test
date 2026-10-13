@@ -116,6 +116,22 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  describe '#command_safety_auto_approve (issue #224 follow-up)' do
+    it 'defaults to disabled when the key is absent (MANUAL consent)' do
+      expect(described_class.new({}).command_safety_auto_approve_enabled)
+        .to be(false)
+    end
+
+    it 'reads the command_safety_auto_approve key' do
+      expect(described_class.new(command_safety_auto_approve: true)
+                            .command_safety_auto_approve_enabled).to be(true)
+    end
+
+    it 'mentions the key in the default template (commented out)' do
+      expect(template).to include('command_safety_auto_approve')
+    end
+  end
+
   describe 'model profile api key (issue #197)' do
     it 'reads the api key from a model profile' do
       cfg = described_class.new(models: [

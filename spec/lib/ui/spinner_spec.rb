@@ -221,4 +221,70 @@ RSpec.describe UI::Spinner do
       expect(spinner.line(UI::Spinner::FRAMES.size)).to eq("#{UI::Spinner::FRAMES[0]} Working...")
     end
   end
+
+  describe '#badge (issue #224 follow-up: live consent-mode badge)' do
+    it 'is nil by default (renders nothing, frame format unchanged)' do
+      spinner = described_class.new('Working', ui: quiet_console)
+      expect(spinner.badge).to be_nil
+      expect(spinner.line(0)).to eq("#{UI::Spinner::FRAMES[0]} Working...")
+    end
+
+    it 'renders a plain-string badge between the frame and the message' do
+      out = capture('Working') do |spinner|
+        spinner.badge = '[cmd: MANUAL]'
+        spinner.start
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include("#{UI::Spinner::FRAMES[0]} [cmd: MANUAL] Working...")
+    end
+
+    it 're-evaluates a callable badge every frame so it tracks live state' do
+      mode = 'MANUAL'
+      out = capture('Working') do |spinner|
+        spinner.badge = -> { "[cmd: #{mode}]" }
+        spinner.start
+        spinner.render!
+        mode = 'AUTO-APPROVE'
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include("#{UI::Spinner::FRAMES[0]} [cmd: MANUAL] Working...")
+      expect(out).to include("#{UI::Spinner::FRAMES[1]} [cmd: AUTO-APPROVE] Working...")
+    end
+
+    it 'renders a nil badge value as nothing on the very next frame' do
+      out = capture('Working') do |spinner|
+        spinner.badge = -> { '[cmd: MANUAL]' }
+        spinner.start
+        spinner.render!
+        spinner.badge = -> { nil } # safety check switched off -> no badge
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include('[cmd: MANUAL] Working...')
+      expect(out).to include("#{UI::Spinner::FRAMES[1]} Working...")
+      expect(out).not_to include("#{UI::Spinner::FRAMES[1]} [")
+    end
+
+    it 'combines a badge with a suffix' do
+      out = capture('Working', 'ctx 1/2 (50%)') do |spinner|
+        spinner.badge = '[cmd: AUTO-APPROVE]'
+        spinner.start
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include('[cmd: AUTO-APPROVE] Working... ctx 1/2 (50%)')
+    end
+
+    it 'falls back to no badge when the callable raises' do
+      out = capture('Working') do |spinner|
+        spinner.badge = -> { raise 'boom' }
+        spinner.start
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include("#{UI::Spinner::FRAMES[0]} Working...")
+    end
+  end
 end

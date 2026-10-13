@@ -257,34 +257,37 @@ RSpec.describe CommandRunner do
     end
   end
 
+  # issue #224: a fake LLM client that records requests and answers with
+  # one scripted verdict block (shared by the safety-check and the
+  # auto-approve contexts below).
+  def fake_client(*lines)
+    client = double('client')
+    allow(client).to receive(:chat) do |chain, tools: nil, timeout: nil|
+      client.instance_variable_get(:@calls) << { chain: chain, tools: tools }
+      { choices: [{ message: { content: lines.join("\n") } }] }
+    end
+    client.instance_variable_set(:@calls, [])
+    client
+  end
+
+  def harness_with(client, chain)
+    double('harness', client: client, logger: nil, session: double('session', messages: chain))
+  end
+
+  # A chain ending on an unresolved assistant tool_calls - the shape the
+  # session has at dialog time (SafetyCheck truncates that).
+  def chain_mid_tool_loop
+    [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'do it' },
+      { role: 'assistant', content: nil,
+        tool_calls: [{ id: 'c1', function: { name: 'run.command', arguments: '{}' } }] }
+    ]
+  end
+
   # issue #224: the model's own safety verdict, shown as an advisory note in
   # the consent dialog for an unapproved command. Never auto-approves.
   context 'command safety check (issue #224)' do
-    # Fake LLM client: records requests, answers one scripted verdict line
-    # per command (in order).
-    def fake_client(*lines)
-      client = double('client')
-      allow(client).to receive(:chat) do |chain, tools: nil, timeout: nil|
-        client.instance_variable_get(:@calls) << { chain: chain, tools: tools }
-        { choices: [{ message: { content: lines.join("\n") } }] }
-      end
-      client.instance_variable_set(:@calls, [])
-      client
-    end
-
-    def harness_with(client, chain)
-      double('harness', client: client, logger: nil, session: double('session', messages: chain))
-    end
-
-    def chain_mid_tool_loop
-      [
-        { role: 'system', content: 'sys' },
-        { role: 'user', content: 'do it' },
-        { role: 'assistant', content: nil,
-          tool_calls: [{ id: 'c1', function: { name: 'run.command', arguments: '{}' } }] }
-      ]
-    end
-
     it 'shows the verdict as the first dialog note line (advisory)' do
       Dir.mktmpdir do |dir|
         client = fake_client('safe: read-only syntax check')
@@ -337,6 +340,83 @@ RSpec.describe CommandRunner do
 
         expect(out.string).not_to include('MODEL VERDICT')
         expect(runner.run('echo hi')).to start_with('exit code: 0')
+      end
+    end
+  end
+
+  # issue #224 follow-up: AUTO-APPROVE mode (live toggle, Ctrl+A). With
+  # the posture effective, a verdict of "safe:" skips the consent dialog;
+  # "dangerous:" verdicts and missing verdicts still ask.
+  context 'auto-approve mode (issue #224 follow-up)' do
+    def auto_approve_harness(client, chain)
+      double('harness', client: client, logger: nil,
+             session: double('session', messages: chain),
+             command_safety_auto_approve_effective?: true)
+    end
+
+    def manual_harness(client, chain)
+      double('harness', client: client, logger: nil,
+             session: double('session', messages: chain),
+             command_safety_auto_approve_effective?: false)
+    end
+
+    it 'skips the dialog for a "safe:" verdict (no user input consumed)' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('safe: harmless read')
+        runner = make_tool_runner(dir, { command_safety_check: true },
+                                  harness: auto_approve_harness(client, chain_mid_tool_loop))
+        out = drive_dialog([]) # nothing typed - the dialog must not open
+        result = runner.run('echo hi')
+        expect(result).to start_with('exit code: 0')
+        expect(out.string).not_to include('The model is requesting')
+      end
+    end
+
+    it 'still opens the dialog for a "dangerous:" verdict' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('dangerous: deletes the repo')
+        runner = make_tool_runner(dir, { command_safety_check: true },
+                                  harness: auto_approve_harness(client, chain_mid_tool_loop))
+        out = drive_dialog(['4']) # Allow(1), Cancel(2) -> deny
+        result = runner.run('rm -rf .')
+        expect(result).to start_with('error: user denied')
+        expect(out.string).to include('dangerous: deletes the repo')
+      end
+    end
+
+    it 'does NOT auto-approve a malformed verdict that only mentions safe later' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('not really safe, just checking')
+        runner = make_tool_runner(dir, { command_safety_check: true },
+                                  harness: auto_approve_harness(client, chain_mid_tool_loop))
+        out = drive_dialog(['4'])
+        expect(runner.run('echo hi')).to start_with('error: user denied')
+        expect(out.string).to include('MODEL VERDICT (advisory)')
+      end
+    end
+
+    it 'still opens the dialog for a "safe:" verdict in MANUAL mode' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('safe: harmless read')
+        runner = make_tool_runner(dir, { command_safety_check: true },
+                                  harness: manual_harness(client, chain_mid_tool_loop))
+        out = drive_dialog(['1'])
+        result = runner.run('echo hi')
+        expect(result).to start_with('exit code: 0')
+        expect(out.string).to include('The model is requesting')
+      end
+    end
+
+    it 'ignores the posture when the safety check is disabled (no verdict)' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('safe: should never be asked')
+        runner = make_tool_runner(dir, {},
+                                  harness: auto_approve_harness(client, chain_mid_tool_loop))
+        out = drive_dialog(['1'])
+        result = runner.run('echo hi')
+        expect(result).to start_with('exit code: 0')
+        expect(client.instance_variable_get(:@calls)).to be_empty
+        expect(out.string).to include('The model is requesting')
       end
     end
   end

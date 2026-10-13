@@ -604,6 +604,60 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #224 follow-up: the session-level command consent posture
+  # (MANUAL / AUTO-APPROVE), toggled live with Ctrl+A and always visible
+  # in the spinner via the mode badge.
+  describe '#command_safety_auto_approve / mode label / toggle (issue #224 follow-up)' do
+    it 'defaults to MANUAL when the option is absent' do
+      harness = build_harness(command_safety_check: true)
+
+      expect(harness.command_safety_auto_approve).to be(false)
+      expect(harness.command_mode_label).to eq('MANUAL')
+      expect(harness.command_safety_auto_approve_effective?).to be(false)
+    end
+
+    it 'starts in AUTO-APPROVE when the option is set (config default)' do
+      harness = build_harness(command_safety_check: true,
+                              command_safety_auto_approve: true)
+
+      expect(harness.command_mode_label).to eq('AUTO-APPROVE')
+      expect(harness.command_safety_auto_approve_effective?).to be(true)
+    end
+
+    it 'shows no mode label (and an ineffective posture) with the check off' do
+      harness = build_harness(command_safety_check: false,
+                              command_safety_auto_approve: true)
+
+      expect(harness.command_mode_label).to be_nil
+      expect(harness.command_safety_auto_approve_effective?).to be(false)
+    end
+
+    it 'toggle_command_mode flips the posture and returns the new label' do
+      harness = build_harness(command_safety_check: true)
+
+      expect(harness.toggle_command_mode).to eq('AUTO-APPROVE')
+      expect(harness.command_mode_label).to eq('AUTO-APPROVE')
+
+      expect(harness.toggle_command_mode).to eq('MANUAL')
+      expect(harness.command_mode_label).to eq('MANUAL')
+    end
+
+    it 'toggle_command_mode is a no-op (nil) when the check is off' do
+      harness = build_harness(command_safety_check: false)
+
+      expect(harness.toggle_command_mode).to be_nil
+      expect(harness.command_safety_auto_approve).to be(false)
+    end
+
+    it 'coerces the setter to a boolean' do
+      harness = build_harness(command_safety_check: true)
+      harness.command_safety_auto_approve = 'yes'
+      expect(harness.command_safety_auto_approve).to be(false)
+      harness.command_safety_auto_approve = true
+      expect(harness.command_safety_auto_approve).to be(true)
+    end
+  end
+
   # issue #208: the session is the working chain. When a turn dies mid-loop
   # (connection loss after the LLM answer of round N), every round already
   # made - assistant tool_calls AND tool results - must remain in the

@@ -58,6 +58,17 @@ module Commands
           saved one way never auto-approve commands on the other. The command
           and its output are NOT sent to or stored in the model's session.
 
+        Command safety check (issue #224, opt-in 'command_safety_check'):
+          When on, before the consent dialog for an UNAPPROVED command the
+          model itself is asked whether the command looks safe; the verdict
+          is shown as an advisory note in the dialog. The spinner always
+          shows the current consent mode as a [cmd: ...] badge.
+          AUTO-APPROVE mode (initial posture from config
+          'command_safety_auto_approve'): commands the model verdicts
+          "safe:" run WITHOUT the dialog; "dangerous:" verdicts and missing
+          verdicts still ask. Toggled LIVE with Ctrl+A (idle prompt or note
+          editor) - the badge and the ack line show the new mode.
+
         Session:
           Prompts are accumulated in a session, so the model sees the whole
           conversation. If a request to the LLM fails mid-turn, the tool work
@@ -129,6 +140,10 @@ module Commands
                    and prefilled at the next prompt (submit key sends it).
                    Note editor: keep the text as a draft for the next time
                    the editor opens.
+         Ctrl+A   Toggle the command consent mode (MANUAL / AUTO-APPROVE)
+                  while the safety check is on; works at the idle prompt
+                  and inside the note editor (the read closes, an ack line
+                  is printed, the spinner badge shows the new mode).
           Ctrl+C   Cancel the current input (or interrupt a running request)
           Ctrl+D   Quit (on an empty prompt); inside a note editor: abort the
                    RUNNING turn like Ctrl+C (a note committed before it is

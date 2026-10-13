@@ -391,8 +391,23 @@ class Task
     return if task.visible_spinner
 
     spinner = UI::Spinner.new(DEFAULT_SPINNER_MESSAGE, ui: task.ui)
+    # issue #224 follow-up: the spinner ALWAYS shows the current command
+    # consent MODE (a live badge, re-evaluated every frame) so the user
+    # can verify a Ctrl+A toggle took effect at a glance. A harness that
+    # does not expose the mode (unit-test harnesses) or a disabled safety
+    # check yields a nil label and renders no badge.
+    harness = task.harness
+    spinner.badge = -> { mode_badge(harness) } if harness.respond_to?(:command_mode_label)
     spinner.start
     task.spinner = spinner
+  end
+
+  # The command consent MODE badge ("[cmd: AUTO-APPROVE]" / "[cmd: MANUAL]")
+  # or nil to render nothing (safety check off). Reads the live value each
+  # frame so a mid-turn toggle is reflected immediately.
+  def self.mode_badge(harness)
+    label = harness.command_mode_label
+    label.nil? ? nil : "[cmd: #{label}]"
   end
 
   # Spinner frame for this tick: visible only while waiting on an EMPTY
@@ -426,6 +441,14 @@ class Task
     task.clear_all_spinners
 
     result = task.note_editor.read_multiline(prefill: task.instance_variable_get(:@note_draft))
+    # Ctrl+A toggled the command-consent mode while the editor was open:
+    # ack it and return (no note was typed).
+    if UI::Editor::CtrlAState.fired
+      label = UI::Editor::CtrlAState.label
+      UI::Editor::CtrlAState.reset!
+      ack_command_mode(task, label)
+      return
+    end
     case result.status
     when :submitted
       task.instance_variable_set(:@note_draft, nil)
@@ -450,6 +473,17 @@ class Task
     ui = task.ui
     ui.puts("  [note] got it - #{note}")
     task.buffer.put(type: :text, origin: :user_note, content: "note received: #{note}")
+  end
+
+  # issue #224 follow-up: ack a Ctrl+A command-consent mode toggle (the
+  # spinner badge re-renders the new mode on the next frame). label is nil
+  # when the harness does not support the toggle (nothing was flipped).
+  def self.ack_command_mode(task, label)
+    ui = task.ui
+    line = label.nil? ? "  [cmd: mode toggle unavailable]" \
+                      : "  [cmd: mode is now #{label}]"
+    ui.puts(line)
+    task.buffer.put(type: :text, origin: :user_note, content: line)
   end
 
   def self.handle_request(task, msg)

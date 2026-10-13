@@ -21,6 +21,18 @@ module UI
 
     attr_reader :ui
 
+    # A live status badge rendered between the frame and the message
+    # (issue #224 follow-up: the command consent MODE, e.g. "[cmd:
+    # AUTO-APPROVE]"). It may be a plain string or a callable re-evaluated
+    # on EVERY frame so it always shows the CURRENT state (the mode can be
+    # toggled live mid-turn). nil/blank renders nothing. The Task drain
+    # loop installs it once; it is shared by every frame of the turn.
+    def badge=(value)
+      @badge = value
+    end
+
+    attr_reader :badge
+
     # suffix is optional extra text appended after the message (issue #115,
     # e.g. the current context-usage estimate). It may be a plain string or a
     # callable (lambda/proc) that is re-evaluated on EVERY frame so it always
@@ -37,6 +49,7 @@ module UI
       @active    = false  # between #start and #stop
       @resumable = false  # started and not yet stopped
       @frame     = 0
+      @badge     = nil
       raise ArgumentError, 'Spinner requires a ui: console' if ui.nil?
 
       @ui = ui
@@ -73,7 +86,7 @@ module UI
     def render!
       return unless running?
 
-      text = "#{FRAMES[@frame % FRAMES.size]} #{@message}...#{render_suffix}"
+      text = frame_line
       ui.print("\r#{text}")
       ui.flush
       @frame += 1
@@ -103,7 +116,11 @@ module UI
     # One spinner frame as a plain string (no \r, no write). Public so tests
     # can assert the exact frame text without capturing stdout.
     def line(i)
-      "#{FRAMES[i % FRAMES.size]} #{@message}...#{render_suffix}"
+      "#{FRAMES[i % FRAMES.size]}#{render_badge} #{@message}...#{render_suffix}"
+    end
+
+    def frame_line
+      line(@frame)
     end
 
     # Draw ONE TUI frame (index i) into the viewport, then drain the event
@@ -115,6 +132,18 @@ module UI
     end
 
     private
+
+    # Resolve the badge to text for this frame. A callable is invoked fresh
+    # each frame so it tracks live state (e.g. a mid-turn mode toggle); a
+    # plain string is used as-is. Any failure resolves to no badge - the
+    # spinner must never abort on a transient read error (issue #40).
+    def render_badge
+      value = @badge.respond_to?(:call) ? @badge.call : @badge
+      text  = value.to_s.strip
+      text.empty? ? '' : " #{text}"
+    rescue StandardError
+      ''
+    end
 
     # Resolve the suffix to the text for this frame. A callable is invoked
     # fresh each frame so it tracks live state (issue #126); a plain string is

@@ -121,6 +121,20 @@ class CommandRunner
     # here. Advisory text only - consent proceeds exactly as before.
     verdict = safety_verdict_for(command)
 
+    # issue #224 follow-up: AUTO-APPROVE MODE. When the mode is on (and
+    # the safety check produced a verdict), a command the model calls
+    # "safe:" runs WITHOUT the consent dialog. Anything else - a
+    # "dangerous:" verdict, or no verdict at all - still gets the dialog,
+    # so the model's own check is what decides. This never touches the
+    # allowlist (it is a per-run consent posture, not a stored grant).
+    if auto_approve_mode? && verdict
+      if auto_approve_safe?(verdict)
+        status("✓ auto-approved (model verdict: safe): #{command}")
+        return execute(command, dir, shown, timeout, limit)
+      end
+      # dangerous -> fall through to the dialog with the verdict note.
+    end
+
     # Not in allowlist - ask the user. One "Always allow" option per
     # candidate prefix length of each segment (issue #102); candidates
     # already subsumed by a stored grant are filtered out up front so
@@ -244,10 +258,34 @@ class CommandRunner
     verdict && verdict[command]
   end
 
+  # issue #224 follow-up: AUTO-APPROVE MODE (toggled live with Ctrl+A).
+  # ON only when the harness has BOTH the safety check enabled and the
+  # session's consent posture set to auto-approve (see
+  # Harness#command_safety_auto_approve_effective?). No harness (specs
+  # that build the runner standalone) means the mode is off, so consent
+  # always proceeds via the dialog.
+  def auto_approve_mode?
+    @harness.respond_to?(:command_safety_auto_approve_effective?) &&
+      @harness.command_safety_auto_approve_effective?
+  end
+
+  # A verdict auto-approves when it is a non-empty line starting with
+  # "safe:" (the exact shape SafetyCheck's prompt requests). Anything
+  # else - "dangerous:", blank, or an unexpected shape - is NOT
+  # auto-approved and falls back to the consent dialog.
+  def auto_approve_safe?(verdict)
+    verdict.to_s.strip.match?(/\Asafe:/)
+  end
+
   # One forked LLM call for the given commands. Returns {command =>
   # verdict-or-nil}; nil on any error (a failed check must NEVER break the
   # consent flow - the dialog just shows without a verdict).
   def run_safety_check(commands)
+    # issue #224 follow-up: re-point the spinner so the wait is recognisable
+    # as the model safety check (only inside a Task; the bang path runs on
+    # the main thread where the dialog is served in place - no spinner).
+    Task.emit(:spinner_detail, origin: :command_runner,
+              content: { message: "Model safety check (1 command)" }) if Task.current
     results = SafetyCheck.run(safety_client, session_chain, commands)
     verdicts = results.values.compact
     if verdicts.any?
