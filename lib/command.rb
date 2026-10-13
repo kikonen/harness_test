@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require 'ui'
+require_relative 'ui'
 require_relative 'task_runner'
 
 # Shared base for the slash-command classes in lib/commands/.
