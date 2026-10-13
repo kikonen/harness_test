@@ -145,12 +145,12 @@ class CLI
     using_default  = profile && !explicit_model && (default_key.nil? || (profile[:name] == default_key || profile[:model] == default_key))
     opts[:active_model]   = using_default ? nil : (profile ? (profile[:name] || profile[:model]) : opts[:model])
 
-    # System prompt: --system-file > config 'system' > built-in default.
-    if opts[:system_file]
-      opts[:system] = File.read(opts[:system_file])
-    else
-      opts[:system] = config.system || Harness::SYSTEM_PROMPT
-    end
+    # System prompt file: --system-file > config system_prompt_file >
+    # built-in default (config/system_prompt.txt). issue #223: the config
+    # references a FILE, it does not embed the prompt text in YAML.
+    # The file is read on demand by Harness#build_system_prompt so a
+    # /reload after editing it takes effect without a restart.
+    opts[:system_file] ||= config.system_prompt_file
 
     opts[:compact_recent]   ||= config.compact_recent_messages
     opts[:compact_auto_threshold] = config.compact_auto_threshold

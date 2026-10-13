@@ -436,11 +436,14 @@ class SessionManager
     @rules_mtime = current_rules_mtime
   end
 
-  # Explicitly reload harness.md (called by /reload command).
+  # Explicitly reload the system prompt (called by /reload command). This
+  # re-reads BOTH the base prompt file and harness.md (issue #223): the base
+  # file is read on demand by build_system_prompt, so an edit to either file
+  # takes effect without a restart.
   def reload_rules
     new_prompt = build_system_prompt
     @rules_mtime = current_rules_mtime
-    @harness.logger.info("harness.md reloaded (manual /reload)")
+    @harness.logger.info("system prompt reloaded (base file + harness.md, manual /reload)")
     new_prompt
   end
 
