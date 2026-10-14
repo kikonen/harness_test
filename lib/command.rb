@@ -10,8 +10,9 @@ require_relative 'task_runner'
 # underlying stream for a panel/draw sink without touching any command.
 #
 # Includes TaskRunner (issue #235): a command that drives an LLM round
-# (/retry) runs it on a Task thread via #run_on_task, the same shared
-# wrapper a direct prompt uses.
+# (/retry issue #235, /compact issue #253) runs it on a Task thread via
+# #run_on_task, the same shared wrapper a direct prompt uses, and prints
+# through #emit_line so its lines stay on the event queue.
 class Command
   include TaskRunner
 

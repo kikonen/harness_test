@@ -64,4 +64,35 @@ RSpec.describe TaskRunner do
     # No task output: a leading blank and a trailing blank (each + newline).
     expect(io.string).to eq("\n\n")
   end
+
+  # issue #253: lines emitted from inside a task block must go through the
+  # event queue, never straight to a stream (single-thread I/O rule, #40).
+  it 'writes emit_line to the console when no task is active' do
+    setup_host
+    allow(Task).to receive(:run) { |harness:, ui:, &blk| blk.call(nil); [nil, nil] }
+    allow(Task).to receive(:current).and_return(nil)
+    host.instance_eval { run_on_task { emit_line 'hello' } }
+
+    expect(io.string).to include("hello\n")
+  end
+
+  it 'emits emit_line as a :text event on the active task' do
+    setup_host
+    events = []
+    fake_task = Class.new do
+      define_method(:push_event) do |type:, origin: nil, content: nil|
+        events << { type: type, origin: origin, content: content }
+      end
+    end.new
+
+    allow(Task).to receive(:run) do |harness:, ui:, &blk|
+      allow(Task).to receive(:current).and_return(fake_task)
+      blk.call(nil)
+      [nil, nil]
+    end
+    host.instance_eval { run_on_task { emit_line 'hello' } }
+
+    expect(io.string).to eq("\n\n") # only run_on_task's blank lines
+    expect(events).to eq([{ type: :text, origin: :command, content: 'hello' }])
+  end
 end
