@@ -170,14 +170,14 @@ class CommandAllowlist
   # Extract the candidate prefixes for a command: one per prefix length
   # of each segment, bounded by the first flag (issue #102). For a
   # segment "ruby -c lib/cli.rb" the candidates are ["ruby", "ruby -c"];
-  # for "cd C:/work/x" only the full invocation is offered (a path is
-  # never a subcommand, and granting a bare "cd" would cover every
-  # directory). Segments that yield no candidate (no leading word) are
+  # for "cd C:/work/x" both the short prefix and the full invocation are
+  # offered, so the user can grant as broadly or as narrowly as they want
+  # (issue #249). Segments that yield no candidate (no leading word) are
   # skipped. Returns [] when ANY segment is unsafe.
   #
   # Examples:
   #   "cd C:/work/x && ruby -c lib/cli.rb"
-  #     => ["cd C:/work/x", "ruby", "ruby -c"]
+  #     => ["cd", "cd C:/work/x", "ruby", "ruby -c"]
   #   "bundle exec rspec spec/" => ["bundle", "bundle exec", "bundle exec rspec"]
   def self.extract_prefix_options(command)
     segments = split_segments(command)
@@ -196,12 +196,12 @@ class CommandAllowlist
   # (e.g. "ruby -c lib/cli.rb" offers ["ruby", "ruby -c"]), but NOT when
   # the flag is trailing (e.g. "tail -5" offers only ["tail"] - "-5" is
   # a parameter, not a subcommand). When the subcommand run is just one
-  # token and the rest are arguments/paths (e.g. "cd C:/work/x"), only
-  # the full invocation is offered - a bare "cd" would grant every
-  # directory. When the run hit the MAX_PREFIX_TOKENS cap and the next
-  # token is also a subcommand, the full invocation is appended as an
-  # exact-match option (e.g. "a b c d e" offers "a", "a b", "a b c",
-  # "a b c d e").
+  # token and the rest are arguments/paths (e.g. "cd C:/work/x"), the short
+  # prefix is offered alongside the full invocation (issue #249) - the user
+  # chooses whether to grant every directory or exactly what they typed.
+  # When the run hit the MAX_PREFIX_TOKENS cap and the next token is also
+  # a subcommand, the full invocation is appended as an exact-match option
+  # (e.g. "a b c d e" offers "a", "a b", "a b c", "a b c d e").
   def self.prefix_lengths(segment)
     segment = segment.to_s.strip
     return [] unless segment_safe?(segment)
@@ -220,10 +220,14 @@ class CommandAllowlist
       lengths << words[0...n].join(' ')
     end
 
-    # Single subcommand + non-subcommand args (e.g. "cd C:/work/x"):
-    # a bare "cd" would grant every directory - too broad. Offer only
-    # the full invocation so the user grants exactly what they typed.
-    return [words.join(' ')] if lengths.size == 1 && flag_idx.nil? && words.size > 1
+    # Single subcommand + non-subcommand args (e.g. "cd C:/work/x", or the
+    # issue #249 shape "ruby tmp/issue240_probe.rb"): offer the short prefix
+    # AND the full invocation as an exact-match option, so the user grants
+    # exactly as much as they want rather than only the whole line.
+    if lengths.size == 1 && flag_idx.nil? && words.size > 1
+      full = words.join(' ')
+      lengths << full unless lengths.include?(full)
+    end
 
     # When the first flag is followed by an argument, include it in the
     # prefix: "ruby -c" is a different grant than bare "ruby". A trailing
