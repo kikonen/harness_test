@@ -40,6 +40,11 @@ Keep this in mind:
 
 - All harness state (sessions, log, history) lives in `.harness/` inside
   the working directory - never scatter state files in the project root.
+- Config (issue #260): the user home (`~/.config/harness/config.yml`) is the
+  default config location; `.harness/config.yml` in the working directory is
+  a per-project override, and the lookup order is `-c` > `$HARNESS_CONFIG` >
+  working-dir `.harness/config.yml` > user home. There is no installation-dir
+  tier - `$HARNESS_CONFIG` / `-c` covers that case.
 - Sensitive files/dirs (`.env*`, `.git/`, `.harness/`) are blocked from
   LLM access - do not try to work around this.
 - Destructive operations (file delete, dir delete) require user

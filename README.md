@@ -44,8 +44,9 @@ cp -a _env .env            # env file (currently just points at the config)
 bundle install
 ```
 
-On first run, a config template is written to `.harness/config.yml` in
-your working directory. Edit it to set your model(s), endpoint and token:
+On first run, a config template is written to the user home config
+(`~/.config/harness/config.yml`, issue #260). Edit it to set your model(s),
+endpoint and token:
 
 ```yaml
 models:
@@ -65,9 +66,12 @@ retry:
   delay: 2                  # base delay (s, exponential backoff)
 ```
 
-Config lookup order: `-c FILE` > `$HARNESS_CONFIG` > `.harness/config.yml`
-(in the working directory) > `~/.config/harness/config.yml`. Every key is
-optional; missing values fall back to built-in defaults.
+Config lookup order (issue #260): `-c FILE` > `$HARNESS_CONFIG` >
+`.harness/config.yml` (in the working directory, a per-project override) >
+`~/.config/harness/config.yml` (the user home default). The first existing
+file wins; there is no installation-dir tier because `$HARNESS_CONFIG` / `-c`
+already covers that case. Every key is optional; missing values fall back to
+built-in defaults.
 
 ## Usage
 
@@ -162,7 +166,6 @@ All harness state lives in `.harness/` inside the working directory:
 
 ```
 .harness/
-  config.yml        # your configuration (template created on first run)
   harness_history   # prompt history
   sessions/         # saved sessions (one directory per session, issue #113)
     <id>/           # all of a session's state lives in here (issue #207)
@@ -170,6 +173,10 @@ All harness state lives in `.harness/` inside the working directory:
       harness.log   # that session's request/tool log
       harness_history  # that session's prompt history (issue #119)
 ```
+
+`.harness/config.yml` is no longer auto-created there (issue #260): the
+template goes to the user home, and a file in the project's `.harness/` is a
+deliberate per-project override.
 
 Ignore it from git with a single `.harness/` entry.
 
