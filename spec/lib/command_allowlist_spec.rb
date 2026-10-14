@@ -57,6 +57,26 @@ RSpec.describe CommandAllowlist do
     it 'handles |& (pipe with stderr)' do
       expect(described_class.split_segments('cmd1 |& cmd2')).to eq(['cmd1', 'cmd2'])
     end
+
+    # issue #257: a model-supplied command can carry a byte that is invalid
+    # in UTF-8, which made String#strip raise. The entry point normalizes, so
+    # the bad byte becomes the replacement character instead of crashing the
+    # whole turn.
+    it 'does not raise on a byte invalid in UTF-8 (the byte is replaced)' do
+      bad = [0xE2, 0x90].pack('C*').force_encoding(Encoding::UTF_8)
+      command = 'ls | ' + bad
+      # Control: the raw string is what used to crash the internal strip.
+      expect(command.valid_encoding?).to be false
+      expect { command.strip }.to raise_error(StandardError)
+
+      expect { described_class.split_segments(command) }.not_to raise_error
+      expect(described_class.split_segments(command)).to eq(['ls', '?'])
+      # Prefix extraction runs on the normalized segments, so the bad byte
+      # never reaches its strip.
+      segments = described_class.split_segments(command)
+      expect(described_class.extract_prefix(segments.first)).to eq('ls')
+      expect(described_class.extract_prefix_options(command)).to eq(['ls'])
+    end
   end
 
   describe '.segment_safe?' do
@@ -333,6 +353,21 @@ RSpec.describe CommandAllowlist do
       Dir.mktmpdir do |dir|
         list = described_class.new(dir)
         expect(list.allowed?('ls -la')).to be false
+      end
+    end
+
+    # issue #257: the caller may hand #allowed? raw text from a parsed JSON
+    # payload (a model-supplied command) whose bytes are not valid UTF-8, so
+    # the internal strip used to raise. Normalizing at this entry point keeps
+    # matching working - the undecodable byte is just part of the segment.
+    it 'matches a stored prefix for a command carrying an invalid byte' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(dir)
+        list.add('git')
+        command = 'git ' + [0xE2, 0x90].pack('C*').force_encoding(Encoding::UTF_8)
+        expect(command.valid_encoding?).to be false
+        expect { list.allowed?(command) }.not_to raise_error
+        expect(list.allowed?(command)).to be true
       end
     end
 

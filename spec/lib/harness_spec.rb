@@ -382,6 +382,29 @@ RSpec.describe Harness do
       expect(drain_outbox(task).map { |m| m[:type] }).not_to include(:spinner_detail)
     end
 
+    # issue #257: the tool result goes straight back into the message chain,
+    # so an undecodable byte in it made the next JSON.generate (the request
+    # body AND the session save) raise JSON::GeneratorError - and the failure
+    # was invisible because the save that should record it died on the same
+    # byte. execute_tool_call normalizes what enters the chain.
+    it 'normalizes a tool result that carries an invalid byte' do
+      harness = build_harness
+      bad = [0xE2, 0x90].pack('C*').force_encoding(Encoding::UTF_8)
+
+      raw_tool = Class.new(Tool) do
+        define_method(:execute) { |_args| bad }
+      end.new(name: 'ui.notify', description: 'fake', parameters: {})
+      harness.tool_registry.register(raw_tool)
+
+      result = harness.send(:execute_tool_call,
+                            { id: 'c1', function: { name: 'ui.notify', arguments: '{}' } })
+      expect(result.valid_encoding?).to be true
+      expect(result).to eq('?')
+      # What the session save (JSON.generate) choked on before the fix.
+      expect { JSON.generate({ 'content' => bad }) }.to raise_error(JSON::GeneratorError)
+      expect { JSON.generate({ 'content' => result }) }.not_to raise_error
+    end
+
     it 'does not emit spinner_detail for an unknown tool' do
       call = { id: 'c1', function: { name: 'nope.missing', arguments: '{}' } }
 

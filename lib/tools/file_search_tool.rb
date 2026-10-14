@@ -2,6 +2,7 @@
 
 require_relative '../tool'
 require_relative '../file_list'
+require_relative '../text_normalizer'
 
 # Searches for a regex pattern in files under the harness working directory.
 # Returns matching lines with file path and line number (grep-like output).
@@ -77,6 +78,12 @@ module Tools
           next
         end
         next if content.include?("\x00")  # skip binary files
+
+        # issue #257: normalize at the read boundary. Without this the gsub
+        # (and split / regex match) raise on a file whose bytes are not valid
+        # UTF-8, and the matched lines that reach the LLM - and the session
+        # JSON save - can carry the same invalid bytes.
+        content = TextNormalizer.normalize(content)
 
         # Normalize CRLF to LF for consistent line splitting and output.
         content = content.gsub("\r\n", "\n")

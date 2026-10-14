@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'stringio'
 require 'tmpdir'
+require 'json'
 require 'tools/file_read_tool'
 
 RSpec.describe Tools::FileReadTool do
@@ -37,6 +38,33 @@ RSpec.describe Tools::FileReadTool do
 
       out = tool.execute('path' => 'secret.txt')
       expect(out).to eq("error: access denied for 'secret.txt'")
+    end
+  end
+
+  # issue #257: a file on disk can hold bytes that are not valid UTF-8 (or a
+  # code page tagged by default_external). Read raw, the string is byte
+  # invalid, so the tool's own gsub raises and the returned content breaks
+  # the session's JSON.save. Normalizing at the read boundary means the
+  # model receives the replacement character instead of a crashed turn.
+  describe 'invalid UTF-8 bytes (issue #257)' do
+    def bad_bytes
+      [0xE2, 0x90].pack('C*').force_encoding(Encoding::UTF_8)
+    end
+
+    it 'returns valid UTF-8 for a file containing an undecodable byte' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'sample.txt')
+        File.binwrite(path, "line1 ok\nline2 " + bad_bytes + "\n")
+
+        list = FileList.new([], workdir: dir)
+        list.add_dir(dir, :r)
+        out = described_class.new(list).execute('path' => 'sample.txt')
+
+        expect(out.valid_encoding?).to be true
+        expect(out).to eq("line1 ok\nline2 ?\n")
+        # The content goes straight into the message chain / session save.
+        expect { JSON.generate({ 'content' => out }) }.not_to raise_error
+      end
     end
   end
 end

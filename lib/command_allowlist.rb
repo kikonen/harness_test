@@ -5,6 +5,7 @@ require 'fileutils'
 
 require_relative 'shell_tokenizer'
 require_relative 'shell_parser'
+require_relative 'text_normalizer'
 
 # -- CommandAllowlist -----------------------------------------------------
 #
@@ -80,7 +81,8 @@ class CommandAllowlist
   #   'grep -i "fix\\|feat"'                 => ['grep -i "fix\\|feat"]
   #   "ls > out.txt"                         => [] (unsafe)
   def self.split_segments(command)
-    ShellParser.parse(command.to_s.strip)
+    # issue #257: strip on byte-invalid UTF-8 raises, so normalize first.
+    ShellParser.parse(TextNormalizer.normalize(command).strip)
   rescue ShellParser::ParseError
     []
   end
@@ -89,7 +91,8 @@ class CommandAllowlist
   # Uses ShellTokenizer to classify each token; any :danger token means
   # the segment is unsafe.
   def self.segment_safe?(segment)
-    tokens = ShellTokenizer.tokenize(segment.to_s)
+    # issue #257: normalize before matching (see ShellTokenizer).
+    tokens = ShellTokenizer.tokenize(TextNormalizer.normalize(segment))
     tokens.none? { |kind, _text| kind == :danger }
   end
 
@@ -264,7 +267,10 @@ class CommandAllowlist
   # True when every segment of the command matches a stored prefix.
   def allowed?(command)
     return false if @prefixes.empty?
-    return false if command.to_s.strip.empty?
+    # issue #257: strip on byte-invalid UTF-8 raises, so normalize at this
+    # public entry point (the caller may pass raw JSON-parsed text).
+    command = TextNormalizer.normalize(command)
+    return false if command.strip.empty?
 
     segments = self.class.split_segments(command)
     return false if segments.empty?

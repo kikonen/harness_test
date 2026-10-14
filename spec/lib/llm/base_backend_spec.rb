@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'logger'
 require 'stringio'
+require 'json'
 require 'llm/base_backend'
 
 # Request/response logging in the shared backend machinery: one REQ line per
@@ -153,6 +154,32 @@ RSpec.describe LLM::BaseBackend do
 
       expect(line).to match(/ in \d+\.\d\ds\z/)
       expect(line).not_to include('tokens')
+    end
+  end
+
+  # issue #257: the response body is text that arrived from outside this
+  # process, so a string value in it can be byte-invalid in UTF-8. Parsing
+  # succeeds, but the NEXT JSON.generate - the request body built from this
+  # chain, and the session save - raises JSON::GeneratorError, and the save
+  # that should record the failure dies on the same byte, so nothing reaches
+  # the console. BaseBackend normalizes the parsed structure at that boundary.
+  describe 'response normalization (issue #257)' do
+    it 'returns a response whose string values are valid UTF-8' do
+      bad = [0xE2, 0x90].pack('C*').force_encoding(Encoding::UTF_8)
+      body = '{"message":{"content":"x' + bad + '"}}'
+      http_stub.instance_variable_set(:@responses, [StubResponse.new(200, body)])
+
+      # Control: the parsed value as it arrived is what JSON.generate rejected.
+      raw = JSON.parse(body, symbolize_names: true)
+      expect { JSON.generate(raw) }.to raise_error(JSON::GeneratorError)
+
+      result = backend.chat([{ role: 'user', content: 'hi' }])
+      # MinimalBackend#parse_response hands back the RAW parsed hash, so the
+      # normalized structure is read in its wire shape here.
+      content = result[:message][:content]
+      expect(content.valid_encoding?).to be true
+      expect(content).to eq('x?')
+      expect { JSON.generate(result) }.not_to raise_error
     end
   end
 

@@ -7,6 +7,7 @@ require 'json'
 require_relative 'shared'
 require_relative '../keep_alive_http'
 require_relative '../harness_error'
+require_relative '../text_normalizer'
 
 module LLM
   # Shared request machinery for the per-backend clients (issue #197):
@@ -101,6 +102,15 @@ module LLM
         rescue JSON::ParserError => e
           raise LLMError, "LLM returned invalid JSON: #{e.message}"
         end
+
+        # issue #257: the response body is text that arrived from OUTSIDE this
+        # process, so a string value in it can be byte-invalid in UTF-8. That
+        # does not raise at parse time, but it raises at the next
+        # JSON.generate - both the request body built from this chain and the
+        # session save - and the save that should record the failure dies on
+        # the same byte, so the error never reaches the console. Normalize the
+        # parsed structure at this read boundary.
+        parsed = TextNormalizer.normalize_strings(parsed)
 
         log_response_stats(resp, parsed, Time.now - started)
 
