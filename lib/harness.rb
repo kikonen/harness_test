@@ -43,6 +43,7 @@ require_relative 'tool_registry'
 require_relative 'session_manager'
 require_relative 'state_migrator'
 require_relative 'safety_check'
+require_relative 'text_normalizer'
 
 # -- Harness --------------------------------------------------------------
 
@@ -712,7 +713,13 @@ class Harness
     begin
       result = tool.execute(args)
       logger.info("tool #{func_name} → #{result}")
-      result.to_s
+      # issue #257: the tool result goes straight back into the message
+      # chain, so a byte that is invalid in UTF-8 would make the next
+      # JSON.generate (the request body AND the session save) raise
+      # JSON::GeneratorError - and the failure is invisible, because the
+      # save that should record it fails on the same byte. Normalize here so
+      # every tool result entering the chain is plain valid UTF-8.
+      TextNormalizer.normalize(result)
     rescue => e
       logger.error("tool #{func_name} failed: #{e.message}")
       "error: #{e.message}"

@@ -3,6 +3,7 @@
 require 'open3'
 
 require_relative 'tool'
+require_relative 'text_normalizer'
 
 # Shared base class for the git.* tools.
 #
@@ -51,7 +52,12 @@ class GitRunner < Tool
     }
 
     stdout, stderr, status = Open3.capture3(env, *cmd, chdir: workdir)
-    { status: status.exitstatus, stdout: stdout, stderr: stderr }
+    # issue #257: git output can carry bytes that are not valid UTF-8 (a
+    # binary file in a diff, a path in a legacy code page). Normalize at this
+    # read boundary so the callers' strip / split / regex match never raise.
+    { status: status.exitstatus,
+      stdout: TextNormalizer.normalize(stdout),
+      stderr: TextNormalizer.normalize(stderr) }
   end
 
   # Working directory of the harness (the repository root is found by

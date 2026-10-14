@@ -362,6 +362,45 @@ RSpec.describe CommandRunner do
     end
   end
 
+  # issue #257: the command string is externally-sourced text (the model's
+  # tool-call arguments, parsed from JSON), so a byte that is invalid in
+  # UTF-8 used to crash the internal strip / tokenizer. run() normalizes at
+  # its entry point, so the bad byte becomes the replacement character and
+  # the result is valid UTF-8 that JSON.generate (the session save) can hold.
+  describe 'invalid UTF-8 bytes (issue #257)' do
+    def bad_byte
+      [0xE2, 0x90].pack('C*').force_encoding(Encoding::UTF_8)
+    end
+
+    it 'does not raise on a model-supplied command carrying an invalid byte' do
+      Dir.mktmpdir do |dir|
+        seed_allowlist(dir, 'echo')
+        command = 'echo ' + bad_byte
+        expect(command.valid_encoding?).to be false
+        # Control: the raw string is what the internal strip used to choke on.
+        expect { command.strip }.to raise_error(StandardError)
+
+        runner = make_tool_runner(dir)
+        expect { runner.run(command) }.not_to raise_error
+        expect(runner.run(command)).to start_with('exit code:')
+      end
+    end
+
+    it 'normalizes the child output at the read boundary' do
+      Dir.mktmpdir do |dir|
+        runner = make_tool_runner(dir)
+        # printf emits exactly the undecodable byte (no shell quoting of it).
+        output, _status = runner.send(:read_child_in_group, "printf 'a\\200b'", dir, 10)
+        expect(output.encoding).to eq(Encoding::UTF_8)
+        expect(output.valid_encoding?).to be true
+        expect(output).to eq('a?b')
+        # The point of the fix: this value goes into the session via
+        # JSON.generate, which raised on the raw byte.
+        expect { JSON.generate({ 'result' => output }) }.not_to raise_error
+      end
+    end
+  end
+
   # issue #224 follow-up: AUTO-APPROVE mode (live toggle, Ctrl+A). With
   # the posture effective, a verdict of "safe:" skips the consent dialog;
   # "dangerous:" verdicts and missing verdicts still ask.

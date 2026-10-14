@@ -6,6 +6,7 @@ require_relative 'tool'
 require_relative 'command_allowlist'
 require_relative 'ui/dialog'
 require_relative 'safety_check'
+require_relative 'text_normalizer'
 
 # Shared consent + execution logic for shell commands (issue #129).
 #
@@ -95,7 +96,9 @@ class CommandRunner
   # result string: "exit code: N (Xs)" + output section, or an
   # "error: ..." string on denial / timeout.
   def run(command, cwd: nil, timeout: DEFAULT_TIMEOUT, limit: DEFAULT_LIMIT)
-    command = command.to_s.strip
+    # issue #257: the command is model-supplied text that can carry bytes
+    # invalid in UTF-8, which makes strip (and the tokenizer) raise.
+    command = TextNormalizer.normalize(command).strip
     return "error: 'command' must be a non-empty shell command" if command.empty?
 
     dir   = cwd ? @file_list.resolve(cwd) : @file_list.workdir
@@ -419,10 +422,18 @@ class CommandRunner
     pid = spawn_in_group('sh', ['-c', command], dir, out_w)
     out_w.close
 
-    output = +""
+    # issue #257: the accumulator is BINARY on purpose. Pipe chunks arrive
+    # tagged with Encoding.default_external (a Windows code page in practice)
+    # and are often byte-invalid; appending one to a UTF-8 accumulator either
+    # mutates it to BINARY (so later concatenation with the tool's own UTF-8
+    # literals raises Encoding::CompatibilityError) or raises outright. A
+    # fixed BINARY accumulator can never raise, and the whole result is
+    # normalized once at the end so multi-byte sequences split across chunk
+    # boundaries survive intact.
+    output = +''.dup.force_encoding(Encoding::BINARY)
     reader = Thread.new do
       Thread.current.report_on_exception = false
-      loop { output << out_r.readpartial(64 * 1024) }
+      loop { output << out_r.readpartial(64 * 1024).dup.force_encoding(Encoding::BINARY) }
     rescue EOFError, IOError
       # EOF when the whole tree exits; out_r#close below unblocks a
       # read stuck because a surviving grandchild still held the pipe.
@@ -444,7 +455,9 @@ class CommandRunner
     reader.join
     # waiter has always been joined here (kill + grace join on timeout),
     # so value never blocks.
-    [output, timed_out ? :timeout : waiter.value]
+    # issue #257: the read boundary. Everything downstream (truncate, JSON
+    # for the session save, the console) sees valid UTF-8 from here on.
+    [TextNormalizer.normalize(output), timed_out ? :timeout : waiter.value]
   end
 
   # `sh -c` in its own (process) group: the spawn flag key is

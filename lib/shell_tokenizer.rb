@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'strscan'
+require_relative 'text_normalizer'
 
 # -- ShellTokenizer ---------------------------------------------------------
 #
@@ -71,7 +72,10 @@ class ShellTokenizer
   end
 
   def initialize(command)
-    @command  = command.to_s
+    # issue #257: the command is externally-sourced text (model-supplied or
+    # read from a file). Regex matching on byte-invalid UTF-8 raises
+    # ArgumentError, so normalize at this entry point.
+    @command  = TextNormalizer.normalize(command)
     @scanner  = StringScanner.new(@command)
     @tokens   = []
     @word_buf = +''

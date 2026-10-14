@@ -2,6 +2,7 @@
 
 require_relative '../tool'
 require_relative '../file_list'
+require_relative '../text_normalizer'
 
 module Tools
 
@@ -41,7 +42,12 @@ module Tools
         return "error: file not found: #{shown}"
       end
 
-      content = File.read(path)
+      # issue #257: a file on disk can hold bytes that are not valid UTF-8
+      # (or a code page tagged by Encoding.default_external). Reading it raw
+      # leaves the string byte-invalid, so the gsub below - and everything
+      # downstream (JSON session save, the console) - raises. Normalize at
+      # this read boundary so every consumer sees valid UTF-8.
+      content = TextNormalizer.normalize(File.read(path))
 
       # Normalize CRLF to LF so the LLM always sees clean line endings.
       content = content.gsub("\r\n", "\n")

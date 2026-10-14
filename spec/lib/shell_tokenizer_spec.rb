@@ -165,6 +165,26 @@ RSpec.describe ShellTokenizer do
     it 'handles leading/trailing whitespace' do
       expect(tokenize('  ls   ')).to eq([[:word, 'ls']])
     end
+    # issue #257: the command is externally-sourced text (model-supplied or
+    # read from a file) and can carry bytes that are not valid UTF-8, which
+    # made the scanner's regex matching raise ArgumentError. The entry point
+    # normalizes, so the bad byte arrives as the replacement character and
+    # nothing downstream (prefix extraction, allowlist matching, the session
+    # JSON save) can raise.
+    it 'does not raise on a byte that is invalid in UTF-8' do
+      bad = [0x90].pack('C*').force_encoding(Encoding::UTF_8)
+      command = 'ls | ' + bad
+      expect(command.valid_encoding?).to be false
+      expect { tokenize(command) }.not_to raise_error
+      expect(tokenize(command)).to eq([[:word, 'ls'], [:pipe, '|'], [:word, '?']])
+    end
+
+    it 'keeps every emitted token valid UTF-8' do
+      bad = [0xE2, 0x90].pack('C*').force_encoding(Encoding::UTF_8)
+      tokens = tokenize('echo ' + bad)
+      expect(tokens.map { |_kind, text| text.valid_encoding? }).to all(be(true))
+    end
+
 
     it 'handles adjacent quoted and bare words (parser joins them)' do
       tokens = tokenize('foo"bar baz"')
