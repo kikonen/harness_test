@@ -66,8 +66,10 @@ class CLI
       o.banner  = 'Usage: harness.rb [options]'
       o.separator ''
       o.on('-c FILE', '--config FILE',
-           'Path to the YAML config file. Default: .harness/config.yml, ' \
-           'which is created with a template on first run if missing.') do |v|
+           'Path to the YAML config file. Lookup order: -c, $HARNESS_CONFIG, ' \
+           '<workdir>/.harness/config.yml, ~/.config/harness/config.yml ' \
+           '(issue #260). On first run the template is written to the user ' \
+           'home config when no config file exists yet.') do |v|
         opts[:config_path] = v
       end
       o.on('-m MODEL', '--model MODEL', 'Model name (required)') { |v| opts[:model] = v }

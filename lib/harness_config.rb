@@ -58,9 +58,21 @@ require_relative 'harness_error'
 class HarnessConfig
   HARNESS_DIR = '.harness'
 
+  # issue #260: the user home is the default place for configuration - a repo
+  # .harness/config.yml is only an override for that one project. The old
+  # install-dir tier is deliberately NOT part of the lookup: HARNESS_CONFIG
+  # (or -c) already covers that special case.
+  HOME_CONFIG_DIR = File.join('.config', 'harness')
+
+  # The user-home config file. Computed per call rather than baked into a
+  # constant so the home directory can be resolved (and stubbed) at run time.
+  def self.home_config_path
+    File.join(Dir.home, HOME_CONFIG_DIR, 'config.yml')
+  end
+
   # The config template lives in the repo (config/config.example.yml), not
   # embedded in this file: it is the single source for both the committed
-  # example and what a first run writes to .harness/config.yml.
+  # example and what a first run writes to the user home config (issue #260).
   TEMPLATE_FILE = File.expand_path('../config/config.example.yml', __dir__)
 
   attr_reader :models, :default_model, :system_prompt_file
@@ -89,18 +101,19 @@ class HarnessConfig
   end
 
   # Load the config from the first existing file among the candidates.
-  # When no config file exists anywhere, a default template is written to
-  # .harness/config.yml (inside the working directory) so the user has a
-  # concrete starting point to edit. Best-effort: if that location cannot
-  # be written (read-only workdir, ...), loading simply continues with
-  # built-in defaults. An explicitly given config path (-c) that does not
-  # exist is NOT auto-created - that is a user error, not a first run.
+  # When no config file exists anywhere, a default template is written to the
+  # user home config (issue #260): the project's .harness dir holds session
+  # state only, so a per-project config is an override the user creates
+  # deliberately, not something the harness drops there on its own.
+  # Best-effort: if that location cannot be written (read-only home, ...),
+  # loading simply continues with built-in defaults. An explicitly given
+  # config path (-c) that does not exist is NOT auto-created - that is a
+  # user error, not a first run.
   def self.load(cli_path, workdir)
     path = find_file(cli_path, workdir)
     if path.nil?
-      target = File.join(workdir, HARNESS_DIR, 'config.yml') if workdir
       # Only auto-create when the user did not explicitly point at a file.
-      write_default_template(target) if target && cli_path.nil?
+      write_default_template(home_config_path) if cli_path.nil?
       return new({})
     end
 
@@ -128,7 +141,7 @@ class HarnessConfig
     paths = []
     paths << ENV['HARNESS_CONFIG'] if ENV['HARNESS_CONFIG']
     paths << File.join(workdir, HARNESS_DIR, 'config.yml') if workdir
-    paths << File.join(Dir.home, '.config', 'harness', 'config.yml')
+    paths << home_config_path
     paths
   end
 
