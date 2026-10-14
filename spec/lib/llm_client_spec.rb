@@ -99,7 +99,9 @@ RSpec.describe LLMClient do
     # Swap in a stub HTTP that returns a canned success response and records
     # every logger call, so the specs never touch the network.
     def stub_success!
-      resp = double('resp', is_a?: true, body: resp_body)
+      # The response stats line reads the status code too (issue #231), so the
+      # double has to answer for it.
+      resp = double('resp', is_a?: true, code: '200', body: resp_body)
       http = double('http', request: resp)
 
       expect(KeepAliveHTTP).to receive(:new).and_return(http)

@@ -63,6 +63,10 @@ module LLM
 
       attempts = retry_count
       attempts.times do |attempt|
+        @logger.info("REQ: POST #{uri} (#{req.body.bytesize} bytes, " \
+                     "attempt #{attempt + 1}/#{attempts})")
+        started = Time.now
+
         begin
           resp = http.request(req)
         rescue *LLM::RETRYABLE_ERRORS => e
@@ -92,6 +96,14 @@ module LLM
           raise LLMError, "LLM error (HTTP #{resp.code}):\n#{resp.body}"
         end
 
+        begin
+          parsed = JSON.parse(resp.body, symbolize_names: true)
+        rescue JSON::ParserError => e
+          raise LLMError, "LLM returned invalid JSON: #{e.message}"
+        end
+
+        log_response_stats(resp, parsed, Time.now - started)
+
         # issue #131: the raw API response body is troubleshooting-only - it
         # goes to harness.log with --verbose, while the parsed reasoning /
         # content sections are ALWAYS logged by SessionManager#log_response.
@@ -101,11 +113,7 @@ module LLM
           @logger.info("=" * 50)
         end
 
-        begin
-          return parse_response(JSON.parse(resp.body, symbolize_names: true))
-        rescue JSON::ParserError => e
-          raise LLMError, "LLM returned invalid JSON: #{e.message}"
-        end
+        return parse_response(parsed)
       end
       nil
     end
@@ -162,6 +170,44 @@ module LLM
 
     def retry_delay
       @options[:retry_delay] || LLM::RETRY_DELAY
+    end
+
+    # Request duration for the log line: plain seconds with 2dp (the console
+    # stats line in Harness#format_elapsed factors minutes out; the log wants
+    # one comparable number per attempt).
+    def format_seconds(seconds)
+      format('%.2f', seconds.to_f)
+    end
+
+    # Token counts for the RESP line (issue #231: prompt-processing speed can
+    # be derived from the logged time + tokens). Empty when the backend
+    # reports none.
+    def usage_note(usage)
+      return '' if usage.nil?
+      return '' if usage[:prompt_tokens].nil? || usage[:completion_tokens].nil?
+
+      " - #{usage[:prompt_tokens]} -> #{usage[:completion_tokens]} tokens"
+    end
+
+    # One line per successful attempt: what was called, how big the answer
+    # was, how long it took and the token counts.
+    def log_response_stats(resp, parsed, elapsed)
+      @logger.info("RESP: HTTP #{resp.code} (#{resp.body.to_s.bytesize} bytes) " \
+                   "in #{format_seconds(elapsed)}s#{usage_note(usage_for(parsed))}")
+    end
+
+    # The usage of one RAW parsed response, before normalization: the OpenAI
+    # shape has a `usage` object, the native Ollama shape reports the counts
+    # as top-level fields. BaseBackend cannot know which, so check both.
+    def usage_for(json)
+      return json[:usage] if json.is_a?(Hash) && json[:usage]
+      return nil unless json.is_a?(Hash)
+      return nil unless json.key?(:prompt_eval_count) || json.key?(:eval_count)
+
+      prompt     = json[:prompt_eval_count].to_i
+      completion = json[:eval_count].to_i
+      { prompt_tokens: prompt, completion_tokens: completion,
+        total_tokens: prompt + completion }
     end
 
     # Both backends report tool calls as [{id, function: {name, arguments}}];
