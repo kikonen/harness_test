@@ -247,11 +247,24 @@ RSpec.describe CommandAllowlist do
         .to eq(['bundle', 'bundle exec', 'bundle exec rspec'])
     end
 
-    it 'offers the full invocation for path-like arguments (issue #102)' do
-      # A path is not a subcommand, so only "cd C:/work/x" is offered -
-      # never a bare "cd".
-      expect(described_class.extract_prefix_options('cd C:/work/own/projects/ai/harness_test'))
-        .to eq(['cd C:/work/own/projects/ai/harness_test'])
+    it 'offers the short prefix plus the full invocation for path-like ' \
+       'arguments (issue #102, issue #249)' do
+      # A path is not a subcommand, but the short prefix is still offered
+      # alongside the full invocation so the user grants exactly as much
+      # as they want (issue #249).
+      cmd = 'cd C:/work/own/projects/ai/harness_test'
+      expect(described_class.extract_prefix_options(cmd)).to eq(
+        ['cd', 'cd C:/work/own/projects/ai/harness_test']
+      )
+    end
+
+    it 'offers the short prefix for the issue #249 shape' do
+      # "ruby tmp/issue240_probe.rb" - single subcommand + path argument:
+      # the dialog must offer 'ruby', not only the whole invocation.
+      cmd = 'ruby tmp/issue240_probe.rb 2>&1 | tail -n 6'
+      expect(described_class.extract_prefix_options(cmd)).to eq(
+        ['ruby', 'ruby tmp/issue240_probe.rb 2>&1', 'tail', 'tail -n']
+      )
     end
 
     it 'offers both lengths for flag-like arguments (issue #102)' do
@@ -262,7 +275,7 @@ RSpec.describe CommandAllowlist do
     it 'combines candidates from every segment and dedupes' do
       cmd = 'cd C:/work/x && ruby -c lib/cli.rb && ruby -c lib/cli.rb'
       expect(described_class.extract_prefix_options(cmd)).to eq(
-        ['cd C:/work/x', 'ruby', 'ruby -c']
+        ['cd', 'cd C:/work/x', 'ruby', 'ruby -c']
       )
     end
 

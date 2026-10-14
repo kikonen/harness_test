@@ -202,9 +202,9 @@ RSpec.describe Tools::RunCommandTool do
           out = drive_dialog("1\n")
           tool.execute('command' => 'cd C:/work/x && ruby -c lib/cli.rb')
 
-          # "cd C:/work/x" is granted as a full invocation (a path is not a
-          # subcommand, so no shorter prefix), "ruby" and "ruby -c" are
-          # offered as separate choices.
+          # Every segment offers its short prefix AND the full invocation
+          # (issue #249): 'cd' plus 'cd C:/work/x', 'ruby' plus 'ruby -c'.
+          expect(out.string).to include("Always allow 'cd'")
           expect(out.string).to include("Always allow 'cd C:/work/x'")
           expect(out.string).to include("Always allow 'ruby'")
           expect(out.string).to include("Always allow 'ruby -c'")
@@ -215,8 +215,9 @@ RSpec.describe Tools::RunCommandTool do
         Dir.mktmpdir do |dir|
           list = FileList.new(workdir: dir)
           tool = described_class.new(list, {})
-          # Options: 1 Allow, 2 'cd C:/work/x', 3 'ruby', 4 'ruby -c'.
-          drive_dialog("3 4\n")
+          # Options: 1 Allow, 2 'cd', 3 'cd C:/work/x', 4 'ruby', 5 'ruby -c'
+          # (issue #249 offers the short prefix too).
+          drive_dialog("4 5\n")
 
           out = tool.execute('command' => 'cd C:/work/x && ruby -c lib/cli.rb')
           expect(out).to start_with('exit code:')
@@ -225,6 +226,7 @@ RSpec.describe Tools::RunCommandTool do
           saved = YAML.safe_load(File.read(yml))
           expect(saved).to include('ruby')
           expect(saved).to include('ruby -c')
+          expect(saved).not_to include('cd')
           expect(saved).not_to include('cd C:/work/x')
         end
       end
@@ -233,8 +235,10 @@ RSpec.describe Tools::RunCommandTool do
         Dir.mktmpdir do |dir|
           list = FileList.new(workdir: dir)
           tool = described_class.new(list, {})
-          # Option 2 is 'cd C:/work/x'.
-          drive_dialog("2\n")
+          # Options: 1 Allow, 2 'cd', 3 'cd C:/work/x' (issue #249 - the
+          # short prefix comes first), 4 'ruby', 5 'ruby -c', 6 Cancel.
+          # Pick the full invocation (option 3).
+          drive_dialog("3\n")
 
           out = tool.execute('command' => 'cd C:/work/x && ruby -c lib/cli.rb')
           expect(out).to start_with('exit code:')
