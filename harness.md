@@ -47,6 +47,14 @@ Keep this in mind:
 - Line endings: the harness normalizes to LF for LLM-facing operations
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.
+- Encoding: text that comes from OUTSIDE the process (shell output, file
+  reads, model-supplied tool-call arguments, git output, the LLM response
+  body) can be byte-invalid in UTF-8 or tagged with a code page, so it is
+  normalized once at each read boundary by `TextNormalizer` - bytes that
+  cannot be represented become the printable ASCII replacement `?`, which
+  keeps output inspectable and cannot itself break JSON or the console.
+  Already-valid UTF-8 is returned untouched. Downstream consumers (strip,
+  split, gsub, regex, JSON.generate for the session save) then never raise.
 - Spec layout: tests live under `spec/` mirroring the tree they test -
   e.g. `lib/dialog.rb` is tested by `spec/lib/ui/dialog_spec.rb`, and tools
   in `lib/tools/` are tested in `spec/lib/tools/` (e.g.
