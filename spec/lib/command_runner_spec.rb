@@ -330,6 +330,24 @@ RSpec.describe CommandRunner do
       end
     end
 
+    # issue #240: the allowlist is consulted BEFORE the model check, so an
+    # already-allowed command never costs a safety-check call. Same for the
+    # bang path (both go through #run).
+    it 'does not ask the model for a command already in the allowlist' do
+      Dir.mktmpdir do |dir|
+        seed_allowlist(dir, 'echo')
+        client = fake_client('safe: harmless read')
+        runner = make_tool_runner(dir, { command_safety_check: true },
+                                  harness: harness_with(client, chain_mid_tool_loop))
+        out = drive_dialog([]) # no dialog opens - the allowlist already covers it
+        result = runner.run('echo hi')
+
+        expect(result).to start_with('exit code: 0')
+        expect(client.instance_variable_get(:@calls)).to be_empty
+        expect(out.string).not_to include('The model is requesting')
+      end
+    end
+
     it 'degrades to the plain dialog when the check call fails' do
       Dir.mktmpdir do |dir|
         client = double('client')
