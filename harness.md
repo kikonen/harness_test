@@ -75,6 +75,12 @@ Keep this in mind:
   user test the changes first - merge only after the user explicitly
   says to.
 - The PR body should state that it will be merged with rebase.
+- After a merge, delete the local feature branch (the remote ref is already
+  removed by GitHub on merge, so `git fetch --prune` clears the stale
+  `remotes/origin/...`). No dialog needed - this is the standing habit.
+  A rebase merge rewrites the commit so `git branch -d` refuses ("not fully
+  merged"): confirm the content is identical to `master` first
+  (`git diff <branch> master --stat` is empty), then force-delete.
 
 ## Tunable Constants
 
