@@ -62,6 +62,14 @@ Keep this in mind:
   sudo, forced push, curl|sh, ...) keeps the dialog in EVERY posture and
   gets no "Always allow" option. Anything that auto-approves a command
   without a dialog must print a status line AND log it to harness.log.
+- The posture is ALWAYS labeled (issue #221 review): `Harness#command_mode_label`
+  never returns nil for a real harness (MANUAL when nothing is auto-approved),
+  and it is shown in the startup banner ("Command consent: ..."), the prompt
+  modeline ("[model (effort)] [cmd: MANUAL] >") and the spinner badge at the
+  END of the spinner line - never between the glyph and the progress message.
+- A spinner must not reset to the bare "Working..." default mid-wait: the Task
+  remembers the last :spinner_detail and re-plays it whenever the drain loop
+  has to build a new spinner for the same wait.
 - Consent state is user-side harness state, never conversation state: it is
   not injected into the chain, and posture flags are coerced to real
   booleans on every setter (`yolo=`, `command_safety_auto_approve=`).

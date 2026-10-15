@@ -185,6 +185,11 @@ context), `test.echo` (test-only)
   you picked accepts it: AUTO-APPROVE on a "safe:" model verdict (issue #224)
   or YOLO for everything (issue #221). Postures are always the user's choice -
   the model never flips them.
+- The active posture is ALWAYS labeled so you can see what a run will do
+  before you type anything: the startup banner ("Command consent: MANUAL -
+  ..."), the prompt line ("[model (effort)] [cmd: MANUAL] >") and the
+  spinner badge at the end of its line ("... Sending to model... ctx ...
+  [cmd: YOLO]").
 - The disaster denylist overrides every posture AND every stored grant: a
   well-known disaster (`rm -rf`, `mkfs`, `dd of=/dev/`, `sudo`, `git push -f`,
   `curl | sh`, a fork bomb, `format C:`, `diskpart`, `del /s /q`,

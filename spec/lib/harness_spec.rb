@@ -647,11 +647,14 @@ RSpec.describe Harness do
       expect(harness.command_safety_auto_approve_effective?).to be(true)
     end
 
-    it 'shows no mode label (and an ineffective posture) with the check off' do
+    it 'labels the posture MANUAL with the check off (issue #221 review)' do
+      # The label is always present: with the check off nothing is
+      # auto-approved, so the honest label is MANUAL - an empty spinner
+      # badge read as "no posture", which is bug 2/3.
       harness = build_harness(command_safety_check: false,
                               command_safety_auto_approve: true)
 
-      expect(harness.command_mode_label).to be_nil
+      expect(harness.command_mode_label).to eq('MANUAL')
       expect(harness.command_safety_auto_approve_effective?).to be(false)
     end
 
@@ -662,6 +665,15 @@ RSpec.describe Harness do
       expect(harness.command_mode_label).to eq('AUTO-APPROVE')
 
       expect(harness.toggle_command_mode).to eq('MANUAL')
+      expect(harness.command_mode_label).to eq('MANUAL')
+    end
+
+    it 'AUTO-APPROVE is only labeled when the check is on' do
+      # command_safety_auto_approve without command_safety_check auto-approves
+      # nothing, so the posture label must say MANUAL, not AUTO-APPROVE.
+      harness = build_harness(command_safety_check: false,
+                              command_safety_auto_approve: true)
+
       expect(harness.command_mode_label).to eq('MANUAL')
     end
 

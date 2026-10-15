@@ -223,6 +223,11 @@ class CLI
     # this session's log is written (.harness/sessions/<id>/harness.log) -
     # and which id a later /save or --resume would refer to.
     ui.puts "Session: #{harness.session.session_id} (log: #{session_log_path_display})"
+    # issue #221 review (bug 2): the shell consent posture is a fact about
+    # how this run behaves, so it belongs in the startup banner next to the
+    # model and the session - and the disaster floor is named with it so
+    # YOLO ON is never mistaken for "nothing asks".
+    ui.puts "Command consent: #{consent_posture_display}"
     ui.puts "Tip: type a plain message (no /) to send it directly to the model."
     ui.puts "Tip: Enter adds a newline; paste multiline text directly. The " \
          "submit key sends the whole buffer: Ctrl+Enter (Windows console, or " \
@@ -312,6 +317,20 @@ class CLI
     ui.puts "Continued session #{name} (the newest saved in #{@file_list.workdir}/.harness/sessions/)."
   end
 
+  # issue #221 review (bug 2): one-line description of the shell consent
+  # posture. The /yolo command's own report is the long form; this is the
+  # at-a-glance version shown in the startup banner.
+  def consent_posture_display
+    label = @harness.command_mode_label
+    return 'n/a' if label.nil?
+    return 'YOLO - unapproved commands run without asking; disaster ' \
+           'commands still ask' if @harness.yolo?
+
+    label == 'AUTO-APPROVE' \
+      ? 'AUTO-APPROVE - a "safe:" model verdict runs without asking' \
+      : 'MANUAL - unapproved commands ask (/yolo status shows the postures)'
+  end
+
   # Auto-save the session on exit (best-effort). Returns the session id,
   # or nil when there was nothing to save or saving failed.
   def auto_save_session
@@ -358,8 +377,17 @@ class CLI
       # issue #219: the effective reasoning effort is visible in the modeline
       # so a /param tweak (or the profile default) is visible at a glance.
       effort = @harness.session_manager.param_overrides.reasoning_effort_display
+      # issue #221 review (bug 2): the shell consent posture lives in the
+      # prompt line too, so it is visible on EVERY turn (the spinner only
+      # appears while the model works, and slash commands answer instantly -
+      # neither shows the posture while the user is idle at the prompt).
+      mode = @harness.command_mode_label
       # Bracketed model name keeps the prompt visually distinct from replies.
-      prefix = "[#{model ? "#{model} (#{effort})" : effort}] > "
+      # issue #221 review (bug 2): the posture bracket follows the model
+      # bracket, e.g. "[qwen (medium)] [cmd: YOLO] >".
+      tags   = ["[#{model ? "#{model} (#{effort})" : effort}]"]
+      tags  << "[cmd: #{mode}]" if mode
+      prefix = "#{tags.join(' ')} > "
       ctx = @harness.context_indicator
       ui.puts ctx ? "#{ctx} #{prefix}" : prefix
       ui.flush

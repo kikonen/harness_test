@@ -222,21 +222,21 @@ RSpec.describe UI::Spinner do
     end
   end
 
-  describe '#badge (issue #224 follow-up: live consent-mode badge)' do
+  describe '#badge (issue #224 follow-up: live consent-mode badge at the END)' do
     it 'is nil by default (renders nothing, frame format unchanged)' do
       spinner = described_class.new('Working', ui: quiet_console)
       expect(spinner.badge).to be_nil
       expect(spinner.line(0)).to eq("#{UI::Spinner::FRAMES[0]} Working...")
     end
 
-    it 'renders a plain-string badge between the frame and the message' do
+    it 'renders a plain-string badge at the end of the line' do
       out = capture('Working') do |spinner|
         spinner.badge = '[cmd: MANUAL]'
         spinner.start
         spinner.render!
         spinner.stop
       end
-      expect(out).to include("#{UI::Spinner::FRAMES[0]} [cmd: MANUAL] Working...")
+      expect(out).to include("#{UI::Spinner::FRAMES[0]} Working... [cmd: MANUAL]")
     end
 
     it 're-evaluates a callable badge every frame so it tracks live state' do
@@ -249,8 +249,8 @@ RSpec.describe UI::Spinner do
         spinner.render!
         spinner.stop
       end
-      expect(out).to include("#{UI::Spinner::FRAMES[0]} [cmd: MANUAL] Working...")
-      expect(out).to include("#{UI::Spinner::FRAMES[1]} [cmd: AUTO-APPROVE] Working...")
+      expect(out).to include("#{UI::Spinner::FRAMES[0]} Working... [cmd: MANUAL]")
+      expect(out).to include("#{UI::Spinner::FRAMES[1]} Working... [cmd: AUTO-APPROVE]")
     end
 
     it 'renders a nil badge value as nothing on the very next frame' do
@@ -262,9 +262,11 @@ RSpec.describe UI::Spinner do
         spinner.render!
         spinner.stop
       end
-      expect(out).to include('[cmd: MANUAL] Working...')
+      expect(out).to include('Working... [cmd: MANUAL]')
       expect(out).to include("#{UI::Spinner::FRAMES[1]} Working...")
-      expect(out).not_to include("#{UI::Spinner::FRAMES[1]} [")
+      # The SECOND frame must carry no badge at all (frame 0 legitimately
+      # does, so the assertion is anchored on the second frame's glyph).
+      expect(out).not_to include("#{UI::Spinner::FRAMES[1]} Working... [")
     end
 
     it 'combines a badge with a suffix' do
@@ -274,7 +276,7 @@ RSpec.describe UI::Spinner do
         spinner.render!
         spinner.stop
       end
-      expect(out).to include('[cmd: AUTO-APPROVE] Working... ctx 1/2 (50%)')
+      expect(out).to include('Working... ctx 1/2 (50%) [cmd: AUTO-APPROVE]')
     end
 
     it 'falls back to no badge when the callable raises' do
