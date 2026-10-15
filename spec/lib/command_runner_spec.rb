@@ -534,17 +534,6 @@ RSpec.describe CommandRunner do
     end
   end
 
-  it 'honors dry runs without executing' do
-    Dir.mktmpdir do |dir|
-      seed_allowlist(dir, 'echo hi')
-      file_list = FileList.new([], workdir: dir)
-      runner = described_class.new(file_list, { dry_run: true })
-      out = runner.run('echo hi')
-      shown = file_list.display_path(dir)
-      expect(out).to eq("DRY RUN: would execute 'echo hi' in #{shown}")
-    end
-  end
-
   it 'truncates long output to the line limit' do
     Dir.mktmpdir do |dir|
       seed_allowlist(dir, 'seq 50')

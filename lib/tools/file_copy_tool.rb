@@ -9,9 +9,8 @@ require 'fileutils'
 module Tools
 
   class FileCopyTool < Tool
-    def initialize(file_list, options)
+    def initialize(file_list)
       @file_list = file_list
-      @options   = options
       super(
         name: 'file.copy',
         description: 'Copies a file to a new path. ' \
@@ -58,11 +57,6 @@ module Tools
       if File.exist?(dst)
         Tool.puts "  [file.copy] ✗ #{dst_shown} (destination already exists)"
         return "error: destination '#{dst_shown}' already exists - choose a different path"
-      end
-
-      if @options[:dry_run]
-        Tool.puts "  [file.copy] ~ #{src_shown} → #{dst_shown} (dry run)"
-        return "DRY RUN: would copy #{src_shown} to #{dst_shown}"
       end
 
       dir = File.dirname(dst)

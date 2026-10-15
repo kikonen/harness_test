@@ -333,11 +333,6 @@ class CommandRunner
 
   # Runs the command (after any required confirmation) and formats the result.
   def execute(command, dir, shown, timeout, limit)
-    if @options&.dig(:dry_run)
-      status("~ #{command} (dry run)")
-      return "DRY RUN: would execute '#{command}' in #{shown}"
-    end
-
     started = Time.now
     output, status = run_in_shell(command, dir, timeout)
     # Symbol (not Process::Status) signals the timeout path.
