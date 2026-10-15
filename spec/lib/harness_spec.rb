@@ -681,6 +681,57 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #221: the YOLO posture (the consent-fatigue fix). Like #224's
+  # mode it is a USER-side consent switch (the model cannot turn it on) -
+  # but unlike it, YOLO is persisted with the session (SessionManager
+  # specs cover the round trip) and it wins over the AUTO-APPROVE/MANUAL
+  # pair in the mode label (YOLO means no consent check at all).
+  describe '#yolo? / toggle_yolo / mode label (issue #221)' do
+    it 'defaults to off' do
+      harness = build_harness
+
+      expect(harness.yolo?).to be(false)
+    end
+
+    it 'starts ON when the yolo option is set (config initial posture)' do
+      harness = build_harness(yolo: true)
+
+      expect(harness.yolo?).to be(true)
+      expect(harness.command_mode_label).to eq('YOLO')
+    end
+
+    it 'YOLO wins over AUTO-APPROVE / MANUAL in the mode label' do
+      harness = build_harness(command_safety_check: true,
+                              command_safety_auto_approve: true, yolo: true)
+
+      expect(harness.command_mode_label).to eq('YOLO')
+    end
+
+    it 'YOLO keeps its label even with the safety check off' do
+      harness = build_harness(command_safety_check: false, yolo: true)
+
+      expect(harness.command_mode_label).to eq('YOLO')
+    end
+
+    it 'toggle_yolo flips the posture and returns the new label' do
+      harness = build_harness
+
+      expect(harness.toggle_yolo).to eq('YOLO ON')
+      expect(harness.yolo?).to be(true)
+      expect(harness.toggle_yolo).to eq('YOLO OFF')
+      expect(harness.yolo?).to be(false)
+    end
+
+    it 'coerces the setter to a boolean (truthy junk stays OFF)' do
+      harness = build_harness
+
+      harness.yolo = 'yes'
+      expect(harness.yolo?).to be(false)
+      harness.yolo = true
+      expect(harness.yolo?).to be(true)
+    end
+  end
+
   # issue #208: the session is the working chain. When a turn dies mid-loop
   # (connection loss after the LLM answer of round N), every round already
   # made - assistant tool_calls AND tool results - must remain in the

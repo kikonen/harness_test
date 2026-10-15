@@ -54,6 +54,15 @@ require_relative 'harness_error'
 #   command_safety_auto_approve: true  # with the check on: commands the model
 #                                       # calls "safe:" skip the consent dialog
 #                                       # (toggled live with Ctrl+A, issue #224 follow-up)
+#   yolo: false  # shell consent OFF for the run.command tool: every command
+#                # runs without a dialog and with no model safety check
+#                # (issue #221). Toggled live with /yolo and persisted with the
+#                # session. Well-known disaster commands (rm -rf, format C:,
+#                # sudo, git push -f, curl|sh, ...) ALWAYS keep the dialog.
+#   bang_requires_confirmation: true  # the `! cmd` bang syntax also asks for
+#                # confirmation (default, issue #221). Set false and a
+#                # user-typed bang command runs immediately - it is already
+#                # explicit intent. The disaster denylist still applies.
 #
 class HarnessConfig
   HARNESS_DIR = '.harness'
@@ -88,6 +97,12 @@ class HarnessConfig
     @command_safety_auto_approve = data[:command_safety_auto_approve] == true
     @double_enter_submit = data[:double_enter_submit] == true
     @max_tool_iterations = int_or_nil(data[:max_tool_iterations])
+    # issue #221: YOLO is opt-in (default off) - the harness never assumes
+    # the user wants consent removed. Bang confirmation defaults to ON
+    # (today's behavior): the user has to explicitly turn it off.
+    @yolo = data[:yolo] == true
+    @bang_requires_confirmation = data[:bang_requires_confirmation].nil? ?
+                                  true : data[:bang_requires_confirmation] == true
     @compact      = {
       recent_messages: int_or_nil(data.dig(:compact, :recent_messages)),
       auto_threshold:  float_or_nil(data.dig(:compact, :auto_threshold)),
@@ -193,6 +208,21 @@ class HarnessConfig
   # a session). Only meaningful with command_safety_check on.
   def command_safety_auto_approve_enabled
     @command_safety_auto_approve == true
+  end
+
+  # issue #221: initial YOLO posture for shell consent (issue #221). Off by
+  # default: consent removal is always the user's explicit choice. During a
+  # session it is toggled with /yolo and persisted with the session.
+  def yolo_enabled?
+    @yolo == true
+  end
+
+  # issue #221: whether the `! cmd` bang syntax keeps its confirmation
+  # dialog. Defaults to true (the historic behavior). False means a
+  # user-typed bang command runs without asking - the disaster denylist
+  # still gates it.
+  def bang_requires_confirmation?
+    @bang_requires_confirmation != false
   end
 
   # Max tool-loop iterations for one turn (or nil; the built-in default then applies).

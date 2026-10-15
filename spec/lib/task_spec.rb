@@ -298,6 +298,8 @@ RSpec.describe Task do
         .to eq('[cmd: MANUAL]')
       expect(described_class.mode_badge(mode_harness('AUTO-APPROVE')))
         .to eq('[cmd: AUTO-APPROVE]')
+      # issue #221: YOLO wins the badge the same way (Harness#command_mode_label).
+      expect(described_class.mode_badge(mode_harness('YOLO'))).to eq('[cmd: YOLO]')
     end
 
     it 'does not replace an already running spinner' do
@@ -613,6 +615,123 @@ RSpec.describe Task do
       end
 
       expect(choice).to eq(:allow) # dialog received the typed line
+    end
+  end
+
+  # issue #221: a steering note that is EXACTLY "/yolo" is consumed as a
+  # control gesture (posture toggle) instead of being injected into the
+  # chain. Unit-level on Task.commit_note - the drain-loop wiring is the
+  # same one the note specs above already prove.
+  #
+  # HACK (acknowledged, see harness.md Pending/Deferred): the gesture is
+  # special-cased per command inside Task's note plumbing. These specs pin
+  # the CONTRACT (only an exact /yolo flips state, a real note never
+  # does, the ack lands on ui + buffer) so the gesture-dispatch refactor
+  # promised in the async-task + CLI work can be verified against it.
+  describe 'Task.commit_note /yolo control gesture (issue #221)' do
+    # Harness stand-in: the posture surface + the note setter, both
+    # recorded so the spec can see which path was taken.
+    def gesture_harness
+      Class.new do
+        attr_reader :notes, :toggles
+
+        def initialize
+          @notes   = []
+          @toggles = 0
+          @yolo    = false
+        end
+
+        def yolo?
+          @yolo
+        end
+
+        def yolo=(val)
+          @yolo = (val == true)
+        end
+
+        def yolo_mode_label
+          @yolo ? 'YOLO ON' : 'YOLO OFF'
+        end
+
+        def toggle_yolo
+          @toggles += 1
+          @yolo    = !@yolo
+          @yolo ? 'YOLO ON' : 'YOLO OFF'
+        end
+
+        def user_note_text=(text)
+          @notes << text
+        end
+      end.new
+    end
+
+    # A task stand-in exposing exactly what commit_note touches (harness /
+    # ui / buffer are Task's own accessors - the stand-in must answer them).
+    def gesture_task(harness)
+      task_class = Class.new do
+        attr_accessor :harness, :ui, :buffer
+      end
+      # The real buffer's #put collects the entries; a recording stand-in.
+      entries = []
+      buffer  = Class.new do
+        define_method(:put) { |**entry| entries << entry }
+      end.new
+      io     = StringIO.new
+      task   = task_class.new
+      task.harness = harness
+      task.ui      = UI::Console.new(stdout: io)
+      task.buffer  = buffer
+      [task, io, entries]
+    end
+
+    it 'flips the posture and does NOT inject the note into the chain' do
+      harness        = gesture_harness
+      task, io, buf  = gesture_task(harness)
+
+      described_class.commit_note(task, '/yolo')
+
+      expect(harness.yolo?).to be(true)
+      expect(harness.toggles).to eq(1)
+      expect(harness.notes).to be_empty # consumed, never injected
+      expect(io.string).to include('[cmd: YOLO ON]')
+      expect(buf.map { |e| e[:content] }).to eq(['  [cmd: YOLO ON]'])
+      expect(buf.map { |e| e[:origin] }).to eq([:user_note])
+    end
+
+    it 'honours an explicit /yolo on / off form (sets, not flips)' do
+      harness = gesture_harness
+      task, io, _buf = gesture_task(harness)
+
+      described_class.commit_note(task, '/yolo on')
+      described_class.commit_note(task, '/yolo on') # idempotent
+      expect(harness.yolo?).to be(true)
+      expect(harness.toggles).to eq(0) # explicit forms never blind-toggle
+
+      described_class.commit_note(task, '/YOLO OFF') # casing tolerated
+      expect(harness.yolo?).to be(false)
+      expect(io.string).to include('[cmd: YOLO OFF]')
+    end
+
+    it 'recognizes the gesture forms (bare marker is :toggle, never nil)' do
+      expect(described_class.yolo_note_action('/yolo')).to eq(:toggle)
+      expect(described_class.yolo_note_action('/yolo on')).to eq(:on)
+      expect(described_class.yolo_note_action('  /YOLO Off  ')).to eq(:off)
+      expect(described_class.yolo_note_action('foo /yolo')).to be_nil
+    end
+
+    it 'leaves every real note alone (a note merely MENTIONS yolo)' do
+      harness = gesture_harness
+      task, io, _buf = gesture_task(harness)
+
+      described_class.commit_note(task, 'please run it with yolo off')
+      described_class.commit_note(task, 'yolo')
+      described_class.commit_note(task, '/yolo please do it anyway')
+
+      expect(harness.yolo?).to be(false)
+      expect(harness.toggles).to eq(0)
+      expect(harness.notes)
+        .to eq(['please run it with yolo off', 'yolo', '/yolo please do it anyway'])
+      expect(io.string).to include('[note] got it - yolo')
     end
   end
 end

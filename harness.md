@@ -52,6 +52,19 @@ Keep this in mind:
 - Destructive operations (file delete, dir delete) require a DELETE grant
   from the tool layer - do not bypass it, and never try to reach the same
   result through a shell command instead.
+- Shell consent postures (issue #221): three user-chosen levels of how much
+  manual approval a `run.command` call needs - MANUAL (default, every
+  unapproved command asks) < AUTO-APPROVE (a model "safe:" verdict skips the
+  dialog, `Ctrl+A`) < YOLO (no dialog, no model check, `/yolo`). The POSTURE
+  IS ALWAYS THE USER'S DECISION - the model must never try to flip it, and
+  new consent-related code must never weaken the disaster denylist
+  (`CommandAllowlist.disaster?`): a well-known disaster (rm -rf, format C:,
+  sudo, forced push, curl|sh, ...) keeps the dialog in EVERY posture and
+  gets no "Always allow" option. Anything that auto-approves a command
+  without a dialog must print a status line AND log it to harness.log.
+- Consent state is user-side harness state, never conversation state: it is
+  not injected into the chain, and posture flags are coerced to real
+  booleans on every setter (`yolo=`, `command_safety_auto_approve=`).
 - Line endings: the harness normalizes to LF for LLM-facing operations
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.
@@ -126,3 +139,12 @@ Keep this in mind:
   it is no longer "deferred".
 - CRLF handling: implemented in file.read / file.search / file.patch;
   verify end-to-end on Windows if patching still misbehaves.
+- Mid-turn `/yolo` steering-note gesture (issue #221): the intercept in
+  `Task.commit_note` (`yolo_note_action`) is an ACKNOWLEDGED HACK - it
+  hard-codes one slash command into Task's note plumbing (its own regex,
+  duplicating CommandHandler's COMMANDS registry) and does not scale to
+  more gestures. Accepted only as a stopgap: with the async-task + CLI
+  refactoring, mid-turn notes must dispatch through the shared
+  slash-command registry (state-toggle gestures only - no LLM round, no
+  prompt recursion) and the special case must be deleted. Track this as an
+  open issue when the PR is opened.

@@ -148,4 +148,41 @@ RSpec.describe HarnessConfig do
       expect(cfg.models.first[:api]).to be_nil
     end
   end
+
+  # issue #221: the two consent-posture keys. YOLO is opt-in (default OFF -
+  # the harness never assumes the user wants consent removed); bang
+  # confirmation defaults to ON (today's behavior) and is turned off
+  # explicitly.
+  describe '#yolo_enabled? / #bang_requires_confirmation? (issue #221)' do
+    it 'defaults yolo to off and bang confirmation to on' do
+      cfg = described_class.new({})
+      expect(cfg.yolo_enabled?).to be(false)
+      expect(cfg.bang_requires_confirmation?).to be(true)
+    end
+
+    it 'reads the yolo key' do
+      expect(described_class.new(yolo: true).yolo_enabled?).to be(true)
+      # A truthy junk value must not enable YOLO (same coercion as everywhere
+      # else in consent state).
+      expect(described_class.new(yolo: 'yes').yolo_enabled?).to be(false)
+      expect(described_class.new(yolo: nil).yolo_enabled?).to be(false)
+    end
+
+    it 'reads the bang_requires_confirmation key' do
+      expect(described_class.new(bang_requires_confirmation: false)
+                            .bang_requires_confirmation?).to be(false)
+      expect(described_class.new(bang_requires_confirmation: true)
+                            .bang_requires_confirmation?).to be(true)
+      # nil = key absent = the ON default (only an explicit false disables).
+      expect(described_class.new(bang_requires_confirmation: nil)
+                            .bang_requires_confirmation?).to be(true)
+      expect(described_class.new(bang_requires_confirmation: 'no')
+                            .bang_requires_confirmation?).to be(false)
+    end
+
+    it 'mentions both keys in the default template (commented out)' do
+      expect(template).to include('yolo:')
+      expect(template).to include('bang_requires_confirmation')
+    end
+  end
 end

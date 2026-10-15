@@ -125,5 +125,44 @@ RSpec.describe CommandHandler do
         expect(handler).to have_received(:run_bang_command).with('ls -la')
       end
     end
+
+    # issue #221: the bang consent switch. bang_requires_confirmation is
+    # the DEFAULT (today's dialog behavior); only an explicit false drops
+    # it, and it reaches the runner as auto_approve_all. YOLO is NOT
+    # consulted here - the bang path has its own key (the user's own
+    # typing is already the consent).
+    describe 'bang confirmation option (issue #221)' do
+      def handler_with_options(dir, options)
+        handler = make_handler(dir, UI::Console.new(stdout: StringIO.new))
+        handler.instance_variable_set(:@options, options)
+        handler
+      end
+
+      def captured_auto_approve(handler, line)
+        captured = nil
+        allow(CommandRunner).to receive(:new).and_wrap_original do |m, *args, **kwargs|
+          captured = kwargs[:auto_approve_all]
+          m.call(*args, **kwargs)
+        end
+        allow_any_instance_of(CommandRunner).to receive(:run)
+                .and_return('exit code: 0 (0.0s)')
+        handler.handle(line)
+        captured
+      end
+
+      it 'passes auto_approve_all: false by default (keep the dialog)' do
+        Dir.mktmpdir do |dir|
+          handler = handler_with_options(dir, {}) # key absent -> dialog kept
+          expect(captured_auto_approve(handler, '! echo x')).to be(false)
+        end
+      end
+
+      it 'passes auto_approve_all: true only when bang confirmation is turned off' do
+        Dir.mktmpdir do |dir|
+          handler = handler_with_options(dir, { bang_requires_confirmation: false })
+          expect(captured_auto_approve(handler, '! echo x')).to be(true)
+        end
+      end
+    end
   end
 end

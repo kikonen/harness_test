@@ -28,6 +28,22 @@ require_relative 'text_normalizer'
 # NEVER auto-approves, never widens the allowlist, and never bypasses the
 # user's explicit Allow.
 #
+# CONSENT POSTURES (issue #221, the consent-fatigue fix): three levels of
+# how much manual approval a shell command needs. The user chooses the
+# posture (config initial value + the live /yolo switch); the model never
+# does.
+#   MANUAL        - default. Every unapproved command gets the dialog.
+#   AUTO-APPROVE  - issue #224: commands the model verdicts "safe:" skip it.
+#   YOLO          - /yolo: EVERY run.command call skips the dialog, no model
+#                   check at all (issue #238: the check costs an extra LLM
+#                   round trip and trashes the local KV cache). Every such
+#                   run is status-lined and logged, so nothing is invisible.
+# In ALL postures - and even for a stored allowlist grant - a command
+# matching CommandAllowlist::DISASTER_PATTERNS (the well-known disasters:
+# rm -rf, format C:, sudo, forced push, curl|sh, ...) is refused
+# auto-approval and always reaches the dialog for a one-off explicit Allow.
+# The denylist is the floor under every posture.
+#
 # SAFETY MODEL:
 #   - The FULL command string is displayed to the user before anything runs;
 #     explicit "Allow" required unless the prefix is in the list.
@@ -76,18 +92,32 @@ class CommandRunner
   # title_fmt: sprintf-style dialog title (TOOL_TITLE / BANG_TITLE)
   # ui:        UI::Console for direct main-thread dialogs (nil = Task thread)
   # list:      :tool (default) or :shell - selects the allowlist file
+  # force_confirm: true keeps the consent dialog even for a command whose
+  #   prefix is already allowlisted. Used by the `!` bang path while bang
+  #   confirmation is ON (options[:bang_requires_confirmation], the default
+  #   - issue #221). Setting that config key to false passes force_confirm:
+  #   false here, so a command the USER typed runs without a dialog (the
+  #   disaster denylist still applies: a user-typed rm -rf / is asked for).
+  # auto_approve_all: true skips the consent dialog for EVERY command of
+  #   this caller (the `!` bang path when the user turned bang confirmation
+  #   off, issue #221). The YOLO posture (Harness#yolo?, /yolo) is the same
+  #   idea for the model-driven tool path and is read live from the harness
+  #   instead of being passed here - see auto_approve_all?. In both cases
+  #   the disaster denylist still forces the dialog.
   # harness:   optional Harness (any object with a lazy #logger accessor):
   #            when given, FAILED commands are logged to the session's
   #            harness.log so they leave a trace (issue #185). nil in specs.
   def initialize(file_list, options, label: 'run.command', title_fmt: TOOL_TITLE,
-                 ui: nil, list: :tool, harness: nil)
+                 ui: nil, list: :tool, harness: nil, auto_approve_all: false)
     @file_list = file_list
     @options   = options
     @label     = label
     @title_fmt = title_fmt
     @ui        = ui
+    @list      = list.to_sym
     @safety_client = nil
     @harness   = harness
+    @auto_approve_all = auto_approve_all
     @allowlist = CommandAllowlist.new(file_list.workdir,
                                       file: LISTS.fetch(list.to_sym))
   end
@@ -113,10 +143,39 @@ class CommandRunner
     limit   = DEFAULT_LIMIT if limit <= 0
     limit   = [limit, MAX_LIMIT].min
 
-    # Auto-approve when the command prefix is in the user's allowlist.
-    if @allowlist.allowed?(command)
-      status("✓ auto-approved (allowlist): #{command}")
-      return execute(command, dir, shown, timeout, limit)
+    # DENYLIST FLOOR (issue #221): a well-known disaster command is refused
+    # by EVERY auto-approval path - a stored prefix grant, the AUTO-APPROVE
+    # model verdict and YOLO alike. It always reaches the dialog below and
+    # can only run through an explicit one-off "Allow" (never a standing
+    # grant: the "Always allow" options are dropped for it too). Checked
+    # FIRST so no later shortcut can skip it.
+    disaster = CommandAllowlist.disaster?(command)
+
+    unless disaster
+      # Auto-approve when the command prefix is in the user's allowlist.
+      if @allowlist.allowed?(command)
+        status("✓ auto-approved (allowlist): #{command}")
+        return execute(command, dir, shown, timeout, limit)
+      end
+
+      # YOLO POSTURE (issue #221): the user turned consent off for this
+      # caller, so the command runs with no dialog and deliberately NO
+      # model safety check (issue #238). Two routes reach this branch:
+      #   * the model-driven tool path while Harness#yolo? is on (/yolo),
+      #     read LIVE so a mid-session or mid-turn toggle takes effect
+      #     immediately for the next command of the same tool loop;
+      #   * the `!` bang path with bang confirmation disabled
+      #     (@auto_approve_all, from options[:bang_requires_confirmation]).
+      # The status line + harness.log entry are what keep it auditable.
+      if auto_approve_all?
+        reason = yolo_active? ? 'YOLO' : 'bang consent off'
+        status("✓ auto-approved (#{reason}): #{command}")
+        log_auto_approved(command, reason)
+        return execute(command, dir, shown, timeout, limit)
+      end
+    else
+      status("⚠ denylisted (auto-approval refused in every posture): #{command}")
+      @harness&.logger&.warn("denylisted command needs an explicit Allow: #{command}")
     end
 
     # issue #224: consume a pre-batched verdict when the harness ran one
@@ -130,7 +189,9 @@ class CommandRunner
     # "dangerous:" verdict, or no verdict at all - still gets the dialog,
     # so the model's own check is what decides. This never touches the
     # allowlist (it is a per-run consent posture, not a stored grant).
-    if auto_approve_mode? && verdict
+    # The denylist wins over the model's opinion (issue #221): a disaster
+    # command is never auto-approved just because the model called it safe.
+    if !disaster && auto_approve_mode? && verdict
       if auto_approve_safe?(verdict)
         status("✓ auto-approved (model verdict: safe): #{command}")
         return execute(command, dir, shown, timeout, limit)
@@ -144,7 +205,9 @@ class CommandRunner
     # the dialog only shows prefixes that would actually change
     # behaviour when saved (issue #94).
     all_candidates = CommandAllowlist.extract_prefix_options(command)
-    prefixes       = @allowlist.filter_uncovered(all_candidates)
+    # A denylisted command gets NO "Always allow" option: the dialog is a
+    # one-off decision about this exact invocation, not a standing grant.
+    prefixes       = disaster ? [] : @allowlist.filter_uncovered(all_candidates)
     options        = [UI::Dialog::Option.new(title: 'Allow', value: :allow)]
 
     prefixes.each do |p|
@@ -164,6 +227,15 @@ class CommandRunner
     if all_candidates.empty?
       label = CommandAllowlist.classify_unsafe(command)
       note  = label ? "UNSAFE: #{label} cannot be auto-approved" : UNSAFETY_NOTE
+    end
+
+    # DENYLIST note (issue #221) wins over the UNSAFETY line: the reason
+    # this one asks even in YOLO / AUTO-APPROVE / with a stored grant is the
+    # command itself, so name the matched construct.
+    if disaster
+      note = "DENYLISTED: #{CommandAllowlist.disaster_label(command)} - " \
+             'well-known disaster, auto-approval refused in every posture; ' \
+             'this Allow is one-off'
     end
 
     # issue #224: the model's own safety verdict (advisory) leads the note
@@ -270,6 +342,40 @@ class CommandRunner
   def auto_approve_mode?
     @harness.respond_to?(:command_safety_auto_approve_effective?) &&
       @harness.command_safety_auto_approve_effective?
+  end
+
+  # Issue #221: does THIS caller run without a consent dialog?
+  #   * the `!` bang path with bang confirmation disabled (@auto_approve_all,
+  #     passed by CommandHandler from options[:bang_requires_confirmation]);
+  #   * the run.command tool path while the harness YOLO posture is on.
+  # The YOLO flag is re-read on EVERY command (not cached at construction)
+  # so a /yolo typed at the idle prompt, or flipped by a mid-turn steering
+  # note, applies to the very next command of a running tool loop too.
+  def auto_approve_all?
+    @auto_approve_all || yolo_active?
+  end
+
+  # The harness-side YOLO posture (Harness#yolo?), read live. A runner
+  # built without a harness (unit specs) has no posture to consult, so only
+  # the explicit @auto_approve_all argument can enable it there.
+  # YOLO covers ONLY the model-driven tool path (user decision for issue
+  # #221): the bang list is untouched by it, because there the human already
+  # typed the command - its consent is controlled by the separate
+  # 'bang_requires_confirmation' config key instead.
+  def yolo_active?
+    @list == :tool &&
+      @harness.respond_to?(:yolo?) && @harness.yolo?
+  end
+
+  # Issue #221: an auto-approved-without-dialog run MUST leave a trace.
+  # The status line covers the console; this covers harness.log, so every
+  # command that ran under YOLO (or under bang consent off) is recoverable
+  # from the session log - including the posture that let it through.
+  def log_auto_approved(command, reason)
+    logger = @harness&.logger
+    return unless logger
+
+    logger.info("auto-approved (#{reason}): #{command}")
   end
 
   # A verdict auto-approves when it is a non-empty line starting with

@@ -43,6 +43,18 @@ require_relative 'text_normalizer'
 #       and background (&) can read/write files or run arbitrary code,
 #       so a segment containing them is NEVER auto-approved and its
 #       prefix can never be saved.
+#   DISASTER COMMANDS (issue #221): a command matching DISASTER_PATTERNS
+#     (or recursive-force rm, see recursive_force_rm?) is refused by EVERY
+#     auto-approval path - a stored allowlist grant, the AUTO-APPROVE model
+#     verdict and the YOLO posture alike. Such a command can only ever run
+#     through an explicit one-off "Allow". The check inspects the raw
+#     command (not only the allowlist-decomposable segments), so it also
+#     covers the unsafe constructs YOLO otherwise auto-approves.
+#   YOLO posture (issue #221): switched on by the user (/yolo), it skips
+#     the consent dialog for every run.command call - except denylisted
+#     disaster commands, which keep the dialog in every posture. It is the
+#     user's own decision, never a model decision, and every auto-approved
+#     command is logged (harness.log) and status-lined.
 #   Quotes are NOT in the blocklist: they only affect argument splitting,
 #   not what runs. Operators inside quotes are literal characters.
 #
@@ -66,6 +78,214 @@ class CommandAllowlist
   # with a letter. Distinguishes subcommands (status, log, exec) from
   # arguments (-la, --oneline, main, 68, spec/foo_spec.rb).
   SUBCOMMAND_TOKEN = /\A[a-z][a-z0-9]*\z/
+
+  # Separator token kinds (ShellTokenizer) - used to split a command into
+  # raw segments for the disaster scan.
+  SEPARATORS = %i[pipe and or semi pipe_and].freeze
+
+  # Well-known disaster commands - POSIX side (issue #221). Matched
+  # against every raw segment of the command AND against the whole command
+  # (see disaster_scan?). Deliberately broad: a disaster does not need the
+  # exact spelling "rm -rf /", and a false positive only costs one
+  # confirmation dialog.
+  DISASTER_PATTERNS = [
+    /\bmkfs(\.|\s|$)/,                            # make filesystem
+    /\bfsck\b.*(?<!\w)-f(\s|$)/,                  # force filesystem check
+    /\bdd\b.*\bof=\/dev\//,                       # raw write to a device
+    /\b(shutdown|reboot|halt|poweroff)\b/,        # power off the machine
+    /\bsudo\b/,                                   # privilege escalation
+    # Forced push. --force-with-lease is deliberately NOT matched: it is
+    # the safe variant (it refuses when the remote moved).
+    /\bgit\s+push\b(?=.*(--force(?![\w-])|(?<!\w)-f(\s|$)))/,
+    /\bkill\b.*\s-\d+\s+-1\b/,                    # kill every process
+    /\bchmod\b.*-[A-Za-z]*R[A-Za-z]*\b.*\b777\b/, # world-writable everything
+    /\bchown\b.*\s-R\b.*\s\/(\s|$)/,              # chown the whole tree
+    /\bDROP\s+DATABASE\b/i,                       # sql
+  ].freeze
+
+  # Patterns whose construct SPANS a separator (a pipe, a subshell), so
+  # they must be matched against the whole command string rather than a
+  # single segment - the tokenizer removes the separator when segmenting.
+  WHOLE_COMMAND_PATTERNS = [
+    /\bcurl\b[^|]*\|\s*(sh|bash|zsh|perl|python)\b/,        # download -> shell
+    /\bwget\b[^|]*\|\s*(sh|bash|zsh|perl|python)\b/,        # download -> shell
+    /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;?/          # fork bomb
+  ].freeze
+
+  # cmd.exe recursive-force delete (del /s /q, rd /q /s, erase /s /q):
+  # the Windows twin of `rm -rf`. Lookaheads over the WHOLE segment text
+  # so the construct is also caught inside a quoted payload
+  # (`cmd //c "del /q /s C:\work\*"` - the payload is one quoted token,
+  # so the word-based win_recursive_force_delete? below never sees `del`
+  # as its own word).
+  WIN_CMD_RECURSIVE_DELETE = /
+    (?=.*\b(?:del|erase|rd|rmdir)(\.exe)?\b)
+    (?=.*\/s(\s|$))
+    (?=.*\/[qfp](\s|$))
+  /ix
+  # PowerShell recursive-force delete (Remove-Item -Recurse -Force and the
+  # short -r / -f forms, including inside a quoted powershell -Command
+  # payload). -Rec/-r for the recursion, -F* for the force.
+  WIN_PS_RECURSIVE_DELETE = /
+    (?=.*\bRemove-Item\b)
+    (?=.*(?:-(?:Rec|Recursive)|(?<!\w)-r(\s|$)))
+    (?=.*-F)
+  /ix
+
+  # Well-known disaster commands - Windows / PowerShell side (issue #221).
+  # Commands always reach us through `sh -c`, but from there they invoke
+  # cmd.exe (`cmd //c "del /s /q C:\..."`) and PowerShell
+  # (`powershell -Command "Remove-Item -Recurse -Force ..."`) just as
+  # easily as a POSIX binary, so the Windows spellings must be recognized
+  # too. All patterns are case-insensitive: Windows tools are not.
+  # Note: quoted payloads ARE visible here (the tokenizer keeps the quotes
+  # in the token text), which is what catches `powershell -Command
+  # "Remove-Item -Recurse -Force ..."`. The price is that a commit message
+  # literally containing such a phrase trips the gate too - accepted for
+  # the disaster gate: it costs one extra confirmation, never a run.
+  WINDOWS_DISASTER_PATTERNS = [
+    /\bformat\b\s+[a-z]:/i,                       # format C:
+    /\b(diskpart|sdelete|cleanmgr)\b/i,           # partition / wipe tools
+    /\bdiskpart\b.*\bclean\b/i,                   # wipe a disk's partition table
+    # delete shadow copies (the ransomware idiom of destroying backups)
+    /\bvssadmin\b.*\bdelete\b/i,
+    /\breg(\.exe)?\s+delete\b/i,                  # delete registry keys
+    /\bbcdedit\b.*\s\/(set|create|delete)/i,      # boot configuration store edits
+    /\bmountvol\b.*\/[dD]\b/i,                    # remove volume mount points
+    # takeown is typed WITHOUT the .exe in practice (`takeown /f C:\x /r`),
+    # so the suffix must be optional - the .exe-only form never matched.
+    /\btakeown(\.exe)?\b/i,                       # seize ownership of a tree
+    # blanket ACL grant ("give everyone full control")
+    # (icacls, not *ir*cacls - the old spelling matched nothing real).
+    /\bicacls?\b.*\/(grant|reset)\b.*\beveryone\b/i,
+    /\bClear-Disk\b/i,                            # PowerShell: wipe a disk
+    /\bInitialize[-.]?Disk\b.*(-Force|(?<!\w)-Confirm:)/i,
+    WIN_CMD_RECURSIVE_DELETE,
+    WIN_PS_RECURSIVE_DELETE,
+    /\bSet-Content\b.*\bNUL\b/i,                  # overwrite a device name
+  ].freeze
+
+  # cmd.exe delete verbs whose recursive + quiet/force combination is the
+  # Windows equivalent of `rm -rf` (see win_recursive_force_delete?). Kept
+  # free of duplicates and of verbs that are not real cmd.exe commands.
+  WIN_DELETE_COMMANDS = %w[del erase rd rmdir].freeze
+
+  # ------------------------------------------------------------------
+  # Disaster scan (issue #221)
+  # ------------------------------------------------------------------
+
+  # Split a command into RAW segments at the separator tokens. Unlike
+  # split_segments (the ShellParser path, which returns [] for unsafe
+  # constructs) this keeps every segment even when the command contains
+  # redirects, substitutions or subshells - the disaster scan must see the
+  # whole command, including exactly the shapes YOLO auto-approves.
+  def self.raw_segments(command)
+    tokens = ShellTokenizer.tokenize(TextNormalizer.normalize(command.to_s))
+    segments = []
+    current  = []
+    tokens.each do |kind, text|
+      if SEPARATORS.include?(kind)
+        segments << current.join(' ') unless current.empty?
+        current = []
+      else
+        current << text.to_s
+      end
+    end
+    segments << current.join(' ') unless current.empty?
+    segments.reject { |s| s.strip.empty? }
+  end
+
+  # True when the command is a well-known disaster: either a separator-
+  # spanning construct in the whole string (curl ... | sh, a fork bomb) or
+  # any single segment matching the per-segment patterns.
+  def self.disaster?(command)
+    text = TextNormalizer.normalize(command.to_s)
+    return true if WHOLE_COMMAND_PATTERNS.any? { |re| re.match?(text) }
+
+    raw_segments(text).any? { |seg| disaster_segment?(seg) }
+  end
+
+  # Short human-readable label for the denylist dialog note (issue #221):
+  # names the matched construct (and the segment it was found in) so the
+  # user sees WHY this command is refused every auto-approval path rather
+  # than a bare "denylisted".
+  def self.disaster_label(command)
+    text = TextNormalizer.normalize(command.to_s)
+    (WHOLE_COMMAND_PATTERNS + DISASTER_PATTERNS +
+     WINDOWS_DISASTER_PATTERNS).each do |re|
+      m = re.match(text)
+      # A match must be skipped when the pattern matched ZERO characters:
+      # the recursive-delete twins are pure lookaheads (they assert flag
+      # combinations without consuming), so their m[0] is empty and would
+      # render as "DENYLISTED:  - well-known disaster...". Falling through
+      # lands on the fallback label below, which is exactly what those
+      # patterns mean.
+      next if m.nil? || m[0].to_s.strip.empty?
+      return m[0].strip
+    end
+    'recursive-force delete'
+  end
+
+  def self.disaster_segment?(segment)
+    return true if DISASTER_PATTERNS.any? { |re| re.match?(segment) }
+    return true if WINDOWS_DISASTER_PATTERNS.any? { |re| re.match?(segment) }
+    return true if win_recursive_force_delete?(segment)
+
+    recursive_force_rm?(segment)
+  end
+
+  # cmd.exe / Windows recursive-force delete: `del /s /q C:\...`,
+  # `rd /s /q dir`, `erase /s`, and their PowerShell cousins (handled by
+  # Remove-Item above). Matched on the bare command word plus its flags so
+  # `git commit -m "del /s /q"` inside quotes does not trip it - quoted
+  # words are not :word-kind flags here.
+  def self.win_recursive_force_delete?(segment)
+    words = ShellTokenizer.tokenize(segment)
+            .select { |kind, _t| kind == :word }
+            .map { |_k, t| t.to_s }
+    bare  = ->(w) { w.downcase.sub(/\.exe\z/, '') }
+    idx   = words.index { |w| WIN_DELETE_COMMANDS.include?(bare.call(w)) }
+    return false unless idx
+
+    recursive = false
+    force     = false
+    words[(idx + 1)..].each do |w|
+      next unless w.start_with?('/') || w.start_with?('-')
+      flag = w[1..].to_s.downcase.delete(':')
+      recursive ||= %w[s recursive].include?(flag)
+      force     ||= %w[q quiet f force p prompt-].include?(flag)
+    end
+    recursive && force
+  end
+
+  # `rm` with BOTH a recursive and a force flag, in any spelling or order
+  # (rm -rf /, rm -fr tmp/, rm -r -f ..., rm --recursive --force ...).
+  # Split out from DISASTER_PATTERNS because the test is about flag
+  # combination, not a fixed phrase. Quoted arguments are skipped so a
+  # message like git commit -m "rm -rf is dangerous" is not flagged: the
+  # scan only looks at unquoted words.
+  def self.recursive_force_rm?(segment)
+    words = ShellTokenizer.tokenize(segment)
+            .select { |kind, _t| kind == :word }
+            .map { |_k, t| t.to_s }
+    rm_idx = words.index { |w| w == 'rm' }
+    return false unless rm_idx
+
+    recursive = false
+    force     = false
+    words[(rm_idx + 1)..].each do |w|
+      next unless w.start_with?('-')
+      if w.start_with?('--')
+        recursive ||= (w == '--recursive')
+        force     ||= (w == '--force')
+      else
+        chars = w[1..].chars
+        recursive ||= chars.include?('r') || chars.include?('R')
+        force     ||= chars.include?('f')
+      end
+    end
+    recursive && force
+  end
 
   # ------------------------------------------------------------------
 # Public class-level API (used by specs and RunCommandTool)

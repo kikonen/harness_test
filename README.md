@@ -19,10 +19,16 @@ scoped to a working directory you choose.
 - **Shell execution with confirmation** - the `run.command` tool shows the
   full command before running it and requires an explicit "Allow" every
   single time, unless its prefix is already in the allowlist or the
-  AUTO-APPROVE posture (issue #224, toggled live with `Ctrl+A`) accepts it.
+  consent posture you picked accepts it: AUTO-APPROVE (a model "safe:"
+  verdict, `Ctrl+A`) or YOLO (no consent at all, `/yolo`, issue #221). In
+  EVERY posture a well-known disaster command (`rm -rf`, `sudo`,
+  `git push -f`, `curl | sh`, `format C:`, ...) is refused auto-approval and
+  always asks - the denylist is the floor under all three postures.
 - **Local shell mode** - a line starting with `!` runs a shell command
   directly, bypassing the model, with its own allowlist
-  (`.harness/shell_commands.yml`) (issue #129).
+  (`.harness/shell_commands.yml`) (issue #129); its own confirmation dialog
+  can be turned off with the `bang_requires_confirmation: false` config key
+  (issue #221).
 - **Sessions** - the conversation plus the access list is auto-saved to
   `.harness/sessions/<id>/session.json` (its own directory, issue #207) at
   every prompt boundary (before each send and after each reply) and again on
@@ -99,7 +105,9 @@ commands. Multiline input: paste a block, or end a line with `\`.
 Keys: `Ctrl+C` cancel/interrupt, `Ctrl+D` quit (empty prompt), `Ctrl+A`
 toggle the command consent mode (MANUAL / AUTO-APPROVE, issue #224),
 Up/Down browse history. A line starting with `!` runs a shell command
-locally instead of prompting the model (issue #129).
+locally instead of prompting the model (issue #129). `/yolo` [on|off|status]
+toggles the YOLO posture: every `run.command` call then runs with no dialog
+and no model check (issue #221; the disaster denylist still asks).
 
 ## Regenerating the shell parser
 
@@ -134,6 +142,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/param [key [value]]` | Show, override or reset a model parameter |
 | `/ctx` | Show context usage (tokens, %, headroom, auto-compact status) |
 | `/reasoning` | Show the reasoning text of the last response |
+| `/yolo [on|off|status]` | Toggle the YOLO shell-consent posture (saved with the session) |
 | `/help` | Show command help |
 | `/exit` | Quit (auto-saves the session) |
 
@@ -153,8 +162,9 @@ DELETE grant)
 `git.apply` (apply a unified diff; `dry_run` validates it without applying)
 
 **Shell** - `run.command` (full command shown, explicit Allow required
-unless the prefix is already allowlisted or AUTO-APPROVE accepts a "safe:"
-verdict; timeout-guarded, output truncated)
+unless the prefix is already allowlisted or the posture you picked accepts it
+(AUTO-APPROVE on a "safe:" verdict, or YOLO for everything); timeout-guarded,
+output truncated)
 
 **Meta** - `tools.list`, `tools.search`, `time.now`, `ui.notify` (progress
 messages to your console), `ui.dialog` (ask the user a question and wait
@@ -171,8 +181,15 @@ context), `test.echo` (test-only)
 - When the model touches a path you have not granted, you are prompted
   with numbered choices including the intended purpose - no auto-grants.
 - File and directory deletes need their own DELETE grant.
-- Shell commands ask unless the prefix is allowlisted or AUTO-APPROVE
-  accepts a "safe:" model verdict (issue #224).
+- Shell commands ask unless the prefix is allowlisted or the consent posture
+  you picked accepts it: AUTO-APPROVE on a "safe:" model verdict (issue #224)
+  or YOLO for everything (issue #221). Postures are always the user's choice -
+  the model never flips them.
+- The disaster denylist overrides every posture AND every stored grant: a
+  well-known disaster (`rm -rf`, `mkfs`, `dd of=/dev/`, `sudo`, `git push -f`,
+  `curl | sh`, a fork bomb, `format C:`, `diskpart`, `del /s /q`,
+  `Remove-Item -Recurse -Force`, ...) always reaches the dialog as a one-off
+  Allow, with no "Always allow" option offered (issue #221).
 - Sensitive files/dirs (`.env*`, `.git/`, `.harness/`) can never be
   granted.
 

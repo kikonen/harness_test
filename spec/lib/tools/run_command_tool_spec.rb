@@ -23,11 +23,12 @@ RSpec.describe Tools::RunCommandTool do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
       tool = described_class.new(list, {})
-      # "rm -rf /" offers 'rm' and 'rm -rf', so:
-      # Allow(1), 'rm'(2), 'rm -rf'(3), Cancel(4).
-      drive_dialog("4 this command is too broad, narrow it\n")
+      # "bundle exec rake test" offers its prefix candidates, so:
+      # Allow(1), 'bundle'(2), 'bundle exec'(3), 'bundle exec rake'(4),
+      # 'bundle exec rake test'(5), Cancel(6).
+      drive_dialog("6 this command is too broad, narrow it\n")
 
-      out = tool.execute('command' => 'rm -rf /')
+      out = tool.execute('command' => 'bundle exec rake test')
       expect(out).to start_with('error: user denied executing the command')
       expect(out).to include('user\'s note: "this command is too broad, narrow it"')
     end
@@ -37,10 +38,11 @@ RSpec.describe Tools::RunCommandTool do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
       tool = described_class.new(list, {})
-      # Allow(1), 'rm'(2), 'rm -rf'(3), Cancel(4).
-      drive_dialog("4\n")
+      # Allow(1), 'bundle'(2), 'bundle exec'(3), 'bundle exec rake'(4),
+      # 'bundle exec rake test'(5), Cancel(6).
+      drive_dialog("6\n")
 
-      out = tool.execute('command' => 'rm -rf /')
+      out = tool.execute('command' => 'bundle exec rake test')
       expect(out).to eq('error: user denied executing the command')
     end
   end

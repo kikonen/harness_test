@@ -163,6 +163,12 @@ class CLI
     # Only effective with command_safety_check on.
     opts[:command_safety_auto_approve] = config.command_safety_auto_approve_enabled
 
+    # issue #221: initial YOLO posture (shell consent OFF for run.command)
+    # and whether the `!` bang syntax keeps its confirmation. Both default
+    # to the conservative value (YOLO off, bang confirmation on).
+    opts[:yolo] = config.yolo_enabled?
+    opts[:bang_requires_confirmation] = config.bang_requires_confirmation?
+
     opts[:compact_recent]   ||= config.compact_recent_messages
     opts[:compact_auto_threshold] = config.compact_auto_threshold
     opts[:compact_max_size] = config.compact_max_size

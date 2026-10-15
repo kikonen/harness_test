@@ -30,6 +30,11 @@ RSpec.describe SessionManager do
     Class.new do
       attr_accessor :session, :client, :history
 
+      # issue #221: save/resume persists the YOLO consent posture, so the
+      # stub mirrors Harness#yolo? / yolo=.
+      attr_writer :yolo
+      def yolo?; @yolo == true; end
+
       def initialize(session, client)
         @session = session
         @client  = client
@@ -426,6 +431,83 @@ RSpec.describe SessionManager do
       end
     end
   end
+  # issue #221: the YOLO consent posture travels with the session save
+  # (like active_model / param_overrides - it is harness state, not
+  # conversation state). A session saved with YOLO ON resumes with consent
+  # still OFF for the dialog; saved OFF resumes OFF even when the config
+  # initial posture would be ON (what the session had is what it gets
+  # back). A session saved BEFORE the feature has no key and stays MANUAL.
+  describe 'YOLO posture round trip (issue #221)' do
+    def save_with_yolo(dir, on)
+      file_list = FileList.new([], workdir: dir)
+      manager   = described_class.new(harness, file_list)
+      harness.yolo = on
+      session.add_user('hello')
+      manager.save_session
+      JSON.parse(File.read(manager.session_file_path(session.session_id)))
+    end
+
+    it 'saves the posture as a plain boolean' do
+      Dir.mktmpdir do |dir|
+        data = save_with_yolo(dir, true)
+        expect(data['yolo']).to be(true)
+
+        data = save_with_yolo(dir, false)
+        expect(data['yolo']).to be(false)
+      end
+    end
+
+    it 'resume restores a saved YOLO-ON posture even when the harness starts OFF' do
+      Dir.mktmpdir do |dir|
+        data = save_with_yolo(dir, true)
+
+        # Fresh session, harness OFF (the config default): the saved
+        # posture must win - consent stays off, not silently re-enabled.
+        new_session = Session.new('system prompt')
+        harness.session = new_session
+        harness.yolo = false
+        file_list = FileList.new([], workdir: dir)
+        manager   = described_class.new(harness, file_list)
+
+        manager.resume_session(data['session_id'])
+        expect(harness.yolo?).to be(true)
+      end
+    end
+
+    it 'resume turns a saved YOLO-OFF posture back off even when the harness starts ON' do
+      Dir.mktmpdir do |dir|
+        data = save_with_yolo(dir, false)
+
+        # Harness left YOLO ON (e.g. from the config initial posture):
+        # what the SESSION had is what it gets back.
+        new_session = Session.new('system prompt')
+        harness.session = new_session
+        harness.yolo = true
+        file_list = FileList.new([], workdir: dir)
+        manager   = described_class.new(harness, file_list)
+
+        manager.resume_session(data['session_id'])
+        expect(harness.yolo?).to be(false)
+      end
+    end
+
+    it 'a session saved BEFORE the feature (no yolo key) resumes MANUAL' do
+      Dir.mktmpdir do |dir|
+        # The pre-#221 JSON simply has no 'yolo' key at all.
+        data = save_with_yolo(dir, false)
+        data.delete('yolo')
+        path = File.join(dir, '.harness', 'sessions', data['session_id'], 'session.json')
+        File.write(path, JSON.generate(data))
+
+        harness.yolo = true
+        file_list = FileList.new([], workdir: dir)
+        manager   = described_class.new(harness, file_list)
+
+        manager.resume_session(data['session_id'])
+        expect(harness.yolo?).to be(false)
+      end
+    end
+  end
 end
 
 RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
@@ -455,6 +537,9 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
         @history = nil
       end
       attr_reader :options, :logger
+      # issue #221: stub mirrors Harness#yolo? / yolo= (save/resume).
+      attr_writer :yolo
+      def yolo?; @yolo == true; end
       def rebind_logger; @logger; end
       def compact_recent_messages; 6; end
       def compact_auto_threshold; 88; end
@@ -473,7 +558,6 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
   it '#param_overrides is memoized (same instance across calls)' do
     expect(manager.param_overrides).to equal(manager.param_overrides)
   end
-
   it 'setting an override updates options immediately' do
     manager.param_overrides.set('reasoning_effort', 'low')
     expect(options[:reasoning_effort]).to eq('low')

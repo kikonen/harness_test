@@ -26,6 +26,7 @@ require_relative 'commands/model_command'
 require_relative 'commands/param_command'
 require_relative 'commands/help_command'
 require_relative 'commands/exit_command'
+require_relative 'commands/yolo_command'
 
 # Thin dispatcher: checks if input starts with "/", extracts the first word,
 # looks up the command class in a registry map, and delegates.
@@ -57,6 +58,7 @@ class CommandHandler
     'param'         => Commands::ParamCommand,
     'help'          => Commands::HelpCommand,
     'exit'          => Commands::ExitCommand,
+    'yolo'          => Commands::YoloCommand,
   }.freeze
 
   def initialize(
@@ -133,6 +135,16 @@ class CommandHandler
     # Flatten multiline input the same way slash commands are flattened.
     command = command.gsub(/\s*\n\s*/, ' ').strip
 
+    # Issue #221: the bang path is the one place where the harness asks a
+    # human to confirm a command the SAME human just typed - the purest form
+    # of consent fatigue. The config key 'bang_requires_confirmation'
+    # (default true, i.e. today's behavior) lets the user drop it: with the
+    # key false, auto_approve_all is passed to the runner and every bang
+    # command runs immediately. YOLO does NOT cover bang syntax - the
+    # human's own typing is already the consent, so a separate switch
+    # controls it (the user's choice for issue #221). Either way the
+    # disaster denylist still gates the command: `! rm -rf /` is always
+    # confirmed.
     runner = CommandRunner.new(
       @file_list,
       @options,
@@ -140,7 +152,9 @@ class CommandHandler
       harness: @harness, # failed commands traced in harness.log (issue #185)
       title_fmt: CommandRunner::BANG_TITLE,
       ui: @ui,
-      list: :shell)
+      list: :shell,
+      # Default true: bang commands keep the confirmation dialog (issue #221).
+      auto_approve_all: @options[:bang_requires_confirmation] == false)
     result = runner.run(command).to_s
 
     if result.start_with?('error: user denied')
