@@ -507,7 +507,7 @@ class Task
     # WHY IT IS A HACK: this hard-codes ONE slash command into Task's note
     # plumbing (its own regex, duplicating knowledge CommandHandler's
     # COMMANDS registry already owns) - it does not scale to more gestures.
-    # The agreed follow-up (see harness.md Pending/Deferred) is to make
+    # The agreed follow-up (issue #267) is to make
     # mid-turn notes dispatch through the shared slash-command registry as
     # part of the async-task + CLI refactoring, and delete this branch.
     if (toggle = yolo_note_action(note))

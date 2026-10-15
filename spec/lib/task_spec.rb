@@ -691,7 +691,7 @@ RSpec.describe Task do
   # chain. Unit-level on Task.commit_note - the drain-loop wiring is the
   # same one the note specs above already prove.
   #
-  # HACK (acknowledged, see harness.md Pending/Deferred): the gesture is
+  # HACK (acknowledged, issue #267): the gesture is
   # special-cased per command inside Task's note plumbing. These specs pin
   # the CONTRACT (only an exact /yolo flips state, a real note never
   # does, the ack lands on ui + buffer) so the gesture-dispatch refactor
