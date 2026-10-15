@@ -65,8 +65,11 @@ Keep this in mind:
 - The posture is ALWAYS labeled (issue #221 review): `Harness#command_mode_label`
   never returns nil for a real harness (MANUAL when nothing is auto-approved),
   and it is shown in the startup banner ("Command consent: ..."), the prompt
-  modeline ("[model (effort)] [cmd: MANUAL] >") and the spinner badge at the
+  modeline ("[model (effort)] [MANUAL] >") and the spinner badge at the
   END of the spinner line - never between the glyph and the progress message.
+  The tag is the BARE bracketed label - a "cmd:" prefix inside the brackets is
+  redundant noise (the brackets already mark it as a tag); same for ack lines
+  ("[YOLO ON]", "[mode is now AUTO-APPROVE]").
 - A spinner must not reset to the bare "Working..." default mid-wait: the Task
   remembers the last :spinner_detail and re-plays it whenever the drain loop
   has to build a new spinner for the same wait.

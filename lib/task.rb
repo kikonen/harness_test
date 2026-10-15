@@ -430,12 +430,13 @@ class Task
     task.spinner = spinner
   end
 
-  # The command consent MODE badge ("[cmd: AUTO-APPROVE]" / "[cmd: MANUAL]")
-  # or nil to render nothing (safety check off). Reads the live value each
-  # frame so a mid-turn toggle is reflected immediately.
+  # The command consent MODE badge ("[AUTO-APPROVE]" / "[MANUAL]" / "[YOLO]")
+  # or nil to render nothing. The bare label is the tag - a "cmd:" prefix
+  # adds nothing the brackets do not already say (issue #221 review). Reads
+  # the live value each frame so a mid-turn toggle is reflected immediately.
   def self.mode_badge(harness)
     label = harness.command_mode_label
-    label.nil? ? nil : "[cmd: #{label}]"
+    label.nil? ? nil : "[#{label}]"
   end
 
   # Spinner frame for this tick: visible only while waiting on an EMPTY
@@ -521,7 +522,7 @@ class Task
       end
       label = task.harness.respond_to?(:yolo_mode_label) \
                 ? task.harness.yolo_mode_label : nil
-      line  = "  [cmd: #{label || 'YOLO toggle unavailable'}]"
+      line  = "  [#{label || 'YOLO toggle unavailable'}]"
       task.ui.puts(line)
       task.buffer.put(type: :text, origin: :user_note, content: line)
       return
@@ -554,8 +555,8 @@ class Task
   # when the harness does not support the toggle (nothing was flipped).
   def self.ack_command_mode(task, label)
     ui = task.ui
-    line = label.nil? ? "  [cmd: mode toggle unavailable]" \
-                      : "  [cmd: mode is now #{label}]"
+    line = label.nil? ? "  [mode toggle unavailable]" \
+                      : "  [mode is now #{label}]"
     ui.puts(line)
     task.buffer.put(type: :text, origin: :user_note, content: line)
   end

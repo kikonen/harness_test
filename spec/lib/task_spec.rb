@@ -299,7 +299,7 @@ RSpec.describe Task do
       described_class.ensure_spinner_running(task)
 
       expect(task.visible_spinner.badge).to respond_to(:call)
-      expect(task.visible_spinner.badge.call).to eq('[cmd: AUTO-APPROVE]')
+      expect(task.visible_spinner.badge.call).to eq('[AUTO-APPROVE]')
     end
 
     it 'installs no badge for a harness without a mode (unit-test harness)' do
@@ -316,13 +316,15 @@ RSpec.describe Task do
       expect(described_class.mode_badge(mode_harness(nil))).to be_nil
     end
 
-    it 'mode_badge brackets the label for display' do
+    # issue #221 review: the bare bracketed label IS the tag - a "cmd:"
+    # prefix inside the brackets says nothing the brackets do not say.
+    it 'mode_badge brackets the bare label for display' do
       expect(described_class.mode_badge(mode_harness('MANUAL')))
-        .to eq('[cmd: MANUAL]')
+        .to eq('[MANUAL]')
       expect(described_class.mode_badge(mode_harness('AUTO-APPROVE')))
-        .to eq('[cmd: AUTO-APPROVE]')
+        .to eq('[AUTO-APPROVE]')
       # issue #221: YOLO wins the badge the same way (Harness#command_mode_label).
-      expect(described_class.mode_badge(mode_harness('YOLO'))).to eq('[cmd: YOLO]')
+      expect(described_class.mode_badge(mode_harness('YOLO'))).to eq('[YOLO]')
     end
 
     it 'does not replace an already running spinner' do
@@ -759,8 +761,8 @@ RSpec.describe Task do
       expect(harness.yolo?).to be(true)
       expect(harness.toggles).to eq(1)
       expect(harness.notes).to be_empty # consumed, never injected
-      expect(io.string).to include('[cmd: YOLO ON]')
-      expect(buf.map { |e| e[:content] }).to eq(['  [cmd: YOLO ON]'])
+      expect(io.string).to include('[YOLO ON]')
+      expect(buf.map { |e| e[:content] }).to eq(['  [YOLO ON]'])
       expect(buf.map { |e| e[:origin] }).to eq([:user_note])
     end
 
@@ -775,7 +777,7 @@ RSpec.describe Task do
 
       described_class.commit_note(task, '/YOLO OFF') # casing tolerated
       expect(harness.yolo?).to be(false)
-      expect(io.string).to include('[cmd: YOLO OFF]')
+      expect(io.string).to include('[YOLO OFF]')
     end
 
     it 'recognizes the gesture forms (bare marker is :toggle, never nil)' do

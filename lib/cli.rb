@@ -384,9 +384,10 @@ class CLI
       mode = @harness.command_mode_label
       # Bracketed model name keeps the prompt visually distinct from replies.
       # issue #221 review (bug 2): the posture bracket follows the model
-      # bracket, e.g. "[qwen (medium)] [cmd: YOLO] >".
+      # bracket, e.g. "[qwen (medium)] [YOLO] >" - the bare label is the
+      # tag, a "cmd:" prefix would only be noise inside the brackets.
       tags   = ["[#{model ? "#{model} (#{effort})" : effort}]"]
-      tags  << "[cmd: #{mode}]" if mode
+      tags  << "[#{mode}]" if mode
       prefix = "#{tags.join(' ')} > "
       ctx = @harness.context_indicator
       ui.puts ctx ? "#{ctx} #{prefix}" : prefix
@@ -402,7 +403,7 @@ class CLI
         label = UI::Editor::CtrlAState.label
         UI::Editor::CtrlAState.reset!
         ui.puts label.nil? ? '  (command mode toggle unavailable - safety check off)' \
-                            : "  [cmd: mode is now #{label}]"
+                            : "  [mode is now #{label}]"
         next
       end
 

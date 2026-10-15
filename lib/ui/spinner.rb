@@ -22,8 +22,8 @@ module UI
     attr_reader :ui
 
     # A live status badge rendered at the END of the frame line (issue #224
-    # follow-up: the command consent MODE, e.g. "[cmd: YOLO]"). It may be a
-    # plain string or a callable re-evaluated on EVERY frame so it always
+    # follow-up: the command consent MODE, e.g. "[YOLO]"). It may be a plain
+    # string or a callable re-evaluated on EVERY frame so it always
     # shows the CURRENT state (the mode can be toggled live mid-turn).
     # nil/blank renders nothing. The Task drain loop installs it once; it is
     # shared by every frame of the turn. Placement matters: the progress

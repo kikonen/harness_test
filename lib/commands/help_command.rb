@@ -64,9 +64,9 @@ module Commands
           When on, before the consent dialog for an UNAPPROVED command the
           model itself is asked whether the command looks safe; the verdict
           is shown as an advisory note in the dialog. The spinner always
-          shows the current consent mode as a [cmd: ...] badge at the END of
+          shows the current consent mode as a [MODE] badge at the END of
           the spinner line, and the same bracket is in the prompt line
-          ("[model (effort)] [cmd: MANUAL] >") plus the startup banner, so
+          ("[model (effort)] [MANUAL] >") plus the startup banner, so
           the posture is visible even while idle.
           AUTO-APPROVE mode (initial posture from config
           'command_safety_auto_approve'): commands the model verdicts
@@ -77,7 +77,7 @@ module Commands
         Shell consent postures (issue #221, the consent-fatigue fix):
           The active posture is ALWAYS labeled - in the banner
           ("Command consent: ..."), in the prompt line and in the spinner
-          badge ([cmd: MANUAL] / [cmd: AUTO-APPROVE] / [cmd: YOLO]).
+          badge ([MANUAL] / [AUTO-APPROVE] / [YOLO]).
           Three levels of how much manual approval a run.command call needs,
           always chosen by the USER (the model never decides):
             MANUAL       - every unapproved command asks (the default).

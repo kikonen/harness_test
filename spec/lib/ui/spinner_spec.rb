@@ -231,38 +231,38 @@ RSpec.describe UI::Spinner do
 
     it 'renders a plain-string badge at the end of the line' do
       out = capture('Working') do |spinner|
-        spinner.badge = '[cmd: MANUAL]'
+        spinner.badge = '[MANUAL]'
         spinner.start
         spinner.render!
         spinner.stop
       end
-      expect(out).to include("#{UI::Spinner::FRAMES[0]} Working... [cmd: MANUAL]")
+      expect(out).to include("#{UI::Spinner::FRAMES[0]} Working... [MANUAL]")
     end
 
     it 're-evaluates a callable badge every frame so it tracks live state' do
       mode = 'MANUAL'
       out = capture('Working') do |spinner|
-        spinner.badge = -> { "[cmd: #{mode}]" }
+        spinner.badge = -> { "[#{mode}]" }
         spinner.start
         spinner.render!
         mode = 'AUTO-APPROVE'
         spinner.render!
         spinner.stop
       end
-      expect(out).to include("#{UI::Spinner::FRAMES[0]} Working... [cmd: MANUAL]")
-      expect(out).to include("#{UI::Spinner::FRAMES[1]} Working... [cmd: AUTO-APPROVE]")
+      expect(out).to include("#{UI::Spinner::FRAMES[0]} Working... [MANUAL]")
+      expect(out).to include("#{UI::Spinner::FRAMES[1]} Working... [AUTO-APPROVE]")
     end
 
     it 'renders a nil badge value as nothing on the very next frame' do
       out = capture('Working') do |spinner|
-        spinner.badge = -> { '[cmd: MANUAL]' }
+        spinner.badge = -> { '[MANUAL]' }
         spinner.start
         spinner.render!
         spinner.badge = -> { nil } # safety check switched off -> no badge
         spinner.render!
         spinner.stop
       end
-      expect(out).to include('Working... [cmd: MANUAL]')
+      expect(out).to include('Working... [MANUAL]')
       expect(out).to include("#{UI::Spinner::FRAMES[1]} Working...")
       # The SECOND frame must carry no badge at all (frame 0 legitimately
       # does, so the assertion is anchored on the second frame's glyph).
@@ -271,12 +271,12 @@ RSpec.describe UI::Spinner do
 
     it 'combines a badge with a suffix' do
       out = capture('Working', 'ctx 1/2 (50%)') do |spinner|
-        spinner.badge = '[cmd: AUTO-APPROVE]'
+        spinner.badge = '[AUTO-APPROVE]'
         spinner.start
         spinner.render!
         spinner.stop
       end
-      expect(out).to include('Working... ctx 1/2 (50%) [cmd: AUTO-APPROVE]')
+      expect(out).to include('Working... ctx 1/2 (50%) [AUTO-APPROVE]')
     end
 
     it 'falls back to no badge when the callable raises' do

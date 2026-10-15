@@ -50,7 +50,9 @@ module Commands
     # label defaults to the CURRENT state (used by /yolo status).
     def report(label = @harness.yolo_mode_label)
       on = @harness.yolo?
-      @ui.puts "  [cmd: #{label}]"
+      # The bare bracketed label is the ack - a "cmd:" prefix says nothing
+      # the brackets do not already say (issue #221 review).
+      @ui.puts "  [#{label}]"
       @ui.puts on ? '  Shell consent for run.command is OFF - commands run ' \
                   'without asking.' \
                  : '  Shell consent is ON - unapproved commands ask as before.'
