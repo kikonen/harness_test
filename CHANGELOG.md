@@ -7,6 +7,23 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - TextNormalizer preserves multi-byte text (issue #268)
+
+- Fix: command output lost every non-ASCII character. The child pipe
+  accumulator is BINARY (the #257 design), and `String#encode` FROM a BINARY
+  tag maps each byte separately, so a valid UTF-8 character was destroyed one
+  byte at a time - a 2-byte letter became two '?' and a 3-byte glyph became
+  three. A native Finnish `wc -c` total line arrived as `yhteens??`, i.e.
+  command output with non-ASCII text was simply unreadable.
+- `normalize` now treats a BINARY tag as a BYTE CONTAINER rather than a text
+  encoding: read the bytes as UTF-8 first, fall back to the ambient code page
+  only when they are not valid UTF-8, and only then replace what genuinely
+  cannot be mapped. The fallback refuses BINARY as `default_external`.
+- Fix: a string byte-invalid in its OWN declared code page was returned still
+  tagged with that code page (scrub in place), re-introducing the
+  Encoding::CompatibilityError the #257 boundary exists to prevent. scrub now
+  runs on a UTF-8 copy, so the return type is always valid UTF-8.
+
 ## Unreleased - YOLO consent posture (PR #266, issues #221 / #254)
 
 - YOLO posture: `/yolo [on|off|status]` skips the `run.command` consent

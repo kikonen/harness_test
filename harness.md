@@ -66,11 +66,14 @@ Keep this in mind:
 - Encoding: text that comes from OUTSIDE the process (shell output, file
   reads, model-supplied tool-call arguments, git output, the LLM response
   body) can be byte-invalid in UTF-8 or tagged with a code page, so it is
-  normalized once at each read boundary by `TextNormalizer` - bytes that
-  cannot be represented become the printable ASCII replacement `?`, which
-  keeps output inspectable and cannot itself break JSON or the console.
-  Already-valid UTF-8 is returned untouched. Downstream consumers (strip,
-  split, gsub, regex, JSON.generate for the session save) then never raise.
+  normalized once at each read boundary by `TextNormalizer`, which always
+  RETURNS valid UTF-8: a BINARY tag is a byte container (read the bytes as
+  UTF-8 first, then the ambient code page), a declared code page is
+  transcoded, and only bytes that genuinely cannot be represented become the
+  printable ASCII replacement `?`. A naive transcode from a BINARY tag
+  destroys every multi-byte character (issue #268) - never #encode from
+  BINARY yourself. Downstream consumers (strip, split, gsub, regex,
+  JSON.generate for the session save) then never raise.
 - Spec layout: tests live under `spec/` mirroring the tree they test -
   e.g. `lib/ui/dialog.rb` is tested by `spec/lib/ui/dialog_spec.rb`, and tools
   in `lib/tools/` are tested in `spec/lib/tools/` (e.g.
