@@ -26,7 +26,11 @@ Keep this in mind:
 - 2-space indentation, no tabs.
 - Preserve existing formatting and style when editing - do not reformat
   untouched code.
-- Comments explain *why*, not *what*.
+- Comments follow the WWWW rule: What / Why / When / Who / * - the star
+  being whatever the code cannot tell the reader (an invariant, a gotcha,
+  a labeled HACK with its issue). Lead with *why*; *what* is already in
+  the code, so document it only where a complex algorithm genuinely hides
+  it. Say each thing once, skip the obvious, no filler.
 - Prefer small, focused methods; keep classes cohesive.
 - Lines should be at maximum 90 characters long.
 - Ruby and other text files must retain trailing newline in the end

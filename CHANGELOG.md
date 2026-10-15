@@ -41,6 +41,10 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   sections were dropped (constants live in the code, deferred work in open
   issues #244 / #254 / #183 / #267), as were the self-descriptive notes about
   how harness.md itself is loaded - the model does not need them to code.
+- Code Style now states the WWWW comment rule (What / Why / When / Who / *,
+  the star being what the code cannot tell the reader): lead with *why*,
+  document *what* only where a complex algorithm hides it, say each thing
+  once. It replaces the bare "comments explain why, not what" line.
 - Follow-up: issue #267 for the mid-turn gesture-dispatch refactor (remove
   the labeled `/yolo` HACK in `Task#commit_note`).
 
