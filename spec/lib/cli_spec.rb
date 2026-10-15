@@ -33,6 +33,38 @@ RSpec.describe CLI do
     end
   end
 
+  # issue #221 review (bug 2): the shell consent posture is stated in the
+  # startup banner so the run's approval behavior is visible from the first
+  # line (YOLO ON must never look like "nothing ever asks").
+  describe 'startup banner - command consent posture' do
+    it 'names the MANUAL posture and how to change it' do
+      cli = build_cli
+      allow(cli).to receive(:get_command).and_return(nil)
+
+      expect(ui).to receive(:puts)
+        .with(/^Command consent: MANUAL - unapproved commands ask/)
+        .ordered
+      expect(ui).to receive(:puts).at_least(:once)
+
+      cli.run
+    end
+
+    it 'names YOLO with the disaster floor still asking' do
+      cli = build_cli
+      allow(cli).to receive(:get_command).and_return(nil)
+      cli.harness.yolo = true
+
+      expected = 'Command consent: YOLO - unapproved commands run ' \
+                 'without asking; disaster commands still ask'
+      expect(ui).to receive(:puts)
+        .with(expected)
+        .ordered
+      expect(ui).to receive(:puts).at_least(:once)
+
+      cli.run
+    end
+  end
+
   describe '#run' do
     it 'prints the session id and its log path in the banner' do
       cli = build_cli
@@ -76,6 +108,28 @@ RSpec.describe CLI do
         editor_result('hello world', :submitted))
 
       expect(cli.send(:get_command)).to eq('hello world')
+    end
+
+    # issue #221 review (bug 2): the prompt modeline carries the consent
+    # posture bracket next to the model bracket, so it is visible on every
+    # turn (the spinner only exists while the model works).
+    it 'shows the consent posture in the prompt modeline' do
+      allow(editor).to receive(:read_multiline).and_return(
+        editor_result('x', :submitted))
+
+      expect(ui).to receive(:puts).with(/test-model .* \[cmd: MANUAL\] > /)
+
+      cli.send(:get_command)
+    end
+
+    it 'shows [cmd: YOLO] in the prompt modeline when YOLO is on' do
+      allow(editor).to receive(:read_multiline).and_return(
+        editor_result('x', :submitted))
+      cli.harness.yolo = true
+
+      expect(ui).to receive(:puts).with(/\[cmd: YOLO\] > /)
+
+      cli.send(:get_command)
     end
 
     it 'keeps a cancelled buffer as the draft and re-prompts' do

@@ -312,15 +312,20 @@ class Harness
     yolo_mode_label
   end
 
-  # The full command-consent MODE as one short label: YOLO wins over the
-  # #224 AUTO-APPROVE / MANUAL pair (YOLO means no consent check at all).
-  # nil renders no badge - shown only when something is switchable: with
-  # YOLO off and the safety check off there is no posture to display.
+  # The full command-consent MODE as one short label. The label is ALWAYS
+  # present (issue #221 review, bug 2/3): the posture is a fact the user
+  # should be able to read at any moment, not something shown only when it
+  # happens to be switchable. YOLO wins over the #224 AUTO-APPROVE / MANUAL
+  # pair (YOLO means no consent check at all) and does not need the safety
+  # check on to have a label - a YOLO run with the check off is exactly the
+  # state worth showing. MANUAL is the plain default: every unapproved
+  # command asks. nil only for a harness that has no posture concept at all
+  # (unit-test doubles do not implement this method).
   def command_mode_label
     return 'YOLO' if @yolo
-    return nil unless command_safety_check
+    return 'AUTO-APPROVE' if command_safety_auto_approve_effective?
 
-    command_safety_auto_approve ? 'AUTO-APPROVE' : 'MANUAL'
+    'MANUAL'
   end
 
   # Short label for the /yolo ack line.

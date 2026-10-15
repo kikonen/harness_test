@@ -21,12 +21,15 @@ module UI
 
     attr_reader :ui
 
-    # A live status badge rendered between the frame and the message
-    # (issue #224 follow-up: the command consent MODE, e.g. "[cmd:
-    # AUTO-APPROVE]"). It may be a plain string or a callable re-evaluated
-    # on EVERY frame so it always shows the CURRENT state (the mode can be
-    # toggled live mid-turn). nil/blank renders nothing. The Task drain
-    # loop installs it once; it is shared by every frame of the turn.
+    # A live status badge rendered at the END of the frame line (issue #224
+    # follow-up: the command consent MODE, e.g. "[cmd: YOLO]"). It may be a
+    # plain string or a callable re-evaluated on EVERY frame so it always
+    # shows the CURRENT state (the mode can be toggled live mid-turn).
+    # nil/blank renders nothing. The Task drain loop installs it once; it is
+    # shared by every frame of the turn. Placement matters: the progress
+    # message ("Sending to model...") is what the user reads first, so the
+    # posture tag trails it instead of interrupting it (issue #221 review,
+    # bug 3 - the tag between the glyph and the message read as incoherent).
     def badge=(value)
       @badge = value
     end
@@ -116,7 +119,7 @@ module UI
     # One spinner frame as a plain string (no \r, no write). Public so tests
     # can assert the exact frame text without capturing stdout.
     def line(i)
-      "#{FRAMES[i % FRAMES.size]}#{render_badge} #{@message}...#{render_suffix}"
+      "#{FRAMES[i % FRAMES.size]} #{@message}...#{render_suffix}#{render_badge}"
     end
 
     def frame_line

@@ -113,6 +113,12 @@ class Task
     @buffer  = OutputBuffer.new    # structured log (runner fills it)
     @spinner = nil
     @thread  = nil
+    # The LAST spinner content the task asked for ({message:, suffix:}).
+    # The drain loop recreates the spinner every time the outbox empties
+    # again, and a fresh spinner would otherwise fall back to the default
+    # 'Working' message - the "Sending to model..." line must not reset
+    # mid-turn (issue #221 review, bug 1).
+    @spinner_detail = nil
     @ui      = nil                 # set by Task.run before start
     @dialog_open = false           # true while perform_direct is on stdin
     @note_editor  = nil            # issue #36: mid-turn steering editor
@@ -121,6 +127,18 @@ class Task
   end
 
   attr_writer :ui
+
+  # -- Spinner content memory (issue #221 review, bug 1) ---------------------
+
+  attr_reader :spinner_detail
+
+  # Remember what the task asked the spinner to show (a {message:, suffix:}
+  # payload from :spinner_detail). ensure_spinner_running re-plays it when
+  # it has to build a NEW spinner for the same wait, so the spinner line
+  # keeps its real message instead of resetting to 'Working...'.
+  def record_spinner_detail(payload)
+    @spinner_detail = payload if payload.is_a?(Hash)
+  end
 
   # True while the main thread is inside a dialog's perform_direct
   # (stdin read + prompt print) - store_and_render must not clear any
@@ -315,10 +333,6 @@ class Task
       poll_for_note(task)
 
       loop do
-        # Spinner visible only while waiting on an EMPTY outbox. No data
-        # means the task is silently working => animate.
-        show_spinner_if_waiting(task)
-
         # issue #36: peek for steering input; if the user is at the
         # keyboard, open the note editor on this thread. A committed note
         # lands on the harness where call_llm injects it before the next
@@ -327,7 +341,16 @@ class Task
 
         # Wait for the next event on the SINGLE queue (blocks up to timeout).
         msg = task.poll
-        next unless msg  # timeout expired, loop again (spinner re-renders)
+        # Issue #221 review (bug 1): poll FIRST, animate only on a quiet
+        # tick. Polling first gives the task thread its first ~100ms to say
+        # what it is doing (:spinner_detail), so the very first frame is the
+        # real message ("Sending to model...") instead of a stray 'Working'
+        # frame the user saw flash at the start of every turn.
+        if msg.nil?
+          # Timeout expired: no data means the task is silently working.
+          show_spinner_if_waiting(task)
+          next
+        end
 
         # Clear the spinner line BEFORE rendering any output so a stale
         # spin frame never survives above real text.
@@ -390,12 +413,17 @@ class Task
   def self.ensure_spinner_running(task)
     return if task.visible_spinner
 
-    spinner = UI::Spinner.new(DEFAULT_SPINNER_MESSAGE, ui: task.ui)
+    # Re-play the last requested spinner content (bug 1): a spinner built
+    # after an output batch cleared the previous one shows the SAME message
+    # the task asked for, not the bare default.
+    detail  = task.spinner_detail || {}
+    spinner = UI::Spinner.new(detail[:message] || DEFAULT_SPINNER_MESSAGE,
+                              detail[:suffix], ui: task.ui)
     # issue #224 follow-up: the spinner ALWAYS shows the current command
-    # consent MODE (a live badge, re-evaluated every frame) so the user
-    # can verify a Ctrl+A toggle took effect at a glance. A harness that
-    # does not expose the mode (unit-test harnesses) or a disabled safety
-    # check yields a nil label and renders no badge.
+    # consent MODE (a live badge at the END of the line, re-evaluated every
+    # frame) so the user can verify a /yolo or Ctrl+A toggle took effect at
+    # a glance. A harness that does not expose the mode (unit-test
+    # harnesses) yields a nil label and renders no badge.
     harness = task.harness
     spinner.badge = -> { mode_badge(harness) } if harness.respond_to?(:command_mode_label)
     spinner.start
@@ -568,6 +596,9 @@ class Task
       # cleared if the previous batch was non-spinner output).
       ensure_spinner_running(task) unless task.visible_spinner
       task.visible_spinner&.update_detail(**payload)
+      # Remember it so a spinner rebuilt later in the same wait keeps this
+      # message instead of falling back to 'Working...' (bug 1).
+      task.record_spinner_detail(payload)
       task.buffer.put(type: :spinner_detail, origin: msg[:origin] || :task, content: msg[:content])
     when :text
       ui.puts(msg[:content].to_s)

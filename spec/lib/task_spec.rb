@@ -258,6 +258,29 @@ RSpec.describe Task do
     end
   end
 
+  # issue #221 review (bug 1): the spinner content the task asked for is
+  # remembered, so a spinner rebuilt later in the same wait does not fall
+  # back to the bare 'Working' default.
+  describe 'spinner detail memory' do
+    let(:task) { described_class.new { |_t| } }
+
+    it 'spinner_detail is nil until something is recorded' do
+      expect(task.spinner_detail).to be_nil
+    end
+
+    it 'record_spinner_detail stores a hash payload' do
+      task.record_spinner_detail(message: 'Sending', suffix: 'ctx 12%')
+
+      expect(task.spinner_detail).to eq(message: 'Sending', suffix: 'ctx 12%')
+    end
+
+    it 'ignores a non-hash payload (nothing to re-play)' do
+      task.record_spinner_detail('Sending')
+
+      expect(task.spinner_detail).to be_nil
+    end
+  end
+
   # issue #224 follow-up: the spinner badge ALWAYS shows the command
   # consent mode (live, re-read every frame) when the harness exposes it.
   describe 'Task.ensure_spinner_running mode badge (issue #224 follow-up)' do
@@ -311,6 +334,23 @@ RSpec.describe Task do
       first = task.spinner
       described_class.ensure_spinner_running(task)
       expect(task.spinner).to equal(first)
+    end
+
+    # issue #221 review (bug 1): the spinner is recreated whenever the
+    # outbox empties again after an output batch cleared it - the new
+    # spinner must show the message the task asked for, not 'Working'.
+    it 'a rebuilt spinner re-plays the recorded spinner detail' do
+      task = described_class.new { |_t| }
+      task.ui = UI::Console.new(stdout: StringIO.new)
+      task.harness = mode_harness('MANUAL')
+      task.record_spinner_detail(message: 'Sending to qwen', suffix: 'ctx 12%')
+
+      described_class.ensure_spinner_running(task)
+      line = task.visible_spinner.frame_line
+
+      expect(line).to include('Sending to qwen...')
+      expect(line).to include('ctx 12%')
+      expect(line).not_to include('Working')
     end
   end
 
@@ -368,6 +408,30 @@ RSpec.describe Task do
       expect(io_out.string).to include('ctx 12%')
     end
 
+    # issue #221 review, bug 1: the reported symptom - after any output
+    # line the spinner came back as 'Working...' even though the task had
+    # said what it was doing. The line must keep its real message for the
+    # whole wait.
+    it 'the spinner does NOT reset to "Working..." after an output line' do
+      io_out = StringIO.new
+      io_in  = StringIO.new
+
+      described_class.run(harness: nil,
+                          ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
+        Task.emit(:spinner_detail, origin: :session_manager,
+                  content: { message: 'Sending to model' })
+        sleep 0.2                      # render 'Sending to model...' frames
+        Task.puts '[step 1] working'   # clears the spinner line
+        sleep 0.3                      # spinner is rebuilt here (bug 1 site)
+      end
+
+      captured = io_out.string
+
+      expect(captured).to include('[step 1] working')
+      expect(captured).to include('Sending to model...')
+      expect(captured).not_to include('Working...')
+    end
+
     it 'prints text events from the outbox in order (and keeps the spinner going after)' do
       io_out = StringIO.new
       io_in = StringIO.new
@@ -384,7 +448,9 @@ RSpec.describe Task do
 
       expect(captured).to include('[step 1] first')
       expect(captured).to include('[step 2] second')
-      expect(captured).to include('Working...') # default spinner re-shown
+      # No :spinner_detail was emitted, so the default message is correct
+      # here - the memory (bug 1 fix) only re-plays what the task asked for.
+      expect(captured).to include('Working...')
     end
 
     it 'handles a dialog request from the task thread on the main thread' do
