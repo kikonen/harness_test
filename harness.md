@@ -60,6 +60,9 @@ Keep this in mind:
 - Consent state is user-side harness state, never conversation state: it is
   not injected into the chain, and posture flags are coerced to real booleans
   on every setter.
+- A deferred value must be resolved lazily too: pass a getter or a forwarding
+  stand-in (`DeferredLogger`), never a nil placeholder snapshot - a consumer
+  that stores the value sees "not yet" forever (issue #270).
 - Line endings: the harness normalizes to LF for LLM-facing operations
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.

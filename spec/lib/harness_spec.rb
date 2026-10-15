@@ -218,6 +218,39 @@ RSpec.describe Harness do
       sessions_dir = File.join(workdir, Harness::HARNESS_DIR, 'sessions')
       expect(Dir.exist?(sessions_dir) ? Dir.children(sessions_dir) : []).to be_empty
     end
+
+    # issue #270: the client is built while there is NO logger yet, and the
+    # backend logs on the first attempt of every request. Handing it the nil
+    # placeholder killed the first prompt of a run where nothing else touched
+    # Harness#logger first (verbose off + auto_save off). The client must
+    # therefore never be able to observe a nil logger.
+    it 'gives the LLM client a deferred stand-in, never the nil placeholder' do
+      harness = build_harness(auto_save: false, verbose: false)
+
+      expect(harness.client.backend.logger).not_to be_nil
+      expect(harness.client.backend.logger).to be_a(DeferredLogger)
+      # The deferral itself is intact: no log dir just because a client exists.
+      expect(harness.instance_variable_get(:@logger)).to be_nil
+      expect(Dir.exist?(File.dirname(harness.session_log_path))).to be false
+    end
+
+    it 'logs the first request instead of raising on a nil logger' do
+      # The reported failure: "undefined method 'info' for nil" on the FIRST
+      # prompt. Nothing here touches Harness#logger before the request, so the
+      # stand-in is the only thing between the backend and a nil.
+      harness = build_harness(auto_save: false, verbose: false,
+                              base_url: 'http://127.0.0.1:1/v1', api: :openai,
+                              retry_count: 1, retry_delay: 0)
+
+      # Port 1: nothing listens. The request fails on connect, but only AFTER
+      # the backend has logged its attempt - that log line is the point.
+      expect {
+        harness.client.chat([{ role: 'user', content: 'hi' }])
+      }.to raise_error(LLMError)
+
+      log = File.read(harness.session_log_path)
+      expect(log).to include('REQ: POST').and include('attempt 1/')
+    end
   end
 
   describe '#rebind_logger (issue #113 / #123)' do
