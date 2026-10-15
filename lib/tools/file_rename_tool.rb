@@ -7,9 +7,8 @@ require 'fileutils'
 module Tools
 
   class FileRenameTool < Tool
-    def initialize(file_list, options, session = nil)
+    def initialize(file_list, session = nil)
       @file_list = file_list
-      @options   = options
       # issue #170: optional Session - when given, the digest cache entry
       # travels with the file (contents unchanged).
       @session   = session
@@ -61,11 +60,6 @@ module Tools
       if File.exist?(new_path)
         Tool.puts "  [file.rename] ✗ #{new_shown} (destination already exists)"
         return "error: destination '#{new_shown}' already exists - choose a different new path"
-      end
-
-      if @options[:dry_run]
-        Tool.puts "  [file.rename] ~ #{old_shown} → #{new_shown} (dry run)"
-        return "DRY RUN: would rename #{old_shown} to #{new_shown}"
       end
 
       dir = File.dirname(new_path)

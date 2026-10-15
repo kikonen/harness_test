@@ -7,9 +7,8 @@ require 'fileutils'
 module Tools
 
   class FileWriteTool < Tool
-    def initialize(file_list, options, session = nil)
+    def initialize(file_list, session = nil)
       @file_list = file_list
-      @options   = options
       # issue #170: optional Session - when given, writes are checked
       # against the digest cache (external-change detection) and record
       # the new digest on success. nil only for specs that never had a
@@ -58,11 +57,6 @@ module Tools
                  'Re-read the file with file.read, or report the external change ' \
                  'with file.touch if you know what happened.'
         end
-      end
-
-      if @options[:dry_run]
-        Tool.puts "  [file.write] ~ #{shown} (dry run, #{content.length} chars)"
-        return "DRY RUN: would write #{content.length} chars to #{shown}"
       end
 
       dir = File.dirname(path)

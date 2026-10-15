@@ -8,9 +8,8 @@ require_relative '../file_list'
 module Tools
 
   class FileDeleteTool < Tool
-    def initialize(file_list, options, session = nil)
+    def initialize(file_list, session = nil)
       @file_list = file_list
-      @options   = options
       # issue #170: optional Session - when given, the digest cache entry
       # is dropped when the file is deleted.
       @session   = session
@@ -48,11 +47,6 @@ module Tools
       unless File.file?(path)
         Tool.puts "  [file.delete] ✗ #{shown} (file does not exist)"
         return "error: file '#{shown}' does not exist on disk"
-      end
-
-      if @options[:dry_run]
-        Tool.puts "  [file.delete] ~ #{shown} (dry run)"
-        return "DRY RUN: would delete #{shown}"
       end
 
       File.delete(path)

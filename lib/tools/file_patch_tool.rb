@@ -50,9 +50,8 @@ module Tools
   class FilePatchTool < Tool
     SEARCH_WINDOW = 50  # lines to search above/below the declared position
 
-    def initialize(file_list, options, session = nil)
+    def initialize(file_list, session = nil)
       @file_list = file_list
-      @options   = options
       # issue #170: optional Session - when given, the digest cache is used
       # for external-change detection and refreshed after a successful patch.
       # nil only for specs without a prior read (nothing to detect).
@@ -146,11 +145,6 @@ module Tools
       new_content += "\n" if trailing_nl
       # Restore the original line-ending style.
       new_content = new_content.gsub("\n", "\r\n") if crlf
-
-      if @options[:dry_run]
-        Tool.puts "  [file.patch] ~ #{shown} (dry run, #{applied} hunk(s) applied)"
-        return "DRY RUN: would apply #{applied} hunk(s) to #{shown}"
-      end
 
       File.write(path, new_content)
 

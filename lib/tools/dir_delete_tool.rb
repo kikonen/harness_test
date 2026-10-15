@@ -11,9 +11,8 @@ require_relative '../file_list'
 module Tools
 
   class DirDeleteTool < Tool
-    def initialize(file_list, options)
+    def initialize(file_list)
       @file_list = file_list
-      @options   = options
       super(
         name: 'dir.delete',
         description: 'Deletes an EMPTY directory from disk. Non-empty directories are rejected - ' \
@@ -64,11 +63,6 @@ module Tools
         return Tool.denial_error(
           "error: delete access denied for '#{@file_list.display_path(path)}'", result
         ) unless Tool.granted?(result)
-      end
-
-      if @options[:dry_run]
-        Tool.puts "  [dir.delete] ~ #{shown} (dry run)"
-        return "DRY RUN: would delete empty directory #{shown}"
       end
 
       Dir.rmdir(path)
