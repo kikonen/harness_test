@@ -47,7 +47,7 @@ RSpec.describe Commands::YoloCommand do
     command(harness).handle('')
 
     expect(harness.yolo?).to be(true)
-    expect(io.string).to include('[cmd: YOLO ON]')
+    expect(io.string).to include('[YOLO ON]')
     expect(io.string).to include('Shell consent for run.command is OFF')
   end
 
@@ -56,7 +56,7 @@ RSpec.describe Commands::YoloCommand do
     command(harness).handle('')
 
     expect(harness.yolo?).to be(false)
-    expect(io.string).to include('[cmd: YOLO OFF]')
+    expect(io.string).to include('[YOLO OFF]')
     expect(io.string).to include('unapproved commands ask as before')
   end
 
@@ -78,7 +78,7 @@ RSpec.describe Commands::YoloCommand do
     command(harness).handle('status')
 
     expect(harness.yolo?).to be(true)
-    expect(io.string).to include('[cmd: YOLO ON]')
+    expect(io.string).to include('[YOLO ON]')
   end
 
   it 'prints the denylist floor reminder with examples' do

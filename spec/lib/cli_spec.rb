@@ -117,17 +117,17 @@ RSpec.describe CLI do
       allow(editor).to receive(:read_multiline).and_return(
         editor_result('x', :submitted))
 
-      expect(ui).to receive(:puts).with(/test-model .* \[cmd: MANUAL\] > /)
+      expect(ui).to receive(:puts).with(/test-model .* \[MANUAL\] > /)
 
       cli.send(:get_command)
     end
 
-    it 'shows [cmd: YOLO] in the prompt modeline when YOLO is on' do
+    it 'shows [YOLO] in the prompt modeline when YOLO is on' do
       allow(editor).to receive(:read_multiline).and_return(
         editor_result('x', :submitted))
       cli.harness.yolo = true
 
-      expect(ui).to receive(:puts).with(/\[cmd: YOLO\] > /)
+      expect(ui).to receive(:puts).with(/\[YOLO\] > /)
 
       cli.send(:get_command)
     end

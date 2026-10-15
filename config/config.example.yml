@@ -69,7 +69,7 @@ retry:
 # ("dangerous:" verdicts and missing verdicts still ask). Manual consent
 # (false) is the default. During a session the posture is toggled live
 # with Ctrl+A (note editor or idle prompt); the spinner always shows the
-# current mode as a [cmd: ...] badge (issue #224 follow-up).
+# current mode as a [MODE] badge at the end of its line (issue #224 follow-up).
 # command_safety_auto_approve: false
 
 # Shell consent postures (issue #221, the consent-fatigue fix). Three
