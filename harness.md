@@ -23,6 +23,10 @@ Keep this in mind:
   new rules take effect on the next prompt - no restart needed.
 - When creating temporary directories or files for testing use the "tmp"
   directory, not the root directory of the project.
+- This file is injected into EVERY system prompt, so it holds coding rules and
+  guidelines ONLY - never per-issue history or fixed-bug notes (those go to
+  `CHANGELOG.md` and the issue/PR). Keep every rule short enough to earn its
+  tokens: if the model does not need it to write correct code, do not add it.
 
 ## Code Style
 
@@ -52,30 +56,14 @@ Keep this in mind:
 - Destructive operations (file delete, dir delete) require a DELETE grant
   from the tool layer - do not bypass it, and never try to reach the same
   result through a shell command instead.
-- Shell consent postures (issue #221): three user-chosen levels of how much
-  manual approval a `run.command` call needs - MANUAL (default, every
-  unapproved command asks) < AUTO-APPROVE (a model "safe:" verdict skips the
-  dialog, `Ctrl+A`) < YOLO (no dialog, no model check, `/yolo`). The POSTURE
-  IS ALWAYS THE USER'S DECISION - the model must never try to flip it, and
-  new consent-related code must never weaken the disaster denylist
-  (`CommandAllowlist.disaster?`): a well-known disaster (rm -rf, format C:,
-  sudo, forced push, curl|sh, ...) keeps the dialog in EVERY posture and
-  gets no "Always allow" option. Anything that auto-approves a command
-  without a dialog must print a status line AND log it to harness.log.
-- The posture is ALWAYS labeled (issue #221 review): `Harness#command_mode_label`
-  never returns nil for a real harness (MANUAL when nothing is auto-approved),
-  and it is shown in the startup banner ("Command consent: ..."), the prompt
-  modeline ("[model (effort)] [MANUAL] >") and the spinner badge at the
-  END of the spinner line - never between the glyph and the progress message.
-  The tag is the BARE bracketed label - a "cmd:" prefix inside the brackets is
-  redundant noise (the brackets already mark it as a tag); same for ack lines
-  ("[YOLO ON]", "[mode is now AUTO-APPROVE]").
-- A spinner must not reset to the bare "Working..." default mid-wait: the Task
-  remembers the last :spinner_detail and re-plays it whenever the drain loop
-  has to build a new spinner for the same wait.
+- Consent code: new code must never weaken the disaster denylist
+  (`CommandAllowlist.disaster?`) - a well-known disaster keeps the consent
+  dialog in EVERY posture with no "Always allow" option - and anything that
+  auto-approves a command without a dialog must print a status line AND log
+  it to harness.log.
 - Consent state is user-side harness state, never conversation state: it is
-  not injected into the chain, and posture flags are coerced to real
-  booleans on every setter (`yolo=`, `command_safety_auto_approve=`).
+  not injected into the chain, and posture flags are coerced to real booleans
+  on every setter.
 - Line endings: the harness normalizes to LF for LLM-facing operations
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.
@@ -150,12 +138,6 @@ Keep this in mind:
   it is no longer "deferred".
 - CRLF handling: implemented in file.read / file.search / file.patch;
   verify end-to-end on Windows if patching still misbehaves.
-- Mid-turn `/yolo` steering-note gesture (issue #221): the intercept in
-  `Task.commit_note` (`yolo_note_action`) is an ACKNOWLEDGED HACK - it
-  hard-codes one slash command into Task's note plumbing (its own regex,
-  duplicating CommandHandler's COMMANDS registry) and does not scale to
-  more gestures. Accepted only as a stopgap: with the async-task + CLI
-  refactoring, mid-turn notes must dispatch through the shared
-  slash-command registry (state-toggle gestures only - no LLM round, no
-  prompt recursion) and the special case must be deleted. Track this as an
-  open issue when the PR is opened.
+- Mid-turn slash-command gestures: the `/yolo` intercept in `Task.commit_note`
+  is a labeled HACK (see its comment); the shared gesture-dispatch refactor is
+  tracked as issue #267.
