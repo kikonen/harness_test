@@ -7,6 +7,23 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - first prompt no longer dies on a nil logger (issue #270)
+
+- Fix: with `auto_save: false` (and verbose off), the FIRST prompt of a run
+  ended in `[task error] NoMethodError: undefined method 'info' for nil`.
+- Cause: `Harness#initialize` passed the deliberately-deferred logger (nil
+  until first use, issue #123) straight into `LLMClient`, and the backend logs
+  unconditionally on the first attempt of every request. The lazy `Harness#logger`
+  accessor and its client rebind could never help: the crash happened before
+  anything had asked for the logger, so the rebind never ran.
+- New `DeferredLogger` (`lib/deferred_logger.rb`): what such a consumer gets
+  instead of the nil. It resolves the source's `#logger` at CALL time, so it can
+  never hold a nil and never pins a logger the owner is about to replace. The
+  deferral itself (#123: no throwaway log dir for a fresh id) is unchanged.
+- The rule this teaches: a deferred value is only correct if RESOLVING it is
+  deferred too - a nil placeholder is a snapshot of "not yet", not a deferred
+  value.
+
 ## Unreleased - TextNormalizer preserves multi-byte text (issue #268)
 
 - Fix: command output lost every non-ASCII character. The child pipe

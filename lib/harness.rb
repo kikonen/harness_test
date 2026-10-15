@@ -14,6 +14,7 @@ require_relative 'llm_client'
 require_relative 'file_list'
 require_relative 'session'
 require_relative 'task'
+require_relative 'deferred_logger'
 require_relative 'tools/echo_tool'
 require_relative 'tools/notify_tool'
 require_relative 'tools/dialog_tool'
@@ -112,9 +113,14 @@ class Harness
     # (#rebind_logger), so a startup that resumes a saved session never
     # leaves a throwaway log directory behind for the fresh random id
     # (issue #123).
-    @logger        = nil
+    @logger = nil
     @tool_registry = build_tool_registry
-    @client        = LLMClient.new(options, @logger)
+    # issue #270: the client is built while there is deliberately NO logger
+    # yet, so it gets a DeferredLogger (resolved from #logger at CALL time)
+    # rather than the nil placeholder. The backend logs on the first attempt
+    # of every request, and a nil there killed the first prompt of any run
+    # where nothing else touched #logger first (verbose off + auto_save off).
+    @client = LLMClient.new(options, DeferredLogger.new(self))
     @session_manager = SessionManager.new(self, file_list)
     # issue #224 follow-up: session-level auto-approve toggle for the
     # command safety check. NOT persisted with the session - it is a
