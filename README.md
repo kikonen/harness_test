@@ -14,11 +14,15 @@ scoped to a working directory you choose.
 - **Fine-grained access control** - every file/directory access by the
   model requires a grant you approve interactively: single file, directory
   (direct children only), or directory tree (recursive). Read and write
-  are separate; a write grant implies read. Sensitive paths (`.env*`,
-  `.git/`, `.harness/`) are always blocked.
+  are separate (a write grant implies read) and delete is its own mode.
+  Sensitive paths (`.env*`, `.git/`, `.harness/`) are always blocked.
 - **Shell execution with confirmation** - the `run.command` tool shows the
   full command before running it and requires an explicit "Allow" every
-  single time.
+  single time, unless its prefix is already in the allowlist or the
+  AUTO-APPROVE posture (issue #224, toggled live with `Ctrl+A`) accepts it.
+- **Local shell mode** - a line starting with `!` runs a shell command
+  directly, bypassing the model, with its own allowlist
+  (`.harness/shell_commands.yml`) (issue #129).
 - **Sessions** - the conversation plus the access list is auto-saved to
   `.harness/sessions/<id>/session.json` (its own directory, issue #207) at
   every prompt boundary (before each send and after each reply) and again on
@@ -85,15 +89,17 @@ bin/harness -r <id>                    # resume a saved session
 bin/harness --continue                 # resume the newest saved session in this workdir
 bin/harness --no-auto-save             # disable periodic auto-save at prompt boundaries
 bin/harness --system-file my.md        # override the system prompt
-bin/harness -v                         # (already on by default) verbose logging
+bin/harness -v                         # verbose: full prompt + raw response in the log
 ```
 
 `bin/rspec` runs the harness's own test suite (rspec), from any directory.
 
 Type a plain message to send it to the model. Lines starting with `/` are
 commands. Multiline input: paste a block, or end a line with `\`.
-Keys: `Ctrl+C` cancel/interrupt, `Ctrl+D` quit (empty prompt),
-Up/Down browse history.
+Keys: `Ctrl+C` cancel/interrupt, `Ctrl+D` quit (empty prompt), `Ctrl+A`
+toggle the command consent mode (MANUAL / AUTO-APPROVE, issue #224),
+Up/Down browse history. A line starting with `!` runs a shell command
+locally instead of prompting the model (issue #129).
 
 ## Regenerating the shell parser
 
@@ -125,6 +131,9 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/tools` | List available tools |
 | `/models` | Show configured models (default and active marked) |
 | `/model [name]` | Show or switch the active model |
+| `/param [key [value]]` | Show, override or reset a model parameter |
+| `/ctx` | Show context usage (tokens, %, headroom, auto-compact status) |
+| `/reasoning` | Show the reasoning text of the last response |
 | `/help` | Show command help |
 | `/exit` | Quit (auto-saves the session) |
 
@@ -134,29 +143,36 @@ The model has access to these tools:
 
 **Files** - `file.read`, `file.write`, `file.patch` (unified diff),
 `file.search` (regex grep), `file.list` (glob), `file.info` (metadata),
-`file.sha`, `file.copy`, `file.rename`, `file.delete` (confirms)
+`file.copy`, `file.rename`, `file.delete` (needs a DELETE grant)
 
-**Directories** - `dir.create`, `dir.delete` (confirms, empty only)
+**Directories** - `dir.create`, `dir.delete` (empty dirs only, needs a
+DELETE grant)
 
 **Git** - `git.status`, `git.diff`, `git.log`, `git.show`,
 `git.grep` (search commit diffs for when code was added/removed),
-`git.apply` (apply a unified diff)
+`git.apply` (apply a unified diff; `dry_run` validates it without applying)
 
 **Shell** - `run.command` (full command shown, explicit Allow required
-every time; timeout-guarded, output truncated)
+unless the prefix is already allowlisted or AUTO-APPROVE accepts a "safe:"
+verdict; timeout-guarded, output truncated)
 
-**Meta** - `tools.list`, `tools.search`, `time.now`, `ui.notify`
-(progress messages to your console), `test.echo` (test-only)
+**Meta** - `tools.list`, `tools.search`, `time.now`, `ui.notify` (progress
+messages to your console), `ui.dialog` (ask the user a question and wait
+for the picked option), `ui.note` (one-line note in the model's own
+context), `test.echo` (test-only)
 
 ## Access model
 
-- Grants are tracked per mode: **read**, **write**, or both. A write
-  grant implies read on the same path; a read grant never implies write.
+- Grants are tracked per mode: **read**, **write** and **delete** are each
+  separate. A write grant implies read on the same path; a read grant
+  never implies write, and neither read nor write implies delete.
 - Directory grants come in two tiers: *dir only* (direct children) and
   *recursive* (whole tree).
 - When the model touches a path you have not granted, you are prompted
   with numbered choices including the intended purpose - no auto-grants.
-- Destructive operations (file/dir delete, shell commands) always ask.
+- File and directory deletes need their own DELETE grant.
+- Shell commands ask unless the prefix is allowlisted or AUTO-APPROVE
+  accepts a "safe:" model verdict (issue #224).
 - Sensitive files/dirs (`.env*`, `.git/`, `.harness/`) can never be
   granted.
 
@@ -167,6 +183,8 @@ All harness state lives in `.harness/` inside the working directory:
 ```
 .harness/
   harness_history   # prompt history
+  allowed_commands.yml  # run.command prefix allowlist (separate from...)
+  shell_commands.yml    # ...the `!` local shell allowlist (issue #129)
   sessions/         # saved sessions (one directory per session, issue #113)
     <id>/           # all of a session's state lives in here (issue #207)
       session.json  # the saved session (conversation + access list)
@@ -190,11 +208,11 @@ lib/cli.rb          # option parsing, REPL loop, input handling
 lib/harness.rb      # tool loop, tool execution, registry
 lib/llm_client.rb   # HTTP, retries, request building
 lib/session*.rb     # conversation state, save/resume/compact
-lib/file_list.rb    # access grants (read/write, files/dirs)
+lib/file_list.rb    # access grants (read / write / delete, files and dirs)
 lib/git_runner.rb   # safe git invocation base for the git tools
 lib/shell_tokenizer.rb  # StringScanner lexer for shell commands
 lib/shell_parser.y  # Racc grammar source (regenerate .rb with racc)
 lib/command_handler.rb + lib/commands/*.rb  # one class per /command
 lib/tools/*.rb      # one file per tool
-lib/system_prompt.txt                     # built-in system prompt
+config/system_prompt.txt                  # built-in system prompt
 ```

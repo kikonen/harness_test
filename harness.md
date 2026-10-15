@@ -12,7 +12,7 @@ Keep this in mind:
   consistent (re-read the file, check that referenced methods exist) before
   declaring the task done.
 - If you change a tool's behavior (e.g. its parameters, return format, or
-  error messages), also update the system prompt (`lib/system_prompt.txt`)
+  error messages), also update the system prompt (`config/system_prompt.txt`)
   and/or the tool's own description so the LLM (you, in future sessions)
   sees the accurate contract.
 - If you change CLI commands or `/help` text, keep them in sync with the
@@ -47,8 +47,11 @@ Keep this in mind:
   tier - `$HARNESS_CONFIG` / `-c` covers that case.
 - Sensitive files/dirs (`.env*`, `.git/`, `.harness/`) are blocked from
   LLM access - do not try to work around this.
-- Destructive operations (file delete, dir delete) require user
-  confirmation via the tool layer - do not bypass.
+- Access modes (read / write / delete) are tracked separately: a write grant
+  implies read, but neither read nor write implies delete.
+- Destructive operations (file delete, dir delete) require a DELETE grant
+  from the tool layer - do not bypass it, and never try to reach the same
+  result through a shell command instead.
 - Line endings: the harness normalizes to LF for LLM-facing operations
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.
@@ -61,7 +64,7 @@ Keep this in mind:
   Already-valid UTF-8 is returned untouched. Downstream consumers (strip,
   split, gsub, regex, JSON.generate for the session save) then never raise.
 - Spec layout: tests live under `spec/` mirroring the tree they test -
-  e.g. `lib/dialog.rb` is tested by `spec/lib/ui/dialog_spec.rb`, and tools
+  e.g. `lib/ui/dialog.rb` is tested by `spec/lib/ui/dialog_spec.rb`, and tools
   in `lib/tools/` are tested in `spec/lib/tools/` (e.g.
   `lib/tools/file_read_tool.rb` ->
   `spec/lib/tools/file_read_tool_spec.rb`). Do NOT drop spec files into
@@ -107,14 +110,19 @@ Keep this in mind:
   `compact.reserved_tokens`. Trigger is the stricter of pct and reserve.
 - `Harness::MAX_TOOL_ITERATIONS`, `TOOL_LOOP_WARN_THRESHOLD`,
   `TOOL_LOOP_HARD_LIMIT` - tool-loop safety limits.
-- `LLMClient::NUM_CTX` - context window size (default 65536); sampling
-  defaults (`TEMPERATURE`, `TOP_P`, `TOP_K`, `MIN_P`, penalties) and
-  retry settings (`RETRY_COUNT`, `RETRY_DELAY`) also live in LLMClient.
+- `LLM::NUM_CTX` - context window size (default 65536) and `LLM::RETRY_COUNT`
+  / `LLM::RETRY_DELAY` (transient-error retries) live in `lib/llm/shared.rb`;
+  `LLMClient` only aliases them. There are no code-side sampling constants:
+  sampling values are owned by the config and an unset key is not sent
+  (issue #215).
 - `SensitiveFiles::SENSITIVE_DIRS` / sensitive file patterns - security
   blocklist.
 
 ## Pending / Deferred
 
-- `run_command` tool: deferred pending a security model review.
+- Shell command safety check: the follow-ups are tracked as open issues
+  (#244: use the shell parse for the check; #254: model-decided safety for
+  the unsafe case). The `run.command` tool itself is implemented and wired -
+  it is no longer "deferred".
 - CRLF handling: implemented in file.read / file.search / file.patch;
   verify end-to-end on Windows if patching still misbehaves.

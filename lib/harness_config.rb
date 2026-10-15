@@ -37,7 +37,7 @@ require_relative 'harness_error'
 #       repeat_penalty: 1.05
 #   default_model: local        # model used when -m is not given
 #   compact:
-#     recent_messages: 3        # messages retained verbatim after /compact
+#     recent_messages: 6        # messages retained verbatim after /compact
 #     auto_threshold: 88        # auto-compact when context usage reaches this % of the window
 #     max_size: 500             # max length (words) of the compaction summary
 #     reserved_tokens: 8192     # absolute headroom (tokens) kept free before auto-compact (issue #151)
