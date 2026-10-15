@@ -36,6 +36,11 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   nil for a real harness) in the startup banner, the prompt modeline and the
   spinner badge at the END of the spinner line; the tag is the bare bracketed
   label (`[YOLO]`), a `cmd:` prefix inside the brackets being noise.
+- harness.md de-bloat: the file is injected into every system prompt, so it
+  holds coding rules only. Tunable Constants and the Pending / Deferred
+  sections were dropped (constants live in the code, deferred work in open
+  issues #244 / #254 / #183 / #267), as were the self-descriptive notes about
+  how harness.md itself is loaded - the model does not need them to code.
 - Follow-up: issue #267 for the mid-turn gesture-dispatch refactor (remove
   the labeled `/yolo` HACK in `Task#commit_note`).
 

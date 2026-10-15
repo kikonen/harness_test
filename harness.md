@@ -17,25 +17,17 @@ Keep this in mind:
   sees the accurate contract.
 - If you change CLI commands or `/help` text, keep them in sync with the
   actual behavior in `lib/cli.rb`.
-- The `harness.md` file (this file) is re-read automatically when its
-  modification time changes (checked before each prompt), and can be
-  force-reloaded with the `/reload` command. If you edit this file, the
-  new rules take effect on the next prompt - no restart needed.
 - When creating temporary directories or files for testing use the "tmp"
   directory, not the root directory of the project.
-- This file is injected into EVERY system prompt, so it holds coding rules and
-  guidelines ONLY - never per-issue history or fixed-bug notes (those go to
-  `CHANGELOG.md` and the issue/PR). Keep every rule short enough to earn its
-  tokens: if the model does not need it to write correct code, do not add it.
 
 ## Code Style
 
 - Ruby, `frozen_string_literal: true` magic comment at the top of every file.
 - 2-space indentation, no tabs.
-- Prefer small, focused methods; keep classes cohesive.
-- Comments explain *why*, not *what*.
 - Preserve existing formatting and style when editing - do not reformat
   untouched code.
+- Comments explain *why*, not *what*.
+- Prefer small, focused methods; keep classes cohesive.
 - Lines should be at maximum 90 characters long.
 - Ruby and other text files must retain trailing newline in the end
 - AVOID using "—" emdash use normal dash "-" instead
@@ -109,35 +101,3 @@ Keep this in mind:
   A rebase merge rewrites the commit so `git branch -d` refuses ("not fully
   merged"): confirm the content is identical to `master` first
   (`git diff <branch> master --stat` is empty), then force-delete.
-
-## Tunable Constants
-
-- `Session::COMPACT_RECENT_MESSAGES` - how many recent messages survive
-  `/compact` verbatim (default 6).
-- `Session::AUTO_COMPACT_THRESHOLD` - auto-compact when context usage
-  reaches this % of the window (default 88); config key
-  `compact.auto_threshold`; set to 100+ to disable.
-- `Session::COMPACT_RESERVED_TOKENS` - absolute headroom (tokens) kept free
-  before auto-compact fires (default 8192, issue #151); config key
-  `compact.reserved_tokens`. Trigger is the stricter of pct and reserve.
-- `Harness::MAX_TOOL_ITERATIONS`, `TOOL_LOOP_WARN_THRESHOLD`,
-  `TOOL_LOOP_HARD_LIMIT` - tool-loop safety limits.
-- `LLM::NUM_CTX` - context window size (default 65536) and `LLM::RETRY_COUNT`
-  / `LLM::RETRY_DELAY` (transient-error retries) live in `lib/llm/shared.rb`;
-  `LLMClient` only aliases them. There are no code-side sampling constants:
-  sampling values are owned by the config and an unset key is not sent
-  (issue #215).
-- `SensitiveFiles::SENSITIVE_DIRS` / sensitive file patterns - security
-  blocklist.
-
-## Pending / Deferred
-
-- Shell command safety check: the follow-ups are tracked as open issues
-  (#244: use the shell parse for the check; #254: model-decided safety for
-  the unsafe case). The `run.command` tool itself is implemented and wired -
-  it is no longer "deferred".
-- CRLF handling: implemented in file.read / file.search / file.patch;
-  verify end-to-end on Windows if patching still misbehaves.
-- Mid-turn slash-command gestures: the `/yolo` intercept in `Task.commit_note`
-  is a labeled HACK (see its comment); the shared gesture-dispatch refactor is
-  tracked as issue #267.
