@@ -9,7 +9,6 @@
 # appends its path to it AS-IS (no rewriting):
 #   api: openai -> .../v1      e.g. http://localhost:11434/v1  (/chat/completions)
 #   api: ollama  -> server root, e.g. http://localhost:11434   (/api/chat)
-# One or more named model profiles.
 models:
   - name: local            # selection key (used by -m / default_model)
     url: http://localhost:11434/v1
@@ -72,3 +71,20 @@ retry:
 # with Ctrl+A (note editor or idle prompt); the spinner always shows the
 # current mode as a [cmd: ...] badge (issue #224 follow-up).
 # command_safety_auto_approve: false
+
+# Shell consent postures (issue #221, the consent-fatigue fix). Three
+# levels: MANUAL (every unapproved command asks) < AUTO-APPROVE (model-
+# "safe:" commands skip the dialog) < YOLO (EVERY run.command call runs
+# with no dialog and no model safety check at all). YOLO is the INITIAL
+# posture only - during a session it is toggled live with /yolo and is
+# saved with the session (resume keeps it). Opt-in: default false.
+# What YOLO does NOT change: the disaster denylist - a well-known disaster
+# (rm -rf, format C:, sudo, git push -f, curl | sh, ...) keeps the dialog
+# in EVERY posture, file-access grants are untouched, and every auto-
+# approved run is status-lined and written to harness.log.
+# yolo: false
+
+# The `! cmd` bang syntax keeps its confirmation dialog (default true).
+# Set false and a user-typed bang command runs immediately - the human's
+# own typing is already the consent. The disaster denylist still applies.
+# bang_requires_confirmation: true

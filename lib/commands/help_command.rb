@@ -12,6 +12,8 @@ module Commands
                          delete) and the auto-approved command lists
                          (run.command tool and shell (!), kept separate)
           /clear         Remove all grants from the list
+          /yolo          Toggle the YOLO shell-consent posture (see Command
+                         safety below); /yolo on|off|status also available
 
           /retry         Re-send the chain after a failed request; tool work
                          already done is kept, so the turn resumes from there
@@ -68,6 +70,22 @@ module Commands
           "safe:" run WITHOUT the dialog; "dangerous:" verdicts and missing
           verdicts still ask. Toggled LIVE with Ctrl+A (idle prompt or note
           editor) - the badge and the ack line show the new mode.
+
+        Shell consent postures (issue #221, the consent-fatigue fix):
+          Three levels of how much manual approval a run.command call needs,
+          always chosen by the USER (the model never decides):
+            MANUAL       - every unapproved command asks (the default).
+            AUTO-APPROVE - a "safe:" model verdict skips the dialog (Ctrl+A).
+            YOLO (/yolo) - EVERY run.command call runs with no dialog and no
+              model safety check; each run is status-lined and logged to
+              harness.log. Initial posture from config 'yolo'; saved with the
+              session (resume keeps it). YOLO does NOT cover the `!` bang
+              syntax - that has its own 'bang_requires_confirmation' key.
+          The disaster denylist is the floor under EVERY posture (and under
+          a stored allowlist grant): rm -rf, mkfs, dd of=/dev/, shutdown,
+          sudo, git push -f, curl | sh, a fork bomb, format C:, diskpart,
+          del /s /q, Remove-Item -Recurse -Force, ... always reach the dialog
+          with no "Always allow" option - a one-off Allow only.
 
         Session:
           Prompts are accumulated in a session, so the model sees the whole

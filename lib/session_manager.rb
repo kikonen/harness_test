@@ -594,6 +594,14 @@ class SessionManager
     # issue #219: session-level parameter overrides survive a save/resume
     # round trip, like the active model.
     data[:param_overrides] = param_overrides.to_h
+    # issue #221: the YOLO shell posture survives a save/resume round trip
+    # too. The user switched it on deliberately for THIS session; resuming
+    # it must not quietly restore the consent prompts they opted out of.
+    # (The disaster denylist still applies in a resumed YOLO session - it is
+    # a floor under the posture, not part of it.) Kept here rather than in
+    # Session#to_h because it is harness consent state, not conversation
+    # state - the same treatment as active_model / param_overrides.
+    data[:yolo] = @harness.yolo? == true
     json = JSON.generate(data)
 
     File.write(path, json)
@@ -623,6 +631,13 @@ class SessionManager
     # and re-apply them on top of the restored profile so they win again.
     param_overrides.load(data[:param_overrides])
     param_overrides.restore!
+    # issue #221: restore the YOLO posture the session was saved with. A
+    # session saved with YOLO ON resumes with consent still off (the denylist
+    # floor unchanged); a session saved with it OFF does NOT inherit the
+    # config's initial posture - what the session had is what it gets back.
+    # Sessions saved before this feature have no key and stay MANUAL.
+    @harness.yolo = data[:yolo] == true
+    @harness.logger.info("yolo posture restored: #{@harness.yolo? ? 'ON' : 'OFF'}")
     reset_rules_mtime
     # issue #207: the id is the directory name (the file is session.json).
     @harness.logger.info("session resumed: #{File.basename(File.dirname(path))} (#{path})")

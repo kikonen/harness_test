@@ -578,4 +578,138 @@ RSpec.describe CommandRunner do
       expect(out.string).to include('[shell] ✗ denied by user')
     end
   end
+
+  # issue #221: the YOLO posture (Harness#yolo? / /yolo). Every run.command
+  # skips the consent dialog - including UNSAFE-construct commands the
+  # allowlist could never grant - and NO model safety check runs (issue
+  # #238). The disaster denylist is the floor: a denylisted command still
+  # gets the dialog even with a stored grant AND YOLO on.
+  context 'YOLO posture (issue #221)' do
+    # A harness stand-in with the YOLO posture ON and a recording logger
+    # (the audit trail: every auto-approved run must be logged).
+    def yolo_harness
+      messages = []
+      logger = double('logger')
+      allow(logger).to receive(:info) { |m| messages << m }
+      allow(logger).to receive(:warn) { |m| messages << m }
+      allow(logger).to receive(:debug) { |m| messages << m }
+      h = double('harness', yolo?: true, logger: logger)
+      [messages, h]
+    end
+
+    it 'runs an unapproved command with no dialog (nothing typed)' do
+      Dir.mktmpdir do |dir|
+        _, h = yolo_harness
+        runner = make_tool_runner(dir, {}, harness: h)
+        out = drive_dialog([]) # the dialog must NEVER open
+        result = runner.run('echo yolo')
+        expect(result).to start_with('exit code: 0')
+        expect(out.string).not_to include('The model is requesting')
+      end
+    end
+
+    # The allowlist path could never grant these (no safe prefix to save);
+    # YOLO auto-approves them anyway.
+    it 'auto-approves a command with UNSAFE constructs' do
+      Dir.mktmpdir do |dir|
+        _, h = yolo_harness
+        runner = make_tool_runner(dir, {}, harness: h)
+        drive_dialog([])
+        # A redirect: extract_prefix_options returns [] and the allowlist
+        # path refuses it - under YOLO it simply runs.
+        result = runner.run('echo yolo > tmpfile')
+        expect(result).to start_with('exit code: 0')
+      end
+    end
+
+    it 'skips the model safety check entirely (issue #238: no extra LLM round trip)' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('safe: should never be asked')
+        h = double('harness', yolo?: true, logger: nil, client: client,
+                   session: double('session', messages: []))
+        runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
+        drive_dialog([])
+        expect(runner.run('echo hi')).to start_with('exit code: 0')
+        expect(client.instance_variable_get(:@calls)).to be_empty
+      end
+    end
+
+    it 'logs every YOLO auto-approval to harness.log (the audit trail)' do
+      Dir.mktmpdir do |dir|
+        messages, h = yolo_harness
+        runner = make_tool_runner(dir, {}, harness: h)
+        drive_dialog([])
+        runner.run('echo yolo')
+        expect(messages.any? { |m| m.include?('auto-approved (YOLO): echo yolo') })
+          .to be true
+      end
+    end
+
+    it 'does NOT cover bang syntax (list: :shell ignores the YOLO posture)' do
+      Dir.mktmpdir do |dir|
+        _, h = yolo_harness
+        # The bang runner keeps asking even while YOLO is on - its consent
+        # is controlled by the separate bang_requires_confirmation key.
+        # BANG_TITLE + list: :shell - a real bang-path runner, just with
+        # the YOLO harness attached (which it must ignore).
+        runner, out = make_main_runner(dir, '2', harness: h,
+                                       title_fmt: described_class::BANG_TITLE)
+        result = runner.run('echo bang')
+        expect(out.string).to include('Run shell command:')
+        expect(result).to start_with('exit code: 0')
+      end
+    end
+
+    it 'the disaster denylist overrides a stored allowlist grant AND YOLO' do
+      Dir.mktmpdir do |dir|
+        seed_allowlist(dir, 'rm -rf')
+        _, h = yolo_harness
+        runner = make_tool_runner(dir, {}, harness: h)
+        # Denylist wins: the dialog DOES open (Cancel = option 2 - a
+        # denylisted command gets no "Always allow" options).
+        out = drive_dialog(['2'])
+        result = runner.run('rm -rf /somewhere')
+        expect(result).to start_with('error: user denied')
+        expect(out.string).to include('DENYLISTED: recursive-force delete')
+        expect(out.string).not_to include("Always allow '")
+      end
+    end
+
+    it 'the disaster denylist overrides the AUTO-APPROVE model verdict' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('safe: definitely fine')
+        h = double('harness', yolo?: false, logger: nil, client: client,
+                   session: double('session', messages: chain_mid_tool_loop),
+                   command_safety_auto_approve_effective?: true)
+        runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
+        out = drive_dialog(['2']) # Cancel (Allow=1, Cancel=2: no grants offered)
+        result = runner.run('sudo rm something')
+        expect(result).to start_with('error: user denied')
+        expect(out.string).to include('DENYLISTED: sudo')
+      end
+    end
+  end
+
+  # issue #221: bang confirmation OFF (config bang_requires_confirmation:
+  # false) is passed to the runner as auto_approve_all - a user-typed bang
+  # command runs immediately, no dialog. The denylist still gates it.
+  context 'bang consent off (issue #221)' do
+    it 'runs every bang command without a dialog' do
+      Dir.mktmpdir do |dir|
+        runner, out = make_main_runner(dir, auto_approve_all: true)
+        result = runner.run('echo typed') # nothing typed - no dialog
+        expect(result).to start_with('exit code: 0')
+        expect(out.string).to include('auto-approved (bang consent off)')
+      end
+    end
+
+    it 'still asks for a denylisted bang command' do
+      Dir.mktmpdir do |dir|
+        runner, out = make_main_runner(dir, '2', auto_approve_all: true)
+        result = runner.run('rm -rf /somewhere')
+        expect(result).to start_with('error: user denied')
+        expect(out.string).to include('DENYLISTED')
+      end
+    end
+  end
 end

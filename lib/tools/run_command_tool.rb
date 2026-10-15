@@ -14,6 +14,12 @@ require_relative '../command_runner'
 #     explicit "Allow" required unless the prefix is in the allowlist.
 #   - "Always allow <prefix>" saves a grant to .harness/allowed_commands.yml
 #     (issue #69, multi-select per-prefix issue #102).
+#   - CONSENT POSTURES (issue #221): the user chooses how much consent this
+#     tool needs (MANUAL / AUTO-APPROVE / YOLO, see CommandRunner). The
+#     posture is invisible to the model and is never the model's decision -
+#     the tool description stays conservative either way. The disaster
+#     denylist (CommandAllowlist.disaster?) always forces the dialog, in
+#     every posture, even for a stored prefix grant.
 #   - Commands run under a timeout (default 60 s, cap 300 s); output is
 #     truncated to a line limit (default 200, max 5000) because it goes
 #     into the LLM context window.

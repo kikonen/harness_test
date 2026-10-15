@@ -469,10 +469,56 @@ class Task
   # call_llm injects it into the chain before the next LLM call) and render
   # an ack line. Main thread only - the single-thread I/O rule (issue #40).
   def self.commit_note(task, note)
+    # HACK (issue #221, acknowledged as tech debt): a steering note that is
+    # exactly "/yolo" is intercepted here as a CONTROL gesture instead of
+    # being injected into the chain. It is the only keyboard-free way to
+    # flip the shell consent posture while a tool loop runs, and it is safe
+    # because toggle_yolo is a pure main-thread boolean write - no LLM
+    # round, no prompt recursion, no stdin contention with the drain loop.
+    # WHY IT IS A HACK: this hard-codes ONE slash command into Task's note
+    # plumbing (its own regex, duplicating knowledge CommandHandler's
+    # COMMANDS registry already owns) - it does not scale to more gestures.
+    # The agreed follow-up (see harness.md Pending/Deferred) is to make
+    # mid-turn notes dispatch through the shared slash-command registry as
+    # part of the async-task + CLI refactoring, and delete this branch.
+    if (toggle = yolo_note_action(note))
+      # 'on'/'off' set the posture explicitly (idempotent); a bare /yolo
+      # flips it. The mode is a symbol so a bare marker (no on/off group)
+      # is still truthy - nil from an unmatched optional group would make
+      # the whole gesture silently fall through into the chain.
+      case toggle
+      when :on  then task.harness.yolo = true
+      when :off then task.harness.yolo = false
+      else           task.harness.toggle_yolo
+      end
+      label = task.harness.respond_to?(:yolo_mode_label) \
+                ? task.harness.yolo_mode_label : nil
+      line  = "  [cmd: #{label || 'YOLO toggle unavailable'}]"
+      task.ui.puts(line)
+      task.buffer.put(type: :text, origin: :user_note, content: line)
+      return
+    end
+
     task.harness.user_note_text = note
     ui = task.ui
     ui.puts("  [note] got it - #{note}")
     task.buffer.put(type: :text, origin: :user_note, content: "note received: #{note}")
+  end
+
+  # HACK (see commit_note): recognize the single special-cased /yolo
+  # steering gesture. Returns the mode name when the note is a bare /yolo
+  # control gesture (optionally with on/off), nil for any real note (a note
+  # that merely MENTIONS yolo stays a note - only an exact "/yolo",
+  # "/yolo on" or "/yolo off" flips the posture). Goes away with the
+  # gesture-dispatch refactor.
+  def self.yolo_note_action(note)
+    m = note.to_s.strip.match(%r{\A/yolo(?:\s+(on|off))?\z}i)
+    return nil unless m
+
+    # :toggle for the bare marker: an unmatched OPTIONAL group returns nil,
+    # which is falsy - returning it would make "/yolo" look like "no
+    # gesture" and inject the command into the conversation chain.
+    m[1] ? m[1].downcase.to_sym : :toggle
   end
 
   # issue #224 follow-up: ack a Ctrl+A command-consent mode toggle (the

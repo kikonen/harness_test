@@ -121,6 +121,14 @@ class Harness
     # per-run consent posture (toggled live with Ctrl+A), so every
     # fresh run starts with the config default.
     @command_safety_auto_approve = options[:command_safety_auto_approve] == true
+    # issue #221: YOLO posture - skip the shell consent dialog entirely for
+    # the run.command tool (the disaster denylist still applies, see
+    # CommandAllowlist::DISASTER_PATTERNS). Unlike the #224 posture above,
+    # this ONE IS persisted with the session (SessionManager#save_session /
+    # #resume_session write and read the session JSON's 'yolo' key): the user
+    # turned it on deliberately and a resume must not silently restore the
+    # prompts they opted out of. Toggled live with /yolo.
+    @yolo = options[:yolo] == true
   end
 
   # Build the system prompt: the base prompt (read from options[:system_file]
@@ -270,14 +278,54 @@ class Harness
     command_safety_check && command_safety_auto_approve
   end
 
-  # issue #224 follow-up: the command consent MODE as a short label the
-  # spinner always shows (so the current posture is visible at a glance,
-  # even when the safety check is off). Shown only when the safety check
-  # is on - with it off there is no mode to switch.
+  # -- YOLO posture (issue #221) ------------------------------------------
+  #
+  # The user's own answer to consent fatigue (issue #221 / #254): with YOLO
+  # on, EVERY run.command call skips the consent dialog - no per-command
+  # 1+ENTER, and deliberately NO model safety-check call either (issue #238:
+  # the check adds an LLM round trip per batch and trashes the local KV
+  # cache, which is exactly the performance pain the check was supposed to
+  # avoid). What does NOT change in YOLO:
+  #   * the disaster denylist (CommandAllowlist.disaster?) - a well-known
+  #     disaster command still gets the dialog in every posture;
+  #   * file/dir/git tool grants (YOLO is a SHELL consent posture only -
+  #     it never grants file write access);
+  #   * the audit trail: every YOLO run prints a status line and is logged.
+  # The model cannot turn it on; only /yolo, the config initial posture, a
+  # mid-turn steering note carrying /yolo, or a resumed session can.
+  def yolo?
+    @yolo
+  end
+
+  def yolo=(val)
+    # Coerce to a real boolean: a truthy junk value must not make YOLO look
+    # ON while the code still treats it as a non-boolean (issue #221, same
+    # shape as the #224 setter).
+    @yolo = (val == true)
+  end
+
+  # Flip the YOLO posture (the /yolo slash command and the mid-turn
+  # /yolo steering marker both use this). Returns the new state as a label
+  # so the caller can ack it. The state travels with the session save.
+  def toggle_yolo
+    @yolo = !@yolo
+    yolo_mode_label
+  end
+
+  # The full command-consent MODE as one short label: YOLO wins over the
+  # #224 AUTO-APPROVE / MANUAL pair (YOLO means no consent check at all).
+  # nil renders no badge - shown only when something is switchable: with
+  # YOLO off and the safety check off there is no posture to display.
   def command_mode_label
+    return 'YOLO' if @yolo
     return nil unless command_safety_check
 
     command_safety_auto_approve ? 'AUTO-APPROVE' : 'MANUAL'
+  end
+
+  # Short label for the /yolo ack line.
+  def yolo_mode_label
+    @yolo ? 'YOLO ON' : 'YOLO OFF'
   end
 
   # issue #224 follow-up: flip the command consent MODE live (Ctrl+A).
