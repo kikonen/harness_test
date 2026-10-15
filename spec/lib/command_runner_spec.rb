@@ -399,6 +399,28 @@ RSpec.describe CommandRunner do
         expect { JSON.generate({ 'result' => output }) }.not_to raise_error
       end
     end
+
+    # issue #268: the accumulator is BINARY (#257), but a BINARY tag is a
+    # byte container, not an encoding - transcoding it byte-by-byte destroyed
+    # every multi-byte character, so native non-ASCII command output came out
+    # as '?' runs. The bytes are valid UTF-8 and must survive intact.
+    it 'keeps multi-byte characters in the child output' do
+      Dir.mktmpdir do |dir|
+        runner = make_tool_runner(dir)
+        # printf writes the UTF-8 bytes of 'a with diaeresis' (C3 A4) and of a
+        # 3-byte character, spelled as octal escapes so this SPEC SOURCE
+        # stays pure ASCII (a literal here would itself be mangled by the
+        # harness' own read/patch boundary).
+        output, _status = runner.send(
+          :read_child_in_group,
+          "printf '\\303\\244\\342\\234\\223'", dir, 10
+        )
+
+        expect(output.bytes).to eq([0xC3, 0xA4, 0xE2, 0x9C, 0x93])
+        expect(output.encoding).to eq(Encoding::UTF_8)
+        expect { JSON.generate({ 'result' => output }) }.not_to raise_error
+      end
+    end
   end
 
   # issue #224 follow-up: AUTO-APPROVE mode (live toggle, Ctrl+A). With
