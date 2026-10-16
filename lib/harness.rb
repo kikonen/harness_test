@@ -13,8 +13,8 @@ require_relative 'tool'
 require_relative 'llm_client'
 require_relative 'file_list'
 require_relative 'session'
+require_relative 'session_locator'
 require_relative 'task'
-require_relative 'deferred_logger'
 require_relative 'tools/echo_tool'
 require_relative 'tools/notify_tool'
 require_relative 'tools/dialog_tool'
@@ -69,7 +69,8 @@ class Harness
   HARNESS_DIR = '.harness'
 
   # Log file name (inside the session's own directory, see #session_log_path).
-  SESSION_LOG_FILE = 'harness.log'
+  # Kept as an alias: the name belongs to SessionLocator's path knowledge.
+  SESSION_LOG_FILE = SessionLocator::SESSION_LOG_FILE
 
   attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager, :client
   attr_accessor :history
@@ -94,10 +95,35 @@ class Harness
     @user_notes
   end
 
-  def initialize(options, file_list)
+  # session_id: the id this run owns, settled BEFORE this constructor (issue
+  # #276) by CLI via SessionLocator. The log file, the history file and the
+  # session directory are all derived from it, so minting it here and letting
+  # a resume swap it later forced every derived resource to be chased down
+  # again (issues #113 / #119 / #123 / #135 / #270). nil keeps the old
+  # behaviour for specs and embedding: this run owns a fresh id from the start.
+  # resume_data: saved session data to restore into the session (the CLI
+  # resolved and read it before constructing this Harness).
+  def initialize(options, file_list, session_id: nil, resume_data: nil)
     @options       = options
     @file_list     = file_list
-    @session       = Session.new(build_system_prompt)
+    @locator       = SessionLocator.new(file_list.workdir)
+    @session       = Session.new(build_system_prompt, session_id: session_id)
+    # Grants live in the file list, so restore them into THIS file_list (the
+    # one every tool was built with) rather than swapping the list out.
+    if resume_data
+      # Identity is settled ONCE (issue #276), so the id the file was found
+      # under and the id inside the file must agree. A mismatch means the
+      # saved session was written by hand or moved between directories - the
+      # logger and the history file were already built under the settled id,
+      # so silently adopting the file's id would split this run's state
+      # across two session directories.
+      saved_id = resume_data[:session_id]
+      if saved_id && saved_id != session_id
+        raise HarnessError,
+              "session file says id #{saved_id} but it is stored under #{session_id}"
+      end
+      @session.restore(resume_data, @file_list)
+    end
     # issue #36 / #198 phase 1: mid-turn steering notes. A pending note
     # (set by the Task drain loop's UI::Editor while the model works) is
     # injected into the chain by #call_llm (issue #208: that chain IS
@@ -109,18 +135,13 @@ class Harness
     # the .harness directory. Best-effort: failures are reported but never
     # block startup (issue #120).
     StateMigrator.run(@file_list.workdir, HARNESS_DIR)
-    # The logger is DEFERRED: it is only created on first use
-    # (#rebind_logger), so a startup that resumes a saved session never
-    # leaves a throwaway log directory behind for the fresh random id
-    # (issue #123).
-    @logger = nil
+    # The logger and the client are built HERE, once, under the session id the
+    # run already owns (issue #276). Both log on their own initiative - the
+    # backend logs on the first attempt of every LLM request - so neither can
+    # be handed a placeholder to be filled in later.
+    @logger        = build_logger
     @tool_registry = build_tool_registry
-    # issue #270: the client is built while there is deliberately NO logger
-    # yet, so it gets a DeferredLogger (resolved from #logger at CALL time)
-    # rather than the nil placeholder. The backend logs on the first attempt
-    # of every request, and a nil there killed the first prompt of any run
-    # where nothing else touched #logger first (verbose off + auto_save off).
-    @client = LLMClient.new(options, DeferredLogger.new(self))
+    @client        = LLMClient.new(options, @logger)
     @session_manager = SessionManager.new(self, file_list)
     # issue #224 follow-up: session-level auto-approve toggle for the
     # command safety check. NOT persisted with the session - it is a
@@ -135,6 +156,15 @@ class Harness
     # turned it on deliberately and a resume must not silently restore the
     # prompts they opted out of. Toggled live with /yolo.
     @yolo = options[:yolo] == true
+    # LAST, once every object it touches exists: the harness-side state a
+    # saved session carries (its model profile, its param overrides and its
+    # YOLO posture) is NOT conversation state, so Session#restore cannot
+    # apply it. Mid-run /resume runs the same steps (see
+    # SessionManager#resume_session); the difference is that here the id was
+    # already settled, so no derived resource has to be re-pointed. Applied
+    # after the config's initial @yolo on purpose: what the SESSION had is
+    # what it gets back.
+    apply_resume_state(resume_data) if resume_data
   end
 
   # Build the system prompt: the base prompt (read from options[:system_file]
@@ -154,12 +184,12 @@ class Harness
 
   # issue #113: each session logs to its own file inside its session dir
   # (.harness/sessions/<session-id>/), so concurrent sessions in the same
-  # workdir do not interleave in one shared log. The session id is stable
-  # within a run, EXCEPT that resume/continue swaps in a saved session with
-  # a different id; that re-points the logger via #rebind_logger (see
-  # SessionManager#resume_session).
+  # workdir do not interleave in one shared log. The id is settled before this
+  # Harness is built (issue #276), so the path is right from the first log
+  # line. It only changes when /resume swaps in another session MID-RUN (see
+  # #rebind_logger).
   def session_log_path
-    File.join(@file_list.workdir, HARNESS_DIR, 'sessions', @session.session_id, SESSION_LOG_FILE)
+    @locator.session_log_path(@session.session_id)
   end
 
   def build_logger
@@ -172,23 +202,17 @@ class Harness
     logger
   end
 
-  # issue #113 / #123: create (or rebuild) the logger for the CURRENT
-  # session id. Deferred from #initialize so a fresh random id never gets a
-  # throwaway log directory when the run resumes a saved session instead.
-  # When the session id changes (resume/continue), closes the old logger and
-  # re-points the LLM client, which holds its own reference.
+  # Mid-run identity change ONLY (issue #113, narrowed by #276): /resume swaps
+  # in a saved session with a different id while this Harness is already
+  # running, so the log file - and the client that holds a reference to it -
+  # must move to the new session's directory. Startup resume/continue no longer
+  # comes through here at all: that id is resolved before #initialize, so the
+  # logger built there is already the right one.
   def rebind_logger
     @logger.close if @logger.respond_to?(:close)
     @logger = build_logger
     @client.logger = @logger if @client.respond_to?(:logger=)
     @logger
-  end
-
-  # Lazy accessor: the logger is created on first use (issue #123), so code
-  # that logs before any rebind still gets a working logger for the current
-  # session id.
-  def logger
-    @logger ||= rebind_logger
   end
 
   def build_tool_registry
@@ -783,5 +807,22 @@ class Harness
       logger.error("tool #{func_name} failed: #{e.message}")
       "error: #{e.message}"
     end
+  end
+
+  # The non-conversation part of a saved session: the model profile it was
+  # saved with, its session-level parameter overrides (issue #219) and its
+  # YOLO posture (issue #221). Extracted from SessionManager#resume_session
+  # so a startup resume (issue #276: the id is resolved before this Harness
+  # exists, so the session data is restored HERE rather than by a later
+  # resume call) applies exactly the same state.
+  def apply_resume_state(data)
+    @session_manager.restore_session_model(data[:active_model])
+    @session_manager.param_overrides.load(data[:param_overrides])
+    @session_manager.param_overrides.restore!
+    # What the SESSION had is what it gets back: a session saved with YOLO
+    # OFF does not inherit the config's initial posture. Sessions saved
+    # before the feature have no key and stay MANUAL.
+    self.yolo = data[:yolo] == true
+    logger.info("yolo posture restored: #{yolo? ? 'ON' : 'OFF'}")
   end
 end

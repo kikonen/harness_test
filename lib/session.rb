@@ -55,10 +55,16 @@ class Session
   attr_reader :messages, :created_at, :system_prompt, :session_id,
               :last_reasoning, :file_cache
 
-  def initialize(system_prompt)
+  # session_id: the id THIS session is identified by. It is a parameter, not
+  # something minted here (issue #276): the log file, the history file and the
+  # session directory are all derived from it, so whoever mints it after the
+  # fact has to chase all of them again. A caller that has already resolved
+  # identity (CLI, via SessionLocator) passes it in; the default exists for
+  # standalone construction in specs.
+  def initialize(system_prompt, session_id: nil)
     @system_prompt = system_prompt
     @created_at    = Time.now
-    @session_id    = SecureRandom.uuid
+    @session_id    = session_id || SecureRandom.uuid
     @user_prompts  = 0
     @last_stats    = nil
     @last_reasoning = nil

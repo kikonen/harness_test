@@ -4,17 +4,16 @@ require 'json'
 require 'fileutils'
 
 require_relative 'harness_error'
+require_relative 'session_locator'
 require_relative 'param_overrides'
 
 # Manages all session-related logic: prompt flow, compaction, rules file,
 # model switching, and persistence (save/resume/list).
 # Extracted from Harness to keep the LLM-call logic focused.
 class SessionManager
-  HARNESS_DIR  = '.harness'
-  SESSIONS_DIR = File.join(HARNESS_DIR, 'sessions')
   # issue #207: the session JSON lives INSIDE the session's own directory
   # (.harness/sessions/<id>/session.json), alongside its log and history.
-  SESSION_FILE = 'session.json'
+  SESSION_FILE = SessionLocator::SESSION_FILE
   RULES_FILE   = 'harness.md'
   # Minimum seconds between two auto-saves inside the same run_prompt cycle
   # (de-dups the pre-send and post-turn saves when the round trip is fast).
@@ -23,6 +22,7 @@ class SessionManager
   def initialize(harness, file_list)
     @harness     = harness
     @file_list   = file_list
+    @locator     = SessionLocator.new(file_list.workdir)
     @rules_mtime = current_rules_mtime
     @last_autosave = 0
   end
@@ -567,21 +567,13 @@ class SessionManager
 
   # -- Persistence ---------------------------------------------------------
 
-  # Directory where saved sessions are stored (inside the working directory).
-  def sessions_dir
-    File.join(@file_list.workdir, SESSIONS_DIR)
-  end
-
   # issue #207: the saved JSON of a session lives INSIDE its own directory
   # (next to the log and history), not alongside the per-session dirs.
-  def session_file_path(id)
-    File.join(sessions_dir, id, SESSION_FILE)
-  end
-
-  # All saved session files (issue #207 layout: <sessions>/<id>/session.json).
-  def session_files
-    Dir.glob(File.join(sessions_dir, '*', SESSION_FILE)).select { |p| File.file?(p) }
-  end
+  # issue #276: WHERE a session lives is SessionLocator's knowledge - this is
+  # a pointer to it, kept because the save path and the UI both report the
+  # file a session was written to. Listing and newest-session lookup go to the
+  # locator directly (see Commands::SessionsCommand).
+  def session_file_path(id) = @locator.session_file_path(id)
 
   # Save the current session (conversation + file list) to disk.
   def save_session
@@ -609,7 +601,12 @@ class SessionManager
     id
   end
 
-  # Resume a saved session by id (full or abbreviated UUID).
+  # Resume a saved session by id (full or abbreviated UUID) MID-RUN (the
+  # /resume command). Startup resume/continue no longer comes through here:
+  # issue #276 resolves the id in CLI before the Harness is built, so the
+  # logger and the history file were already created under it. THIS path
+  # legitimately changes identity while everything is already running, which
+  # is why the derived resources are re-pointed here and only here.
   def resume_session(id)
     id = id.to_s.strip
     raise HarnessError, 'usage: /resume <session-id>' if id.empty?
@@ -619,9 +616,9 @@ class SessionManager
 
     data = JSON.parse(File.read(path), symbolize_names: true)
     @harness.session.restore(data, @file_list)
-    # issue #113: the log path is per-session, and resume swaps in a saved
-    # session with a different id than the fresh one built at startup -
-    # re-point the logger so it follows the resumed session.
+    # issue #113: the log path is per-session, and this resume swaps in a
+    # saved id the logger was not built under - close and reopen it on the
+    # new session's directory.
     @harness.rebind_logger
     # issue #119: command history is per session too - re-point the history
     # manager so up/down arrows and the saved file follow the new session.
@@ -644,40 +641,10 @@ class SessionManager
     path
   end
 
-  # issue #107: find the most recently saved session in this workdir's
-  # sessions dir (returns a full path). Used by --continue. Returns nil
-  # when no sessions exist yet.
-  def newest_session_path
-    return nil unless File.directory?(sessions_dir)
-
-    session_files.max_by { |p| File.mtime(p) }
-  end
-
-  # List saved sessions, newest first.
-  def list_sessions
-    return [] unless File.directory?(sessions_dir)
-
-    session_files.sort_by { |p| File.mtime(p) }.reverse.map do |path|
-      data = JSON.parse(File.read(path), symbolize_names: true)
-      {
-        # issue #207: the file is <sessions>/<id>/session.json - the id is
-        # the DIRECTORY name, not the file name.
-        id:       File.basename(File.dirname(path)),
-        path:     path,
-        saved_at: File.mtime(path),
-        messages: (data[:messages] || []).size,
-        files:    (data[:files] || []).size,
-        workdir:  data[:workdir]
-      }
-    rescue JSON::ParserError, StandardError
-      nil
-    end.compact
-  end
-
-  private
-
-  # Restore the session's model. When the stored model is no longer
-  # configured, show an error and reset to the config default model.
+  # Restore the model a session was saved with (used by #resume_session AND,
+  # since issue #276, by Harness#apply_resume_state on a startup resume - so
+  # it cannot stay private). When the stored model is no longer configured,
+  # report it and fall back to the config default model.
   def restore_session_model(name)
     restore_active_model(name)
   rescue HarnessError => e
@@ -691,21 +658,10 @@ class SessionManager
     apply_profile(profile)
   end
 
-  # Find a saved session file by (abbreviated) id.
-  def find_session_file(id)
-    raise HarnessError, "invalid session id: #{id}" unless id =~ /\A[0-9a-fA-F-]+\Z/
+  private
 
-    # issue #207: the id is the session DIRECTORY name (the file inside it
-    # is always session.json).
-    matches = session_files.select do |p|
-      File.basename(File.dirname(p)).downcase.start_with?(id.downcase)
-    end
-
-    case matches.size
-    when 0 then nil
-    when 1 then matches.first
-    else
-      raise HarnessError, "ambiguous session id '#{id}' - matches: #{matches.map { |p| File.basename(File.dirname(p)) }.join(', ')}"
-    end
-  end
+  # Find a saved session file by (abbreviated) id - SessionLocator's lookup
+  # (issue #276), so startup resolution and a mid-run /resume resolve an id
+  # the same way.
+  def find_session_file(id) = @locator.find_session_file(id)
 end

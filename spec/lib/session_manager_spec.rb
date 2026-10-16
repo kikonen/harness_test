@@ -260,30 +260,6 @@ RSpec.describe SessionManager do
       end
     end
 
-    describe '#newest_session_path' do
-      it 'is nil when the sessions dir does not exist' do
-        with_tmp_manager do |manager, _, _|
-          expect(manager.newest_session_path).to be_nil
-        end
-      end
-
-      it 'returns the most recently modified session file' do
-        with_tmp_manager do |manager, _, dir|
-          sessions = File.join(dir, '.harness/sessions')
-          # issue #207: files live inside per-session directories.
-          older_dir = File.join(sessions, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
-          newer_dir = File.join(sessions, 'ffffffff-0000-1111-2222-333333333333')
-          FileUtils.mkdir_p([older_dir, newer_dir])
-          older = File.join(older_dir, 'session.json')
-          newer = File.join(newer_dir, 'session.json')
-          File.write(older, '{}')
-          File.write(newer, '{}')
-          # Force distinct mtimes: put the "older" one clearly in the past.
-          File.utime(Time.now - 120, Time.now - 120, older)
-          expect(manager.newest_session_path).to eq(newer)
-        end
-      end
-    end
   end
 
   describe '#resume_session (issue #113)' do
@@ -391,31 +367,6 @@ RSpec.describe SessionManager do
         # The old layout's file must NOT appear next to the session dirs.
         expect(File.exist?(File.join(dir, '.harness/sessions', "#{session.session_id}.json")))
           .to be false
-      end
-    end
-
-    it '#list_sessions reads sessions from the new layout (id = dir name)' do
-      Dir.mktmpdir do |dir|
-        seed_saved_session(dir)
-
-        file_list = FileList.new([], workdir: dir)
-        manager   = described_class.new(harness, file_list)
-
-        # eq() does not unwrap hash matchers - use match_array for that.
-        expect(manager.list_sessions)
-          .to match_array([hash_including(id: sid, messages: 1)])
-      end
-    end
-
-    it '#newest_session_path finds sessions in the new layout' do
-      Dir.mktmpdir do |dir|
-        seed_saved_session(dir)
-
-        file_list = FileList.new([], workdir: dir)
-        manager   = described_class.new(harness, file_list)
-
-        expect(manager.newest_session_path)
-          .to eq(File.join(dir, '.harness/sessions', sid, 'session.json'))
       end
     end
 

@@ -2,10 +2,17 @@
 
 require 'spec_helper'
 require 'tmpdir'
+require 'fileutils'
+require 'json'
+require 'reline'
 require 'cli'
 
 # issue #189: the startup banner shows the session id and where its log is
 # written, so the user can find harness.log without guessing.
+#
+# issue #276: the rest of this file covers the bootstrap ORDER - the session
+# id is resolved before the Harness is constructed, so the log file, the
+# history file and the session directory are all created under ONE id.
 
 RSpec.describe CLI do
   let(:workdir) { Dir.mktmpdir }
@@ -21,6 +28,114 @@ RSpec.describe CLI do
 
   def build_cli
     described_class.new(options, ui)
+  end
+
+  # Seed a saved session in the issue #207 layout (issue #276) so a resume has
+  # something real to resolve: <sessions>/<id>/session.json. active_model is
+  # nil by default - the "use whatever the config default is" state - because
+  # these specs are about identity, not model profiles.
+  def seed_saved_session(id, model: nil, yolo: false)
+    dir  = File.join(workdir, '.harness', 'sessions', id)
+    FileUtils.mkdir_p(dir)
+    data = {
+      session_id:    id,
+      created_at:    Time.now.iso8601,
+      system_prompt: 'saved system prompt',
+      user_prompts:  3,
+      messages:      [{ role: 'system', content: 'saved system prompt' },
+                      { role: 'user', content: 'earlier prompt' },
+                      { role: 'assistant', content: 'earlier reply' }],
+      active_model:  model,
+      yolo:          yolo,
+      workdir:       workdir
+    }
+    File.write(File.join(dir, 'session.json'), JSON.generate(data))
+    dir
+  end
+
+  def session_dirs
+    dir = File.join(workdir, '.harness', 'sessions')
+    Dir.exist?(dir) ? Dir.children(dir).sort : []
+  end
+
+  # issue #276: identity is resolved before anything derived from it is
+  # constructed, so on EVERY startup path the log file, the history file and
+  # the session directory all sit under the same single id.
+  describe 'identity-first bootstrap (issue #276)' do
+    it 'a fresh run puts log, history and session dir under its own id' do
+      cli  = build_cli
+      id   = cli.harness.session.session_id
+
+      expect(session_dirs).to eq([id])
+      expect(File.file?(cli.harness.session_log_path)).to be true
+      expect(cli.history.history_file).to eq(
+        File.join(workdir, '.harness', 'sessions', id, 'harness_history')
+      )
+    end
+
+    it '--resume puts log, history and session dir under the RESUMED id' do
+      saved = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(saved)
+
+      cli = described_class.new(options.merge(resume: saved[0, 8]), ui)
+      id  = cli.harness.session.session_id
+
+      expect(id).to eq(saved)
+      # Issue #135's symptom: a second (throwaway) directory for the fresh
+      # random id the run threw away. There is no longer a fresh id to throw.
+      expect(session_dirs).to eq([saved])
+      expect(File.file?(cli.harness.session_log_path)).to be true
+      expect(cli.history.history_file).to eq(
+        File.join(workdir, '.harness', 'sessions', saved, 'harness_history')
+      )
+    end
+
+    it '--continue resolves the newest saved session before constructing' do
+      older = '11111111-2222-3333-4444-555555555555'
+      newer = '66666666-7777-8888-9999-000000000000'
+      seed_saved_session(older)
+      seed_saved_session(newer)
+      File.utime(Time.now - 60, Time.now - 60,
+                 File.join(workdir, '.harness', 'sessions', older, 'session.json'))
+
+      cli = described_class.new(options.merge(continue: true), ui)
+
+      expect(cli.harness.session.session_id).to eq(newer)
+      # Same single id for log, history and the session dir - and only the two
+      # REAL sessions exist (no third one minted for this run).
+      expect(session_dirs).to eq([older, newer])
+      expect(cli.harness.session_log_path)
+        .to eq(File.join(workdir, '.harness', 'sessions', newer, 'harness.log'))
+      expect(File.file?(cli.harness.session_log_path)).to be true
+      expect(cli.history.history_file).to eq(
+        File.join(workdir, '.harness', 'sessions', newer, 'harness_history')
+      )
+    end
+
+    it 'a typo in --resume raises BEFORE any session directory exists' do
+      expect {
+        described_class.new(options.merge(resume: 'deadbeef'), ui)
+      }.to raise_error(HarnessError, /no saved session matching 'deadbeef'/)
+
+      # Nothing was built under a random id on the way to the failure.
+      expect(session_dirs).to eq([])
+    end
+
+    it '--list-sessions lists from the locator without constructing a Harness' do
+      saved = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(saved)
+      allow(ui).to receive(:puts)
+
+      expect {
+        described_class.new(options.merge(list_sessions: true, model: nil), ui)
+      }.to raise_error(SystemExit)
+
+      expect(ui).to have_received(:puts).with(/Saved sessions \(1\)/)
+      expect(ui).to have_received(:puts).with(/#{Regexp.escape(saved)}/)
+      # Listing used to mint a fresh random id on the way (a Harness was
+      # constructed to read JSON files). It must not create any session dir.
+      expect(session_dirs).to eq([saved])
+    end
   end
 
   describe '#session_log_path_display' do
