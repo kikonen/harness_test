@@ -238,4 +238,5 @@ lib/shell_parser.y  # Racc grammar source (regenerate .rb with racc)
 lib/command_handler.rb + lib/commands/*.rb  # one class per /command
 lib/tools/*.rb      # one file per tool
 config/system_prompt.txt                  # built-in system prompt
+doc/*.md            # design documents (why a subsystem is shaped as it is)
 ```

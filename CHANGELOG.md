@@ -26,8 +26,25 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
 - Strip: the flagged 10-line comment on the 3-line `Harness#command_mode_label`,
   every comment inside `Harness#initialize` (all of them restated the assignment
   under them), and the same pattern across `lib/harness.rb` and `lib/task.rb`
-  (comment lines 292 -> 36 and 279 -> 212; zero issue-number references left in
+  (comment lines 292 -> 33 and 279 -> 209; zero issue-number references left in
   either file).
+- New rule: design documentation lives in `doc/<topic>.md`, not in a source-file
+  header. A long file-level header (the prose explaining a subsystem's
+  architecture, protocol or ownership rules) moves to `doc/`; the source keeps at
+  most a 3-line header naming the invariant and pointing at the doc. Docs hold
+  what a reader needs BEFORE reading the code; comments stay for what a specific
+  line cannot say. `README.md` gained the `doc/` line in its project layout.
+- Move: four such headers became docs (`doc/task_design.md` 63 header lines,
+  `doc/encoding_design.md` 32, `doc/output_buffer_design.md` 30,
+  `doc/session_file_cache_design.md` 30); each source file now carries a
+  2-3-line pointer instead (`lib/task.rb` 209 -> 149 comment lines). The two
+  medium headers that do not warrant a doc file of their own (`lib/ui/spinner.rb`,
+  `lib/ui/console.rb`) were trimmed to the same 3-line form: invariant kept,
+  history and forward-looking notes dropped. No file-level header of 8+ lines is
+  left in `lib/`. harness.md's
+  own Encoding convention shrank to the actionable rule plus the pointer, since
+  its rationale now lives in `doc/encoding_design.md` and harness.md is injected
+  into every system prompt.
 
 ## Unreleased - session identity resolved before anything is built (issue #276)
 

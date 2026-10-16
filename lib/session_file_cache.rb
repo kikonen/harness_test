@@ -1,35 +1,8 @@
 # frozen_string_literal: true
 
-# issue #170: per-session digest cache for files read in this session.
-#
-# Replaces the model-facing SHA protocol (the model used to carry a
-# sha256 parameter around between file.read and file.write / file.patch):
-# the digests are now harness-side state, kept in ONE place.
-#
-# Purpose: detect a conflict with EXTERNAL changes made after the model
-# read a file (user edit, another tool, generated code), so a stale
-# write/patch fails with a clear error instead of silently clobbering.
-# It is NOT protection against concurrent harness turns - the harness is
-# single-turn by design.
-#
-# Keys are WORKDIR-RELATIVE paths (e.g. "lib/foo.rb"), never absolute:
-# this makes the persisted session portable - moving the repository to a
-# different location does not break the cache keys (a session file is
-# saved under its own "workdir" and restored against it). Files that live
-# OUTSIDE the workdir fall back to their canonical path as the key (the
-# same fallback FileList#display_path uses for display).
-# Values are hex SHA-256 digests of the file content as last observed in-
-# session (read, or our own write).
-#
-# The cache API takes CANONICAL (absolute) paths plus the working
-# directory and derives the relative key itself, so every caller goes
-# through ONE key-derivation rule (#key_for).
-#
-# Lifecycle: owned by the Session (one per session), so the cache is
-# restored with a resumed session and survives compaction. An entry
-# clears itself when our own write overwrites it; external changes are
-# cleared by file.touch (model-reported) - only then do write/patch
-# re-hash the on-disk file into the cache without complaining.
+# Per-session digest cache: detects a write over a file an external edit
+# changed after the model read it; keys and lifecycle:
+# doc/session_file_cache_design.md
 
 class SessionFileCache
   def initialize

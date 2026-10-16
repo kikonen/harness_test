@@ -1,37 +1,7 @@
 # frozen_string_literal: true
 
-# -- TextNormalizer -------------------------------------------------------
-#
-# Single place for making externally-sourced text safe to use.
-#
-# WHY (issue #233 / #257): anything the harness takes from OUTSIDE its own
-# process - a shell command's output, a file read from disk, a diff or a
-# command string the model sent - can carry bytes that are not valid UTF-8,
-# or be tagged with an encoding that is not UTF-8. Ruby then fails in two
-# ways:
-#   * String operations over invalid bytes raise ArgumentError
-#     ("invalid byte sequence in UTF-8"): strip, split, regex match.
-#   * Concatenating a UTF-8 literal with a BINARY string raises
-#     Encoding::CompatibilityError ("incompatible character encodings:
-#     UTF-8 and BINARY (ASCII-8BIT)") - this is what killed run.command.
-#
-# Both fire the moment the malformed text is first touched, and the failure
-# is often invisible because the handler that reports it fails the same way:
-# the session save is JSON.generate, which raises JSON::GeneratorError on the
-# exact same byte, so the tool error never reaches the console.
-#
-# So the harness normalizes ONCE at each read boundary and every downstream
-# consumer then sees plain, valid UTF-8 and cannot raise: the tokenizer,
-# String#strip, the line truncation, JSON.generate, and the console.
-#
-# A string that is already valid UTF-8 is returned untouched (no allocation,
-# no frozen-string mutation). A string tagged with a DECLARED encoding is
-# transcoded, trusting the tag. A BINARY-tagged string is a byte container,
-# not a text encoding, so its bytes are read as UTF-8 first (see
-# normalize_bytes: this is where a naive transcode destroys every multi-byte
-# character, issue #268). Only bytes that cannot be represented in UTF-8 are
-# replaced with the replacement character, so output stays inspectable
-# instead of crashing the turn.
+# Single place that makes externally-sourced text valid UTF-8; why the
+# boundary exists and the return rules: doc/encoding_design.md
 module TextNormalizer
   # Stand-in for a byte that cannot be represented in UTF-8. A printable
   # ASCII char is chosen deliberately: the replacement is what the model
