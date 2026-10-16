@@ -1,35 +1,7 @@
 # frozen_string_literal: true
 
-# -- OutputBuffer ------------------------------------------------------------
-#
-# A structured, append-only record of everything the harness wants to show
-# the user (issue #40 - single-thread I/O rule, follow-up).
-#
-# The key idea: task-thread code NEVER writes to an IO stream. Instead it
-# appends a typed, origin-tagged entry to this buffer. The main thread (the
-# CLI drain loop, and later the TUI) advances a read waterline (#drain) and
-# renders whatever is new. This replaces the fire-and-forget "puts to stdout"
-# model with a durable, inspectable log of {type, origin, content} blobs:
-#
-#   * type    - what KIND of output this is (:response, :stats, :step,
-#               :system, :error, ...), so a renderer can style it distinctly.
-#   * origin  - WHERE it came from (:session_manager, :harness, a tool name,
-#               ...), so a renderer or future TUI can attribute it.
-#   * content - the text itself (a single line; multi-part output is either
-#               one blob or several entries, in order).
-#
-# The buffer is owned by the TASK (one per Task instance - see
-# Task#buffer). The DRAIN LOOP fills it (one put per output event it reads
-# from the outbox); task-thread code NEVER touches the buffer directly.
-# A future TUI can read the buffer as a durable, inspectable record of
-# everything shown to the user.
-#
-# THREADING: main-thread-only access. The task thread communicates through
-# the outbox and never reaches the buffer; every put/drain in production is
-# driven by the single drain loop on the main thread (issue #154). There is
-# therefore no synchronization here - it would be dead weight. If a future
-# TUI ever reads the buffer from a second thread while the drain loop writes,
-# put a Mutex back at that point.
+# Append-only structured log of everything shown to the user; threading and
+# ownership rules: doc/output_buffer_design.md
 
 class OutputBuffer
   # One unit of output. A Data instance - IMMUTABLE BY CONSTRUCTION: no

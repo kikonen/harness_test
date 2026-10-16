@@ -1,20 +1,8 @@
 # frozen_string_literal: true
 
-# -- UI::Spinner --------------------------------------------------------------
-#
-# Animated status indicator (issue #74 / #13). First primitive of the
-# namespaced UI library. Public API is unchanged from the previous
-# top-level Spinner: start / stop / running?.
-#
-# Single-thread I/O rule (issue #40): the spinner does NOT spawn a background
-# thread. It is a pure state object + render method. The main thread calls
-# `render!` on each drain tick to advance one animation frame. This guarantees
-# that all console I/O (spinner frames, output, dialogs) happens on the same
-# thread and can never interleave or race.
-#
-# Rendering: the ANSI single-line spinner on the injected console (the safe
-# default for CI, pipes and non-TTY alike); draw_tui_frame is preserved for
-# headless testing through ratatui's test terminal.
+# Animated status indicator. NO background thread: the main thread calls
+# `render!` once per drain tick, so a spinner frame can never interleave
+# with other console I/O.
 module UI
   class Spinner
     FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']

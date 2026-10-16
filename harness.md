@@ -40,6 +40,13 @@ Keep this in mind:
   method bodies - they belong in CHANGELOG, the issue and the commit message.
   When the user flags a comment as useless, the ASSISTANT strips it (never
   the user) and audits the same file for the same pattern in the same pass.
+- Design documentation lives in `doc/<topic>.md`, not in a source-file header.
+  A long file-level header (prose explaining a subsystem's architecture,
+  protocol or ownership rules) moves to `doc/`; the source keeps at most a
+  3-line header naming the invariant and pointing at the doc. Docs hold the
+  rationale a reader needs BEFORE reading the code; comments stay for what a
+  specific line cannot say. One topic per file, and a version-sensitive doc
+  names the version it was verified against.
 - Prefer small, focused methods; keep classes cohesive.
 - Lines should be at maximum 90 characters long.
 - Ruby and other text files must retain trailing newline in the end
@@ -81,17 +88,11 @@ Keep this in mind:
 - Line endings: the harness normalizes to LF for LLM-facing operations
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.
-- Encoding: text that comes from OUTSIDE the process (shell output, file
-  reads, model-supplied tool-call arguments, git output, the LLM response
-  body) can be byte-invalid in UTF-8 or tagged with a code page, so it is
-  normalized once at each read boundary by `TextNormalizer`, which always
-  RETURNS valid UTF-8: a BINARY tag is a byte container (read the bytes as
-  UTF-8 first, then the ambient code page), a declared code page is
-  transcoded, and only bytes that genuinely cannot be represented become the
-  printable ASCII replacement `?`. A naive transcode from a BINARY tag
-  destroys every multi-byte character (issue #268) - never #encode from
-  BINARY yourself. Downstream consumers (strip, split, gsub, regex,
-  JSON.generate for the session save) then never raise.
+- Encoding: text from OUTSIDE the process (shell output, file reads,
+  model-supplied tool arguments, git output, LLM bodies) is normalized once at
+  each read boundary by `TextNormalizer`, which always returns valid UTF-8.
+  Never `#encode` from a BINARY tag yourself - a BINARY tag is a byte
+  container. Rationale and return rules: `doc/encoding_design.md`.
 - Spec layout: tests live under `spec/` mirroring the tree they test -
   e.g. `lib/ui/dialog.rb` is tested by `spec/lib/ui/dialog_spec.rb`, and tools
   in `lib/tools/` are tested in `spec/lib/tools/` (e.g.
