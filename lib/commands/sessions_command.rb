@@ -1,14 +1,21 @@
 # frozen_string_literal: true
 
 require_relative '../command'
+require_relative '../session_locator'
 
 module Commands
   # /sessions - list saved sessions.
+  #
+  # Listing is pure path + JSON reading, so it goes through SessionLocator
+  # (issue #276) and needs NO harness: CLI's --list-sessions runs this command
+  # with harness: nil, before any Harness exists. This class is the single
+  # renderer of the session list (both entry points show the same columns).
   class SessionsCommand < Command
     def handle(_args)
-      sessions = @harness.session_manager.list_sessions
+      locator  = SessionLocator.new(@file_list.workdir)
+      sessions = locator.list
       if sessions.empty?
-        @ui.puts "No saved sessions (#{@harness.session_manager.sessions_dir})."
+        @ui.puts "No saved sessions (#{locator.sessions_dir})."
         return
       end
 

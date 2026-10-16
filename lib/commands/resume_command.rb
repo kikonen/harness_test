@@ -13,7 +13,9 @@ module Commands
       end
 
       path = @harness.session_manager.resume_session(id)
-      @ui.puts "Session #{File.basename(path, '.json')} resumed."
+      # issue #207: the id is the session DIRECTORY name (the file inside it
+      # is always session.json), so the file's basename is never the id.
+      @ui.puts "Session #{File.basename(File.dirname(path))} resumed."
       @ui.puts "  (conversation and file list restored - see /session)"
     end
 
