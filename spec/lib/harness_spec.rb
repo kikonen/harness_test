@@ -45,7 +45,21 @@ RSpec.describe Harness do
     # resolved (issue #223); num_ctx fixed so context indicators are stable.
     opts      = { system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE,
                   num_ctx: 65_536 }.merge(options)
-    described_class.new(opts, file_list)
+    # session_id / resume_data are constructor keywords (issue #276: the id is
+    # settled before the Harness exists), not LLM options, so they are pulled
+    # out of the options hash and passed where they belong.
+    session_id  = opts.delete(:session_id)
+    resume_data = opts.delete(:resume_data)
+    described_class.new(opts, file_list, session_id: session_id, resume_data: resume_data)
+  end
+
+  # The on-disk path of a session id in this spec's workdir (#207 layout).
+  def session_path(id, name = SessionLocator::SESSION_LOG_FILE)
+    File.join(workdir, SessionLocator::SESSIONS_DIR, id, name)
+  end
+
+  def saved_session_ids
+    Dir.children(File.join(workdir, SessionLocator::SESSIONS_DIR))
   end
 
   # A harness whose client plays a scripted response sequence (see
@@ -189,55 +203,61 @@ RSpec.describe Harness do
       expect(harness.session_log_path).to eq(expected)
     end
 
-    it 'creates the log file at the per-session path on first use' do
+    it 'creates the log file at the per-session path during #initialize' do
       harness = build_harness
 
-      # The logger is deferred (issue #123): touching it creates the file.
-      expect { harness.logger }.to change { File.file?(harness.session_log_path) }.from(false).to(true)
+      # issue #276: the id is settled BEFORE this object is built, so the
+      # logger is built in #initialize - the file exists from construction
+      # on, without anything having to ask for the logger first.
+      expect(harness.logger).to be_a(Logger)
+      expect(File.file?(harness.session_log_path)).to be true
     end
 
     it 'does not write to the legacy shared .harness/harness.log' do
       harness = build_harness
-      harness.logger # force creation via the lazy accessor
+      harness.logger.info('per-session only')
 
       expect(File.exist?(File.join(workdir, Harness::HARNESS_DIR, 'harness.log'))).to be false
     end
   end
 
-  describe '#initialize logger deferral (issue #123)' do
-    it 'does NOT create a log directory for the fresh random id' do
-      harness = build_harness
+  # issue #276 replaced the #123 / #270 deferral machinery: the session id is
+  # resolved before construction, so the logger and the client are built once,
+  # under the id this run owns. There is no lazy accessor and no placeholder
+  # a consumer could hold.
+  describe '#initialize logger (issue #276)' do
+    it 'has a real logger from #initialize on every path' do
+      fresh  = build_harness
+      resume = build_harness(session_id: 'f7931611-30b4-4b4b-aec6-f7083ef2942a')
 
-      expect(harness.instance_variable_get(:@logger)).to be_nil
-      expect(File.directory?(File.dirname(harness.session_log_path))).to be false
+      [fresh, resume].each do |harness|
+        expect(harness.logger).to be_a(Logger)
+        expect(harness.instance_variable_get(:@logger)).to be_a(Logger)
+      end
     end
 
-    it 'creates no session dir at all when nothing logs before a resume' do
-      build_harness
+    it 'logs under the id it was given, not under a fresh random one' do
+      id      = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      harness = build_harness(session_id: id)
+      harness.logger.info('startup line')
 
-      sessions_dir = File.join(workdir, Harness::HARNESS_DIR, 'sessions')
-      expect(Dir.exist?(sessions_dir) ? Dir.children(sessions_dir) : []).to be_empty
+      expect(harness.session.session_id).to eq(id)
+      expect(File.read(harness.session_log_path)).to include('startup line')
+      # Issue #123's throwaway-directory symptom is now structurally
+      # impossible: there is no wrong id to log under.
+      expect(saved_session_ids).to eq([id])
     end
 
-    # issue #270: the client is built while there is NO logger yet, and the
-    # backend logs on the first attempt of every request. Handing it the nil
-    # placeholder killed the first prompt of a run where nothing else touched
-    # Harness#logger first (verbose off + auto_save off). The client must
-    # therefore never be able to observe a nil logger.
-    it 'gives the LLM client a deferred stand-in, never the nil placeholder' do
+    it 'gives the LLM client the real logger, never a placeholder' do
       harness = build_harness(auto_save: false, verbose: false)
 
-      expect(harness.client.backend.logger).not_to be_nil
-      expect(harness.client.backend.logger).to be_a(DeferredLogger)
-      # The deferral itself is intact: no log dir just because a client exists.
-      expect(harness.instance_variable_get(:@logger)).to be_nil
-      expect(Dir.exist?(File.dirname(harness.session_log_path))).to be false
+      expect(harness.client.backend.logger).to equal(harness.logger)
     end
 
-    it 'logs the first request instead of raising on a nil logger' do
-      # The reported failure: "undefined method 'info' for nil" on the FIRST
-      # prompt. Nothing here touches Harness#logger before the request, so the
-      # stand-in is the only thing between the backend and a nil.
+    it 'logs the first request without any lazy path running' do
+      # The #270 failure shape, asserted against the real fix: the backend
+      # logs on the first attempt of every request, and the logger it holds
+      # is the one built at construction.
       harness = build_harness(auto_save: false, verbose: false,
                               base_url: 'http://127.0.0.1:1/v1', api: :openai,
                               retry_count: 1, retry_delay: 0)
@@ -253,30 +273,31 @@ RSpec.describe Harness do
     end
   end
 
-  describe '#rebind_logger (issue #113 / #123)' do
+  describe '#rebind_logger (mid-run /resume only, issue #113)' do
     it 'points the logger at the CURRENT session id after a resume swaps it in' do
       harness = build_harness
+      fresh_id   = harness.session.session_id
       resumed_id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
 
-      # Simulate resume: the session id changes but the logger was still
-      # bound to the fresh id created at startup (or not created at all).
+      # Mid-run /resume: the id changes while this Harness is already running.
       harness.session.instance_variable_set(:@session_id, resumed_id)
 
       expect(harness.session_log_path).to include(resumed_id)
 
       new_logger = harness.rebind_logger
+      new_logger.info('after the swap')
 
       expect(new_logger).to be_a(Logger)
-      expect(File.file?(File.join(workdir, Harness::HARNESS_DIR, 'sessions', resumed_id, 'harness.log'))).to be true
+      expect(File.file?(session_path(resumed_id))).to be true
+      # The old session's log is CLOSED by the swap: nothing written under it
+      # after the id changed (that was the point of the rebind).
+      fresh_log = File.read(session_path(fresh_id))
+      expect(fresh_log).not_to include('after the swap')
     end
 
     it 'closes the old logger when re-binding after a late id change' do
       harness = build_harness
-      fresh_id = harness.session.session_id
-      harness.logger # force creation for the fresh id
-
       old_logger = harness.instance_variable_get(:@logger)
-      expect(old_logger).not_to be_nil
 
       harness.session.instance_variable_set(:@session_id, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
       harness.rebind_logger
@@ -292,6 +313,64 @@ RSpec.describe Harness do
 
       # issue #197: the client is a dispatcher; the backend holds the logger.
       expect(harness.client.backend.logger).to equal(harness.logger)
+    end
+  end
+
+  # issue #276: startup resume (the id is resolved BEFORE this Harness exists)
+  # and mid-run /resume (the id is swapped while it runs) must end with the
+  # same single identity for log, history and session dir. Startup resume does
+  # no rebind at all; mid-run /resume still rebinds, and only there.
+  describe 'startup resume via resume_data (issue #276)' do
+    def seed_saved_session(id, yolo: true)
+      FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
+      data = {
+        session_id:    id,
+        created_at:    Time.now.iso8601,
+        system_prompt: 'saved prompt',
+        user_prompts:  2,
+        messages:      [{ role: 'system', content: 'saved prompt' },
+                        { role: 'user', content: 'earlier' },
+                        { role: 'assistant', content: 'reply' }],
+        yolo:          yolo,
+        workdir:       workdir
+      }
+      File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate(data))
+    end
+
+    def saved_data(id)
+      JSON.parse(File.read(session_path(id, SessionLocator::SESSION_FILE)),
+                 symbolize_names: true)
+    end
+
+    it 'restores the conversation and the YOLO posture under the settled id' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(id, yolo: true)
+
+      harness = build_harness(session_id: id, resume_data: saved_data(id))
+
+      expect(harness.session.session_id).to eq(id)
+      expect(harness.session.messages.map { |m| m[:content] }).to include('earlier')
+      # The posture the session was saved with wins over the config initial
+      # posture (#221 rule), and it is applied DURING construction - not by a
+      # later resume call that would then need a logger rebind.
+      expect(harness.yolo?).to be(true)
+      expect(harness.logger).to be_a(Logger)
+      expect(harness.session_log_path).to include(id)
+      # Only the resumed session's directory exists (issues #123 / #135).
+      expect(saved_session_ids).to eq([id])
+    end
+
+    it 'refuses a session file whose stored id is not the one it lives under' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(id)
+      data = saved_data(id)
+      data[:session_id] = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+
+      # The logger and the history file were already built under the settled
+      # id, so silently adopting the file's id would split this run's state
+      # across two session directories.
+      expect { build_harness(session_id: id, resume_data: data) }
+        .to raise_error(HarnessError, /says id a{8}-bbbb-cccc-dddd-eeeeeeeeeeee/)
     end
   end
 

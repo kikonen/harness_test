@@ -106,41 +106,38 @@ RSpec.describe HistoryManager do
     end
   end
 
-  describe 'resume keeps history in the RESUMED session (issue #135)' do
+  # issue #135's symptom was a dummy dir for a throwaway id. Issue #276 made
+  # it structurally impossible: the CLI resolves the resumed id BEFORE
+  # constructing anything, so the manager is bound to sid_a once and sid_b -
+  # the id the run never used - is never bound at all.
+  describe 'resume keeps history in the RESUMED session (issues #135 / #276)' do
     before do
-      # Session A persisted a few entries. A fresh process now RESUMES it.
-      # The CLI binds the manager to the fresh random id first (sid_b), then
-      # resume_session rebinds it to the resumed id (sid_a) - which only works
-      # because CLI wires the manager onto the harness (@harness.history).
-      # Model that fixed ordering here.
-      m_a = manager
-      m_a.bind_session(sid_a)
+      # Session A persisted a few entries. A fresh process RESUMES A: the id is
+      # resolved first (SessionLocator) and the manager is bound to it once.
+      seed = manager
+      seed.bind_session(sid_a)
       Reline::HISTORY.clear
       Reline::HISTORY << 'first prompt'
       Reline::HISTORY << 'second prompt'
-      m_a.save
+      seed.save
       expect(File.file?(session_file(sid_a))).to be true
 
-      # New process: fresh-id binding, then the resume rebind + load.
       @m = manager
-      @m.bind_session(sid_b) # fresh random id (pre-resume binding)
-      @m.bind_session(sid_a) # SessionManager#resume_session rebinds it
+      @m.bind_session(sid_a) # the id this run owns - no fresh id in between
       Reline::HISTORY.clear
       @m.load # <- A's entries are now in the buffer for the resumed run
       expect(history_entries).to eq(['first prompt', 'second prompt'])
     end
 
     it 'saves new typed entries into the RESUMED session dir (sid_a)' do
-      Reline::HISTORY << '/resume' # the resume command itself, like in a real run
       Reline::HISTORY << 'a fresh prompt in the resumed run'
 
       @m.save
 
-      expect(File.exist?(session_file(sid_b))).to be false # no dummy dir
-      content = File.read(session_file(sid_a))
-      expect(content).to include('first prompt')
-      expect(content).to include('second prompt')
-      expect(content).to include('a fresh prompt in the resumed run')
+      # No dummy file under an id this run never used (issue #135).
+      expect(File.exist?(session_file(sid_b))).to be false
+      expect(File.read(session_file(sid_a)))
+        .to include('first prompt', 'second prompt', 'a fresh prompt in the resumed run')
     end
 
     it 'does not touch sid_a file when only loaded entries are present' do

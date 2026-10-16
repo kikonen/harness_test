@@ -20,18 +20,23 @@ class HistoryManager
   # read-only fallback for sessions created before issue #119.
   LEGACY_FILENAME = 'harness_history'
 
-  def initialize(workdir)
+  # session_id: the id this run owns (issue #276: the CLI resolves the session
+  # id before constructing anything, so the per-session history file is derived
+  # from a settled id AT construction). nil is only for standalone use: the
+  # file then stays the legacy shared one until #bind_session names a session.
+  def initialize(workdir, session_id: nil)
     @workdir      = workdir
-    @history_file = resolve_file # legacy shared file until #bind_session
-    @current_id   = nil
+    @current_id   = session_id
+    @history_file = resolve_file
   end
 
   # Persisted history file for the CURRENT session id (the save target).
   attr_reader :history_file
 
-  # Point this manager at a session id (issue #119). The history file is
-  # resolved immediately, so the id only needs to be set before load/save
-  # - typically right after a resume or /session-clear.
+  # Point this manager at a session id (issue #119). Only a MID-RUN identity
+  # change needs it now (SessionManager#resume_session): at startup the id
+  # arrives as a constructor parameter. The file is resolved immediately, so
+  # the id only needs to be set before load/save.
   def bind_session(session_id)
     @current_id   = session_id
     @history_file = resolve_file

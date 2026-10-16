@@ -8,6 +8,7 @@ require_relative 'harness_config'
 require_relative 'harness'
 require_relative 'file_list'
 require_relative 'history_manager'
+require_relative 'session_locator'
 require_relative 'command_handler'
 require_relative 'ui'
 
@@ -25,38 +26,56 @@ class CLI
 
   # Defaults keep the entry point (`CLI.new.run`) unchanged; the tests inject
   # pre-parsed options and a stubbed UI instead.
+  #
+  # Construction order is the point of this method (issue #276): the session
+  # identity is resolved FIRST, and only then are the objects that DERIVE from
+  # it (log file, history file, session directory, LLM client) constructed -
+  # once, under an id that never changes again. The old order built a Harness
+  # (and with it a logger under a freshly minted random id) before consulting
+  # --resume / --continue, so every derived resource had to be chased down and
+  # re-pointed afterwards (issues #113, #119, #123, #135, #270).
   def initialize(options = nil, ui = nil)
     @options   = options || parse_options
     @ui        = ui || UI::Console.new(stdout: $stdout, stdin: $stdin)
     @file_list = FileList.new([], workdir: @options[:workdir])
-    @harness   = Harness.new(@options, @file_list)
 
-    @commands  = CommandHandler.new(
+    # 1. Identity: which session IS this run. Needs the workdir and nothing
+    #    else - no Harness, no logger, no client (that is what makes this
+    #    step possible before step 2).
+    @locator = SessionLocator.new(@options[:workdir])
+    list_sessions_and_exit if @options[:list_sessions]
+
+    # Identity FIRST: which session IS this run (--resume <id> / --continue
+    # newest / a fresh UUID). Resolution happens before ANY Harness exists: a
+    # typo'd or ambiguous id raises here, where no session directory has been
+    # created yet - the old order had already minted (and could already have
+    # logged under) a random id the run then threw away.
+    session_id  = @locator.resolve_id(
+      resume: @options[:resume], newest: !!@options[:continue]
+    )
+    resume_data = resumed_run? ? @locator.read_session(session_id) : nil
+
+    # 2. Construct: every identity-derived object is built under the id
+    #    settled above. Nothing below this line can ever change the id, so
+    #    nothing below it needs a "re-point me after the id changed" hook.
+    @harness = Harness.new(@options, @file_list,
+                           session_id: session_id, resume_data: resume_data)
+
+    # issue #119: the per-session history file is derived from the same id,
+    # so it is named AT construction (issue #276) - never rebound after a
+    # resume swapped the id under it (issue #135's throwaway-dir symptom).
+    @history = HistoryManager.new(@file_list.workdir, session_id: session_id)
+    @harness.history = @history
+
+    @commands = CommandHandler.new(
       harness: @harness,
       file_list: @file_list,
       options: @options,
       ui: @ui)
 
-    @history   = HistoryManager.new(@file_list.workdir)
-    # issue #135: share the manager with the harness (it declares
-    # attr_accessor :history) so SessionManager#resume_session can rebind it
-    # to the resumed session id. Before this wiring @harness.history was nil,
-    # so the `@harness.history&.bind_session(...)` in resume_session no-opped
-    # and a save at close wrote into a throwaway .harness/sessions/<fresh-id>/
-    # dir - the dummy-dir-on-every-resume symptom.
-    @harness.history = @history
-    list_sessions_and_exit if @options[:list_sessions]
     # issue #198 phase 3: draft of an Esc-cancelled idle-prompt read (the
     # buffer is prefilled at the next prompt instead of being dropped).
     @idle_draft = nil
-    resume_from_cli if @options[:resume]
-    continue_from_cli if @options[:continue]
-    # issue #119: command history is per session - bind it to the active
-    # session id AFTER resume/continue (if any) swapped in a saved session,
-    # so a fresh run binds its own id and a resumed run keeps following the
-    # resumed one. Binding here (not before resume) means the fresh random id
-    # is never persisted as a throwaway directory.
-    @history.bind_session(@harness.session.session_id)
   end
 
   def parse_options
@@ -201,8 +220,13 @@ class CLI
   end
 
   # List saved sessions and exit (used by --list-sessions).
+  # issue #276: listing is path + JSON reading, so it runs through the SAME
+  # renderer /sessions uses, with harness: nil - the old path constructed a
+  # whole Harness (client, logger, tool registry) just to read a few JSON
+  # files, minting a fresh random id on the way.
   def list_sessions_and_exit
-    commands.list_sessions
+    Commands::SessionsCommand.new(harness: nil, file_list: @file_list,
+                                  options: @options, ui: @ui).handle('')
     exit 0
   end
 
@@ -223,6 +247,13 @@ class CLI
     # this session's log is written (.harness/sessions/<id>/harness.log) -
     # and which id a later /save or --resume would refer to.
     ui.puts "Session: #{harness.session.session_id} (log: #{session_log_path_display})"
+    # issue #276: --resume / --continue now restore the conversation during
+    # construction, so the banner is where the user learns WHICH session this
+    # run is (the old separate "Resumed session ..." line came from a resume
+    # call made after the Harness was already built).
+    if resumed_run?
+      ui.puts "  (resumed conversation and file list - see /session)"
+    end
     # issue #221 review (bug 2): the shell consent posture is a fact about
     # how this run behaves, so it belongs in the startup banner next to the
     # model and the session - and the disaster floor is named with it so
@@ -292,29 +323,15 @@ class CLI
   # issue #189: the log path relative to the workdir (absolute paths would
   # duplicate the Working directory line above).
   def session_log_path_display
-    File.join(Harness::HARNESS_DIR, 'sessions', harness.session.session_id, Harness::SESSION_LOG_FILE)
+    id = harness.session.session_id
+    File.join(SessionLocator::SESSIONS_DIR, id, SessionLocator::SESSION_LOG_FILE)
   end
 
-  # Resume a saved session given via -r / --resume (best-effort: a missing
-  # or ambiguous id raises HarnessError, which the entry point reports).
-  def resume_from_cli
-    id   = @options[:resume]
-    path = @harness.session_manager.resume_session(id)
-    # issue #207: the id is the session DIRECTORY name.
-    name = File.basename(File.dirname(path))
-    ui.puts "Resumed session #{name} (conversation and file list restored - see /session)."
-  end
-
-  # issue #107: resume the most recently saved session in this workdir's
-  # .harness/sessions/. Equivalent to --resume <id> with the newest id.
-  def continue_from_cli
-    path = @harness.session_manager.newest_session_path
-    raise HarnessError, 'no saved sessions in this workdir to continue (use /sessions to list any)' unless path
-
-    # issue #207: the id is the session DIRECTORY name.
-    name = File.basename(File.dirname(path))
-    @harness.session_manager.resume_session(name)
-    ui.puts "Continued session #{name} (the newest saved in #{@file_list.workdir}/.harness/sessions/)."
+  # True when this startup resolved an EXISTING session (--resume / --continue,
+  # issue #276): the conversation was restored during construction, so the
+  # banner has to say so (there is no separate resume call left to report it).
+  def resumed_run?
+    !!@options[:continue] || !@options[:resume].to_s.strip.empty?
   end
 
   # issue #221 review (bug 2): one-line description of the shell consent
