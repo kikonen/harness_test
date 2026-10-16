@@ -77,11 +77,6 @@ class CommandHandler
     @exiting
   end
 
-  # Delegate for CLI's --list-sessions flag.
-  def list_sessions
-    Commands::SessionsCommand.new(harness:, file_list:, options:, ui:).handle('')
-  end
-
   # Build the command line to resume a saved session in a new harness run.
   def resume_command(id)
     Commands::ResumeCommand.new(harness:, file_list:, options:, ui:).resume_cli_string(id)

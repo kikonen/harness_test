@@ -60,9 +60,15 @@ Keep this in mind:
 - Consent state is user-side harness state, never conversation state: it is
   not injected into the chain, and posture flags are coerced to real booleans
   on every setter.
-- A deferred value must be resolved lazily too: pass a getter or a forwarding
-  stand-in (`DeferredLogger`), never a nil placeholder snapshot - a consumer
-  that stores the value sees "not yet" forever (issue #270).
+- Resolve identity before constructing what derives from it (issue #276).
+  A session id is identity: the log file, the history file and the session
+  directory are all DERIVED from it. Constructing an object that derives from
+  an id before the id is settled forces every derived resource to be chased
+  and re-pointed afterwards (`rebind_logger`, `client.logger=`,
+  `history.bind_session` - issues #113 / #119 / #123 / #135 / #270 were all
+  one ordering bug). Resolve first (`SessionLocator`), construct once; a
+  mid-run identity change (`/resume`) is the only case that rebinds, and it
+  says so explicitly.
 - Line endings: the harness normalizes to LF for LLM-facing operations
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.

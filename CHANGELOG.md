@@ -7,20 +7,66 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - session identity resolved before anything is built (issue #276)
+
+- Refactor: the session id is now settled BEFORE `Harness` is constructed, so
+  the log file, the history file and the session directory are all created
+  once, under one id. New `SessionLocator` (`lib/session_locator.rb`) is the
+  single place that knows WHERE a session lives and WHICH session this run is;
+  it needs the workdir and nothing else (constructing it touches no disk).
+- `CLI#initialize` order is now: parse options -> resolve the id
+  (`--resume <id>` / `--continue` newest / a fresh UUID) -> read the saved data
+  -> construct Harness -> bind history to the settled id. `Session` takes its
+  id as a parameter (`session_id:`) and `Harness` takes `session_id:` /
+  `resume_data:`.
+- Delete: `lib/deferred_logger.rb` (the #270 stopgap), the lazy `Harness#logger`
+  accessor and the #123 deferral. `Harness#logger` is a real Logger from
+  `#initialize` on every path (fresh, `-r`, `--continue`, mid-run `/resume`),
+  and the client holds that same Logger, so no consumer can hold a placeholder.
+- Trade-off of the eager logger: a fresh run now creates its own
+  `.harness/sessions/<id>/` at startup (its log file), where the #123 deferral
+  created it only on the first log line. The deferral existed to protect the
+  RESUMED case (no dir for an id the run threw away) and that case is now
+  correct by construction; the log file of the id a run actually owns is not
+  throwaway state.
+- `rebind_logger` survives ONLY as the mid-run `/resume` case (identity changes
+  while everything is already running); startup resume no longer rebinds
+  anything, and `SessionManager#resume_session` is now the mid-run path alone.
+- Startup resume also applies the session's harness-side state (model profile,
+  param overrides, YOLO posture) during construction via
+  `Harness#apply_resume_state`, so a `--resume` run no longer silently drops
+  the posture and overrides the mid-run `/resume` used to restore.
+- A session file whose stored `session_id` is not the directory name it lives
+  under is now refused (it would split the run's state across two dirs), and a
+  typo'd `--resume` id raises BEFORE any session directory is created.
+- `--list-sessions` lists through `SessionLocator` (it used to construct a whole
+  Harness - client, logger, tool registry - just to read a few JSON files, and
+  minted a fresh random id on the way). `CommandHandler#list_sessions` is gone.
+- Fix found while testing the real CLI: mid-run `/resume` printed
+  `File.basename(path, '.json')`, which has never been the id since the #207
+  layout moved the JSON to `<sessions>/<id>/session.json`.
+- harness.md: the "a deferred value must be resolved lazily" rule (which
+  advertised `DeferredLogger` as a reusable pattern) is replaced by the
+  ordering rule - resolve identity before constructing what derives from it.
+  Issues #113 / #119 / #123 / #135 / #270 were five symptoms of this one bug.
+
 ## Unreleased - first prompt no longer dies on a nil logger (issue #270)
 
 - Fix: with `auto_save: false` (and verbose off), the FIRST prompt of a run
   ended in `[task error] NoMethodError: undefined method 'info' for nil`.
-- Cause: `Harness#initialize` passed the deliberately-deferred logger (nil
+- Cause (stopgap; superseded by #276 above): `Harness#initialize` passed the
+  deliberately-deferred logger (nil
   until first use, issue #123) straight into `LLMClient`, and the backend logs
   unconditionally on the first attempt of every request. The lazy `Harness#logger`
   accessor and its client rebind could never help: the crash happened before
   anything had asked for the logger, so the rebind never ran.
-- New `DeferredLogger` (`lib/deferred_logger.rb`): what such a consumer gets
+- New `DeferredLogger` (`lib/deferred_logger.rb`, DELETED by #276): what such a
+  consumer got
   instead of the nil. It resolves the source's `#logger` at CALL time, so it can
   never hold a nil and never pins a logger the owner is about to replace. The
   deferral itself (#123: no throwaway log dir for a fresh id) is unchanged.
-- The rule this teaches: a deferred value is only correct if RESOLVING it is
+- The rule this taught (superseded by the ordering rule in harness.md): a
+  deferred value is only correct if RESOLVING it is
   deferred too - a nil placeholder is a snapshot of "not yet", not a deferred
   value.
 
