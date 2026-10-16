@@ -322,6 +322,10 @@ class Harness
         Task.emit(:text, origin: :harness, content: '  [note] sent to model')
       end
 
+      # Each request announces its own wait, so an earlier re-point (an
+      # in-loop compaction) cannot outlive it.
+      @session_manager.request_spinner_detail
+
       data    = @client.chat(messages, tools: tools)
       message = data[:choices][0][:message]
 
