@@ -103,7 +103,9 @@ RSpec.describe SessionManager do
   let(:manager) { described_class.new(harness, file_list) }
 
   # issue #217: the UI (spinner, /model, /models, startup banner) shows
-  # WHERE a call goes via target_display - api type + endpoint path.
+  # WHERE a call goes via target_display - api type + endpoint path. The
+  # request spinner line carries the same tail (see the #request_spinner_detail
+  # specs), so this harness's stub client has a backend.
   describe '#target_display' do
     it 'shows the openai target' do
       expect(backend).to receive(:api_type).and_return(:openai)
@@ -117,6 +119,55 @@ RSpec.describe SessionManager do
       allow(backend).to receive(:endpoint_path).and_return('/api/chat')
 
       expect(manager.target_display).to eq('ollama /api/chat')
+    end
+  end
+
+  # Issue #283: the spinner line of an LLM request is one method with ONE
+  # caller (Harness#call_llm, once per request). send_session no longer emits
+  # it, so nothing can hold a stale message for the rest of a turn.
+  describe '#request_spinner_detail (issue #283)' do
+    def emitted_details
+      task = Task.new { }
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+      begin
+        manager.request_spinner_detail
+        events = []
+        loop do
+          m = task.poll(0)
+          break unless m
+          events << m
+        end
+        events
+      ensure
+        Thread.current[:harness_task] = old_current
+      end
+    end
+
+    it 'emits exactly one spinner_detail with the model and the backend target' do
+      harness.options[:model] = 'qwen2.5-coder:32b'
+
+      events = emitted_details
+
+      expect(events.map { |e| e[:type] }).to eq([:spinner_detail])
+      expect(events.first[:origin]).to eq(:session_manager)
+      expect(events.first[:content][:message])
+        .to eq('Sending to qwen2.5-coder:32b (openai /chat/completions)')
+      expect(events.first[:content][:suffix]).to respond_to(:call)
+    end
+
+    it 'names the target only when the client reports a backend' do
+      harness.options[:model] = 'raw-model'
+      harness.client = Class.new { def chat(*) = nil; }.new
+
+      expect(emitted_details.first[:content][:message]).to eq('Sending to raw-model')
+    end
+
+    it 'still emits a bare Sending line when no model is configured' do
+      harness.options.delete(:model)
+
+      expect(emitted_details.first[:content][:message])
+        .to eq('Sending (openai /chat/completions)')
     end
   end
 

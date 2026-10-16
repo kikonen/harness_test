@@ -909,6 +909,76 @@ RSpec.describe Harness do
     end
   end
 
+  # Issue #283: call_llm emits the request line before every request, so a
+  # re-point made by an earlier wait (an in-loop compaction) cannot stick for
+  # the rest of the turn.
+  describe '#call_llm spinner announcements (issue #283)' do
+    let(:task) { Task.new { } }
+    around do |example|
+      @old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+      example.run
+    ensure
+      Thread.current[:harness_task] = @old_current
+    end
+
+    def spinner_details
+      events = []
+      loop do
+        m = task.poll(0)
+        break unless m
+        events << m[:content][:message] if m[:type] == :spinner_detail
+      end
+      events
+    end
+
+    # num_ctx 10: the scripted client's prompt_tokens (10) are over the
+    # trigger and no headroom is reserved in such a small window.
+    def loop_options
+      { model: 'test-model', num_ctx: 10, compact_reserved: 0 }
+    end
+
+    def echo_round(id)
+      { content: nil,
+        tool_calls: [{ id: id,
+                       function: { name: 'test.echo', arguments: '{"text":"x"}' } }] }
+    end
+
+    it 'announces the send line before each request of a tool loop' do
+      h = build_harness(loop_options)
+      h.instance_variable_set(:@client, FakeScriptedClient.new(
+        [echo_round('c1'), { content: 'final' }]
+      ))
+      h.session.add_user('do the thing')
+
+      h.call_llm
+
+      expect(spinner_details).to eq(['Sending to test-model'] * 2)
+    end
+
+    it 're-announces the send line after an in-loop compaction' do
+      # Two tool rounds build a chain big enough to summarize, then the
+      # threshold trips: iteration 3 first compacts (its own spinner line)
+      # and then announces its own request.
+      h = build_harness(loop_options)
+      h.instance_variable_set(:@client, FakeScriptedClient.new(
+        [echo_round('c1'), echo_round('c2'),
+         { content: 'HANDOFF SUMMARY' }, { content: 'final' }]
+      ))
+      h.session.add_user('do the thing')
+
+      h.call_llm
+
+      details = spinner_details
+      compact = details.index { |d| d.include?('Compacting session mid-task') }
+      expect(compact).not_to be_nil
+      # The turn's LAST spinner line is the new request, not the finished
+      # compaction.
+      expect(details.last).to eq('Sending to test-model')
+      expect(details[0, compact]).to all(eq('Sending to test-model'))
+    end
+  end
+
   # issue #224: a tool batch with SEVERAL run.command calls is checked with
   # ONE forked LLM call (one verdict line per command) BEFORE the first
   # consent dialog. Advisory only; errors degrade to a verdict-less flow.

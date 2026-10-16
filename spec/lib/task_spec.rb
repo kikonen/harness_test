@@ -434,6 +434,32 @@ RSpec.describe Task do
       expect(captured).not_to include('Working...')
     end
 
+    # Issue #283 (the real drain loop): memory re-points a spinner for the
+    # wait it was recorded during, so the NEW wait must announce itself
+    # rather than inherit the finished wait's line.
+    it 'a new wait shows the newest spinner line, not one from an earlier wait' do
+      io_out = StringIO.new
+      io_in  = StringIO.new
+
+      described_class.run(harness: nil,
+                          ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
+        Task.emit(:spinner_detail, origin: :session_manager,
+                  content: { message: 'Compacting session mid-task' })
+        sleep 0.2
+        Task.puts '[step 2] running tests'   # the compaction wait is over
+        Task.emit(:spinner_detail, origin: :session_manager,
+                  content: { message: 'Sending to model' })
+        sleep 0.3
+      end
+
+      captured = io_out.string
+
+      expect(captured).to include('Compacting session mid-task...')
+      expect(captured).to include('Sending to model...')
+      expect(captured.split('Sending to model...').last)
+        .not_to include('Compacting session mid-task...')
+    end
+
     it 'prints text events from the outbox in order (and keeps the spinner going after)' do
       io_out = StringIO.new
       io_in = StringIO.new

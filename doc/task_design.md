@@ -46,9 +46,19 @@ OTHER data clears the spinner line BEFORE it is rendered (output lines must
 never land under a stale spin frame). It comes back on the next tick only if
 the outbox is empty again.
 
+A re-point describes ONE wait. The runner remembers it only so a spinner
+rebuilt inside that same wait keeps its message instead of falling back to the
+bare default; it is NOT a turn-wide state to be cleaned up. So every wait
+emits its own `:spinner_detail` when it starts - whoever finishes a wait does
+not have to clear anything, because whoever starts the next one overwrites it.
+
 Harness code never starts or stops spinners - it just emits `:spinner_detail`
 (or nothing at all) and is done. Tool execution renders output, it does not
 wait, so it never re-points the spinner.
+
+The LLM-request wait is announced by `SessionManager#request_spinner_detail`,
+which `Harness#call_llm` calls before EACH request of the tool loop (the only
+caller of it) - see issue #283.
 
 ## Console injection
 

@@ -7,6 +7,27 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - each LLM request announces its own spinner line (issue #283)
+
+- Fix: after an in-loop compaction the spinner kept saying
+  "Compacting session mid-task ..." for the REST of the turn, even though the
+  compaction was long done and the model request was running.
+- Cause: `send_session` emitted the "Sending to ..." `:spinner_detail` ONCE
+  before the whole tool loop, while `Harness#call_llm` iterates many times.
+  The compaction re-point won the race and nothing re-pointed it back, because
+  the runner replays the last remembered line whenever it rebuilds the spinner.
+- Fix shape (the agreed design): a wait that starts says what it is doing.
+  New `SessionManager#request_spinner_detail` is the single source of the
+  request line (model + ` (api path)` tail + live ctx suffix), and
+  `Harness#call_llm` calls it before EVERY `@client.chat` of the loop. There is
+  no "clear the spinner" logic anywhere: the next wait overwrites the previous
+  one, and `#send_session` no longer emits it at all.
+- `target_suffix` keeps the issue #217 target tail and drops it for a client
+  without a `#backend` (test doubles), so describing a wait can never break it.
+- doc/task_design.md: the spinner-ownership section now states the rule the
+  bug was missing - a re-point describes ONE wait; the runner only remembers it
+  so a spinner rebuilt INSIDE that wait keeps its message.
+
 ## Unreleased - comment rule made enforceable; offenders stripped (issue #281)
 
 - `harness.md` Code Style: the descriptive WWWW rule becomes a hard budget with a

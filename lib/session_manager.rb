@@ -238,12 +238,9 @@ class SessionManager
     # on context size), not just the raw usage percentage.
     Task.emit(:compact, origin: :session_manager,
               content: "  [context at #{last_prompt_tokens}/#{window} tokens (trigger #{trigger}) - in-loop compaction...]")
-
-    # issue #116: the send_session spinner is still animating here (this
-    # runs from inside Harness#call_llm). The task has exactly ONE spinner;
-    # our :spinner_detail simply re-points its message/suffix for the rest
-    # of the wait (the "Sending to ..." line becomes our compaction line).
-
+    # The spinner Harness left animating (this runs from inside
+    # Harness#call_llm) is re-pointed for the summary call's wait only: one
+    # :spinner_detail, no start/stop pair.
     Task.emit(:spinner_detail, origin: :session_manager,
               content: { message: 'Compacting session mid-task (summarizing full work trail)',
                          suffix: -> { @harness.context_indicator_live(messages) } })
@@ -288,16 +285,21 @@ class SessionManager
     false
   end
 
-  # Sends the session chain to the LLM and prints the response.
-  def send_session
-    # issue #115 / #126: show the LIVE context usage estimate next to the
-    # spinner (re-evaluated each frame from the current chain, not a snapshot).
-    # issue #217: include WHERE the call goes (API type + path) so a /model
-    # switch between backends is visible at a glance without opening the log.
+  # The spinner line for ONE outgoing LLM request. Harness#call_llm is its
+  # only caller, so each request re-announces its own wait and a re-point
+  # made earlier in the loop cannot outlive it.
+  def request_spinner_detail
+    label   = @harness.options[:model].to_s.strip
+    message = label.empty? ? 'Sending' : "Sending to #{label}"
     Task.emit(:spinner_detail, origin: :session_manager,
-              content: { message: "Sending to #{@harness.options[:model]} (#{target_display})",
+              content: { message: "#{message}#{target_suffix}",
                          suffix: -> { @harness.context_indicator_live } })
+  end
 
+  # Sends the session chain to the LLM and prints the response. Each request's
+  # spinner line belongs to #request_spinner_detail; only waits owned here
+  # re-point it.
+  def send_session
     response = nil
     begin
       response = @harness.call_llm
@@ -659,6 +661,15 @@ class SessionManager
   end
 
   private
+
+  # The " (api path)" tail of the send-spinner message; a client without a
+  # backend (a stub) gets no tail.
+  def target_suffix
+    return '' unless @harness.client.respond_to?(:backend)
+    return '' if @harness.client.backend.nil?
+
+    " (#{target_display})"
+  end
 
   # Find a saved session file by (abbreviated) id - SessionLocator's lookup
   # (issue #276), so startup resolution and a mid-run /resume resolve an id
