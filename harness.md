@@ -26,11 +26,20 @@ Keep this in mind:
 - 2-space indentation, no tabs.
 - Preserve existing formatting and style when editing - do not reformat
   untouched code.
-- Comments follow the WWWW rule: What / Why / When / Who / * - the star
-  being whatever the code cannot tell the reader (an invariant, a gotcha,
-  a labeled HACK with its issue). Lead with *why*; *what* is already in
-  the code, so document it only where a complex algorithm genuinely hides
-  it. Say each thing once, skip the obvious, no filler.
+- Comments: hard budget, enforced by a delete test. A comment may say ONLY
+  what the code cannot say: an invariant, a gotcha, an ordering constraint,
+  a labeled HACK. Never explain the programming language (`== true` is a
+  boolean check; `!!` is a truthiness cast - the reader knows both) and never
+  restate the line below the comment. Budget: at most ONE *why* sentence per
+  method (2-3 lines max); short obvious control flow (label lookups, getters,
+  setters, formatting, one-liners) gets NO comment at all. Delete test: if
+  deleting a comment loses no information the code does not already carry,
+  delete it - a comment that merely restates code is fluff, and one that
+  states a wrong mechanism (e.g. calling `val == true` "coercion") is worse
+  than none. Issue numbers, bug numbers and design history do NOT belong in
+  method bodies - they belong in CHANGELOG, the issue and the commit message.
+  When the user flags a comment as useless, the ASSISTANT strips it (never
+  the user) and audits the same file for the same pattern in the same pass.
 - Prefer small, focused methods; keep classes cohesive.
 - Lines should be at maximum 90 characters long.
 - Ruby and other text files must retain trailing newline in the end
@@ -58,8 +67,8 @@ Keep this in mind:
   auto-approves a command without a dialog must print a status line AND log
   it to harness.log.
 - Consent state is user-side harness state, never conversation state: it is
-  not injected into the chain, and posture flags are coerced to real booleans
-  on every setter.
+  not injected into the chain, and every posture setter compares strictly to
+  `true` (`val == true`), so only a literal true turns a posture on.
 - Resolve identity before constructing what derives from it (issue #276).
   A session id is identity: the log file, the history file and the session
   directory are all DERIVED from it. Constructing an object that derives from

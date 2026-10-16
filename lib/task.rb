@@ -3,13 +3,13 @@
 # -- Task --------------------------------------------------------------------
 #
 # Runs a block on a background thread and owns ALL console I/O for that turn
-# (issue #40 - single-thread I/O rule). The task thread NEVER writes to an
+# (single-thread I/O rule). The task thread NEVER writes to an
 # IO stream. It pushes typed events onto the SINGLE event queue (the outbox);
 # the main thread's drain loop reads from that queue, stores each output
 # event into the OutputBuffer (structured log), and renders to stdout in
 # order. There is no second channel - one queue guarantees total ordering.
 #
-# SINGLE EVENT QUEUE (issue #40 follow-up):
+# SINGLE EVENT QUEUE:
 #   The outbox (Thread::Queue) is the ONLY task→main channel. Both output
 #   events (:text, :spinner_detail, etc.) AND control events (:done,
 #   :error_ctrl, :__request__) travel on it. The drain loop pops one message
@@ -53,22 +53,16 @@
 #   (no background work survives the turn) and the Interrupt is re-raised
 #   for the CLI's cleanup path.
 
-# Mid-turn user notes (issue #36 / #198 phase 1): NO reader thread. On each
-# drain tick Task.run peeks `stdin.input_pending?` (cross-platform; nil when
-# the stream does not support it). When something is waiting on the keyboard
-# it opens a UI::Editor ON THE MAIN THREAD: tty -> Reline multiline (issue
-# #198 phase 4: Enter inserts a newline, the submit key commits the whole
-# block as ONE note, Esc keeps the draft for the next trigger, Ctrl-D on an
-# empty buffer aborts the turn); non-tty -> plain gets() (one line per read -
-# a pipe has no submit key). The committed note is rendered as an ack and
-# stored on the harness (Harness#user_note_text=), where
-# Harness#call_llm injects it into the chain before the next LLM call.
-# Because the drain loop only ever peeks and then reads, no other thread can
-# be parked on stdin: dialogs (served by this same main-thread loop) route
-# their choice line through the SAME UI::Editor on a tty (issue #198 phase
-# 2), so every in-turn stdin read shares one code path with nothing to race
-# for the keyboard - issue #198's stuck-dialog / lost-line bug class is gone
-# by construction.
+# Mid-turn user notes: NO reader thread. Each drain tick PEEKS
+# `stdin.input_pending?` (nil on streams that do not support it); if the user
+# is at the keyboard the MAIN thread opens a UI::Editor - tty gets Reline
+# multiline (Enter = newline, submit key = one note, Esc = draft kept, Ctrl-D
+# on an empty buffer = abort the turn), non-tty gets one line per read (a
+# pipe has no submit key). The note is acked and stored on the harness, where
+# Harness#call_llm injects it before the next LLM call.
+# Because nothing else is ever parked on stdin, dialogs served by this same
+# loop route their tty choice line through the SAME UI::Editor: one code path,
+# nothing to race for the keyboard.
 
 require_relative 'output_buffer'
 require_relative 'ui/editor'
@@ -99,10 +93,6 @@ class Task
 
   attr_reader :thread, :buffer, :ui
 
-  # Mid-turn steering state (issue #36 / #198 phase 1): @note_editor opens
-  # the Reline editor when input_pending? triggers; @note_draft is the text
-  # a cancelled Esc left behind (prefilled on the next trigger); @harness is
-  # assigned by Task.run so the drain loop can store committed notes on it.
   attr_accessor :note_editor
   attr_accessor :harness
 
@@ -113,36 +103,28 @@ class Task
     @buffer  = OutputBuffer.new    # structured log (runner fills it)
     @spinner = nil
     @thread  = nil
-    # The LAST spinner content the task asked for ({message:, suffix:}).
-    # The drain loop recreates the spinner every time the outbox empties
-    # again, and a fresh spinner would otherwise fall back to the default
-    # 'Working' message - the "Sending to model..." line must not reset
-    # mid-turn (issue #221 review, bug 1).
+    # The drain loop rebuilds the spinner whenever the outbox empties;
+    # this replay keeps its message from resetting mid-turn.
     @spinner_detail = nil
     @ui      = nil                 # set by Task.run before start
     @dialog_open = false           # true while perform_direct is on stdin
-    @note_editor  = nil            # issue #36: mid-turn steering editor
+    @note_editor  = nil
     @note_draft   = nil            # draft kept by a cancelled Esc
     @harness      = nil
   end
 
   attr_writer :ui
 
-  # -- Spinner content memory (issue #221 review, bug 1) ---------------------
+  # -- Spinner content memory ------------------------------------------------
 
   attr_reader :spinner_detail
 
-  # Remember what the task asked the spinner to show (a {message:, suffix:}
-  # payload from :spinner_detail). ensure_spinner_running re-plays it when
-  # it has to build a NEW spinner for the same wait, so the spinner line
-  # keeps its real message instead of resetting to 'Working...'.
   def record_spinner_detail(payload)
     @spinner_detail = payload if payload.is_a?(Hash)
   end
 
-  # True while the main thread is inside a dialog's perform_direct
-  # (stdin read + prompt print) - store_and_render must not clear any
-  # output line in that window, so the Choice prompt survives.
+  # While true, store_and_render must not clear output lines: a Choice
+  # prompt on stdin would vanish with them.
   def dialog_open?
     @dialog_open
   end
@@ -213,10 +195,7 @@ class Task
     @outbox << event
   end
 
-  # Blocking request: posts a dialog/event message to the outbox for the
-  # main thread to process, then blocks until the main thread calls
-  # #respond with a value. Returns that value. Raises if the task is
-  # stopped while waiting.
+  # Blocks until the main thread answers with #respond.
   def request(type, **payload)
     @outbox << { type: :__request__, kind: type, **payload }
     reply = @inbox.pop
@@ -270,13 +249,8 @@ class Task
     @spinner if @spinner&.running?
   end
 
-  # Stop the spinner and clear its line on the task's stdout stream.
-  # Called by the drain loop when data arrives, when the wait ends
-  # (:done/:error), or on Ctrl+C (ensure).
   def clear_all_spinners
     return unless @spinner
-    # In production the console is always set by Task.run; in unit tests it
-    # may be nil - just stop without clearing.
     if @ui && @spinner.running?
       @spinner.clear_line
     end
@@ -315,10 +289,8 @@ class Task
   )
     task = Task.new(&block)
     task.ui = ui
-    # Mid-turn steering (issue #36 / #198 phase 1): the editor peeks stdin
-    # on every drain tick - no reader thread, so nothing can race for the
-    # keyboard. Needs a harness to land notes on; Task.run is called with
-    # harness: nil only from unit tests.
+    # The editor only PEEKS stdin: no reader thread, so nothing races for
+    # the keyboard. Notes need a harness to land on (nil = unit test).
     task.harness = harness
     task.note_editor = UI::Editor.new(ui.stdin) if ui.stdin && harness
     error_msg   = nil
@@ -327,16 +299,10 @@ class Task
     begin
       task.start
 
-      # issue #36: input may already be waiting at the keyboard when the
-      # turn starts - pick it up before the first outbox event so an
-      # immediate :done does not lose it.
+      # Input waiting at turn start must not be lost to an immediate :done.
       poll_for_note(task)
 
       loop do
-        # issue #36: peek for steering input; if the user is at the
-        # keyboard, open the note editor on this thread. A committed note
-        # lands on the harness where call_llm injects it before the next
-        # LLM call. Esc / bare Enter returns immediately (task keeps running).
         poll_for_note(task)
 
         # Wait for the next event on the SINGLE queue (blocks up to timeout).
@@ -392,9 +358,7 @@ class Task
       drain_remaining(task)
       [error_msg, task]
     rescue NoteAbort
-      # issue #36: Ctrl-D inside the note editor - abandon the turn. Same
-      # rule as Ctrl+C: the task thread must NOT keep working in the
-      # background. Returns normally (no error) like a completed turn.
+      # Like Ctrl+C: the task thread must not keep working in the background.
       task.stop
       [nil, task]
     rescue Interrupt
@@ -419,21 +383,13 @@ class Task
     detail  = task.spinner_detail || {}
     spinner = UI::Spinner.new(detail[:message] || DEFAULT_SPINNER_MESSAGE,
                               detail[:suffix], ui: task.ui)
-    # issue #224 follow-up: the spinner ALWAYS shows the current command
-    # consent MODE (a live badge at the END of the line, re-evaluated every
-    # frame) so the user can verify a /yolo or Ctrl+A toggle took effect at
-    # a glance. A harness that does not expose the mode (unit-test
-    # harnesses) yields a nil label and renders no badge.
+    # A live badge so a mid-turn /yolo or Ctrl+A toggle is visible at once.
     harness = task.harness
     spinner.badge = -> { mode_badge(harness) } if harness.respond_to?(:command_mode_label)
     spinner.start
     task.spinner = spinner
   end
 
-  # The command consent MODE badge ("[AUTO-APPROVE]" / "[MANUAL]" / "[YOLO]")
-  # or nil to render nothing. The bare label is the tag - a "cmd:" prefix
-  # adds nothing the brackets do not already say (issue #221 review). Reads
-  # the live value each frame so a mid-turn toggle is reflected immediately.
   def self.mode_badge(harness)
     label = harness.command_mode_label
     label.nil? ? nil : "[#{label}]"
@@ -448,16 +404,10 @@ class Task
     task.visible_spinner&.render!
   end
 
-  # issue #36 / #198 phase 4: poll for a mid-turn steering note. The read is
-  # MULTILINE (read_multiline): on tty Enter inserts a newline and the
-  # submit key commits the whole block as ONE note; non-tty streams keep
-  # one line per read. input_pending? only PEEKS (never consumes), so it is
-  # safe to call on every tick: no reader thread exists, and while the
-  # editor is open THIS thread owns stdin - nothing else can read from it.
-  # The editor returns immediately when the user cancels (Esc -> draft kept
-  # for the next trigger) or submits nothing (:empty), so the task keeps
-  # running; Ctrl-D inside the editor raises NoteAbort, which Task.run
-  # turns into a turn abort.
+  # MULTILINE read: Enter inserts a newline, the submit key commits the
+  # whole block as one note. Safe to call every tick: the read only PEEKS,
+  # and while the editor is open this thread owns stdin. Cancel (:cancelled
+  # / :empty) keeps the task running; :eof raises NoteAbort.
   def self.poll_for_note(task)
     return unless task.note_editor && task.harness
 
@@ -486,35 +436,21 @@ class Task
       # Esc: keep the buffer as a draft; it is prefilled on the next trigger.
       task.instance_variable_set(:@note_draft, result.text)
     when :empty
-      # Bare Enter: the user changed their mind mid-thought - no note, back
-      # to spinner mode (design decision from trial T3, issue #198).
+      # Bare Enter: the user changed their mind mid-thought - no note.
     when :eof
       # Ctrl-D inside the editor: abort the running turn (see NoteAbort).
       raise NoteAbort
     end
   end
 
-  # issue #36: store a committed steering note on the harness (Harness#
-  # call_llm injects it into the chain before the next LLM call) and render
-  # an ack line. Main thread only - the single-thread I/O rule (issue #40).
+  # Main thread only (single-thread I/O rule).
   def self.commit_note(task, note)
-    # HACK (issue #221, acknowledged as tech debt): a steering note that is
-    # exactly "/yolo" is intercepted here as a CONTROL gesture instead of
-    # being injected into the chain. It is the only keyboard-free way to
-    # flip the shell consent posture while a tool loop runs, and it is safe
-    # because toggle_yolo is a pure main-thread boolean write - no LLM
-    # round, no prompt recursion, no stdin contention with the drain loop.
-    # WHY IT IS A HACK: this hard-codes ONE slash command into Task's note
-    # plumbing (its own regex, duplicating knowledge CommandHandler's
-    # COMMANDS registry already owns) - it does not scale to more gestures.
-    # The agreed follow-up (issue #267) is to make
-    # mid-turn notes dispatch through the shared slash-command registry as
-    # part of the async-task + CLI refactoring, and delete this branch.
+    # HACK (#221, tech debt tracked by #267): hard-codes one slash command
+    # into note plumbing, duplicating CommandHandler's registry. Safe only
+    # because toggle_yolo is a pure main-thread boolean write.
     if (toggle = yolo_note_action(note))
-      # 'on'/'off' set the posture explicitly (idempotent); a bare /yolo
-      # flips it. The mode is a symbol so a bare marker (no on/off group)
-      # is still truthy - nil from an unmatched optional group would make
-      # the whole gesture silently fall through into the chain.
+      # A symbol mode: nil from an unmatched optional group would read as
+      # "no gesture" and inject the command into the chain.
       case toggle
       when :on  then task.harness.yolo = true
       when :off then task.harness.yolo = false
@@ -550,9 +486,6 @@ class Task
     m[1] ? m[1].downcase.to_sym : :toggle
   end
 
-  # issue #224 follow-up: ack a Ctrl+A command-consent mode toggle (the
-  # spinner badge re-renders the new mode on the next frame). label is nil
-  # when the harness does not support the toggle (nothing was flipped).
   def self.ack_command_mode(task, label)
     ui = task.ui
     line = label.nil? ? "  [mode toggle unavailable]" \
@@ -566,12 +499,9 @@ class Task
       dialog = msg[:dialog]
       task.instance_variable_set(:@dialog_open, true)
       begin
-        # issue #198 phase 1: no reader thread exists during the turn (the
-        # drain loop only PEEKS stdin), so the dialog can read task.ui.stdin
-        # directly with nothing to race for the keyboard. Phase 2 routes
-        # its tty choice line through the SAME UI::Editor as steering notes.
-        # The console wraps the task's streams so rendered text lands where
-        # everything else lands (same stream, single-thread I/O order).
+        # No reader thread during the turn, so the dialog can read stdin with
+        # nothing to race for the keyboard; the Console wraps the task's streams
+        # so output keeps its single-thread order.
         ui = UI::Console.new(stdout: task.ui.stdout, stdin: task.ui.stdin)
         answer = dialog.perform_direct(ui: ui)
         task.respond(answer)
