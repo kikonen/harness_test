@@ -7,6 +7,28 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - comment rule made enforceable; offenders stripped (issue #281)
+
+- `harness.md` Code Style: the descriptive WWWW rule becomes a hard budget with a
+  delete test. A comment may only say what the code cannot (invariant, gotcha,
+  ordering constraint, labeled HACK), at most one *why* sentence per method; short
+  obvious control flow (getters, setters, label lookups, one-liners) gets NO
+  comment; the programming language is never explained (`== true` is a boolean
+  check, `!!` a truthiness cast); a comment that restates the line under it is
+  fluff and one that names the wrong mechanism (calling `val == true` "coercion")
+  is worse than none; issue/bug numbers and design history move out of method
+  bodies to CHANGELOG, the issue and the commit message. A comment the user flags
+  as useless is stripped by the ASSISTANT, and the same file is audited for the
+  same pattern in the same pass.
+- `harness.md` Conventions: the "posture flags are coerced to real booleans" line
+  was itself the wrong-mechanism kind - it now states what the setters do
+  (`val == true`, a strict comparison, so only a literal true turns a posture on).
+- Strip: the flagged 10-line comment on the 3-line `Harness#command_mode_label`,
+  every comment inside `Harness#initialize` (all of them restated the assignment
+  under them), and the same pattern across `lib/harness.rb` and `lib/task.rb`
+  (comment lines 292 -> 36 and 279 -> 212; zero issue-number references left in
+  either file).
+
 ## Unreleased - session identity resolved before anything is built (issue #276)
 
 - Refactor: the session id is now settled BEFORE `Harness` is constructed, so
