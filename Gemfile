@@ -22,4 +22,10 @@ gem 'ratatui_ruby'
 
 group :development do
   gem 'rspec'
+
+  # House-rule enforcement (issue #302): the mechanical part of harness.md
+  # (line length, indentation, frozen_string_literal, string literals,
+  # trailing whitespace) is a cop set here rather than a habit each session
+  # has to remember. Opinionated cops are disabled in .rubocop.yml.
+  gem 'rubocop', '~> 1.92'
 end
