@@ -7,6 +7,34 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - rubocop with loosened defaults (issue #302)
+
+- `rubocop` 1.92 added to the development group, `.rubocop.yml` written from
+  scratch with `DisabledByDefault: true`: only the mechanical house rules
+  harness.md already states are enforced (Layout, the paren/super/string/
+  frozen-literal Style cops, Lint, Naming). Metrics is off entirely - at the
+  default thresholds it fires 363 times on this tree, and class/method size is
+  review judgement, not a house rule.
+- Layout and the Style cops are scoped to `lib/`: formatting rules in specs buy
+  nothing (spec/**/* is where nearly every formatting offense lives). Lint and
+  Naming stay on everywhere - they catch real mistakes, not taste.
+- Continuation style is CONFIGURED rather than disabled, from a probe file the
+  user wrote (args hanging under the opening call = wrong; 2-space continuation
+  with the closing bracket on the last argument's line = right):
+  `with_fixed_indentation`, `MultilineMethodCallBraceLayout: same_line`,
+  `HashAlignment: EnforcedColonStyle: key`.
+- `inherit_mode: merge: [Exclude]` is load-bearing: without it an Exclude set in
+  `.rubocop.yml` REPLACES the per-cop Exclude lists `.rubocop_todo.yml`
+  generates, silently discarding the baseline (1149 baselined offenses kept
+  firing before this was found).
+- Quotes flipped repo-wide in one pass: 989 lines across 81 files of `lib/` +
+  `harness.rb`, single -> double (the repo's older single-quote habit is
+  dropped). Specs untouched. Suite unchanged: 924 examples, 0 failures.
+- `.rubocop_todo.yml` baselines what is left (633 offenses across 41 cops,
+  biggest: LineLength 193, HashAlignment 87, ArgumentAlignment 50) so new code
+  is held to the rules while old debt is cleaned step by step.
+- CI runs `bundle exec rubocop --format github` after rspec.
+
 ## Unreleased - mid-run /resume builds a FRESH Harness (issue #280)
 
 - `/resume <id>` no longer patches the live Harness. `CLI#setup` (issue #282) is

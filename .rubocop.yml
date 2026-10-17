@@ -1,0 +1,179 @@
+# House rules for the harness (issue #302).
+#
+# The mechanical part of what harness.md already states (line length, 2-space
+# indent, frozen_string_literal, trailing whitespace) becomes a cop set here, so
+# the suite enforces it instead of every session having to remember it. Cops that
+# restate Ruby idiom rather than THIS repo's decisions stay off: a cop the code
+# fights gets switched off anyway, and a config full of disabled cops is noise.
+#
+# Existing violations are baselined in .rubocop_todo.yml, so new code is held to
+# the rules while old code is cleaned on purpose, in its own commit.
+
+inherit_from: .rubocop_todo.yml
+
+# Without this, an Exclude set here (the spec/**/* scoping below) REPLACES the
+# Exclude lists the todo file generates for the same cop, silently discarding
+# the baseline - which is exactly what happened when this config was first
+# generated: 1149 baselined offenses kept firing.
+inherit_mode:
+  merge:
+    - Exclude
+
+AllCops:
+  DisabledByDefault: true
+  TargetRubyVersion: 4.0
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    # Racc output; its own header says DO NOT MODIFY.
+    - lib/shell_parser.rb
+    - tmp/**/*
+    - .harness/**/*
+    - vendor/**/*
+
+# Specs are test code: their shape follows the example being described, and a
+# formatting rule there (quote style, brace layout, wrapped-argument indent)
+# buys nothing - measured, spec/**/* is where nearly every formatting offense
+# lives. So the whole Layout department skips specs, and each Style cop enabled
+# below carries the same exclusion (enabling the Style DEPARTMENT would switch
+# on ~100 cops, which DisabledByDefault exists to prevent). Lint and Naming stay
+# on everywhere: those catch real mistakes (unused variable, duplicated branch),
+# not taste.
+Lint:
+  Enabled: true
+
+Lint/NonLocalExitFromIterator:
+  Enabled: false
+
+Layout:
+  Enabled: true
+  Exclude:
+    - spec/**/*
+
+# Size limits are review judgement, not a mechanical house rule, and this repo's
+# classes are deliberately big (session_manager 632 lines, command_runner 609).
+# Measured at the default thresholds the whole department fires 363 times
+# (MethodLength 148, AbcSize 90, CyclomaticComplexity 55, PerceivedComplexity
+# 43, ClassLength 19, BlockLength 5, ParameterLists 2, BlockNesting 1).
+Metrics:
+  Enabled: false
+
+Naming:
+  Enabled: true
+
+Naming/PredicatePrefix:
+  Enabled: false
+
+Naming/MethodParameterName:
+  AllowedNames:
+    - id
+    - io
+    - ui
+
+# Continuation style, taken from the style probe (tmp/style_example_1.rb): the
+# 'want_this' block passes under these settings, and the 'not_this' block (args
+# hanging under the opening call, values table-padded, closing brace on its own
+# line) is flagged. This is harness.md's rule made executable: 2 spaces from the
+# line that opened the call, closing bracket on the last argument's line.
+Layout/ArgumentAlignment:
+  EnforcedStyle: with_fixed_indentation
+
+Layout/ArrayAlignment:
+  EnforcedStyle: with_fixed_indentation
+
+Layout/FirstArgumentIndentation:
+  EnforcedStyle: consistent
+
+Layout/FirstArrayElementIndentation:
+  EnforcedStyle: consistent
+
+Layout/FirstHashElementIndentation:
+  EnforcedStyle: consistent
+
+# Keys of a multi-line hash line up; VALUES get no table padding ('table' style
+# demands it and the probe file rejects that).
+Layout/HashAlignment:
+  EnforcedColonStyle: key
+
+Layout/MultilineMethodCallBraceLayout:
+  EnforcedStyle: same_line
+
+Layout/MultilineMethodCallIndentation:
+  EnforcedStyle: indented
+
+Layout/MultilineOperationIndentation:
+  EnforcedStyle: indented
+
+Layout/LineLength:
+  # harness.md: "Lines should be at maximum 90 characters long." 90 is the width
+  # of ONE Emacs buffer in the two-pane setup the code is read in (a Zenbook
+  # laptop: two side-by-side windows fit ~90 columns each). A physical
+  # constraint, not an abstract limit.
+  Max: 90
+  AllowedPatterns:
+    - '^\s*(# |url: |https?://)'
+
+Layout/SpaceInsideBlockBraces:
+  # The repo writes an empty block as { } (Task.new { }); the default wants {}.
+  EnforcedStyleForEmptyBraces: space
+
+Layout/ExtraSpacing:
+  AllowForAlignment: true
+
+Layout/EndOfLine:
+  # Measured on this Windows checkout: 'native' fires on all 131 files (native
+  # means CRLF there) while 'lf' is clean - the tree really is LF
+  # (.gitattributes 'text=auto eol=lf', core.autocrlf false), so LF is the
+  # honest rule rather than a per-OS one.
+  EnforcedStyle: lf
+
+Style/FrozenStringLiteralComment:
+  Enabled: true
+  EnforcedStyle: always
+
+Style/StringLiterals:
+  Enabled: true
+  # Double quotes everywhere (the repo's older single-quote habit is dropped).
+  # Measured against the tree: 5062 offenses to flip vs 62 for single quotes -
+  # a codebase-wide decision, not one belonging to this PR, so the number is
+  # recorded here for whoever reads it next.
+  EnforcedStyle: double_quotes
+  Exclude:
+    - spec/**/*
+
+# Parentheses: a call that TAKES arguments wears them (x = some_method arg1,
+# arg2, arg3 is the unreadable form); a call with no arguments never wears them;
+# super stays bare unless suppressing all forwarding is the point. The Allowed
+# list is the family of calls Ruby itself writes without parens - the repo
+# already writes all 62 logger calls parenthesised, so the list only stops the
+# cop fighting puts/raise idiom.
+Style/MethodCallWithArgsParentheses:
+  Enabled: true
+  EnforcedStyle: require_parentheses
+  AllowedMethods:
+    - emit_line
+    - exit
+    - print
+    - p
+    - puts
+    - raise
+    - sleep
+    - warn
+    - yield
+  Exclude:
+    - spec/**/*
+
+Style/MethodCallWithoutArgsParentheses:
+  Enabled: true
+  Exclude:
+    - spec/**/*
+
+Style/SuperArguments:
+  Enabled: true
+  Exclude:
+    - spec/**/*
+
+Style/SuperWithArgsParentheses:
+  Enabled: true
+  Exclude:
+    - spec/**/*
