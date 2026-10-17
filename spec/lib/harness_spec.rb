@@ -118,11 +118,14 @@ RSpec.describe Harness do
       expect(build_harness.context_indicator_live).to be_nil
     end
 
-    it 'shows EXACT usage (no ~) when the last response reported it' do
+    # Issue #271: this is the SPINNER's segment - the percentage and the
+    # window it is a percentage of, not the token arithmetic (which
+    # #context_indicator and the /ctx report keep).
+    it 'shows the percentage and the rounded window when usage was reported' do
       harness = build_harness
       seed_usage(harness, 5_915)
 
-      expect(harness.context_indicator_live).to eq('🧠 ctx 5915/65536 (9%)')
+      expect(harness.context_indicator_live).to eq('🧠 9% (66K)')
     end
 
     it 'marks estimates with ~ when no usage was reported yet' do
@@ -158,9 +161,25 @@ RSpec.describe Harness do
 
       line = harness.context_indicator_live(extended)
       expect(line).to include('~')
-      # 10 (anchor) + ceil((4 + 2000)/4) for the new assistant+tool
-      # messages = 511, NOT a from-scratch re-estimate of the whole chain.
-      expect(line).to include('511/')
+      # The segment must carry the ANCHORED count (511 tokens = 1% of
+      # 65536), not the from-scratch chars/4 estimate of the whole chain,
+      # which also measures the system prompt and reads several percent
+      # higher.
+      expect(harness.session.anchored_estimate(extended)).to eq(511)
+      expect(line).to eq('🧠 ~1% (66K)')
+    end
+
+    # The window is only ever read as an order of magnitude, so a five-digit
+    # one is rounded to whole thousands; sub-thousand windows stay exact.
+    it 'rounds the window to K, keeping a small window exact' do
+      wide = build_harness(num_ctx: 160_000)
+      wide.session.record_stats(prompt_tokens: 19_514,
+                               usage: { prompt_tokens: 19_514 })
+      expect(wide.context_indicator_live).to eq('🧠 12% (160K)')
+
+      tiny = build_harness(num_ctx: 10)
+      tiny.session.record_stats(prompt_tokens: 10, usage: { prompt_tokens: 10 })
+      expect(tiny.context_indicator_live).to eq('🧠 100% (10)')
     end
   end
 
@@ -953,7 +972,7 @@ RSpec.describe Harness do
 
       h.call_llm
 
-      expect(spinner_details).to eq(['Sending to test-model'] * 2)
+      expect(spinner_details).to eq(['Sending (test-model)'] * 2)
     end
 
     it 're-announces the send line after an in-loop compaction' do
@@ -974,8 +993,8 @@ RSpec.describe Harness do
       expect(compact).not_to be_nil
       # The turn's LAST spinner line is the new request, not the finished
       # compaction.
-      expect(details.last).to eq('Sending to test-model')
-      expect(details[0, compact]).to all(eq('Sending to test-model'))
+      expect(details.last).to eq('Sending (test-model)')
+      expect(details[0, compact]).to all(eq('Sending (test-model)'))
     end
   end
 

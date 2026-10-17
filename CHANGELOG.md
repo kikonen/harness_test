@@ -7,6 +7,27 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - compact spinner line (issue #271)
+
+- The per-request spinner line was the longest UI line of a turn and its
+  numbers were unglanceable:
+  "Sending to qwen2.5-coder:32b (ollama /api/chat)... 🧠 ctx 19514/160000 (12%)".
+- New format: "Sending (qwen2.5-coder:32b / openai)... 🧠 12% (160K)".
+  - `SessionManager#request_spinner_detail`: the recipient moves into
+    parentheses after the verb and only the API TYPE is named. The endpoint
+    path issue #217 added was the longest part of the line and is already in
+    the startup banner and printed by /model, so it left the spinner;
+    `target_suffix` became `api_type_label`. `#target_display` (and with it
+    /model, /models and the banner) still shows api type + endpoint path.
+  - `Harness#context_indicator_live` - the spinner's context segment - now
+    leads with the percentage and names the window it is a percentage of,
+    rounded to whole thousands by the new `#window_label` (65536 -> 66K,
+    160000 -> 160K; a window under 1000 stays exact). The used-token count is
+    dropped: the percentage is what the eye tracks frame to frame.
+- The compact form is the spinner's ONLY: `#context_indicator` (the modeline
+  and the per-turn stats line) and `#context_report` (/ctx) keep the full
+  token arithmetic, so /compact's before/after lines stay verbose.
+
 ## Unreleased - each LLM request announces its own spinner line (issue #283)
 
 - Fix: after an in-loop compaction the spinner kept saying

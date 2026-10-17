@@ -288,11 +288,16 @@ class SessionManager
   # The spinner line for ONE outgoing LLM request. Harness#call_llm is its
   # only caller, so each request re-announces its own wait and a re-point
   # made earlier in the loop cannot outlive it.
+  #
+  # Issue #271 compacted the form: WHO the request goes to sits in
+  # parentheses after the verb, and only the API TYPE is named - the endpoint
+  # path #217 added was the longest part of the line and is already in the
+  # startup banner and printed by /model. A client with no backend (a stub)
+  # gets the model alone.
   def request_spinner_detail
-    label   = @harness.options[:model].to_s.strip
-    message = label.empty? ? 'Sending' : "Sending to #{label}"
+    who = [@harness.options[:model].to_s.strip, api_type_label].reject(&:empty?)
     Task.emit(:spinner_detail, origin: :session_manager,
-              content: { message: "#{message}#{target_suffix}",
+              content: { message: who.empty? ? 'Sending' : "Sending (#{who.join(' / ')})",
                          suffix: -> { @harness.context_indicator_live } })
   end
 
@@ -469,8 +474,9 @@ class SessionManager
   # Where the active backend actually sends its calls: the API type and the
   # endpoint path it appends to the configured base URL, e.g.
   # "openai /v1/chat/completions" or "ollama /api/chat". Shown by the UI
-  # (send spinner, /model, /models, startup banner) so a /model switch
-  # between API types is visible without reading harness.log (issue #217).
+  # (startup banner, /model, /models) so a /model switch between API types is
+  # visible without reading harness.log (issue #217). The spinner names only
+  # the API type (see #request_spinner_detail, issue #271).
   def target_display
     backend = @harness.client.backend
     "#{backend.api_type} #{backend.endpoint_path}"
@@ -662,13 +668,11 @@ class SessionManager
 
   private
 
-  # The " (api path)" tail of the send-spinner message; a client without a
-  # backend (a stub) gets no tail.
-  def target_suffix
+  # The API type of the active backend ('openai' / 'ollama'); '' when the
+  # client has no backend (a stub).
+  def api_type_label
     return '' unless @harness.client.respond_to?(:backend)
-    return '' if @harness.client.backend.nil?
-
-    " (#{target_display})"
+    (@harness.client.backend&.api_type).to_s.strip
   end
 
   # Find a saved session file by (abbreviated) id - SessionLocator's lookup
