@@ -6,13 +6,26 @@ require 'tools/git_apply_tool'
 require 'session'
 
 RSpec.describe Tools::GitApplyTool do
-  # Minimal git repo in a tmp dir: the apply tool runs real git. The
-  # identity is set via the environment so no global config is needed.
+  # Minimal git repo in a tmp dir: the apply tool runs real git. Identity via
+  # the environment so no global config is needed.
+  #
+  # maintenance.auto / gc.auto are switched OFF through git's own config env
+  # mechanism because `git commit` otherwise spawns a DETACHED
+  # `git maintenance run --auto --quiet --detach` child that writes
+  # .git/objects/maintenance.lock inside the tmp repo - after the example
+  # finished, while Dir.mktmpdir is walking the same tree to delete it. The
+  # cleanup then dies on a path it had already enumerated (Errno::ENOENT) and
+  # the example fails on teardown, not on its own assertions.
   GIT_ENV = {
     'GIT_AUTHOR_NAME'     => 'test',
     'GIT_AUTHOR_EMAIL'    => 'test@example.com',
     'GIT_COMMITTER_NAME'  => 'test',
-    'GIT_COMMITTER_EMAIL' => 'test@example.com'
+    'GIT_COMMITTER_EMAIL' => 'test@example.com',
+    'GIT_CONFIG_COUNT'    => '2',
+    'GIT_CONFIG_KEY_0'    => 'maintenance.auto',
+    'GIT_CONFIG_VALUE_0'  => 'false',
+    'GIT_CONFIG_KEY_1'    => 'gc.auto',
+    'GIT_CONFIG_VALUE_1'  => '0'
   }.freeze
 
   def setup_git_repo(dir, file: 'hello.txt', content: "line1\nline2\nline3\n")
