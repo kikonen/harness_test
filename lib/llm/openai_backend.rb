@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require 'net/http'
+require "net/http"
 
-require_relative 'base_backend'
+require_relative "base_backend"
 
 module LLM
   # OpenAI-compatible backend (default, issue #197): POST /v1/chat/completions.
@@ -18,7 +18,7 @@ module LLM
 
     # issue #217: public (like BaseBackend#endpoint_path) so the UI can
     # show the actual call target.
-    def endpoint_path = '/chat/completions'
+    def endpoint_path = "/chat/completions"
 
     private
 
@@ -47,7 +47,7 @@ module LLM
       normalized = {
         choices: [{
           message: {
-            role: message[:role] || 'assistant',
+            role: message[:role] || "assistant",
             content: message[:content],
             reasoning: message[:reasoning] || message[:reasoning_content],
             tool_calls: normalize_tool_calls(message[:tool_calls])

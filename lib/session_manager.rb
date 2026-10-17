@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
-require 'json'
-require 'fileutils'
+require "json"
+require "fileutils"
 
-require_relative 'harness_error'
-require_relative 'session_locator'
-require_relative 'param_overrides'
+require_relative "harness_error"
+require_relative "session_locator"
+require_relative "param_overrides"
 
 # Manages all session-related logic: prompt flow, compaction, rules file,
 # model switching, and persistence (save/resume/list).
@@ -14,7 +14,7 @@ class SessionManager
   # issue #207: the session JSON lives INSIDE the session's own directory
   # (.harness/sessions/<id>/session.json), alongside its log and history.
   SESSION_FILE = SessionLocator::SESSION_FILE
-  RULES_FILE   = 'harness.md'
+  RULES_FILE   = "harness.md"
   # Minimum seconds between two auto-saves inside the same run_prompt cycle
   # (de-dups the pre-send and post-turn saves when the round trip is fast).
   AUTOSAVE_MIN_INTERVAL = 0.5
@@ -35,7 +35,7 @@ class SessionManager
   def run_prompt(instruction)
     if check_rules_reload
       Task.emit(:system, origin: :session_manager,
-                content: '  [harness.md reloaded - project rules updated]')
+                content: "  [harness.md reloaded - project rules updated]")
     end
 
     # Auto-compact BEFORE sending: it must never run after the response,
@@ -54,7 +54,7 @@ class SessionManager
     @harness.session.add_user(user_prompt)
     # issue #107: persist BEFORE sending so the in-flight prompt is on disk
     # and can be /retry'd from a fresh process if this one dies mid-turn.
-    maybe_auto_save('pre-send')
+    maybe_auto_save("pre-send")
     send_session
   end
 
@@ -72,7 +72,7 @@ class SessionManager
   # exactly that point; the model sees every tool call and result it made.
   def retry
     unless @harness.session.pending?
-      raise HarnessError, 'nothing to retry - the session ends on an answered reply (send a prompt first)'
+      raise HarnessError, "nothing to retry - the session ends on an answered reply (send a prompt first)"
     end
 
     # The previous attempt may have failed because the context was full:
@@ -82,7 +82,7 @@ class SessionManager
       reserved_tokens: @harness.compact_reserved_tokens
     )
       Task.emit(:compact, origin: :session_manager,
-                content: '  [context over threshold - compacting before retry...]')
+                content: "  [context over threshold - compacting before retry...]")
       result = compact_session
       Task.emit(:compact, origin: :session_manager,
                 content: "  [compact done: #{result[:before]} -> #{result[:after]} messages]")
@@ -123,12 +123,12 @@ class SessionManager
   # issue #108: in-loop compaction instruction - mid-turn, there is no verbatim
   # tail to carry detail, so the summary must be a complete hand-off of the
   # work state (including tool results) for continuing the task in progress.
-  INLOOP_SUMMARY_INSTRUCTION = 'Summarize the ENTIRE conversation and tool work above as a ' \
-                               'hand-off for continuing an in-progress task. Include: ' \
-                               '(1) the original goal, (2) every step already completed with its ' \
-                               'concrete results (file paths, SHAs, command outputs when available), ' \
-                               '(3) key decisions made, (4) files modified or created and their ' \
-                               'current state, (5) the exact next step to take. '
+  INLOOP_SUMMARY_INSTRUCTION = "Summarize the ENTIRE conversation and tool work above as a " \
+                               "hand-off for continuing an in-progress task. Include: " \
+                               "(1) the original goal, (2) every step already completed with its " \
+                               "concrete results (file paths, SHAs, command outputs when available), " \
+                               "(3) key decisions made, (4) files modified or created and their " \
+                               "current state, (5) the exact next step to take. "
 
   # issue #108: ask the LLM for a summary of an arbitrary message chain.
   # conversation is expected WITHOUT the system message. Returns the
@@ -138,16 +138,16 @@ class SessionManager
     max_words = @harness.compact_max_size || 500
     messages = conversation + [
       {
-        role: 'user',
+        role: "user",
         content: "#{instruction} " \
                  "Keep it under #{max_words} words. " \
-                 'Do NOT include the summarization instruction itself.'
+                 "Do NOT include the summarization instruction itself."
       }
     ]
 
     data = @harness.client.chat(messages)
     text = data[:choices][0][:message][:content]
-    raise HarnessError, 'LLM returned empty summary' if text.nil? || text.strip.empty?
+    raise HarnessError, "LLM returned empty summary" if text.nil? || text.strip.empty?
 
     text.strip
   end
@@ -163,14 +163,14 @@ class SessionManager
     context_before = @harness.context_indicator
 
     if @harness.session.conversation_size < 4
-      raise HarnessError, 'session too small to compact (need at least 4 conversation messages)'
+      raise HarnessError, "session too small to compact (need at least 4 conversation messages)"
     end
 
     conversation = @harness.session.messages[1..] # skip the system message
-    end_instruction = 'Summarize the entire conversation above in a concise, structured format. ' \
-                      'Include: (1) what was being worked on, (2) key decisions made, ' \
-                      '(3) files that were modified or created, (4) any pending tasks or ' \
-                      'unresolved issues, (5) important context needed to continue. '
+    end_instruction = "Summarize the entire conversation above in a concise, structured format. " \
+                      "Include: (1) what was being worked on, (2) key decisions made, " \
+                      "(3) files that were modified or created, (4) any pending tasks or " \
+                      "unresolved issues, (5) important context needed to continue. "
     # issue #115 / #126: show the LIVE context usage next to the spinner -
     # a callable suffix is re-evaluated every frame from the CURRENT chain,
     # not the "before" snapshot (already visible above).
@@ -242,16 +242,16 @@ class SessionManager
     # Harness#call_llm) is re-pointed for the summary call's wait only: one
     # :spinner_detail, no start/stop pair.
     Task.emit(:spinner_detail, origin: :session_manager,
-              content: { message: 'Compacting session mid-task (summarizing full work trail)',
+              content: { message: "Compacting session mid-task (summarizing full work trail)",
                          suffix: -> { @harness.context_indicator_live(messages) } })
 
     summary_text = generate_compact_summary(conversation, INLOOP_SUMMARY_INSTRUCTION)
     new_chain = [
-      { role: 'system', content: @harness.session.system_prompt },
-      { role: 'user', content: "This is a summary of our previous conversation:\n\n#{summary_text}" },
-      { role: 'assistant', content: 'Understood. I have the context from our previous conversation. How can I help you continue?' },
-      { role: 'user', content: 'Continuing the in-progress task from the summary above. ' \
-                               'Do not repeat steps that are already completed - pick up where it left off.' }
+      { role: "system", content: @harness.session.system_prompt },
+      { role: "user", content: "This is a summary of our previous conversation:\n\n#{summary_text}" },
+      { role: "assistant", content: "Understood. I have the context from our previous conversation. How can I help you continue?" },
+      { role: "user", content: "Continuing the in-progress task from the summary above. " \
+                               "Do not repeat steps that are already completed - pick up where it left off." }
     ]
     before = messages.size # captured BEFORE the replace below
 
@@ -274,7 +274,7 @@ class SessionManager
       "in-loop compaction: #{before} -> #{messages.size} messages " \
       "(summary: #{summary_text.length} chars)"
     )
-    maybe_auto_save('in-loop compact')
+    maybe_auto_save("in-loop compact")
     true
   rescue StandardError => e
     # Best-effort: a failed compaction must not abort an otherwise healthy
@@ -297,7 +297,7 @@ class SessionManager
   def request_spinner_detail
     who = [@harness.options[:model].to_s.strip, api_type_label].reject(&:empty?)
     Task.emit(:spinner_detail, origin: :session_manager,
-              content: { message: who.empty? ? 'Sending' : "Sending (#{who.join(' / ')})",
+              content: { message: who.empty? ? "Sending" : "Sending (#{who.join(' / ')})",
                          suffix: -> { @harness.context_indicator_live } })
   end
 
@@ -315,7 +315,7 @@ class SessionManager
       # which survives here too). Anything else re-raises for the caller.
       raise unless context_exceeded_error?(e.message) && @harness.session.conversation_size >= 4
       Task.emit(:compact, origin: :session_manager,
-                content: '  [context window exceeded - compacting and re-sending...]')
+                content: "  [context window exceeded - compacting and re-sending...]")
       result = compact_session
       Task.emit(:compact, origin: :session_manager,
                 content: "  [compact done: #{result[:before]} -> #{result[:after]} messages, retrying...]")
@@ -336,9 +336,9 @@ class SessionManager
     Task.emit(:response, origin: :session_manager,
               content: ">>> #{reason} <<<") if reason
 
-    Task.emit(:response, origin: :session_manager, content: '=' * 80)
+    Task.emit(:response, origin: :session_manager, content: "=" * 80)
     Task.emit(:response, origin: :session_manager, content: response[:content].to_s)
-    Task.emit(:response, origin: :session_manager, content: '-' * 80)
+    Task.emit(:response, origin: :session_manager, content: "-" * 80)
 
     @harness.print_stats(response[:stats])
 
@@ -347,7 +347,7 @@ class SessionManager
     # reply is on disk too, so a crash right after the response loses
     # nothing (de-duplicated by AUTOSAVE_MIN_INTERVAL when the round trip
     # was very fast).
-    maybe_auto_save('post-turn')
+    maybe_auto_save("post-turn")
   end
 
   # Silent auto-compaction, run at the start of the NEXT prompt (see
@@ -396,7 +396,7 @@ class SessionManager
 
   def log_text_or_none(text)
     s = text.to_s.strip
-    s.empty? ? '(none)' : text.to_s
+    s.empty? ? "(none)" : text.to_s
   end
 
   # issue #139 / #178: dump the messages that SURVIVED a compaction (the
@@ -407,7 +407,7 @@ class SessionManager
   # is exactly what is being inspected here (issue #178), and these dumps
   # are rare enough that harness.log size is a non-issue.
   def log_retained_window(messages)
-    lines = messages.reject { |m| m[:role] == 'system' }.map do |m|
+    lines = messages.reject { |m| m[:role] == "system" }.map do |m|
       %(#{m[:role]}:\n#{m[:content].to_s})
     end
     @harness.logger.info("retained after compaction:\n" + lines.join("\n"))
@@ -480,7 +480,7 @@ class SessionManager
   # Switch to a configured model profile by name (or raw model id).
   def switch_model(name)
     name = name.to_s.strip
-    raise HarnessError, 'usage: /model <name>' if name.empty?
+    raise HarnessError, "usage: /model <name>" if name.empty?
 
     profiles = model_profiles
     if profiles.empty?
@@ -626,7 +626,7 @@ class SessionManager
   # The API type of the active backend ('openai' / 'ollama'); '' when the
   # client has no backend (a stub).
   def api_type_label
-    return '' unless @harness.client.respond_to?(:backend)
+    return "" unless @harness.client.respond_to?(:backend)
     (@harness.client.backend&.api_type).to_s.strip
   end
 end

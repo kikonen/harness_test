@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
-require_relative '../file_list'
-require 'fileutils'
+require_relative "../tool"
+require_relative "../file_list"
+require "fileutils"
 
 # Creates a directory (with mkdir -p semantics: parent directories are
 # created as needed). The path must reside under the working directory and
@@ -15,23 +15,23 @@ module Tools
       @file_list = file_list
       @options   = options
       super(
-        name: 'dir.create',
-        description: 'Creates a directory (mkdir -p semantics: parent directories are created as needed). ' \
-                     'Paths outside the working directory require explicit user approval. ' \
-                     'If the directory already exists, the call is a no-op (success). ' \
-                     'Paths are relative to the harness working directory.',
+        name: "dir.create",
+        description: "Creates a directory (mkdir -p semantics: parent directories are created as needed). " \
+                     "Paths outside the working directory require explicit user approval. " \
+                     "If the directory already exists, the call is a no-op (success). " \
+                     "Paths are relative to the harness working directory.",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
-            path: { type: 'string', description: 'Path of the directory to create (relative to the working directory)' }
+            path: { type: "string", description: "Path of the directory to create (relative to the working directory)" }
           },
-          required: ['path']
+          required: ["path"]
         }
       )
     end
 
     def execute(args)
-      path  = @file_list.resolve(args['path'])
+      path  = @file_list.resolve(args["path"])
       shown = @file_list.display_path(path)
 
       # Security: sensitive paths (e.g. inside .git or .harness) are blocked.

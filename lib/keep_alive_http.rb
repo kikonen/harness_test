@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require 'net/http'
-require 'logger'
+require "net/http"
+require "logger"
 
 # Net::HTTP with TCP keepalive enabled on the underlying socket, so that
 # long-running LLM generations are not cut off by idle-connection timeouts

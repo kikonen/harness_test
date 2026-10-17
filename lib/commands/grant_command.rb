@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require_relative '../command'
-require_relative '../command_allowlist'
+require_relative "../command"
+require_relative "../command_allowlist"
 
 module Commands
   # /grant - show all current grants: file/dir access grants (read, write,
@@ -10,7 +10,7 @@ module Commands
   class GrantCommand < Command
     def handle(_args)
       access = @file_list.accessible_paths
-      labels = { both: 'Read + write', read: 'Read only', write: 'Write only', delete: 'Delete' }
+      labels = { both: "Read + write", read: "Read only", write: "Write only", delete: "Delete" }
 
       %i[both read write delete].each do |mode|
         section = access[mode]
@@ -50,11 +50,11 @@ module Commands
       end
 
       unless tool_list.empty?
-        @ui.puts 'Commands for run.command:'
+        @ui.puts "Commands for run.command:"
         tool_list.each { |p| @ui.puts "  - #{p}" }
       end
       unless shell_list.empty?
-        @ui.puts 'Commands for shell (!):'
+        @ui.puts "Commands for shell (!):"
         shell_list.each { |p| @ui.puts "  - #{p}" }
       end
     end

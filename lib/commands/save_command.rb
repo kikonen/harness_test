@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative '../command'
+require_relative "../command"
 
 module Commands
   # /save - save the session (conversation + access list) to disk.
@@ -15,9 +15,9 @@ module Commands
 
     # Build the CLI command to resume this session in a new harness run.
     def resume_cli_string(id)
-      parts = ['ruby harness.rb', "-m #{@options[:model]}", "--resume #{id}"]
+      parts = ["ruby harness.rb", "-m #{@options[:model]}", "--resume #{id}"]
       parts << "-d #{@file_list.workdir}" unless @file_list.workdir == Dir.pwd
-      parts.join(' ')
+      parts.join(" ")
     end
   end
 end

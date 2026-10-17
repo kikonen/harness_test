@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative '../command'
+require_relative "../command"
 
 module Commands
   # /resume <id> - resume a saved session by its id.
@@ -21,7 +21,7 @@ module Commands
       end
 
       unless @on_resume
-        @ui.puts '  [error] resume is not available in this run'
+        @ui.puts "  [error] resume is not available in this run"
         return
       end
 
@@ -31,14 +31,14 @@ module Commands
       # that - a stale reference to the session being left behind.
       resumed = @on_resume.call(id)
       @ui.puts "  Session #{resumed.session.session_id} resumed."
-      @ui.puts '  (conversation, file list and log rebuilt under it - see /session)'
+      @ui.puts "  (conversation, file list and log rebuilt under it - see /session)"
     end
 
     # Build the CLI command to resume a session in a new harness run.
     def resume_cli_string(id)
-      parts = ['ruby harness.rb', "-m #{@options[:model]}", "--resume #{id}"]
+      parts = ["ruby harness.rb", "-m #{@options[:model]}", "--resume #{id}"]
       parts << "-d #{@file_list.workdir}" unless @file_list.workdir == Dir.pwd
-      parts.join(' ')
+      parts.join(" ")
     end
   end
 end

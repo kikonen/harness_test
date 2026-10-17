@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require 'net/http'
-require 'openssl'
+require "net/http"
+require "openssl"
 
-require_relative '../harness_error'
+require_relative "../harness_error"
 
 # -- LLM ------------------------------------------------------------------
 #
@@ -63,7 +63,7 @@ module LLM
 
   def self.backend_type(value)
     case value.to_s.strip
-    when 'ollama' then OLLAMA
+    when "ollama" then OLLAMA
     else               OPENAI   # default and fallback: OpenAI-compatible
     end
   end

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require 'reline'
+require "reline"
 
 # -- UI::Editor -------------------------------------------------------------
 #
@@ -39,10 +39,10 @@ require 'reline'
 
 module UI
   class Editor
-    DEFAULT_PROMPT = 'note> '
+    DEFAULT_PROMPT = "note> "
     # Reline's PROMPT for dialog choice lines (the steering note uses
     # DEFAULT_PROMPT).
-    DIALOG_PROMPT = '> '
+    DIALOG_PROMPT = "> "
     EDITOR_RESULT = Struct.new(:text, :status)
 
     # Key bytes (Reline keymap sequences; see doc/reline_cursor_and_
@@ -164,7 +164,7 @@ module UI
     # escape-prefix. The current buffer is left INTACT - the caller hands
     # it back as a prefilled draft on the next read.
     module RelineEscCancel
-      def reset_variables(prompt = '')
+      def reset_variables(prompt = "")
         super
         @cancelled = false
       end

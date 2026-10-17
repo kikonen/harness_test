@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative '../command'
+require_relative "../command"
 
 module Commands
   # /param - show and adjust the LLM parameters for this session (issue #219).
@@ -40,7 +40,7 @@ module Commands
       end
 
       eff  = param.effective(key)
-      mark = param.overridden?(key) ? 'session override' : 'profile default'
+      mark = param.overridden?(key) ? "session override" : "profile default"
       @ui.puts "#{key}: #{param.display_value(eff)} (#{mark})"
     end
 

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative '../command'
+require_relative "../command"
 
 module Commands
   # /compact - compact the session (summarize conversation to free context).
@@ -25,10 +25,10 @@ module Commands
         if result[:context_before] && result[:context_line]
           emit_line "  #{result[:context_before]} -> #{result[:context_line]}"
         end
-        emit_line ''
-        emit_line 'Summary:'
+        emit_line ""
+        emit_line "Summary:"
         emit_line result[:summary]
-        emit_line ''
+        emit_line ""
       end
     end
   end

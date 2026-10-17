@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
-require_relative '../file_list'
+require_relative "../tool"
+require_relative "../file_list"
 
 # Applies a standard unified diff patch to a file.
 # The model provides the file path and a unified diff; the patch is applied
@@ -57,29 +57,29 @@ module Tools
       # nil only for specs without a prior read (nothing to detect).
       @session   = session
       super(
-        name: 'file.patch',
-        description: 'Applies a standard unified diff patch to a file. ' \
-                     'The diff must be in unified diff format (--- / +++ / @@ hunks). ' \
-                     'Hunk line numbers are used as a hint - the hunk is located by matching its context lines, ' \
-                     'so small line-number errors are tolerated. ' \
-                     'Use this for targeted edits instead of rewriting the entire file with file.write. ' \
-                     'If the file may have been modified EXTERNALLY since you last read it, ' \
+        name: "file.patch",
+        description: "Applies a standard unified diff patch to a file. " \
+                     "The diff must be in unified diff format (--- / +++ / @@ hunks). " \
+                     "Hunk line numbers are used as a hint - the hunk is located by matching its context lines, " \
+                     "so small line-number errors are tolerated. " \
+                     "Use this for targeted edits instead of rewriting the entire file with file.write. " \
+                     "If the file may have been modified EXTERNALLY since you last read it, " \
                      "re-read it with file.read first so the patch applies to fresh content.",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
-            path: { type: 'string', description: 'Path of the file to patch (relative to the working directory)' },
-            diff: { type: 'string', description: 'Unified diff to apply (standard format with --- / +++ / @@ hunks)' }
+            path: { type: "string", description: "Path of the file to patch (relative to the working directory)" },
+            diff: { type: "string", description: "Unified diff to apply (standard format with --- / +++ / @@ hunks)" }
           },
-          required: ['path', 'diff']
+          required: ["path", "diff"]
         }
       )
     end
 
     def execute(args)
-      path = @file_list.resolve(args['path'])
+      path = @file_list.resolve(args["path"])
       shown = @file_list.display_path(path)
-      diff  = args['diff'].to_s
+      diff  = args["diff"].to_s
 
       unless @file_list.writable?(path)
         result = @file_list.grant_access(path, :w)
@@ -100,8 +100,8 @@ module Tools
         if cached && current != cached
           Tool.puts "  [file.patch] ✗ #{shown} (externally changed since last read)"
           return "error: '#{shown}' has changed externally since you last read it. " \
-                 'Re-read the file with file.read, or report the external change ' \
-                 'with file.touch if you know what happened.'
+                 "Re-read the file with file.read, or report the external change " \
+                 "with file.touch if you know what happened."
         end
       end
 
@@ -135,7 +135,7 @@ module Tools
           diag = diagnose(lines, hunk)
           Tool.puts "  [file.patch] ✗ #{shown} (hunk at line #{hunk[:old_start]} did not apply)"
           return "error: hunk at old-line #{hunk[:old_start]} did not apply cleanly. #{diag} " \
-                 'Re-read the file with file.read and adjust the diff so its context lines match exactly.'
+                 "Re-read the file with file.read and adjust the diff so its context lines match exactly."
         end
         lines   = result
         applied += 1
@@ -166,8 +166,8 @@ module Tools
     # also swallow hunk body deletion lines (which start with '-'), so the
     # stricter check is required.
     def header_line?(line)
-      line == '---' || line == '+++' ||
-        line.start_with?('--- ') || line.start_with?('+++ ')
+      line == "---" || line == "+++" ||
+        line.start_with?("--- ") || line.start_with?("+++ ")
     end
 
     # Parses a unified diff into an array of hunk hashes:
@@ -204,7 +204,7 @@ module Tools
       while i < lines.size
         line = lines[i]
 
-        if line.start_with?('@@')
+        if line.start_with?("@@")
           # Parse hunk header: @@ -old_start[,old_count] +new_start[,new_count] @@
           match = line.match(/\A@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/)
           return nil unless match
@@ -220,19 +220,19 @@ module Tools
           # part of the hunk (e.g. a trailing "diff --git" line).
           while i < lines.size
             hline = lines[i]
-            break if hline.start_with?('@@')
+            break if hline.start_with?("@@")
 
-            if hline.start_with?('-')
-              hunk_lines << ['-', hline[1..]]
-            elsif hline.start_with?('+')
-              hunk_lines << ['+', hline[1..]]
-            elsif hline.start_with?(' ')
-              hunk_lines << [' ', hline[1..]]
-            elsif hline.start_with?('\\')
+            if hline.start_with?("-")
+              hunk_lines << ["-", hline[1..]]
+            elsif hline.start_with?("+")
+              hunk_lines << ["+", hline[1..]]
+            elsif hline.start_with?(" ")
+              hunk_lines << [" ", hline[1..]]
+            elsif hline.start_with?("\\")
               # "\ No newline at end of file" - ignore
             elsif hline.strip.empty?
               # Blank line: treat as a context line with empty content.
-              hunk_lines << [' ', '']
+              hunk_lines << [" ", ""]
             else
               break  # not part of the hunk
             end
@@ -246,8 +246,8 @@ module Tools
 
           # Use the RECOUNTED counts as the source of truth - they describe
           # what the hunk body actually contains.
-          recounted_old = hunk_lines.count { |t, _| t == ' ' || t == '-' }
-          recounted_new = hunk_lines.count { |t, _| t == ' ' || t == '+' }
+          recounted_old = hunk_lines.count { |t, _| t == " " || t == "-" }
+          recounted_new = hunk_lines.count { |t, _| t == " " || t == "+" }
 
           hunks << {
             old_start: old_start,
@@ -272,14 +272,14 @@ module Tools
     #     just wrong, and the body still carries the real edit.
     # Returns nil only when the body is empty (nothing to apply at all).
     def reconcile_counts(hunk_lines, old_count, new_count)
-      old_seen = hunk_lines.count { |t, _| t == ' ' || t == '-' }
-      new_seen = hunk_lines.count { |t, _| t == ' ' || t == '+' }
+      old_seen = hunk_lines.count { |t, _| t == " " || t == "-" }
+      new_seen = hunk_lines.count { |t, _| t == " " || t == "+" }
 
       lines = hunk_lines.dup
 
       # Only trim when the body exceeds the header count, and only trailing
       # context lines - never '-' / '+' lines, which carry the actual edit.
-      while (old_seen > old_count || new_seen > new_count) && lines.last[0] == ' '
+      while (old_seen > old_count || new_seen > new_count) && lines.last[0] == " "
         old_seen -= 1
         new_seen -= 1
         lines.pop
@@ -299,8 +299,8 @@ module Tools
     # kept. The corresponding new-side context lines are dropped in the same
     # way, so the actual edit is never altered.
     def apply_hunk(lines, hunk)
-      old_side = hunk[:lines].select { |t, _| t == ' ' || t == '-' }.map { |_, text| text }
-      new_side = hunk[:lines].select { |t, _| t == ' ' || t == '+' }.map { |_, text| text }
+      old_side = hunk[:lines].select { |t, _| t == " " || t == "-" }.map { |_, text| text }
+      new_side = hunk[:lines].select { |t, _| t == " " || t == "+" }.map { |_, text| text }
       return nil if old_side.empty? && new_side.empty?
 
       expected = hunk[:old_start] - 1  # 0-based
@@ -309,14 +309,14 @@ module Tools
       # declared position, anchoring on a new-side context line if one exists
       # so the insertion lands in the right place.
       if old_side.empty?
-        anchor = new_side.find { |t| t != '' }
+        anchor = new_side.find { |t| t != "" }
         pos    = anchor ? find_position(lines, [anchor], expected) : nil
         pos    = [[expected, 0].max, lines.size].min if pos.nil?
         return lines[0...pos] + new_side + lines[pos..]
       end
 
       # How many context lines may be dropped without touching edit lines.
-      ctx_count = hunk[:lines].count { |t, _| t == ' ' }
+      ctx_count = hunk[:lines].count { |t, _| t == " " }
       (0..ctx_count).each do |drop|
         # Trailing context is dropped first; once all trailing context is
         # gone, leading context is dropped as well.
@@ -324,13 +324,13 @@ module Tools
         front_drop = drop - back_drop
 
         kept    = drop_hunk_context(hunk[:lines], front_drop, back_drop)
-        pattern = kept.select { |t, _| t == ' ' || t == '-' }.map { |_, text| text }
+        pattern = kept.select { |t, _| t == " " || t == "-" }.map { |_, text| text }
         next if pattern.empty?
 
         pos = find_position(lines, pattern, expected)
         next if pos.nil?
 
-        new_used = kept.select { |t, _| t == ' ' || t == '+' }.map { |_, text| text }
+        new_used = kept.select { |t, _| t == " " || t == "+" }.map { |_, text| text }
         return lines[0...pos] + new_used + lines[pos + pattern.size..]
       end
 
@@ -342,11 +342,11 @@ module Tools
     def drop_hunk_context(hunk_lines, front_drop, back_drop)
       return hunk_lines if front_drop.zero? && back_drop.zero?
 
-      ctx_total = hunk_lines.count { |t, _| t == ' ' }
+      ctx_total = hunk_lines.count { |t, _| t == " " }
       ctx_index = 0
       kept      = []
       hunk_lines.each do |type, text|
-        if type == ' '
+        if type == " "
           ctx_index += 1
           next if ctx_index <= front_drop
           next if ctx_index > (ctx_total - back_drop)
@@ -392,7 +392,7 @@ module Tools
     # Produces a short diagnostic for a failed hunk: the first old-side line
     # that does not match at the declared position.
     def diagnose(lines, hunk)
-      old_side = hunk[:lines].select { |t, _| t == ' ' || t == '-' }.map { |_, text| text }
+      old_side = hunk[:lines].select { |t, _| t == " " || t == "-" }.map { |_, text| text }
       pos      = hunk[:old_start] - 1
 
       old_side.each_with_index do |text, k|
@@ -405,7 +405,7 @@ module Tools
         end
       end
 
-      'The hunk could not be located anywhere in the file - its context lines do not match.'
+      "The hunk could not be located anywhere in the file - its context lines do not match."
     end
   end
 end

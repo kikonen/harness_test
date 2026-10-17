@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
-require_relative '../file_list'
-require_relative '../text_normalizer'
+require_relative "../tool"
+require_relative "../file_list"
+require_relative "../text_normalizer"
 
 module Tools
 
@@ -14,22 +14,22 @@ module Tools
       # later write/patch). nil is only used by specs that never write.
       @session   = session
       super(
-        name: 'file.read',
-        description: 'Reads the contents of a file. ' \
-                     'Paths are relative to the harness working directory. ' \
-                     'Returns the full file content.',
+        name: "file.read",
+        description: "Reads the contents of a file. " \
+                     "Paths are relative to the harness working directory. " \
+                     "Returns the full file content.",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
-            path: { type: 'string', description: 'Path to the file to read (relative to the working directory)' }
+            path: { type: "string", description: "Path to the file to read (relative to the working directory)" }
           },
-          required: ['path']
+          required: ["path"]
         }
       )
     end
 
     def execute(args)
-      path = @file_list.resolve(args['path'])
+      path = @file_list.resolve(args["path"])
       shown = @file_list.display_path(path)
 
       unless @file_list.readable?(path)

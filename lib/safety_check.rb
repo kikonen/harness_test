@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'harness_error'
+require_relative "harness_error"
 
 # issue #224: pre-dialog command safety check. Before the confirmation
 # dialog for an unapproved run.command, ask the model - using a FORK of the
@@ -37,9 +37,9 @@ module SafetyCheck
 
   CHECK_PROMPT = 'I am about to run these shell command(s) in this project:\n' \
                  '%s\n' \
-                 'Reply with EXACTLY one line per command (same order), each line: ' \
+                 "Reply with EXACTLY one line per command (same order), each line: " \
                  '"safe: <short reason>" or "dangerous: <short reason>". ' \
-                 'Do NOT call any tools.'
+                 "Do NOT call any tools."
 
   class << self
     # Fork of chain truncated at the last COMPLETE round: the trailing
@@ -51,7 +51,7 @@ module SafetyCheck
     # never mutated.
     def truncate_for_check(chain)
       forked = chain.dup
-      while (last = forked.last) && last[:role] == 'assistant' && last[:tool_calls]
+      while (last = forked.last) && last[:role] == "assistant" && last[:tool_calls]
         forked.pop
       end
       forked
@@ -71,10 +71,10 @@ module SafetyCheck
       # Degenerate chain (empty, or nothing but the system prompt): there
       # is no conversation to reuse (no cached prefix, nothing to ground
       # the verdict in) - no verdict, no call.
-      return results if base.reject { |m| m[:role] == 'system' }.empty?
+      return results if base.reject { |m| m[:role] == "system" }.empty?
 
       question = format(CHECK_PROMPT, commands.each_with_index.map { |c, i| "#{i + 1}. #{c}" }.join("\n"))
-      fork = base + [{ role: 'user', content: question }]
+      fork = base + [{ role: "user", content: question }]
 
       data = client.chat(fork, tools: nil, timeout: timeout)
       text = data.dig(:choices, 0, :message, :content).to_s

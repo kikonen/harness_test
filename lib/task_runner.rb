@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'task'
+require_relative "task"
 
 # Shared wrapper for running an LLM round on a Task thread (the
 # single-thread I/O rule, issue #40): the block runs on a task thread and

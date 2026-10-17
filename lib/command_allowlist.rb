@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
-require 'yaml'
-require 'fileutils'
+require "yaml"
+require "fileutils"
 
-require_relative 'shell_tokenizer'
-require_relative 'shell_parser'
-require_relative 'text_normalizer'
+require_relative "shell_tokenizer"
+require_relative "shell_parser"
+require_relative "text_normalizer"
 
 # -- CommandAllowlist -----------------------------------------------------
 #
@@ -66,8 +66,8 @@ require_relative 'text_normalizer'
 class CommandAllowlist
   # Two SEPARATE lists (issue #129): the same prefix must not auto-approve
   # both model-driven and locally typed commands.
-  TOOL_FILENAME = 'allowed_commands.yml'   # run.command tool (LLM)
-  SHELL_FILENAME = 'shell_commands.yml'    # `!` bang syntax (local shell)
+  TOOL_FILENAME = "allowed_commands.yml"   # run.command tool (LLM)
+  SHELL_FILENAME = "shell_commands.yml"    # `!` bang syntax (local shell)
 
   FILENAME = TOOL_FILENAME
 
@@ -185,13 +185,13 @@ class CommandAllowlist
     current  = []
     tokens.each do |kind, text|
       if SEPARATORS.include?(kind)
-        segments << current.join(' ') unless current.empty?
+        segments << current.join(" ") unless current.empty?
         current = []
       else
         current << text.to_s
       end
     end
-    segments << current.join(' ') unless current.empty?
+    segments << current.join(" ") unless current.empty?
     segments.reject { |s| s.strip.empty? }
   end
 
@@ -223,7 +223,7 @@ class CommandAllowlist
       next if m.nil? || m[0].to_s.strip.empty?
       return m[0].strip
     end
-    'recursive-force delete'
+    "recursive-force delete"
   end
 
   def self.disaster_segment?(segment)
@@ -243,15 +243,15 @@ class CommandAllowlist
     words = ShellTokenizer.tokenize(segment)
             .select { |kind, _t| kind == :word }
             .map { |_k, t| t.to_s }
-    bare  = ->(w) { w.downcase.sub(/\.exe\z/, '') }
+    bare  = ->(w) { w.downcase.sub(/\.exe\z/, "") }
     idx   = words.index { |w| WIN_DELETE_COMMANDS.include?(bare.call(w)) }
     return false unless idx
 
     recursive = false
     force     = false
     words[(idx + 1)..].each do |w|
-      next unless w.start_with?('/') || w.start_with?('-')
-      flag = w[1..].to_s.downcase.delete(':')
+      next unless w.start_with?("/") || w.start_with?("-")
+      flag = w[1..].to_s.downcase.delete(":")
       recursive ||= %w[s recursive].include?(flag)
       force     ||= %w[q quiet f force p prompt-].include?(flag)
     end
@@ -268,20 +268,20 @@ class CommandAllowlist
     words = ShellTokenizer.tokenize(segment)
             .select { |kind, _t| kind == :word }
             .map { |_k, t| t.to_s }
-    rm_idx = words.index { |w| w == 'rm' }
+    rm_idx = words.index { |w| w == "rm" }
     return false unless rm_idx
 
     recursive = false
     force     = false
     words[(rm_idx + 1)..].each do |w|
-      next unless w.start_with?('-')
-      if w.start_with?('--')
-        recursive ||= (w == '--recursive')
-        force     ||= (w == '--force')
+      next unless w.start_with?("-")
+      if w.start_with?("--")
+        recursive ||= (w == "--recursive")
+        force     ||= (w == "--force")
       else
         chars = w[1..].chars
-        recursive ||= chars.include?('r') || chars.include?('R')
-        force     ||= chars.include?('f')
+        recursive ||= chars.include?("r") || chars.include?("R")
+        force     ||= chars.include?("f")
       end
     end
     recursive && force
@@ -337,11 +337,11 @@ class CommandAllowlist
     when /\A&>?\s/    then "redirect (#{t.inspect})"
     when /\A>+\s/     then "redirect to file (#{t.inspect})"
     when /\A<\s/      then "input redirect (#{t.inspect})"
-    when '&'          then 'background operator (&)'
+    when "&"          then "background operator (&)"
     when /\A\$/       then "substitution or variable expansion (#{t.inspect})"
-    when '`'          then 'command substitution (`...`)'
-    when '('          then 'subshell open ( )'
-    when ')'          then 'subshell close ( )'
+    when "`"          then "command substitution (`...`)"
+    when "("          then "subshell open ( )"
+    when ")"          then "subshell close ( )"
     else "unsafe construct (#{t.inspect})"
     end
   end
@@ -357,7 +357,7 @@ class CommandAllowlist
   # MAX_PREFIX_TOKENS. Stops at the first argument-looking token.
   def self.extract_prefix(segment)
     segment = segment.to_s.strip
-    return '' unless segment_safe?(segment)
+    return "" unless segment_safe?(segment)
 
     tokens = ShellTokenizer.tokenize(segment)
     words  = tokens.select { |kind, _t| kind == :word }.map { |_k, t| t }
@@ -368,7 +368,7 @@ class CommandAllowlist
       break unless SUBCOMMAND_TOKEN.match?(tok)
       prefix << tok
     end
-    prefix.join(' ')
+    prefix.join(" ")
   end
 
   # Extract the set of command prefixes that make up a command.
@@ -433,14 +433,14 @@ class CommandAllowlist
     words  = tokens.select { |kind, _t| kind == :word }.map { |_k, t| t }
     return [] if words.empty?
 
-    flag_idx = words.index { |w| w.start_with?('-') }
+    flag_idx = words.index { |w| w.start_with?("-") }
 
     # Collect the leading run of subcommand-looking tokens.
     lengths = []
     (1..MAX_PREFIX_TOKENS).each do |n|
       break if n > words.size
       break unless words[0...n].all? { |w| SUBCOMMAND_TOKEN.match?(w) }
-      lengths << words[0...n].join(' ')
+      lengths << words[0...n].join(" ")
     end
 
     # Single subcommand + non-subcommand args (e.g. "cd C:/work/x", or the
@@ -448,7 +448,7 @@ class CommandAllowlist
     # AND the full invocation as an exact-match option, so the user grants
     # exactly as much as they want rather than only the whole line.
     if lengths.size == 1 && flag_idx.nil? && words.size > 1
-      full = words.join(' ')
+      full = words.join(" ")
       lengths << full unless lengths.include?(full)
     end
 
@@ -456,7 +456,7 @@ class CommandAllowlist
     # prefix: "ruby -c" is a different grant than bare "ruby". A trailing
     # flag (e.g. "tail -5") is just a parameter - don't offer it.
     if flag_idx && flag_idx < words.size - 1
-      with_flag = words[0..flag_idx].join(' ')
+      with_flag = words[0..flag_idx].join(" ")
       lengths << with_flag unless lengths.include?(with_flag)
     end
 
@@ -466,7 +466,7 @@ class CommandAllowlist
     if lengths.size == MAX_PREFIX_TOKENS && flag_idx.nil? &&
        words.size > MAX_PREFIX_TOKENS &&
        SUBCOMMAND_TOKEN.match?(words[MAX_PREFIX_TOKENS])
-      full = words.join(' ')
+      full = words.join(" ")
       lengths << full unless lengths.include?(full)
     end
     lengths
@@ -480,7 +480,7 @@ class CommandAllowlist
 
   def initialize(workdir, file: TOOL_FILENAME)
     @workdir  = workdir
-    @path     = File.join(workdir, '.harness', file)
+    @path     = File.join(workdir, ".harness", file)
     @prefixes = load
   end
 

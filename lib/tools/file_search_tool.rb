@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
-require_relative '../file_list'
-require_relative '../text_normalizer'
+require_relative "../tool"
+require_relative "../file_list"
+require_relative "../text_normalizer"
 
 # Searches for a regex pattern in files under the harness working directory.
 # Returns matching lines with file path and line number (grep-like output).
@@ -17,37 +17,37 @@ module Tools
     def initialize(file_list)
       @file_list = file_list
       super(
-        name: 'file.search',
-        description: 'Searches for a regex pattern in files under the working directory (like grep). ' \
+        name: "file.search",
+        description: "Searches for a regex pattern in files under the working directory (like grep). " \
                      'Returns matching lines as "file:line: text". ' \
-                     'Sensitive files are excluded. ' \
+                     "Sensitive files are excluded. " \
                      'Use the optional glob to limit which files are searched (e.g. "lib/**/*.rb").',
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
-            pattern: { type: 'string', description: 'Regular expression to search for (Ruby regex syntax)' },
-            glob:    { type: 'string', description: 'Optional glob to limit which files to search (e.g. "lib/**/*.rb"). Defaults to all files.' },
-            context: { type: 'integer', description: 'Optional number of context lines before/after each match (default 0)' }
+            pattern: { type: "string", description: "Regular expression to search for (Ruby regex syntax)" },
+            glob:    { type: "string", description: 'Optional glob to limit which files to search (e.g. "lib/**/*.rb"). Defaults to all files.' },
+            context: { type: "integer", description: "Optional number of context lines before/after each match (default 0)" }
           },
-          required: ['pattern']
+          required: ["pattern"]
         }
       )
     end
 
     def execute(args)
-      pattern_str = args['pattern'].to_s
-      return 'error: usage: file.search(pattern)' if pattern_str.empty?
+      pattern_str = args["pattern"].to_s
+      return "error: usage: file.search(pattern)" if pattern_str.empty?
 
       regex = Regexp.new(pattern_str)
-      glob  = (args['glob'] || '**/*').to_s.strip
-      context = (args['context'] || 0).to_i
+      glob  = (args["glob"] || "**/*").to_s.strip
+      context = (args["context"] || 0).to_i
 
       expanded = File.expand_path(glob, @file_list.workdir)
 
       # Determine the base directory that needs read permission.
       # If stripping the glob changed the path, the result is already a dir.
       # Otherwise it's a file path and we need its parent.
-      stripped = expanded.sub(/\/\*\*?\/.*\z/, '').sub(/\/\*\*?\z/, '')
+      stripped = expanded.sub(/\/\*\*?\/.*\z/, "").sub(/\/\*\*?\z/, "")
       base_dir = (stripped != expanded) ? stripped : File.dirname(stripped)
       unless @file_list.can_list_dir?(base_dir)
         purpose = "to search files matching glob '#{glob}'"

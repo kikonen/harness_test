@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
-require_relative '../command_runner'
+require_relative "../tool"
+require_relative "../command_runner"
 
 # Executes a shell command in the harness working directory.
 #
@@ -31,48 +31,48 @@ module Tools
       # commands are traced in harness.log (issue #185).
       @runner = CommandRunner.new(file_list, options, harness: harness)
       super(
-        name: 'run.command',
-        description: 'Executes a shell command in the harness working directory. ' \
+        name: "run.command",
+        description: "Executes a shell command in the harness working directory. " \
                      'Most commands require explicit user confirmation ("Allow") ' \
-                     'before they run; previously approved command prefixes are ' \
-                     'auto-approved. Use this for tasks no dedicated tool covers ' \
-                     '(running tests, build steps, one-off scripts). Output is ' \
-                     'captured and returned with the exit code.',
+                     "before they run; previously approved command prefixes are " \
+                     "auto-approved. Use this for tasks no dedicated tool covers " \
+                     "(running tests, build steps, one-off scripts). Output is " \
+                     "captured and returned with the exit code.",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
             command: {
-              type: 'string',
+              type: "string",
               description: 'The full shell command to execute (e.g. "bundle exec rspec spec/foo_spec.rb"). ' \
-                           'Shown verbatim to the user for confirmation unless its prefix is already approved.'
+                           "Shown verbatim to the user for confirmation unless its prefix is already approved."
             },
             cwd: {
-              type: 'string',
-              description: 'Optional working directory for the command (relative to the harness ' \
-                           'working directory). Defaults to the working directory itself.'
+              type: "string",
+              description: "Optional working directory for the command (relative to the harness " \
+                           "working directory). Defaults to the working directory itself."
             },
             timeout: {
-              type: 'integer',
+              type: "integer",
               description: "Optional timeout in seconds (default #{CommandRunner::DEFAULT_TIMEOUT}, " \
                            "max #{CommandRunner::MAX_TIMEOUT})."
             },
             limit: {
-              type: 'integer',
+              type: "integer",
               description: "Optional maximum number of output lines returned (default " \
                            "#{CommandRunner::DEFAULT_LIMIT}, max #{CommandRunner::MAX_LIMIT})."
             }
           },
-          required: ['command']
+          required: ["command"]
         }
       )
     end
 
     def execute(args)
       @runner.run(
-        args['command'].to_s,
-        cwd: args['cwd'],
-        timeout: args['timeout'].to_i,
-        limit: args['limit'].to_i)
+        args["command"].to_s,
+        cwd: args["cwd"],
+        timeout: args["timeout"].to_i,
+        limit: args["limit"].to_i)
     end
   end
 end

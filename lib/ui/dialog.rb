@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'editor'
+require_relative "editor"
 
 # -- UI::Dialog ---------------------------------------------------------------
 #
@@ -96,16 +96,16 @@ module UI
 
     # Default title of the explicit "Additional details" option appended
     # to free_text dialogs.
-    FREE_TEXT_OPTION = 'Additional details'
+    FREE_TEXT_OPTION = "Additional details"
 
     # A single selectable item in a dialog.
     class Option
       attr_reader :title, :description, :value
 
       def initialize(title:, value:, description: nil)
-        raise ArgumentError, 'option title must be a non-empty string' \
+        raise ArgumentError, "option title must be a non-empty string" \
                             if title.to_s.strip.empty?
-        raise ArgumentError, 'option value must not be nil' if value.nil?
+        raise ArgumentError, "option value must not be nil" if value.nil?
 
         @title       = title.to_s.strip
         @description = description&.to_s
@@ -137,18 +137,18 @@ module UI
     #            two or more return an array of values.
     def initialize(title:, options:, note: nil, free_text: false, free_text_prompt: nil,
                    multi_select: false)
-      raise ArgumentError, 'dialog title must be a non-empty string' if title.to_s.strip.empty?
+      raise ArgumentError, "dialog title must be a non-empty string" if title.to_s.strip.empty?
       unless options.is_a?(Array) && !options.empty?
-        raise ArgumentError, 'dialog requires a non-empty array of Dialog::Option'
+        raise ArgumentError, "dialog requires a non-empty array of Dialog::Option"
       end
       options.each do |o|
-        raise ArgumentError, 'every option must be a Dialog::Option' unless o.is_a?(Option)
+        raise ArgumentError, "every option must be a Dialog::Option" unless o.is_a?(Option)
       end
 
       @title   = title.to_s.strip
       @note    = note&.to_s
       @free_text = free_text ? true : false
-      @free_text_prompt = free_text_prompt.to_s.strip.sub(/\Aor\s+/, '')
+      @free_text_prompt = free_text_prompt.to_s.strip.sub(/\Aor\s+/, "")
       options = options.dup
       if @free_text
         # The explicit "Additional details" option: the hint (when given)
@@ -156,7 +156,7 @@ module UI
         title = @free_text_prompt.empty? ? FREE_TEXT_OPTION : @free_text_prompt
         options << Option.new(title: title, value: FREE_TEXT)
       end
-      options << Option.new(title: 'Cancel', value: CANCEL_VALUE)
+      options << Option.new(title: "Cancel", value: CANCEL_VALUE)
       @options = options
       @multi_select = multi_select ? true : false
     end
@@ -185,14 +185,14 @@ module UI
       task = defined?(Task) ? Task.current : nil
 
       if task
-        raise ArgumentError, 'dialog routed through a Task: pass ui: nil' \
+        raise ArgumentError, "dialog routed through a Task: pass ui: nil" \
           unless ui.nil?
 
         # Route through the main thread: post a request and block until
         # the main thread processes the dialog and responds.
         task.request(:dialog, dialog: self)
       else
-        raise ArgumentError, 'no Task active: show requires an explicit ui: console' \
+        raise ArgumentError, "no Task active: show requires an explicit ui: console" \
           if ui.nil?
 
         perform_direct(ui: ui)
@@ -313,7 +313,7 @@ module UI
 
       numbers, bad = tokens.map(&:to_i).partition { |n| n >= 1 && n <= @options.size }
       unless bad.empty?
-        return reprompt_invalid(bad.join(', '), ui)
+        return reprompt_invalid(bad.join(", "), ui)
       end
 
       if !@multi_select
@@ -400,7 +400,7 @@ module UI
     # re-prompts), or CANCEL_VALUE on EOF.
     def collect_details(ui)
       ui.puts
-      hint = @free_text_prompt.empty? ? 'type your answer' : @free_text_prompt
+      hint = @free_text_prompt.empty? ? "type your answer" : @free_text_prompt
       if tty_input?(ui)
         ui.puts "             #{hint} (submit key to finish, Esc keeps it, Ctrl-D cancels):"
         draft = nil
@@ -439,7 +439,7 @@ module UI
     # Re-prompt after an empty details block (selection discarded).
     def nil_reprompt(ui)
       ui.puts
-      ui.puts '             (no text entered - picking the option again)'
+      ui.puts "             (no text entered - picking the option again)"
       print_choice_prompt(ui)
       nil
     end
@@ -468,7 +468,7 @@ module UI
         return
       end
 
-      ui.print '             > '
+      ui.print "             > "
       ui.flush
     end
 

@@ -1,28 +1,28 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
+require_relative "../tool"
 
 module Tools
 
   class NotifyTool < Tool
     def initialize
       super(
-        name: 'ui.notify',
+        name: "ui.notify",
         description: 'Sends a progress or status message directly to the user\'s console. Use this to inform the user about what you are doing (e.g., "Analyzing file...", "Applying changes..."). This is the ONLY tool for communicating with the user.',
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
-            message: { type: 'string', description: 'The message to display to the user' }
+            message: { type: "string", description: "The message to display to the user" }
           },
-          required: ['message']
+          required: ["message"]
         }
       )
     end
 
     def execute(args)
-      msg = args['message'] || ''
+      msg = args["message"] || ""
       Tool.puts "  [ui.notify] #{msg}"
-      'ok'
+      "ok"
     end
   end
 end

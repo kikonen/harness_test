@@ -6,7 +6,7 @@ module TextNormalizer
   # Stand-in for a byte that cannot be represented in UTF-8. A printable
   # ASCII char is chosen deliberately: the replacement is what the model
   # sees, and it must not itself break JSON or the console.
-  REPLACEMENT = '?'.freeze
+  REPLACEMENT = "?".freeze
 
   # Returns a valid UTF-8 copy of `text` (never raises).
   def self.normalize(text)

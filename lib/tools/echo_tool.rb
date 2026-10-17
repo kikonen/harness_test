@@ -1,26 +1,26 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
+require_relative "../tool"
 
 module Tools
 
   class EchoTool < Tool
     def initialize
       super(
-        name: 'test.echo',
+        name: "test.echo",
         description: 'TEST-ONLY tool: returns the input text as-is. Do NOT use this to communicate with the user or send progress messages. Use the "ui.notify" tool instead for any user-facing output.',
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
-            text: { type: 'string', description: 'Text to echo back' }
+            text: { type: "string", description: "Text to echo back" }
           },
-          required: ['text']
+          required: ["text"]
         }
       )
     end
 
     def execute(args)
-      args['text'] || ''
+      args["text"] || ""
     end
   end
 end

@@ -45,7 +45,7 @@ class OutputBuffer
   # - Ruby forbids a keyword before a splat, so this stays positional.
   # Returns the last entry written (or nil when nothing was passed).
   def puts(origin = :unknown, *parts)
-    parts = [''] if parts.empty?
+    parts = [""] if parts.empty?
     origin = normalize(origin)
     last = nil
     parts.each do |part|

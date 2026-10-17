@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative '../command'
+require_relative "../command"
 
 module Commands
   # /reload - reload the system prompt (base prompt file + harness.md

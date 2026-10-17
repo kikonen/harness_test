@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require 'fileutils'
-require 'reline'
+require "fileutils"
+require "reline"
 
 # Manages persistence of Reline's command history to a file inside the
 # harness working directory. One entry per line, with backslashes and
@@ -18,7 +18,7 @@ require 'reline'
 class HistoryManager
   # Legacy shared history file (relative to workdir/.harness/), kept as a
   # read-only fallback for sessions created before issue #119.
-  LEGACY_FILENAME = 'harness_history'
+  LEGACY_FILENAME = "harness_history"
 
   # session_id: the id this run owns (issue #276: the CLI resolves the session
   # id before constructing anything, so the per-session history file is derived
@@ -68,7 +68,7 @@ class HistoryManager
     return unless has_new_entry?(file)
 
     FileUtils.mkdir_p(File.dirname(file))
-    File.open(file, 'w') do |f|
+    File.open(file, "w") do |f|
       Reline::HISTORY.each do |entry|
         f.puts escape(entry)
       end
@@ -103,7 +103,7 @@ class HistoryManager
   def resolve_file
     base = File.join(@workdir, Harness::HARNESS_DIR)
     if @current_id
-      File.join(base, 'sessions', @current_id, LEGACY_FILENAME)
+      File.join(base, "sessions", @current_id, LEGACY_FILENAME)
     else
       File.join(base, LEGACY_FILENAME)
     end
@@ -127,7 +127,7 @@ class HistoryManager
   # Backslashes are escaped first, then newlines and carriage returns are
   # replaced by their two-character escape sequences.
   def escape(text)
-    text.gsub('\\', '\\\\').gsub("\n", '\\n').gsub("\r", '\\r')
+    text.gsub("\\", "\\\\").gsub("\n", '\\n').gsub("\r", '\\r')
   end
 
   # Decode a single history line back into the original entry.
@@ -138,9 +138,9 @@ class HistoryManager
   def unescape(line)
     line.gsub(/\\(.)/) do |m|
       case m[1]
-      when 'n' then "\n"
-      when 'r' then "\r"
-      when '\\' then '\\'
+      when "n" then "\n"
+      when "r" then "\r"
+      when "\\" then "\\"
       else m # unknown escape - keep the backslash and the character
       end
     end

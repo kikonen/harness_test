@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require 'digest'
+require "digest"
 
-require_relative 'sensitive_files'
-require_relative 'ui/dialog'
+require_relative "sensitive_files"
+require_relative "ui/dialog"
 
 # Single source of truth for file access permissions.
 #
@@ -94,9 +94,9 @@ class FileList
   # Display form of a path: relative to the working directory when possible.
   def display_path(path)
     path   = resolve(path)
-    return '.' if path == @workdir
+    return "." if path == @workdir
     prefix = "#{@workdir}/"
-    path.start_with?(prefix) ? path.sub(prefix, '') : path
+    path.start_with?(prefix) ? path.sub(prefix, "") : path
   end
 
   def sensitive?(path)
@@ -263,9 +263,9 @@ class FileList
     return :blocked if sensitive?(path)
 
     verb = case mode
-           when :r then 'read access'
-           when :d then 'delete access'
-           else 'write access'
+           when :r then "read access"
+           when :d then "delete access"
+           else "write access"
            end
 
     # Decide the branch on PATH LOCATION, not existence: a new file that does
@@ -284,11 +284,11 @@ class FileList
     options = if dir_prompt || is_dir
       # Directory: offer flat or recursive.
       [
-        UI::Dialog::Option.new(title: 'Allow this directory only', value: :flat),
+        UI::Dialog::Option.new(title: "Allow this directory only", value: :flat),
         UI::Dialog::Option.new(
-          title: 'Allow this directory and subdirs (recursive)',
+          title: "Allow this directory and subdirs (recursive)",
           value: :recursive,
-          description: 'covers every file under the directory'
+          description: "covers every file under the directory"
         )
       ]
     elsif file_prompt && mode == :w
@@ -299,49 +299,49 @@ class FileList
         UI::Dialog::Option.new(
           title: "Allow this directory only: #{shown}",
           value: :target,
-          description: 'grant covers just this new directory'
+          description: "grant covers just this new directory"
         ),
         UI::Dialog::Option.new(
           title: "Allow parent directory: #{parent_shown}/ (dir only)",
           value: :parent_flat,
-          description: 'the parent itself + direct children - makes ALL of them writeable'
+          description: "the parent itself + direct children - makes ALL of them writeable"
         ),
         UI::Dialog::Option.new(
           title: "Allow parent directory: #{parent_shown}/ (recursive)",
           value: :parent_recursive,
-          description: 'every file under the parent'
+          description: "every file under the parent"
         )
       ]
     elsif file_prompt
       # File within workdir: offer file-only or parent-dir (flat/recursive).
       [
-        UI::Dialog::Option.new(title: 'Allow this file only', value: :file),
+        UI::Dialog::Option.new(title: "Allow this file only", value: :file),
         UI::Dialog::Option.new(
           title: "Allow directory: #{parent_shown}/ (dir only)",
           value: :parent_flat,
-          description: 'the directory itself + direct children only'
+          description: "the directory itself + direct children only"
         ),
         UI::Dialog::Option.new(
           title: "Allow directory: #{parent_shown}/ (recursive)",
           value: :parent_recursive,
-          description: 'every file under the directory'
+          description: "every file under the directory"
         )
       ]
     else
       # Outside workdir or special path.
       [
         UI::Dialog::Option.new(
-          title: 'Allow',
+          title: "Allow",
           value: :flat,
-          description: is_dir ? 'this directory only (not subdirs)' : nil
+          description: is_dir ? "this directory only (not subdirs)" : nil
         )
       ]
     end
 
     note = purpose
     unless inside
-      warn_line = 'WARNING: this path is OUTSIDE the working directory - ' \
-                  'granting access may be a sandbox escape.'
+      warn_line = "WARNING: this path is OUTSIDE the working directory - " \
+                  "granting access may be a sandbox escape."
       note  = [note, warn_line].compact.join("\n")
     end
 
@@ -500,7 +500,7 @@ class FileList
     dir = File.dirname(path)
     loop do
       return true if granted_dirs.include?(dir)
-      return false if dir == '/'
+      return false if dir == "/"
 
       parent = File.dirname(dir)
       break if parent == dir
@@ -512,10 +512,10 @@ class FileList
 
   def mode_label(mode)
     case mode
-    when :r then 'read'
-    when :w then 'write'
-    when :d then 'delete'
-    else 'read+write'
+    when :r then "read"
+    when :w then "write"
+    when :d then "delete"
+    else "read+write"
     end
   end
 

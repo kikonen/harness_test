@@ -11,7 +11,7 @@ module UI
     # stdin:  an IO-like object with #gets ($stdin, StringIO). May be nil
     #         when the caller only needs to write (e.g. --list-sessions).
     def initialize(stdout:, stdin: nil)
-      raise ArgumentError, 'UI::Console requires a non-nil stdout stream' \
+      raise ArgumentError, "UI::Console requires a non-nil stdout stream" \
         if stdout.nil?
 
       @stdout = stdout

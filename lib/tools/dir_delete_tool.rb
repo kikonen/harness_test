@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
-require_relative '../file_list'
+require_relative "../tool"
+require_relative "../file_list"
 
 # Deletes a directory WITH ITS WHOLE TREE (issue #290): the whole tree is
 # validated BEFORE a single entry is removed, one DELETE grant covers it, and
@@ -20,30 +20,30 @@ module Tools
       # NEW harness, so storing a Logger here would write to the replaced run.
       @harness   = harness
       super(
-        name: 'dir.delete',
-        description: 'Deletes a directory and, when it is not empty, its whole tree ' \
-                     '(every file and subdir under it). Paths outside the working ' \
-                     'directory require explicit user approval; the working directory ' \
-                     'itself can never be deleted, and a tree containing a sensitive ' \
-                     'subdir (.git, .harness, .env*) is refused. Deleting requires a ' \
-                     'DELETE access grant (its own mode, independent from read/write). ' \
-                     'A path that is itself a symlink is refused - unlink it with ' \
-                     'file.delete. Every deleted path is recorded in harness.log.',
+        name: "dir.delete",
+        description: "Deletes a directory and, when it is not empty, its whole tree " \
+                     "(every file and subdir under it). Paths outside the working " \
+                     "directory require explicit user approval; the working directory " \
+                     "itself can never be deleted, and a tree containing a sensitive " \
+                     "subdir (.git, .harness, .env*) is refused. Deleting requires a " \
+                     "DELETE access grant (its own mode, independent from read/write). " \
+                     "A path that is itself a symlink is refused - unlink it with " \
+                     "file.delete. Every deleted path is recorded in harness.log.",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
             path: {
-              type: 'string',
-              description: 'Path of the directory to delete (relative to the working dir)'
+              type: "string",
+              description: "Path of the directory to delete (relative to the working dir)"
             }
           },
-          required: ['path']
+          required: ["path"]
         }
       )
     end
 
     def execute(args)
-      path  = @file_list.resolve(args['path'])
+      path  = @file_list.resolve(args["path"])
       shown = @file_list.display_path(path)
 
       if @file_list.sensitive?(path)
@@ -57,7 +57,7 @@ module Tools
       if File.symlink?(path)
         Tool.puts "  [dir.delete] ✗ #{shown} (a symlink)"
         return "error: '#{shown}' is a symlink - delete it with file.delete " \
-               '(following it here would delete a tree outside the granted path)'
+               "(following it here would delete a tree outside the granted path)"
       end
 
       unless File.directory?(path)
@@ -175,7 +175,7 @@ module Tools
     def warn_unlogged
       return if @harness&.logger
 
-      Tool.puts '  [dir.delete] ! no harness attached - deleted paths are not logged'
+      Tool.puts "  [dir.delete] ! no harness attached - deleted paths are not logged"
     end
   end
 end

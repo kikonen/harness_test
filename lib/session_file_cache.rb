@@ -85,6 +85,6 @@ class SessionFileCache
     return path if workdir.nil? || workdir.to_s.empty?
 
     prefix = "#{workdir}/"
-    path.start_with?(prefix) ? path.sub(prefix, '') : path
+    path.start_with?(prefix) ? path.sub(prefix, "") : path
   end
 end

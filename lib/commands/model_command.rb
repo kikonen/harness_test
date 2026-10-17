@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative '../command'
+require_relative "../command"
 
 module Commands
   # /model <name> - switch the active model for this run.
@@ -16,7 +16,7 @@ module Commands
                  "(#{@harness.session_manager.target_display} @ #{@options[:base_url]})"
         print_params
         @ui.puts "List models with /models, switch with /model <name>, " \
-                 'adjust parameters with /param.'
+                 "adjust parameters with /param."
         return
       end
 

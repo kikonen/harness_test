@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require_relative 'llm/shared'
-require_relative 'llm/openai_backend'
-require_relative 'llm/ollama_backend'
+require_relative "llm/shared"
+require_relative "llm/openai_backend"
+require_relative "llm/ollama_backend"
 
 # Public LLM client (issue #197): a thin dispatcher over the per-backend
 # clients in lib/llm/. The backend is selected per model profile via the
