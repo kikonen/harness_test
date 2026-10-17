@@ -1,20 +1,17 @@
 # House rules for the harness (issue #302).
 #
-# The mechanical part of what harness.md already states (line length, 2-space
-# indent, frozen_string_literal, trailing whitespace) becomes a cop set here, so
-# the suite enforces it instead of every session having to remember it. Cops that
-# restate Ruby idiom rather than THIS repo's decisions stay off: a cop the code
-# fights gets switched off anyway, and a config full of disabled cops is noise.
+# Only the mechanical part of what harness.md states is enforced:
+# DisabledByDefault, then Layout / Lint / Naming as departments and a handful of
+# Style cops. Why each choice was made and what was measured: doc/rubocop_style.md.
 #
 # Existing violations are baselined in .rubocop_todo.yml, so new code is held to
-# the rules while old code is cleaned on purpose, in its own commit.
+# the rules while old code is cleaned step by step, in its own commit.
 
 inherit_from: .rubocop_todo.yml
 
-# Without this, an Exclude set here (the spec/**/* scoping below) REPLACES the
+# Without this an Exclude set here (the spec/**/* scoping below) REPLACES the
 # Exclude lists the todo file generates for the same cop, silently discarding
-# the baseline - which is exactly what happened when this config was first
-# generated: 1149 baselined offenses kept firing.
+# the baseline.
 inherit_mode:
   merge:
     - Exclude
@@ -31,14 +28,8 @@ AllCops:
     - .harness/**/*
     - vendor/**/*
 
-# Specs are test code: their shape follows the example being described, and a
-# formatting rule there (quote style, brace layout, wrapped-argument indent)
-# buys nothing - measured, spec/**/* is where nearly every formatting offense
-# lives. So the whole Layout department skips specs, and each Style cop enabled
-# below carries the same exclusion (enabling the Style DEPARTMENT would switch
-# on ~100 cops, which DisabledByDefault exists to prevent). Lint and Naming stay
-# on everywhere: those catch real mistakes (unused variable, duplicated branch),
-# not taste.
+# Formatting rules in test code buy nothing. Lint and Naming stay on everywhere:
+# they catch mistakes, not taste.
 Lint:
   Enabled: true
 
@@ -50,11 +41,7 @@ Layout:
   Exclude:
     - spec/**/*
 
-# Size limits are review judgement, not a mechanical house rule, and this repo's
-# classes are deliberately big (session_manager 632 lines, command_runner 609).
-# Measured at the default thresholds the whole department fires 363 times
-# (MethodLength 148, AbcSize 90, CyclomaticComplexity 55, PerceivedComplexity
-# 43, ClassLength 19, BlockLength 5, ParameterLists 2, BlockNesting 1).
+# Class and method size is review judgement, not a house rule.
 Metrics:
   Enabled: false
 
@@ -70,11 +57,12 @@ Naming/MethodParameterName:
     - io
     - ui
 
-# Continuation style, taken from the style probe (tmp/style_example_1.rb): the
-# 'want_this' block passes under these settings, and the 'not_this' block (args
-# hanging under the opening call, values table-padded, closing brace on its own
-# line) is flagged. This is harness.md's rule made executable: 2 spaces from the
-# line that opened the call, closing bracket on the last argument's line.
+# --- Continuation shape -----------------------------------------------------
+# A multi-line call puts the first argument on its own line, every argument on
+# its own line, one indentation step from the line that opened it, and closes
+# the brackets on the last element's line ('})'). Measured against the style
+# probe the owner wrote (doc/rubocop_style.md): these settings accept the
+# hand-written shape and flag the model-written one.
 Layout/ArgumentAlignment:
   EnforcedStyle: with_fixed_indentation
 
@@ -90,10 +78,13 @@ Layout/FirstArrayElementIndentation:
 Layout/FirstHashElementIndentation:
   EnforcedStyle: consistent
 
-# Keys of a multi-line hash line up; VALUES get no table padding ('table' style
-# demands it and the probe file rejects that).
+# Keys of a multi-line hash line up; VALUES get no table padding.
 Layout/HashAlignment:
   EnforcedColonStyle: key
+
+# '}' of a multi-line hash on the line after its last key.
+Layout/MultilineHashBraceLayout:
+  EnforcedStyle: symmetrical
 
 Layout/MultilineMethodCallBraceLayout:
   EnforcedStyle: same_line
@@ -104,28 +95,83 @@ Layout/MultilineMethodCallIndentation:
 Layout/MultilineOperationIndentation:
   EnforcedStyle: indented
 
-Layout/LineLength:
-  # harness.md: "Lines should be at maximum 90 characters long." 90 is the width
-  # of ONE Emacs buffer in the two-pane setup the code is read in (a Zenbook
-  # laptop: two side-by-side windows fit ~90 columns each). A physical
-  # constraint, not an abstract limit.
-  Max: 90
-  AllowedPatterns:
-    - '^\s*(# |url: |https?://)'
+Layout/FirstMethodArgumentLineBreak:
+  Enabled: true
+
+Layout/FirstHashElementLineBreak:
+  Enabled: true
+
+Layout/FirstArrayElementLineBreak:
+  Enabled: true
+
+Layout/MultilineMethodArgumentLineBreaks:
+  Enabled: true
+
+Layout/MultilineHashKeyLineBreaks:
+  Enabled: true
+
+# Continuation of a "\-joined string gets one step from the assignment, not
+# aligned under the opening quote.
+Layout/LineEndStringConcatenationIndentation:
+  EnforcedStyle: indented
+
+# --- Separators -------------------------------------------------------------
+# Blank lines between semantic blocks: the guard clause is the case a wall of
+# text starts with (a guard glued to what follows it reads as trailing noise).
+Layout/EmptyLineAfterGuardClause:
+  Enabled: true
+
+Layout/EmptyLineBetweenDefs:
+  Enabled: true
+
+# No padding blank lines just inside a body. ClassBody / BlockBody / ModuleBody
+# have the style option; MethodBody does NOT (it is a plain on/off cop and
+# rejects EnforcedStyle with a warning on every run), so it is only enabled.
+Layout/EmptyLinesAroundClassBody:
+  Enabled: true
+  EnforcedStyle: no_empty_lines
+
+Layout/EmptyLinesAroundMethodBody:
+  Enabled: true
+
+Layout/EmptyLinesAroundBlockBody:
+  Enabled: true
+  EnforcedStyle: no_empty_lines
 
 Layout/SpaceInsideBlockBraces:
-  # The repo writes an empty block as { } (Task.new { }); the default wants {}.
+  # The repo writes an empty block as { } (Task.new { }).
   EnforcedStyleForEmptyBraces: space
 
 Layout/ExtraSpacing:
   AllowForAlignment: true
 
 Layout/EndOfLine:
-  # Measured on this Windows checkout: 'native' fires on all 131 files (native
-  # means CRLF there) while 'lf' is clean - the tree really is LF
-  # (.gitattributes 'text=auto eol=lf', core.autocrlf false), so LF is the
-  # honest rule rather than a per-OS one.
+  # native fires on all 131 files on a Windows checkout (native means CRLF
+  # there); the tree is LF (.gitattributes eol=lf, core.autocrlf false).
   EnforcedStyle: lf
+
+# Constants belong at the top of the class, not scattered between its methods.
+# The default ExpectedOrder also demands a public_class_methods / initializer
+# arrangement this repo does not follow, so the order is trimmed to what the
+# rule is actually about. Its autocorrect is UNSAFE (a constant read by an
+# earlier method would change meaning), so reordering is reviewed by eye.
+Layout/ClassStructure:
+  Enabled: true
+  ExpectedOrder:
+    - module_inclusion
+    - constants
+    - initializer
+    - public_methods
+    - private_methods
+
+Layout/LineLength:
+  # 90 is the width of ONE Emacs buffer in the two-pane setup the code is read
+  # in (Zenbook: two side-by-side windows fit ~90 columns each) - a physical
+  # constraint, not an abstract limit. A line over 90 is acceptable where
+  # splitting it would be uglier; the long ones stay baselined.
+  Max: 90
+  AllowedPatterns:
+    - '^\s*(# |url: |https?://)'
 
 Style/FrozenStringLiteralComment:
   Enabled: true
@@ -133,20 +179,12 @@ Style/FrozenStringLiteralComment:
 
 Style/StringLiterals:
   Enabled: true
-  # Double quotes everywhere (the repo's older single-quote habit is dropped).
-  # Measured against the tree: 5062 offenses to flip vs 62 for single quotes -
-  # a codebase-wide decision, not one belonging to this PR, so the number is
-  # recorded here for whoever reads it next.
   EnforcedStyle: double_quotes
   Exclude:
     - spec/**/*
 
-# Parentheses: a call that TAKES arguments wears them (x = some_method arg1,
-# arg2, arg3 is the unreadable form); a call with no arguments never wears them;
-# super stays bare unless suppressing all forwarding is the point. The Allowed
-# list is the family of calls Ruby itself writes without parens - the repo
-# already writes all 62 logger calls parenthesised, so the list only stops the
-# cop fighting puts/raise idiom.
+# A call that takes arguments wears them; a call with none never does. super
+# stays bare unless suppressing the forwarding is the point.
 Style/MethodCallWithArgsParentheses:
   Enabled: true
   EnforcedStyle: require_parentheses

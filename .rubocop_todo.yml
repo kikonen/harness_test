@@ -6,7 +6,7 @@
 # Note that changes in the inspected code, or installation of new
 # versions of RuboCop, may require this file to be generated again.
 
-# Offense count: 50
+# Offense count: 32
 # This cop supports safe autocorrection (--autocorrect).
 # Configuration parameters: EnforcedStyle, IndentationWidth.
 # SupportedStyles: with_first_argument, with_fixed_indentation
@@ -18,7 +18,6 @@ Layout/ArgumentAlignment:
     - 'lib/harness.rb'
     - 'lib/session.rb'
     - 'lib/session_locator.rb'
-    - 'lib/session_manager.rb'
     - 'lib/task.rb'
     - 'lib/text_normalizer.rb'
     - 'lib/ui/editor.rb'
@@ -31,6 +30,16 @@ Layout/ArrayAlignment:
   Exclude:
     - 'lib/commands/yolo_command.rb'
     - 'lib/ui/editor.rb'
+
+# Offense count: 3
+# This cop supports unsafe autocorrection (--autocorrect-all).
+# Configuration parameters: Categories, ExpectedOrder.
+# ExpectedOrder: module_inclusion, constants, public_class_methods, initializer, public_methods, protected_methods, private_class_methods, private_methods
+Layout/ClassStructure:
+  Exclude:
+    - 'lib/harness.rb'
+    - 'lib/llm_client.rb'
+    - 'lib/ui/spinner.rb'
 
 # Offense count: 2
 # This cop supports safe autocorrection (--autocorrect).
@@ -45,7 +54,7 @@ Layout/ElseAlignment:
   Exclude:
     - 'lib/file_list.rb'
 
-# Offense count: 27
+# Offense count: 25
 # This cop supports safe autocorrection (--autocorrect).
 Layout/EmptyLineAfterGuardClause:
   Exclude:
@@ -56,7 +65,6 @@ Layout/EmptyLineAfterGuardClause:
     - 'lib/harness.rb'
     - 'lib/param_overrides.rb'
     - 'lib/session.rb'
-    - 'lib/session_manager.rb'
     - 'lib/shell_tokenizer.rb'
     - 'lib/task.rb'
     - 'lib/tools/file_info_tool.rb'
@@ -157,6 +165,41 @@ Layout/ExtraSpacing:
     - 'lib/ui/editor.rb'
     - 'lib/ui/spinner.rb'
 
+# Offense count: 4
+# This cop supports safe autocorrection (--autocorrect).
+# Configuration parameters: AllowImplicitArrayLiterals, AllowMultilineFinalElement.
+Layout/FirstArrayElementLineBreak:
+  Exclude:
+    - 'lib/commands/yolo_command.rb'
+    - 'lib/llm/ollama_backend.rb'
+    - 'lib/llm/openai_backend.rb'
+    - 'lib/ui/editor.rb'
+
+# Offense count: 9
+# This cop supports safe autocorrection (--autocorrect).
+# Configuration parameters: AllowMultilineFinalElement.
+Layout/FirstHashElementLineBreak:
+  Exclude:
+    - 'lib/command_runner.rb'
+    - 'lib/file_list.rb'
+    - 'lib/git_runner.rb'
+    - 'lib/llm/base_backend.rb'
+    - 'lib/llm/ollama_backend.rb'
+
+# Offense count: 33
+# This cop supports safe autocorrection (--autocorrect).
+# Configuration parameters: AllowMultilineFinalElement, AllowedMethods.
+Layout/FirstMethodArgumentLineBreak:
+  Exclude:
+    - 'lib/cli.rb'
+    - 'lib/command_runner.rb'
+    - 'lib/commands/grant_command.rb'
+    - 'lib/harness.rb'
+    - 'lib/llm/base_backend.rb'
+    - 'lib/task.rb'
+    - 'lib/text_normalizer.rb'
+    - 'lib/ui/editor.rb'
+
 # Offense count: 87
 # This cop supports safe autocorrection (--autocorrect).
 # Configuration parameters: AllowMultipleStyles, EnforcedHashRocketStyle, EnforcedColonStyle, EnforcedLastArgumentHashStyle.
@@ -190,17 +233,46 @@ Layout/IndentationWidth:
   Exclude:
     - 'lib/file_list.rb'
 
-# Offense count: 5
+# Offense count: 62
 # This cop supports safe autocorrection (--autocorrect).
 # Configuration parameters: EnforcedStyle, IndentationWidth.
 # SupportedStyles: aligned, indented
 Layout/LineEndStringConcatenationIndentation:
   Exclude:
     - 'lib/cli.rb'
+    - 'lib/command_runner.rb'
+    - 'lib/commands/compact_command.rb'
+    - 'lib/commands/model_command.rb'
     - 'lib/commands/sessions_command.rb'
     - 'lib/commands/yolo_command.rb'
+    - 'lib/file_list.rb'
+    - 'lib/git_runner.rb'
+    - 'lib/harness.rb'
+    - 'lib/llm/base_backend.rb'
+    - 'lib/safety_check.rb'
+    - 'lib/tools/dialog_tool.rb'
+    - 'lib/tools/dir_create_tool.rb'
+    - 'lib/tools/dir_delete_tool.rb'
+    - 'lib/tools/file_copy_tool.rb'
+    - 'lib/tools/file_delete_tool.rb'
+    - 'lib/tools/file_info_tool.rb'
+    - 'lib/tools/file_list_tool.rb'
+    - 'lib/tools/file_patch_tool.rb'
+    - 'lib/tools/file_read_tool.rb'
+    - 'lib/tools/file_rename_tool.rb'
+    - 'lib/tools/file_search_tool.rb'
+    - 'lib/tools/file_write_tool.rb'
+    - 'lib/tools/git_apply_tool.rb'
+    - 'lib/tools/git_diff_tool.rb'
+    - 'lib/tools/git_grep_tool.rb'
+    - 'lib/tools/git_log_tool.rb'
+    - 'lib/tools/git_show_tool.rb'
+    - 'lib/tools/git_status_tool.rb'
+    - 'lib/tools/run_command_tool.rb'
+    - 'lib/tools/tools_list_tool.rb'
+    - 'lib/tools/tools_search_tool.rb'
 
-# Offense count: 193
+# Offense count: 177
 # This cop supports safe autocorrection (--autocorrect).
 # Configuration parameters: Max, AllowHeredoc, AllowURI, AllowQualifiedName, URISchemes, AllowRBSInlineAnnotation, AllowCopDirectives, AllowedPatterns, SplitStrings.
 # URISchemes: http, https
@@ -247,7 +319,28 @@ Layout/LineLength:
     - 'lib/ui/dialog.rb'
     - 'lib/ui/editor.rb'
 
-# Offense count: 22
+# Offense count: 3
+# This cop supports safe autocorrection (--autocorrect).
+# Configuration parameters: AllowMultilineFinalElement.
+Layout/MultilineHashKeyLineBreaks:
+  Exclude:
+    - 'lib/llm/base_backend.rb'
+    - 'lib/llm/ollama_backend.rb'
+
+# Offense count: 39
+# This cop supports safe autocorrection (--autocorrect).
+# Configuration parameters: AllowMultilineFinalElement.
+Layout/MultilineMethodArgumentLineBreaks:
+  Exclude:
+    - 'lib/cli.rb'
+    - 'lib/command_runner.rb'
+    - 'lib/harness.rb'
+    - 'lib/session.rb'
+    - 'lib/task.rb'
+    - 'lib/text_normalizer.rb'
+    - 'lib/ui/editor.rb'
+
+# Offense count: 18
 # This cop supports safe autocorrection (--autocorrect).
 # Configuration parameters: EnforcedStyle.
 # SupportedStyles: symmetrical, new_line, same_line
@@ -256,7 +349,6 @@ Layout/MultilineMethodCallBraceLayout:
     - 'lib/command_runner.rb'
     - 'lib/file_list.rb'
     - 'lib/harness.rb'
-    - 'lib/session_manager.rb'
     - 'lib/tools/dialog_tool.rb'
     - 'lib/tools/dir_create_tool.rb'
     - 'lib/tools/file_list_tool.rb'
