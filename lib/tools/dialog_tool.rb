@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
-require_relative '../ui/dialog'
+require_relative "../tool"
+require_relative "../ui/dialog"
 
 # Lets the MODEL ask the user a question (or make a choice) via a dialog.
 #
@@ -29,70 +29,70 @@ module Tools
 
     def initialize
       super(
-        name: 'ui.dialog',
-        description: 'Shows a dialog (question / choice) to the user and waits for their answer. ' \
-                     'The dialog has a title (what it is about), an optional note (extra context or warning), ' \
-                     'and a list of options; each option has a title, an optional description, and a value. ' \
+        name: "ui.dialog",
+        description: "Shows a dialog (question / choice) to the user and waits for their answer. " \
+                     "The dialog has a title (what it is about), an optional note (extra context or warning), " \
+                     "and a list of options; each option has a title, an optional description, and a value. " \
                      'A standard "Cancel" option is always available to the user. ' \
                      'The dialog always includes an "Additional details" option so the user can type ' \
-                     'their own answer alongside or instead of picking options. ' \
-                     'Optionally enables multi-select so the user can pick SEVERAL options at once by ' \
+                     "their own answer alongside or instead of picking options. " \
+                     "Optionally enables multi-select so the user can pick SEVERAL options at once by " \
                      'typing their numbers in one line (e.g. "1 3"). ' \
-                     'Use this for questions where any combination of options is valid. ' \
-                     'The VALUE of the selected option (or the typed free-text answer) is returned to you; ' \
+                     "Use this for questions where any combination of options is valid. " \
+                     "The VALUE of the selected option (or the typed free-text answer) is returned to you; " \
                      'if the user cancels, you get ":cancelled". Use this to ask the user for a decision, ' \
-                     'a preference, or clarification when you cannot decide on your own.',
+                     "a preference, or clarification when you cannot decide on your own.",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
             title: {
-              type: 'string',
+              type: "string",
               description: 'What the dialog is about (required), e.g. "Which Ruby version should I target?"'
             },
             note: {
-              type: 'string',
-              description: 'Optional extra context or warning shown under the title.'
+              type: "string",
+              description: "Optional extra context or warning shown under the title."
             },
             options: {
-              type: 'array',
+              type: "array",
               description: "The choices for the user (1..#{MAX_OPTIONS} options). The standard cancel option is added automatically.",
               items: {
-                type: 'object',
+                type: "object",
                 properties: {
-                  title: { type: 'string', description: 'Short label of the option, e.g. "Allow" or "Ruby 3.3"' },
-                  description: { type: 'string', description: 'Optional one-line explanation shown under the title' },
+                  title: { type: "string", description: 'Short label of the option, e.g. "Allow" or "Ruby 3.3"' },
+                  description: { type: "string", description: "Optional one-line explanation shown under the title" },
                   value: {
-                    type: ['string', 'number', 'boolean'],
-                    description: 'The value returned to you when this option is selected (must be a JSON string, number, or boolean)'
+                    type: ["string", "number", "boolean"],
+                    description: "The value returned to you when this option is selected (must be a JSON string, number, or boolean)"
                   }
                 },
-                required: ['title', 'value']
+                required: ["title", "value"]
               }
             },
             free_text_prompt: {
-              type: 'string',
+              type: "string",
               description: 'Optional short hint used as the label of the "Additional details" option. ' \
-                           'The dialog always allows typed details; this just customises the label.'
+                           "The dialog always allows typed details; this just customises the label."
             },
             multi_select: {
-              type: 'boolean',
-              description: 'Let the user pick several options at once by typing their numbers in one line ' \
+              type: "boolean",
+              description: "Let the user pick several options at once by typing their numbers in one line " \
                            '(e.g. "1 3"). The values of all selected options are returned. ' \
-                           'Use for questions where any combination of options is valid.'
+                           "Use for questions where any combination of options is valid."
             }
           },
-          required: ['title', 'options']
+          required: ["title", "options"]
         }
       )
     end
 
     def execute(args)
-      title = args['title'].to_s.strip
+      title = args["title"].to_s.strip
       if title.empty?
         return "error: 'title' must be a non-empty string"
       end
 
-      raw_options = args['options']
+      raw_options = args["options"]
       unless raw_options.is_a?(Array) && !raw_options.empty?
         return "error: 'options' must be a non-empty array"
       end
@@ -106,12 +106,12 @@ module Tools
           return "error: every option must be an object with 'title' and 'value'"
         end
 
-        opt_title = raw['title'].to_s.strip
+        opt_title = raw["title"].to_s.strip
         if opt_title.empty?
           return "error: every option needs a non-empty 'title'"
         end
 
-        value = raw['value']
+        value = raw["value"]
         if value.nil? || (value.is_a?(String) && value.empty?)
           return "error: every option needs a 'value' (non-empty string, number, or boolean)"
         end
@@ -119,17 +119,17 @@ module Tools
         options << UI::Dialog::Option.new(
           title: opt_title,
           value: value,
-          description: raw['description']
+          description: raw["description"]
         )
       end
 
       choice = UI::Dialog.new(
         title: title,
         options: options,
-        note: args['note'],
+        note: args["note"],
         free_text: true,
-        free_text_prompt: args['free_text_prompt'],
-        multi_select: args['multi_select'] == true
+        free_text_prompt: args["free_text_prompt"],
+        multi_select: args["multi_select"] == true
         # ui: nil - tools run on the Task thread, so the dialog is routed
         # through the task and the MAIN THREAD services the I/O (issue #40).
       ).show(ui: nil)
@@ -144,7 +144,7 @@ module Tools
       cv = UI::Dialog::CANCEL_VALUE
 
       if choice == cv
-        'cancelled (the user dismissed the dialog without choosing an option)'
+        "cancelled (the user dismissed the dialog without choosing an option)"
       elsif choice.is_a?(Array) && choice.size == 2 &&
             choice[0] == cv && choice[1].is_a?(String)
         # [:cancelled, 'one-line reason']
@@ -159,7 +159,7 @@ module Tools
       elsif choice.is_a?(Array) && choice.last.is_a?(Array) &&
             choice.last.size == 2 && choice.last[0] == ft
         # [v1, v2, ..., [FREE_TEXT, text]]: selections + details.
-        vals = choice[0..-2].map(&:inspect).join(', ')
+        vals = choice[0..-2].map(&:inspect).join(", ")
         "selected: #{vals} (user's details: \"#{choice.last[1]}\")"
       elsif choice.is_a?(Array)
         # Multi-select without details: array of values.

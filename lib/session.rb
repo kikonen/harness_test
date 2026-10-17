@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require 'time'
-require 'securerandom'
+require "time"
+require "securerandom"
 
-require_relative 'session_file_cache'
+require_relative "session_file_cache"
 
 # -- Session --------------------------------------------------------------
 #
@@ -25,7 +25,7 @@ require_relative 'session_file_cache'
 class Session
   UUID_RE = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
   # issue #170: key under which the file digest cache is serialized.
-  FILE_CACHE_KEY = 'file_cache'
+  FILE_CACHE_KEY = "file_cache"
 
   # How many recent messages to retain verbatim after compaction, so the
   # immediate working context (exact file contents, tool outputs, etc.)
@@ -93,14 +93,14 @@ class Session
   def pending?
     last = @messages.last
     case last[:role]
-    when 'user' then true
-    when 'tool' then true
-    else last[:role] == 'assistant' && Array(last[:tool_calls]).any?
+    when "user" then true
+    when "tool" then true
+    else last[:role] == "assistant" && Array(last[:tool_calls]).any?
     end
   end
 
   def add_user(content)
-    @messages << { role: 'user', content: content }
+    @messages << { role: "user", content: content }
     @user_prompts += 1
     self
   end
@@ -125,12 +125,12 @@ class Session
   def flush_notes
     return unless (@notes || []).any?
 
-    @notes.each { |t| @messages << { role: 'system', content: "Note: #{t}" } }
+    @notes.each { |t| @messages << { role: "system", content: "Note: #{t}" } }
     @notes = []
   end
 
   def add_assistant(content)
-    @messages << { role: 'assistant', content: content }
+    @messages << { role: "assistant", content: content }
     self
   end
 
@@ -241,18 +241,18 @@ class Session
     if recent_count > 0 && conversation.size > recent_count
       recent = conversation.last(recent_count)
       # Trim leading `tool` messages (orphaned by the summarization boundary).
-      recent = recent.drop_while { |m| m[:role] == 'tool' }
+      recent = recent.drop_while { |m| m[:role] == "tool" }
     end
 
     @messages = [
       system_message,
-      { role: 'user', content: "This is a summary of our previous conversation:\n\n#{summary_text}" },
-      { role: 'assistant', content: 'Understood. I have the context from our previous conversation. How can I help you continue?' }
+      { role: "user", content: "This is a summary of our previous conversation:\n\n#{summary_text}" },
+      { role: "assistant", content: "Understood. I have the context from our previous conversation. How can I help you continue?" }
     ]
     @messages.concat(recent) if recent && !recent.empty?
     # issue #138: pending ui.note facts must not be dropped by compaction -
     # append them as system messages on the fresh chain.
-    (@notes || []).each { |t| @messages << { role: 'system', content: "Note: #{t}" } }
+    (@notes || []).each { |t| @messages << { role: "system", content: "Note: #{t}" } }
     @notes = []
     @last_stats = nil
     @last_reasoning = nil
@@ -391,9 +391,9 @@ class Session
       if usage && usage[:total_tokens] > 0
         parts << "#{usage[:prompt_tokens]}→#{usage[:completion_tokens]} tokens (#{usage[:total_tokens]} total)"
       end
-      lines << parts.join(', ')
+      lines << parts.join(", ")
     else
-      lines << 'No successful requests yet.'
+      lines << "No successful requests yet."
     end
     lines.join("\n")
   end
@@ -455,7 +455,7 @@ class Session
   def restore_access_grants(data, file_list)
     file_list.clear
 
-    access = data[:access] || data['access']
+    access = data[:access] || data["access"]
     if access.is_a?(Hash)
       # Section names -> FileList grant modes (:rw / :r / :w).
       { both: :rw, read: :r, write: :w, delete: :d }.each do |section_key, mode|
@@ -476,6 +476,6 @@ class Session
   private
 
   def system_message
-    { role: 'system', content: @system_prompt }
+    { role: "system", content: @system_prompt }
   end
 end

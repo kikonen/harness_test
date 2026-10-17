@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'base_backend'
+require_relative "base_backend"
 
 module LLM
   # Native Ollama backend (issue #197): POST /api/chat.
@@ -12,7 +12,7 @@ module LLM
 
     # issue #217: public (like BaseBackend#endpoint_path) so the UI can
     # show the actual call target.
-    def endpoint_path = '/api/chat'
+    def endpoint_path = "/api/chat"
 
     private
 
@@ -66,7 +66,7 @@ module LLM
       normalized = {
         choices: [{
           message: {
-            role: message[:role] || 'assistant',
+            role: message[:role] || "assistant",
             content: message[:content],
             reasoning: message[:thinking] || message[:reasoning],
             tool_calls: normalize_tool_calls(message[:tool_calls])

@@ -1,16 +1,16 @@
 # frozen_string_literal: true
 
-require 'optparse'
-require 'reline'
+require "optparse"
+require "reline"
 
-require_relative 'harness_error'
-require_relative 'harness_config'
-require_relative 'harness'
-require_relative 'file_list'
-require_relative 'history_manager'
-require_relative 'session_locator'
-require_relative 'command_handler'
-require_relative 'ui'
+require_relative "harness_error"
+require_relative "harness_config"
+require_relative "harness"
+require_relative "file_list"
+require_relative "history_manager"
+require_relative "session_locator"
+require_relative "command_handler"
+require_relative "ui"
 
 # -- CLI ------------------------------------------------------------------
 
@@ -23,7 +23,7 @@ class CLI
     :history,
     :ui
 
-  DEFAULT_BASE_URL = 'http://localhost:11434/v1'
+  DEFAULT_BASE_URL = "http://localhost:11434/v1"
 
   # Defaults keep the entry point (`CLI.new.run`) unchanged; the tests inject
   # pre-parsed options and a stubbed UI instead.
@@ -78,41 +78,41 @@ class CLI
     opts = {}
 
     parser = OptionParser.new do |o|
-      o.banner  = 'Usage: harness.rb [options]'
-      o.separator ''
-      o.on('-c FILE', '--config FILE',
-           'Path to the YAML config file. Lookup order: -c, $HARNESS_CONFIG, ' \
-           '<workdir>/.harness/config.yml, ~/.config/harness/config.yml ' \
-           '(issue #260). On first run the template is written to the user ' \
-           'home config when no config file exists yet.') do |v|
+      o.banner  = "Usage: harness.rb [options]"
+      o.separator ""
+      o.on("-c FILE", "--config FILE",
+           "Path to the YAML config file. Lookup order: -c, $HARNESS_CONFIG, " \
+           "<workdir>/.harness/config.yml, ~/.config/harness/config.yml " \
+           "(issue #260). On first run the template is written to the user " \
+           "home config when no config file exists yet.") do |v|
         opts[:config_path] = v
       end
-      o.on('-m MODEL', '--model MODEL', 'Model name (required)') { |v| opts[:model] = v }
-      o.on('--system-file FILE',
-           'Use this file as the system prompt (overrides config / built-in)') do |v|
+      o.on("-m MODEL", "--model MODEL", "Model name (required)") { |v| opts[:model] = v }
+      o.on("--system-file FILE",
+           "Use this file as the system prompt (overrides config / built-in)") do |v|
         opts[:system_file] = v
       end
-      o.on('-d DIR', '--workdir DIR',
-           'Working directory; all file paths are relative to it') do |v|
+      o.on("-d DIR", "--workdir DIR",
+           "Working directory; all file paths are relative to it") do |v|
         opts[:workdir] = v
       end
-      o.on('-r ID', '--resume ID',
-           'Resume a saved session by id (see /sessions)') { |v| opts[:resume] = v }
-      o.on('--continue',
-           'Resume the newest saved session for this workdir (issue #107). ' \
-           'Equivalent to --resume <id> with the most recent id.') do
+      o.on("-r ID", "--resume ID",
+           "Resume a saved session by id (see /sessions)") { |v| opts[:resume] = v }
+      o.on("--continue",
+           "Resume the newest saved session for this workdir (issue #107). " \
+           "Equivalent to --resume <id> with the most recent id.") do
         opts[:continue] = true
       end
-      o.on('--list-sessions',
-           'List saved sessions and exit (no model needed)') { |v| opts[:list_sessions] = v }
-      o.on('--no-auto-save',
-           'Disable periodic auto-save of the session at prompt boundaries ' \
-           '(issue #107). Overrides the config \'auto_save\' key.') do
+      o.on("--list-sessions",
+           "List saved sessions and exit (no model needed)") { |v| opts[:list_sessions] = v }
+      o.on("--no-auto-save",
+           "Disable periodic auto-save of the session at prompt boundaries " \
+           "(issue #107). Overrides the config 'auto_save' key.") do
         opts[:no_auto_save] = true
       end
-      o.on('-v', '--verbose',
-           'Show full prompt and raw response') { |v| opts[:verbose] = v }
-      o.on('-h', '--help') { puts o; exit }
+      o.on("-v", "--verbose",
+           "Show full prompt and raw response") { |v| opts[:verbose] = v }
+      o.on("-h", "--help") { puts o; exit }
     end
     parser.parse!
 
@@ -209,7 +209,7 @@ class CLI
     opts[:double_enter_submit] = config.double_enter_submit_enabled
 
     unless opts[:model] || opts[:list_sessions]
-      raise HarnessError, '-m / --model is required (or set default_model in the config)'
+      raise HarnessError, "-m / --model is required (or set default_model in the config)"
     end
 
     opts
@@ -222,7 +222,7 @@ class CLI
   # files, minting a fresh random id on the way.
   def list_sessions_and_exit
     Commands::SessionsCommand.new(harness: nil, file_list: @file_list,
-                                  options: @options, ui: @ui).handle('')
+                                  options: @options, ui: @ui).handle("")
     exit 0
   end
 
@@ -341,13 +341,13 @@ class CLI
   # at-a-glance version shown in the startup banner.
   def consent_posture_display
     label = @harness.command_mode_label
-    return 'n/a' if label.nil?
-    return 'YOLO - unapproved commands run without asking; disaster ' \
-           'commands still ask' if @harness.yolo?
+    return "n/a" if label.nil?
+    return "YOLO - unapproved commands run without asking; disaster " \
+           "commands still ask" if @harness.yolo?
 
-    label == 'AUTO-APPROVE' \
+    label == "AUTO-APPROVE" \
       ? 'AUTO-APPROVE - a "safe:" model verdict runs without asking' \
-      : 'MANUAL - unapproved commands ask (/yolo status shows the postures)'
+      : "MANUAL - unapproved commands ask (/yolo status shows the postures)"
   end
 
   # Auto-save the session on exit (best-effort). Returns the session id,
@@ -413,7 +413,7 @@ class CLI
       ui.flush
 
       result = UI::Editor.new(ui.stdin)
-                         .read_multiline(prompt: '  ', prefill: @idle_draft)
+                         .read_multiline(prompt: "  ", prefill: @idle_draft)
 
       # Ctrl+A toggled the command-consent mode while the prompt was open:
       # ack it and re-prompt (no command was typed). The spinner badge for
@@ -421,7 +421,7 @@ class CLI
       if UI::Editor::CtrlAState.fired
         label = UI::Editor::CtrlAState.label
         UI::Editor::CtrlAState.reset!
-        ui.puts label.nil? ? '  (command mode toggle unavailable - safety check off)' \
+        ui.puts label.nil? ? "  (command mode toggle unavailable - safety check off)" \
                             : "  [mode is now #{label}]"
         next
       end
@@ -431,7 +431,7 @@ class CLI
         return nil                     # Ctrl-D on an empty buffer => quit
       when :cancelled
         @idle_draft = result.text.to_s # Esc: keep the buffer, prefill next
-        ui.puts '  (cancelled - draft kept; press the submit key to send)'
+        ui.puts "  (cancelled - draft kept; press the submit key to send)"
         next
       when :empty
         next                           # bare Enter: re-prompt, draft untouched

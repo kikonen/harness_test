@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require 'tempfile'
+require "tempfile"
 
-require_relative '../git_runner'
+require_relative "../git_runner"
 
 # Applies a unified diff patch to the working tree (git apply).
 # The model provides the diff text; it is written to a temporary file
@@ -32,34 +32,34 @@ module Tools
       @file_list = file_list
       @session   = session
       super(
-        name: 'git.apply',
-        description: 'Applies a unified diff patch to the working tree (like `git apply`). ' \
-                     'Provide the full unified diff (with --- / +++ / @@ hunks). ' \
-                     'Use dry_run to validate without applying. ' \
-                     'Unlike file.patch, multiple files can be patched in a single call. ' \
-                     'Hunk line numbers and stray trailing whitespace are tolerated.',
+        name: "git.apply",
+        description: "Applies a unified diff patch to the working tree (like `git apply`). " \
+                     "Provide the full unified diff (with --- / +++ / @@ hunks). " \
+                     "Use dry_run to validate without applying. " \
+                     "Unlike file.patch, multiple files can be patched in a single call. " \
+                     "Hunk line numbers and stray trailing whitespace are tolerated.",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
-            diff:      { type: 'string',  description: 'Unified diff to apply (standard format with --- / +++ / @@ hunks)' },
-            dry_run:   { type: 'boolean', description: 'Validate the patch with `git apply --check` without applying it (default false)' },
-            three_way: { type: 'boolean', description: 'If a direct apply fails, retry with a 3-way merge (default false)' }
+            diff:      { type: "string",  description: "Unified diff to apply (standard format with --- / +++ / @@ hunks)" },
+            dry_run:   { type: "boolean", description: "Validate the patch with `git apply --check` without applying it (default false)" },
+            three_way: { type: "boolean", description: "If a direct apply fails, retry with a 3-way merge (default false)" }
           },
-          required: ['diff']
+          required: ["diff"]
         }
       )
     end
 
     def execute(args)
-      diff = args['diff'].to_s
-      return 'error: \'diff\' is required' if diff.strip.empty?
+      diff = args["diff"].to_s
+      return "error: 'diff' is required" if diff.strip.empty?
 
       # issue #22: catch structurally broken diffs before git sees them.
       bad = structural_error(diff)
       return bad if bad
 
-      dry_run   = args['dry_run'] == true
-      three_way = args['three_way'] == true
+      dry_run   = args["dry_run"] == true
+      three_way = args["three_way"] == true
 
       files = touched_files(diff)
 
@@ -86,25 +86,25 @@ module Tools
       guard = external_change_guard(files)
       return guard if guard
 
-      Tempfile.create(['harness_git_apply', '.diff']) do |tmp|
+      Tempfile.create(["harness_git_apply", ".diff"]) do |tmp|
         # issue #171: normalize before git sees the diff - consistent LF
         # line endings and no trailing whitespace on any line (a common
         # model output quirk that would otherwise hard-fail context lines).
         tmp.write(normalize_diff(diff))
         tmp.flush
 
-        result = run_git('git', 'apply', *apply_flags(dry_run), tmp.path)
+        result = run_git("git", "apply", *apply_flags(dry_run), tmp.path)
 
         # `git apply` is atomic (nothing is changed when a hunk fails), so
         # a 3-way retry after a failure is always safe.
         if result[:status] != 0 && three_way && !dry_run
-          result = run_git('git', 'apply', *apply_flags(false, true), tmp.path)
+          result = run_git("git", "apply", *apply_flags(false, true), tmp.path)
         end
 
         if result[:status] != 0
           detail = result[:stderr].strip.empty? ? result[:stdout].strip : result[:stderr].strip
           msg = "error: git apply failed (exit #{result[:status]}): #{detail.lines.first&.strip || 'no error message'}"
-          msg += '. The patch does not match the working tree - check the context lines and retry, or use file.patch per file.'
+          msg += ". The patch does not match the working tree - check the context lines and retry, or use file.patch per file."
           Tool.puts "  [git.apply] ✗ #{msg}"
           return "#{msg}\nfiles: #{files.join(', ')}" if files.any?
           msg
@@ -114,11 +114,11 @@ module Tools
         record_cache(files) unless dry_run
 
         applied = result[:stdout].strip
-        label   = dry_run ? 'validated (dry run)' : 'applied'
+        label   = dry_run ? "validated (dry run)" : "applied"
         Tool.puts "  [git.apply] ✓ #{label} (#{files.join(', ')})" if files.any?
         Tool.puts "  [git.apply] ✓ #{label}" unless files.any?
-        note = applied.empty? ? '' : "\n#{applied}"
-        files_note = files.any? ? " [#{files.join(', ')}]" : ''
+        note = applied.empty? ? "" : "\n#{applied}"
+        files_note = files.any? ? " [#{files.join(', ')}]" : ""
         dry_run ? "ok: patch is valid (dry run, nothing changed)#{files_note}#{note}" \
                 : "ok: patch applied to the working tree#{files_note}#{note}"
       end
@@ -128,10 +128,10 @@ module Tools
 
     def apply_flags(check, three_way = false)
       flags = []
-      flags << '--check' if check
-      flags << '--3way'  if three_way
+      flags << "--check" if check
+      flags << "--3way"  if three_way
       # Be lenient about whitespace (a common model output quirk).
-      flags << '--whitespace=nowarn'
+      flags << "--whitespace=nowarn"
       flags
     end
 
@@ -146,14 +146,14 @@ module Tools
       text = diff.gsub("\r\n", "\n")
       if text.scan(/^@@ /).empty?
         'error: the diff contains no hunks (no "@@ -x,y +a,b @@" lines). ' \
-          'Provide the full unified diff, or use file.patch for a single file.'
+          "Provide the full unified diff, or use file.patch for a single file."
       elsif touched_files(text).any?
         nil
       else
-        'error: the diff has hunks but no file headers. Each hunk must be ' \
+        "error: the diff has hunks but no file headers. Each hunk must be " \
           'preceded by a "--- a/<file>" and "+++ b/<file>" line (a full ' \
           '"diff --git" header is also fine). For single-file edits, ' \
-          'file.patch is more forgiving.'
+          "file.patch is more forgiving."
       end
     end
 
@@ -186,8 +186,8 @@ module Tools
         shown = @file_list.display_path(path)
         Tool.puts "  [git.apply] ✗ #{shown} (externally changed since last read)"
         return "error: '#{shown}' has changed externally since you last read it. " \
-               'Re-read the file with file.read, or report the external change ' \
-               'with file.touch if you know what happened.'
+               "Re-read the file with file.read, or report the external change " \
+               "with file.touch if you know what happened."
       end
       nil
     end
@@ -214,7 +214,7 @@ module Tools
     def touched_files(diff)
       diff.gsub("\r\n", "\n").lines.map do |line|
         m = line.match(/\A(?:diff --git a\/\S+ b\/|\+\+\+ b\/)(\S+)/)
-        m && m[1] != '/dev/null' ? m[1] : nil
+        m && m[1] != "/dev/null" ? m[1] : nil
       end.compact.uniq
     end
   end

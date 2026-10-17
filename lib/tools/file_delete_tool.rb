@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
-require_relative '../file_list'
+require_relative "../tool"
+require_relative "../file_list"
 
 # Deletes a file from disk. Requires a DELETE access grant (its own mode,
 # independent from read/write - issue #92).
@@ -14,22 +14,22 @@ module Tools
       # is dropped when the file is deleted.
       @session   = session
       super(
-        name: 'file.delete',
-        description: 'Deletes a file from disk. ' \
-                     'Paths are relative to the harness working directory. ' \
-                     'Deleting requires a DELETE access grant (its own mode, independent from read/write).',
+        name: "file.delete",
+        description: "Deletes a file from disk. " \
+                     "Paths are relative to the harness working directory. " \
+                     "Deleting requires a DELETE access grant (its own mode, independent from read/write).",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
-            path: { type: 'string', description: 'Path of the file to delete (relative to the working directory)' }
+            path: { type: "string", description: "Path of the file to delete (relative to the working directory)" }
           },
-          required: ['path']
+          required: ["path"]
         }
       )
     end
 
     def execute(args)
-      path  = @file_list.resolve(args['path'])
+      path  = @file_list.resolve(args["path"])
       shown = @file_list.display_path(path)
 
       if @file_list.sensitive?(path)

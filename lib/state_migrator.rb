@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require 'fileutils'
-require_relative 'session_manager'
+require "fileutils"
+require_relative "session_manager"
 
 # One-time migration of harness state that used to live scattered in the
 # working directory into the .harness directory:
@@ -48,8 +48,8 @@ class StateMigrator
   end
 
   def migrate_sessions
-    old = File.join(@workdir, '.sessions')
-    new = File.join(@harness_dir, 'sessions')
+    old = File.join(@workdir, ".sessions")
+    new = File.join(@harness_dir, "sessions")
     if File.directory?(old) && !File.directory?(new)
       FileUtils.mkdir_p(@harness_dir)
       FileUtils.mv(old, new)
@@ -57,8 +57,8 @@ class StateMigrator
   end
 
   def migrate_history
-    old = File.join(@workdir, '.harness_history')
-    new = File.join(@harness_dir, 'harness_history')
+    old = File.join(@workdir, ".harness_history")
+    new = File.join(@harness_dir, "harness_history")
     if File.file?(old) && !File.exist?(new)
       FileUtils.mkdir_p(@harness_dir)
       FileUtils.mv(old, new)
@@ -70,11 +70,11 @@ class StateMigrator
   # <id>/session.json. Each file is moved into its own directory; a
   # pre-existing destination wins (never overwritten).
   def migrate_session_json_layout
-    sessions = File.join(@harness_dir, 'sessions')
+    sessions = File.join(@harness_dir, "sessions")
     return unless File.directory?(sessions)
 
-    Dir.glob(File.join(sessions, '*.json')).each do |path|
-      id     = File.basename(path, '.json')
+    Dir.glob(File.join(sessions, "*.json")).each do |path|
+      id     = File.basename(path, ".json")
       target = File.join(sessions, id, SessionManager::SESSION_FILE)
       FileUtils.mkdir_p(File.dirname(target))
       FileUtils.mv(path, target) unless File.exist?(target)

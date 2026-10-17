@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require 'json'
-require 'securerandom'
+require "json"
+require "securerandom"
 
-require_relative 'harness_error'
+require_relative "harness_error"
 
 # -- SessionLocator ---------------------------------------------------------
 #
@@ -22,14 +22,14 @@ require_relative 'harness_error'
 # what makes the whole rebind machinery unnecessary: the id is never wrong, so
 # no resource is ever built under the wrong one.
 class SessionLocator
-  HARNESS_DIR  = '.harness'
-  SESSIONS_DIR = File.join(HARNESS_DIR, 'sessions')
+  HARNESS_DIR  = ".harness"
+  SESSIONS_DIR = File.join(HARNESS_DIR, "sessions")
   # issue #207: the session JSON lives INSIDE its own directory
   # (.harness/sessions/<id>/session.json), alongside its log and history.
-  SESSION_FILE = 'session.json'
+  SESSION_FILE = "session.json"
   # issue #113: each session logs to its own file inside its session dir, so
   # concurrent sessions in one workdir do not interleave in a shared log.
-  SESSION_LOG_FILE = 'harness.log'
+  SESSION_LOG_FILE = "harness.log"
 
   def initialize(workdir)
     @workdir = workdir
@@ -55,7 +55,7 @@ class SessionLocator
   def session_files
     return [] unless File.directory?(sessions_dir)
 
-    Dir.glob(File.join(sessions_dir, '*', SESSION_FILE)).select { |p| File.file?(p) }
+    Dir.glob(File.join(sessions_dir, "*", SESSION_FILE)).select { |p| File.file?(p) }
   end
 
   def newest_session_path
@@ -75,7 +75,7 @@ class SessionLocator
     when 0 then nil
     when 1 then matches.first
     else
-      found = matches.map { |p| File.basename(File.dirname(p)) }.join(', ')
+      found = matches.map { |p| File.basename(File.dirname(p)) }.join(", ")
       raise HarnessError, "ambiguous session id '#{id}' - matches: #{found}"
     end
   end

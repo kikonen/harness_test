@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative '../command'
+require_relative "../command"
 
 module Commands
   # /reasoning - show the reasoning text of the last LLM response on demand
@@ -10,14 +10,14 @@ module Commands
     def handle(_args)
       reasoning = @harness.session.last_reasoning
       if reasoning.nil? || reasoning.strip.empty?
-        @ui.puts 'No reasoning to show yet (no response with reasoning in this session).'
+        @ui.puts "No reasoning to show yet (no response with reasoning in this session)."
         return
       end
 
       @ui.puts "Reasoning for the last response (#{reasoning.length} chars):"
-      @ui.puts '-' * 60
+      @ui.puts "-" * 60
       @ui.puts reasoning
-      @ui.puts '-' * 60
+      @ui.puts "-" * 60
     end
   end
 end

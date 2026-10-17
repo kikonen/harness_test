@@ -1,55 +1,55 @@
 # frozen_string_literal: true
 
-require 'json'
-require 'logger'
-require 'time'
-require 'thread'
-require 'digest'
-require 'fileutils'
+require "json"
+require "logger"
+require "time"
+require "thread"
+require "digest"
+require "fileutils"
 
-require_relative 'harness_error'
-require_relative 'ui'
-require_relative 'tool'
-require_relative 'llm_client'
-require_relative 'file_list'
-require_relative 'session'
-require_relative 'session_locator'
-require_relative 'task'
-require_relative 'tools/echo_tool'
-require_relative 'tools/notify_tool'
-require_relative 'tools/dialog_tool'
-require_relative 'tools/get_time_tool'
-require_relative 'tools/file_read_tool'
-require_relative 'tools/file_write_tool'
-require_relative 'tools/file_rename_tool'
-require_relative 'tools/file_delete_tool'
-require_relative 'tools/file_list_tool'
-require_relative 'tools/file_search_tool'
-require_relative 'tools/file_patch_tool'
-require_relative 'tools/file_copy_tool'
-require_relative 'tools/file_info_tool'
-require_relative 'tools/note_tool'
-require_relative 'tools/dir_create_tool'
-require_relative 'tools/dir_delete_tool'
-require_relative 'tools/git_diff_tool'
-require_relative 'tools/git_show_tool'
-require_relative 'tools/git_status_tool'
-require_relative 'tools/git_log_tool'
-require_relative 'tools/git_grep_tool'
-require_relative 'tools/git_apply_tool'
-require_relative 'tools/run_command_tool'
-require_relative 'tools/tools_list_tool'
-require_relative 'tools/tools_search_tool'
-require_relative 'tool_registry'
-require_relative 'session_manager'
-require_relative 'state_migrator'
-require_relative 'safety_check'
-require_relative 'text_normalizer'
+require_relative "harness_error"
+require_relative "ui"
+require_relative "tool"
+require_relative "llm_client"
+require_relative "file_list"
+require_relative "session"
+require_relative "session_locator"
+require_relative "task"
+require_relative "tools/echo_tool"
+require_relative "tools/notify_tool"
+require_relative "tools/dialog_tool"
+require_relative "tools/get_time_tool"
+require_relative "tools/file_read_tool"
+require_relative "tools/file_write_tool"
+require_relative "tools/file_rename_tool"
+require_relative "tools/file_delete_tool"
+require_relative "tools/file_list_tool"
+require_relative "tools/file_search_tool"
+require_relative "tools/file_patch_tool"
+require_relative "tools/file_copy_tool"
+require_relative "tools/file_info_tool"
+require_relative "tools/note_tool"
+require_relative "tools/dir_create_tool"
+require_relative "tools/dir_delete_tool"
+require_relative "tools/git_diff_tool"
+require_relative "tools/git_show_tool"
+require_relative "tools/git_status_tool"
+require_relative "tools/git_log_tool"
+require_relative "tools/git_grep_tool"
+require_relative "tools/git_apply_tool"
+require_relative "tools/run_command_tool"
+require_relative "tools/tools_list_tool"
+require_relative "tools/tools_search_tool"
+require_relative "tool_registry"
+require_relative "session_manager"
+require_relative "state_migrator"
+require_relative "safety_check"
+require_relative "text_normalizer"
 
 # -- Harness --------------------------------------------------------------
 
 class Harness
-  DEFAULT_SYSTEM_PROMPT_FILE = File.expand_path('../config/system_prompt.txt', __dir__)
+  DEFAULT_SYSTEM_PROMPT_FILE = File.expand_path("../config/system_prompt.txt", __dir__)
 
   MAX_TOOL_ITERATIONS = 200
   # Consecutive-call thresholds: warn (inject a stop message), then break.
@@ -57,7 +57,7 @@ class Harness
   # After this many consecutive tool-call iterations, force-break and return whatever we have
   TOOL_LOOP_HARD_LIMIT = 20
 
-  HARNESS_DIR = '.harness'
+  HARNESS_DIR = ".harness"
 
   SESSION_LOG_FILE = SessionLocator::SESSION_LOG_FILE
 
@@ -101,7 +101,7 @@ class Harness
 
   def build_system_prompt
     base = read_system_prompt
-    project_file = File.join(@file_list.workdir, 'harness.md')
+    project_file = File.join(@file_list.workdir, "harness.md")
     if File.file?(project_file)
       content = File.read(project_file).strip
       return "#{base}\n\n## Project-Specific Rules\n\n#{content}\n" unless content.empty?
@@ -209,21 +209,21 @@ class Harness
   end
 
   def command_mode_label
-    return 'YOLO' if @yolo
-    return 'AUTO-APPROVE' if command_safety_auto_approve_effective?
+    return "YOLO" if @yolo
+    return "AUTO-APPROVE" if command_safety_auto_approve_effective?
 
-    'MANUAL'
+    "MANUAL"
   end
 
   def yolo_mode_label
-    @yolo ? 'YOLO ON' : 'YOLO OFF'
+    @yolo ? "YOLO ON" : "YOLO OFF"
   end
 
   def toggle_command_mode
     return nil unless command_safety_check
 
     @command_safety_auto_approve = !@command_safety_auto_approve
-    command_safety_auto_approve ? 'AUTO-APPROVE' : 'MANUAL'
+    command_safety_auto_approve ? "AUTO-APPROVE" : "MANUAL"
   end
 
   # ONE check call per tool batch (never one per command). SafetyCheck
@@ -259,10 +259,10 @@ class Harness
   def run_command_batch_commands(message_calls)
     calls = Array(message_calls)
     calls.filter_map do |tc|
-      next unless tc.dig(:function, :name) == 'run.command'
+      next unless tc.dig(:function, :name) == "run.command"
 
       JSON.parse(tc.dig(:function, :arguments).to_s) rescue {}
-    end.map { |a| a['command'].to_s }.reject(&:empty?)
+    end.map { |a| a["command"].to_s }.reject(&:empty?)
   end
 
   # THE single auto-compact trigger for every consumer (SessionManager, /ctx).
@@ -314,8 +314,8 @@ class Harness
         @user_note = nil
         @user_notes << note
         logger.info("user mid-turn note injected: #{note}")
-        messages << { role: 'user', content: "User note (mid-turn): #{note}" }
-        Task.emit(:text, origin: :harness, content: '  [note] sent to model')
+        messages << { role: "user", content: "User note (mid-turn): #{note}" }
+        Task.emit(:text, origin: :harness, content: "  [note] sent to model")
       end
 
       # Each request announces its own wait, so an earlier re-point (an
@@ -359,7 +359,7 @@ class Harness
           logger.info("  calling #{tc[:function][:name]}(#{tc[:function][:arguments]})")
         end
 
-        assistant_msg = { role: 'assistant', content: message[:content] }
+        assistant_msg = { role: "assistant", content: message[:content] }
         assistant_msg[:tool_calls] = message[:tool_calls]
         @session.add_assistant_message(assistant_msg)
 
@@ -369,7 +369,7 @@ class Harness
           result = execute_tool_call(tc)
           record_note(tc, result)
           messages << {
-            role: 'tool',
+            role: "tool",
             tool_call_id: tc[:id],
             content: result
           }
@@ -377,19 +377,19 @@ class Harness
 
         if loop_hard_break
           messages << {
-            role: 'user',
-            content: 'STOP. You are stuck in a tool loop. Do NOT call any more tools. ' \
-                     'Respond NOW with your final answer. If you were editing files, use the file.write tool to save them. ' \
-                     'If this was a query, answer it directly in plain text.'
+            role: "user",
+            content: "STOP. You are stuck in a tool loop. Do NOT call any more tools. " \
+                     "Respond NOW with your final answer. If you were editing files, use the file.write tool to save them. " \
+                     "If this was a query, answer it directly in plain text."
           }
           next
         end
 
         if loop_warning_injected && consecutive_tool_calls == TOOL_LOOP_WARN_THRESHOLD
           messages << {
-            role: 'user',
-            content: 'Reminder: You have called the same tool multiple times in a row. ' \
-                     'If you have enough information, stop calling the same tool and provide your final answer now.'
+            role: "user",
+            content: "Reminder: You have called the same tool multiple times in a row. " \
+                     "If you have enough information, stop calling the same tool and provide your final answer now."
           }
         end
 
@@ -420,11 +420,11 @@ class Harness
   # Buffer the note fact so it survives the transient tool result and reaches
   # the chain on the turn commit.
   def record_note(tool_call, result)
-    return unless tool_call[:function][:name] == 'ui.note'
-    return unless result.is_a?(String) && result.start_with?('ok: noted')
+    return unless tool_call[:function][:name] == "ui.note"
+    return unless result.is_a?(String) && result.start_with?("ok: noted")
 
     args = tool_call[:function][:arguments] ? JSON.parse(tool_call[:function][:arguments]) : {}
-    @session.add_note(args['text'])
+    @session.add_note(args["text"])
   rescue StandardError
     # A malformed note must never break the turn.
   end
@@ -452,7 +452,7 @@ class Harness
     return "#{s.round(2)}s" if s < 60
 
     mins = (s / 60).floor
-    secs = format('%05.2f', s - mins * 60).sub('.', ',')
+    secs = format("%05.2f", s - mins * 60).sub(".", ",")
     "#{mins}m #{secs}s"
   end
 
@@ -462,7 +462,7 @@ class Harness
     return nil if used.nil?
 
     pct = @session.context_pct(window)
-    label = used[:estimated] ? '~' : ''
+    label = used[:estimated] ? "~" : ""
     "🧠 ctx #{label}#{used[:tokens]}/#{window} (#{pct}%)"
   end
 
@@ -478,12 +478,12 @@ class Harness
     window = options[:num_ctx] || LLMClient::NUM_CTX
     if messages
       tokens  = @session.anchored_estimate(messages)
-      label   = '~'
+      label   = "~"
     else
       used    = @session.context_used
       return nil if used.nil?
       tokens  = used[:tokens]
-      label   = used[:estimated] ? '~' : ''
+      label   = used[:estimated] ? "~" : ""
     end
 
     pct = (tokens.to_f / window * 100).round
@@ -501,7 +501,7 @@ class Harness
     headroom = [window - used[:tokens], 0].max
     due      = trigger && (used[:tokens] >= trigger)
 
-    status = due ? 'due' : 'not due'
+    status = due ? "due" : "not due"
     lines = []
     lines << "🧠 Context usage"
     lines << "  Used:        #{used[:tokens]} tokens (#{pct}% of #{window})"
@@ -531,7 +531,7 @@ class Harness
   end
 
   def step_display_disabled?
-    ENV.fetch('HARNESS_STEP_DISPLAY', '') == 'off' || options[:step_display] == false
+    ENV.fetch("HARNESS_STEP_DISPLAY", "") == "off" || options[:step_display] == false
   end
 
   def read_system_prompt

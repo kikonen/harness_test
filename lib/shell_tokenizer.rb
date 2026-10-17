@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require 'strscan'
-require_relative 'text_normalizer'
+require "strscan"
+require_relative "text_normalizer"
 
 # -- ShellTokenizer ---------------------------------------------------------
 #
@@ -55,11 +55,11 @@ require_relative 'text_normalizer'
 #
 class ShellTokenizer
   # Characters that always produce a :danger token when seen outside quotes.
-  DANGER_CHARS = '<>&$`()'.freeze
+  DANGER_CHARS = "<>&$`()".freeze
 
   # A redirect whose target is this path only discards output (no file is
   # created or modified), so it is safe to auto-approve - like `2>&1`.
-  DEVNULL = '/dev/null'.freeze
+  DEVNULL = "/dev/null".freeze
 
   # ------------------------------------------------------------------
   # Public API
@@ -78,7 +78,7 @@ class ShellTokenizer
     @command  = TextNormalizer.normalize(command)
     @scanner  = StringScanner.new(@command)
     @tokens   = []
-    @word_buf = +''
+    @word_buf = +""
   end
 
   # Run the tokenizer and return the token array.
@@ -105,15 +105,15 @@ class ShellTokenizer
       case ch
       when "'"  then scan_single_quoted
       when '"'  then scan_double_quoted
-      when '&'  then scan_ampersand
-      when '|'  then scan_pipe
-      when '>'  then scan_gt
-      when ';'  then flush_word; emit(:semi, ';'); @scanner.getch
-      when '<'  then flush_word; emit(:danger, scan_redirect)
-      when '$'  then flush_word; emit(:danger, scan_dollar)
-      when '`'  then flush_word; emit(:danger, '`'); @scanner.getch
-      when '('  then flush_word; emit(:danger, '('); @scanner.getch
-      when ')'  then flush_word; emit(:danger, ')'); @scanner.getch
+      when "&"  then scan_ampersand
+      when "|"  then scan_pipe
+      when ">"  then scan_gt
+      when ";"  then flush_word; emit(:semi, ";"); @scanner.getch
+      when "<"  then flush_word; emit(:danger, scan_redirect)
+      when "$"  then flush_word; emit(:danger, scan_dollar)
+      when "`"  then flush_word; emit(:danger, "`"); @scanner.getch
+      when "("  then flush_word; emit(:danger, "("); @scanner.getch
+      when ")"  then flush_word; emit(:danger, ")"); @scanner.getch
       else           scan_word
       end
     end
@@ -151,7 +151,7 @@ class ShellTokenizer
         return
       end
       ch = @scanner.getch
-      if ch == '\\' && !@scanner.eos?
+      if ch == "\\" && !@scanner.eos?
         nxt = @scanner.peek(1)
         if '$`"\\'.include?(nxt)
           buf << ch << nxt
@@ -174,14 +174,14 @@ class ShellTokenizer
   # fd-to-fd redirects (`2>&1`) are handled at the `>` dispatch point
   # (see scan_gt), since `>` comes first in the stream.
   def scan_ampersand
-    if @scanner.check('&&')
+    if @scanner.check("&&")
       flush_word
-      @scanner.skip('&&')
-      emit(:and, '&&')
-    elsif !word_buf_ends_with_digit? && @scanner.check('&>')
+      @scanner.skip("&&")
+      emit(:and, "&&")
+    elsif !word_buf_ends_with_digit? && @scanner.check("&>")
       # Combined stdout+stderr redirect (bash/zsh &> operator). Treated
       # like a file redirect: safe only when targeting /dev/null.
-      if (dn = scan_devnull_redirect('&>'))
+      if (dn = scan_devnull_redirect("&>"))
         emit(:word, dn)
       else
         flush_word
@@ -189,25 +189,25 @@ class ShellTokenizer
       end
     else
       flush_word
-      emit(:danger, '&')
+      emit(:danger, "&")
       @scanner.getch
     end
   end
 
   # `|` can be: pipe (`|`), or-list (`||`), or pipe-and (`|&`).
   def scan_pipe
-    if @scanner.check('||')
+    if @scanner.check("||")
       flush_word
-      @scanner.skip('||')
-      emit(:or, '||')
-    elsif @scanner.check('|&')
+      @scanner.skip("||")
+      emit(:or, "||")
+    elsif @scanner.check("|&")
       flush_word
-      @scanner.skip('|&')
-      emit(:pipe_and, '|&')
+      @scanner.skip("|&")
+      emit(:pipe_and, "|&")
     else
       flush_word
       @scanner.getch
-      emit(:pipe, '|')
+      emit(:pipe, "|")
     end
   end
 
@@ -216,12 +216,12 @@ class ShellTokenizer
   # (no hidden execution, no file created/modified) and become one word.
   def scan_gt
     # Check for fd-to-fd redirect: digit + `>&` + optional digit.
-    if @scanner.check('>&') && word_buf_ends_with_digit?
+    if @scanner.check(">&") && word_buf_ends_with_digit?
       # e.g. "2" + ">&1" -> word "2>&1".
       text = @word_buf.dup
       @word_buf.clear
-      @scanner.skip('>&')
-      text << '>&'
+      @scanner.skip(">&")
+      text << ">&"
       if (n = @scanner.peek(1)) && n =~ /\d/
         text << n
         @scanner.getch
@@ -231,7 +231,7 @@ class ShellTokenizer
       # Redirect to /dev/null: safe (only discards output, creates or
       # modifies no file) - becomes one word token, gluing any preceding
       # fd digit (e.g. "2" + ">/dev/null" -> "2>/dev/null").
-      if (dn = scan_devnull_redirect('>'))
+      if (dn = scan_devnull_redirect(">"))
         emit(:word, dn)
       else
         # Any other file redirect: danger.
@@ -261,7 +261,7 @@ class ShellTokenizer
   # and return as a string for the :danger token.
   def scan_redirect
     buf = [@scanner.getch]
-    if @scanner.check(buf.last) && buf.last == '>'
+    if @scanner.check(buf.last) && buf.last == ">"
       buf << @scanner.getch # >>
     end
     buf << scan_target  # include the target (e.g. "file") in the label
@@ -273,7 +273,7 @@ class ShellTokenizer
   # is immediately followed by whitespace/EOS. Lets danger-token labels name
   # the whole construct ("&> build.log") instead of just the operator.
   def scan_target
-    return '' unless @scanner.check(/\s*[^\s|;&<>$`()\n]/)
+    return "" unless @scanner.check(/\s*[^\s|;&<>$`()\n]/)
 
     @scanner.scan(/\s*/)  # eat any separating whitespace (discarded)
     target = @scanner.scan(/[^\s|;&<>$`()\n]+/)
@@ -284,13 +284,13 @@ class ShellTokenizer
   # and return it as a string for the :danger token, so error/note messages
   # name the whole construct rather than just `>`.
   def scan_combined_redirect
-    buf = ['&']
+    buf = ["&"]
     @scanner.getch
-    if @scanner.check('>')
-      buf << '>'
+    if @scanner.check(">")
+      buf << ">"
       @scanner.getch
-      if @scanner.check('>')
-        buf << '>'
+      if @scanner.check(">")
+        buf << ">"
         @scanner.getch
       end
     end
@@ -301,24 +301,24 @@ class ShellTokenizer
   # `$`: consume a plausible substitution lexeme for the error message.
   def scan_dollar
     @scanner.getch
-    if @scanner.check('(')
+    if @scanner.check("(")
       # $(...) - consume up to matching ) or end, whichever comes first.
       depth = 0
-      buf = ['$', '(']
+      buf = ["$", "("]
       @scanner.getch
       depth = 1
       while !@scanner.eos? && depth > 0
         c = @scanner.getch
         buf << c
-        depth += 1 if c == '('
-        depth -= 1 if c == ')'
+        depth += 1 if c == "("
+        depth -= 1 if c == ")"
       end
       buf.join
     elsif (name = @scanner.check(/[A-Za-z_][A-Za-z0-9_]*/))
       word = @scanner.scan(/[A-Za-z_][A-Za-z0-9_]*/)
-      '$' + word
+      "$" + word
     else
-      '$'
+      "$"
     end
   end
 
@@ -330,15 +330,15 @@ class ShellTokenizer
       ch = @scanner.peek(1)
       break if ch =~ /\s/
       break if DANGER_CHARS.include?(ch)
-      break if ch == ';' || ch == "'" || ch == '"'
+      break if ch == ";" || ch == "'" || ch == '"'
 
       # Two-char operators we must not eat as word chars.
-      break if @scanner.check('&&') || @scanner.check('||') || @scanner.check('|&')
+      break if @scanner.check("&&") || @scanner.check("||") || @scanner.check("|&")
 
       # Backslash-escaped char outside quotes: the escaped char is a
       # literal inside the current word (e.g. `a\|b` -> one word). A
       # backslash before whitespace is a line-continuation: skip both.
-      if ch == '\\'
+      if ch == "\\"
         @scanner.getch
         break if @scanner.eos?
         nxt = @scanner.peek(1)

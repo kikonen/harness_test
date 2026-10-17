@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
-require_relative '../file_list'
-require 'fileutils'
+require_relative "../tool"
+require_relative "../file_list"
+require "fileutils"
 
 # Copies a file to a new path. The source must be accessible;
 # the destination must not already exist on disk.
@@ -12,24 +12,24 @@ module Tools
     def initialize(file_list)
       @file_list = file_list
       super(
-        name: 'file.copy',
-        description: 'Copies a file to a new path. ' \
-                     'The destination must not already exist on disk. ' \
-                     'Paths are relative to the harness working directory.',
+        name: "file.copy",
+        description: "Copies a file to a new path. " \
+                     "The destination must not already exist on disk. " \
+                     "Paths are relative to the harness working directory.",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
-            src: { type: 'string', description: 'Source path of the file (relative to the working directory)' },
-            dst: { type: 'string', description: 'Destination path for the copy (relative to the working directory); must not already exist' }
+            src: { type: "string", description: "Source path of the file (relative to the working directory)" },
+            dst: { type: "string", description: "Destination path for the copy (relative to the working directory); must not already exist" }
           },
-          required: ['src', 'dst']
+          required: ["src", "dst"]
         }
       )
     end
 
     def execute(args)
-      src = @file_list.resolve(args['src'])
-      dst = @file_list.resolve(args['dst'])
+      src = @file_list.resolve(args["src"])
+      dst = @file_list.resolve(args["dst"])
       src_shown = @file_list.display_path(src)
       dst_shown = @file_list.display_path(dst)
 
@@ -60,7 +60,7 @@ module Tools
       end
 
       dir = File.dirname(dst)
-      FileUtils.mkdir_p(dir) unless dir == '.'
+      FileUtils.mkdir_p(dir) unless dir == "."
       FileUtils.cp(src, dst)
 
       Tool.puts "  [file.copy] ✓ #{src_shown} → #{dst_shown}"

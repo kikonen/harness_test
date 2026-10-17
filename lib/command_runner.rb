@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
-require 'bundler'
+require "bundler"
 
-require_relative 'tool'
-require_relative 'command_allowlist'
-require_relative 'ui/dialog'
-require_relative 'safety_check'
-require_relative 'text_normalizer'
+require_relative "tool"
+require_relative "command_allowlist"
+require_relative "ui/dialog"
+require_relative "safety_check"
+require_relative "text_normalizer"
 
 # Shared consent + execution logic for shell commands (issue #129).
 #
@@ -86,7 +86,7 @@ class CommandRunner
   # the command contains constructs that can never be auto-approved.
   # Normally replaced by a tailored note naming the specific unsafe
   # construct (issue #102).
-  UNSAFETY_NOTE = 'UNSAFE: contains shell constructs that cannot be auto-approved.'
+  UNSAFETY_NOTE = "UNSAFE: contains shell constructs that cannot be auto-approved."
 
   # label:     bracket used in status lines ('run.command' or 'shell')
   # title_fmt: sprintf-style dialog title (TOOL_TITLE / BANG_TITLE)
@@ -107,7 +107,7 @@ class CommandRunner
   # harness:   optional Harness (any object with a lazy #logger accessor):
   #            when given, FAILED commands are logged to the session's
   #            harness.log so they leave a trace (issue #185). nil in specs.
-  def initialize(file_list, options, label: 'run.command', title_fmt: TOOL_TITLE,
+  def initialize(file_list, options, label: "run.command", title_fmt: TOOL_TITLE,
                  ui: nil, list: :tool, harness: nil, auto_approve_all: false)
     @file_list = file_list
     @options   = options
@@ -168,7 +168,7 @@ class CommandRunner
       #     (@auto_approve_all, from options[:bang_requires_confirmation]).
       # The status line + harness.log entry are what keep it auditable.
       if auto_approve_all?
-        reason = yolo_active? ? 'YOLO' : 'bang consent off'
+        reason = yolo_active? ? "YOLO" : "bang consent off"
         status("✓ auto-approved (#{reason}): #{command}")
         log_auto_approved(command, reason)
         return execute(command, dir, shown, timeout, limit)
@@ -208,7 +208,7 @@ class CommandRunner
     # A denylisted command gets NO "Always allow" option: the dialog is a
     # one-off decision about this exact invocation, not a standing grant.
     prefixes       = disaster ? [] : @allowlist.filter_uncovered(all_candidates)
-    options        = [UI::Dialog::Option.new(title: 'Allow', value: :allow)]
+    options        = [UI::Dialog::Option.new(title: "Allow", value: :allow)]
 
     prefixes.each do |p|
       options << UI::Dialog::Option.new(
@@ -234,8 +234,8 @@ class CommandRunner
     # command itself, so name the matched construct.
     if disaster
       note = "DENYLISTED: #{CommandAllowlist.disaster_label(command)} - " \
-             'well-known disaster, auto-approval refused in every posture; ' \
-             'this Allow is one-off'
+             "well-known disaster, auto-approval refused in every posture; " \
+             "this Allow is one-off"
     end
 
     # issue #224: the model's own safety verdict (advisory) leads the note
@@ -290,7 +290,7 @@ class CommandRunner
   def handle_choice(choice)
     # A [:cancelled, 'reason'] pair means the user cancelled with a one-line reason.
     if choice.is_a?(Array) && choice.size == 2 && choice[1].is_a?(String)
-      return denial('user denied executing the command', note: choice[1]) \
+      return denial("user denied executing the command", note: choice[1]) \
              if choice[0] == UI::Dialog::CANCEL_VALUE
       return {}
     end
@@ -298,7 +298,7 @@ class CommandRunner
     # Multi-select returns an array of values (e.g. [hash1, hash2]).
     # Single selection returns the bare value.
     values = choice.is_a?(Array) ? choice : [choice]
-    return denial('user denied executing the command') \
+    return denial("user denied executing the command") \
            if values.include?(UI::Dialog::CANCEL_VALUE)
 
     # A mix of plain "Allow" with one or more grants is ambiguous: the
@@ -431,7 +431,7 @@ class CommandRunner
     if note
       status("✗ denied by user (note: \"#{note}\")")
     else
-      status('✗ denied by user')
+      status("✗ denied by user")
     end
     { denied: true,
       denial: Tool.denial_error("error: #{message}", note ? { note: note } : nil) }
@@ -471,7 +471,7 @@ class CommandRunner
   # failure is always recoverable from the log.
   def format_result(command, code, elapsed, stdout, out)
     msg = "exit code: #{code} (#{elapsed}s)\n"
-    msg += "--- output ---\n#{out}\n" if out.strip != ''
+    msg += "--- output ---\n#{out}\n" if out.strip != ""
     if !code.zero? && stdout.strip.empty?
       msg += "(the command produced no output - nothing to inspect)\n"
     end
@@ -520,7 +520,7 @@ class CommandRunner
   # then kept the harness' stdin/stdout open forever).
   def read_child_in_group(command, dir, timeout)
     out_r, out_w = IO.pipe
-    pid = spawn_in_group('sh', ['-c', command], dir, out_w)
+    pid = spawn_in_group("sh", ["-c", command], dir, out_w)
     out_w.close
 
     # issue #257: the accumulator is BINARY on purpose. Pipe chunks arrive
@@ -531,7 +531,7 @@ class CommandRunner
     # fixed BINARY accumulator can never raise, and the whole result is
     # normalized once at the end so multi-byte sequences split across chunk
     # boundaries survive intact.
-    output = +''.dup.force_encoding(Encoding::BINARY)
+    output = +"".dup.force_encoding(Encoding::BINARY)
     reader = Thread.new do
       Thread.current.report_on_exception = false
       loop { output << out_r.readpartial(64 * 1024).dup.force_encoding(Encoding::BINARY) }
@@ -584,7 +584,7 @@ class CommandRunner
   # output pipe open past the wait below.
   def kill_process_tree(pid)
     if Gem.win_platform?
-      system('taskkill', '/T', '/F', '/PID', pid.to_s,
+      system("taskkill", "/T", "/F", "/PID", pid.to_s,
              out: File::NULL, err: File::NULL)
     else
       Process.kill(:TERM, -pid) rescue nil

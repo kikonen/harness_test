@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
+require_relative "../tool"
 
 # Meta-tool: lists all available tools with their descriptions.
 # The registry is passed in at construction time (it is built after this
@@ -11,12 +11,12 @@ module Tools
     def initialize(registry)
       @registry = registry
       super(
-        name: 'tools.list',
-        description: 'Lists all available tools with their names and descriptions. ' \
-                     'Use this to discover what tools exist before calling them, ' \
-                     'or to get the full description of a tool you are unsure about.',
+        name: "tools.list",
+        description: "Lists all available tools with their names and descriptions. " \
+                     "Use this to discover what tools exist before calling them, " \
+                     "or to get the full description of a tool you are unsure about.",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {},
           required: []
         }

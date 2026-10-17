@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
-require_relative '../file_list'
-require 'fileutils'
+require_relative "../tool"
+require_relative "../file_list"
+require "fileutils"
 
 module Tools
 
@@ -13,25 +13,25 @@ module Tools
       # travels with the file (contents unchanged).
       @session   = session
       super(
-        name: 'file.rename',
-        description: 'Renames (moves) a file to a new path. ' \
-                     'Paths are relative to the harness working directory. ' \
-                     'The file is moved on disk (contents unchanged). ' \
-                     'The destination must not already exist on disk.',
+        name: "file.rename",
+        description: "Renames (moves) a file to a new path. " \
+                     "Paths are relative to the harness working directory. " \
+                     "The file is moved on disk (contents unchanged). " \
+                     "The destination must not already exist on disk.",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
-            old_path: { type: 'string', description: 'Current path of the file (relative to the working directory)' },
-            new_path: { type: 'string', description: 'New path for the file (relative to the working directory)' }
+            old_path: { type: "string", description: "Current path of the file (relative to the working directory)" },
+            new_path: { type: "string", description: "New path for the file (relative to the working directory)" }
           },
-          required: ['old_path', 'new_path']
+          required: ["old_path", "new_path"]
         }
       )
     end
 
     def execute(args)
-      old_path = @file_list.resolve(args['old_path'])
-      new_path = @file_list.resolve(args['new_path'])
+      old_path = @file_list.resolve(args["old_path"])
+      new_path = @file_list.resolve(args["new_path"])
       old_shown = @file_list.display_path(old_path)
       new_shown = @file_list.display_path(new_path)
 
@@ -63,7 +63,7 @@ module Tools
       end
 
       dir = File.dirname(new_path)
-      FileUtils.mkdir_p(dir) unless dir == '.'
+      FileUtils.mkdir_p(dir) unless dir == "."
       FileUtils.mv(old_path, new_path)
 
       # issue #170: the digest travels with the file - re-key the cache.

@@ -5,7 +5,7 @@
 # with other console I/O.
 module UI
   class Spinner
-    FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+    FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
     attr_reader :ui
 
@@ -44,7 +44,7 @@ module UI
     # ui: the output console (UI::Console), injected ONCE at construction and
     # used by every per-frame write (render!, clear_line) - there is
     # deliberately no per-call stream argument and no global fallback.
-    def initialize(message = 'Working', suffix = nil, ui: nil)
+    def initialize(message = "Working", suffix = nil, ui: nil)
       @message   = message
       @suffix    = suffix
       @active    = false  # between #start and #stop
@@ -52,7 +52,7 @@ module UI
       @frame     = 0
       @badge     = nil
       @elapsed   = nil
-      raise ArgumentError, 'Spinner requires a ui: console' if ui.nil?
+      raise ArgumentError, "Spinner requires a ui: console" if ui.nil?
 
       @ui = ui
     end
@@ -143,9 +143,9 @@ module UI
     def render_elapsed
       value = @elapsed.respond_to?(:call) ? @elapsed.call : @elapsed
       text  = value.to_s.strip
-      text.empty? ? '' : " #{text}"
+      text.empty? ? "" : " #{text}"
     rescue StandardError
-      ''
+      ""
     end
 
     # Resolve the badge to text for this frame. A callable is invoked fresh
@@ -155,9 +155,9 @@ module UI
     def render_badge
       value = @badge.respond_to?(:call) ? @badge.call : @badge
       text  = value.to_s.strip
-      text.empty? ? '' : " #{text}"
+      text.empty? ? "" : " #{text}"
     rescue StandardError
-      ''
+      ""
     end
 
     # Resolve the suffix to the text for this frame. A callable is invoked
@@ -168,9 +168,9 @@ module UI
     def render_suffix
       value = @suffix.respond_to?(:call) ? @suffix.call : @suffix
       text  = value.to_s.strip
-      text.empty? ? '' : " #{text}"
+      text.empty? ? "" : " #{text}"
     rescue StandardError
-      ''
+      ""
     end
   end
 end

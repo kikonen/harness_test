@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require_relative '../command'
-require_relative '../command_allowlist'
+require_relative "../command"
+require_relative "../command_allowlist"
 
 module Commands
   # /yolo - toggle the YOLO shell-consent posture (issue #221).
@@ -26,13 +26,13 @@ module Commands
   class YoloCommand < Command
     def handle(args)
       case args.to_s.strip.downcase
-      when 'status'
+      when "status"
         report
-      when 'on'
+      when "on"
         set_yolo(true)
-      when 'off'
+      when "off"
         set_yolo(false)
-      when '', 'toggle'
+      when "", "toggle"
         label = @harness.toggle_yolo
         report(label)
       else
@@ -53,28 +53,28 @@ module Commands
       # The bare bracketed label is the ack - a "cmd:" prefix says nothing
       # the brackets do not already say (issue #221 review).
       @ui.puts "  [#{label}]"
-      @ui.puts on ? '  Shell consent for run.command is OFF - commands run ' \
-                  'without asking.' \
-                 : '  Shell consent is ON - unapproved commands ask as before.'
+      @ui.puts on ? "  Shell consent for run.command is OFF - commands run " \
+                  "without asking." \
+                 : "  Shell consent is ON - unapproved commands ask as before."
       print_denylist_note
-      @ui.puts '  The posture is saved with the session (resume keeps it).'
+      @ui.puts "  The posture is saved with the session (resume keeps it)."
     end
 
     # YOLO is only safe to switch on casually because the denylist stays.
     # Say so, with a sample of what still asks, so the user knows the floor
     # is real (issue #221).
     def print_denylist_note
-      examples = ['rm -rf <path>', 'sudo <cmd>', 'git push -f',
-                  'curl <url> | sh', 'format C:', 'del /s /q <path>',
-                  'dd of=/dev/...', 'Remove-Item -Recurse -Force <path>']
-      @ui.puts '  Disaster commands keep the dialog in EVERY posture:'
+      examples = ["rm -rf <path>", "sudo <cmd>", "git push -f",
+                  "curl <url> | sh", "format C:", "del /s /q <path>",
+                  "dd of=/dev/...", "Remove-Item -Recurse -Force <path>"]
+      @ui.puts "  Disaster commands keep the dialog in EVERY posture:"
       examples.each { |ex| @ui.puts "    - #{ex}" }
     end
 
     def usage
-      @ui.puts '  usage: /yolo          toggle YOLO (on/off)'
-      @ui.puts '         /yolo on|off   set it explicitly'
-      @ui.puts '         /yolo status   show the current posture'
+      @ui.puts "  usage: /yolo          toggle YOLO (on/off)"
+      @ui.puts "         /yolo on|off   set it explicitly"
+      @ui.puts "         /yolo status   show the current posture"
     end
   end
 end

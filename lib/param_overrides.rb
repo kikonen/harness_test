@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'harness_error'
+require_relative "harness_error"
 
 # Session-level overrides for the adjustable LLM parameters (issue #219).
 #
@@ -61,7 +61,7 @@ class ParamOverrides
         if overridden?(key)
           " (override, config: #{display_value(profile_value(key))})"
         else
-          ''
+          ""
         end
       lines << "  #{key.to_s.ljust(16)} #{display_value(effective(key))}#{mark}"
     end
@@ -87,8 +87,8 @@ class ParamOverrides
   def parse_value(key, value)
     key   = key.to_sym
     value = value.to_s.strip
-    return value if value.downcase == 'default'
-    return 'off' if key == :reasoning_effort && value.downcase == 'off'
+    return value if value.downcase == "default"
+    return "off" if key == :reasoning_effort && value.downcase == "off"
 
     case PARAM_KEYS[key]
     when :string then value
@@ -108,7 +108,7 @@ class ParamOverrides
     end
 
     parsed    = parse_value(key, value)
-    resetting = parsed.to_s.downcase == 'default'
+    resetting = parsed.to_s.downcase == "default"
 
     if resetting
       @overrides.delete(key)
@@ -141,14 +141,14 @@ class ParamOverrides
   # The reasoning effort to show in the status line (issue #219): the
   # effective value, or 'off' when nothing sets it.
   def reasoning_effort_display
-    effective(:reasoning_effort) || 'off'
+    effective(:reasoning_effort) || "off"
   end
 
   # The value shown for a parameter: 'off' for an explicitly-unset reasoning
   # effort, 'default' when unset, else the value.
   def display_value(value)
-    return 'off' if value == 'off'
-    value.nil? ? 'default' : value.to_s
+    return "off" if value == "off"
+    value.nil? ? "default" : value.to_s
   end
 
   # Re-apply every override into options (after a profile change / resume)

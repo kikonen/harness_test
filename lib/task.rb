@@ -3,15 +3,15 @@
 # Task: runs the turn block on a background thread and owns ALL console I/O
 # for it (single-thread I/O rule); design and protocol: doc/task_design.md
 
-require_relative 'output_buffer'
-require_relative 'ui/editor'
-require_relative 'ui/spinner'
+require_relative "output_buffer"
+require_relative "ui/editor"
+require_relative "ui/spinner"
 
 class Task
   # Default spinner message while the runner waits for the task thread.
   # Any :spinner_detail event may override it (and its suffix) for the
   # rest of the wait.
-  DEFAULT_SPINNER_MESSAGE = 'Working'
+  DEFAULT_SPINNER_MESSAGE = "Working"
 
   # Sentinel pushed to inbox when #stop is called, to unblock a pending
   # #request so the task thread can exit cleanly.
@@ -186,7 +186,7 @@ class Task
     task = current
     return unless task
 
-    args = [''] if args.empty?
+    args = [""] if args.empty?
     args.each { |part| task.push_event(type: :text, origin: :task, content: part.to_s) }
     nil
   end
@@ -247,7 +247,7 @@ class Task
     task.harness = harness
     task.note_editor = UI::Editor.new(ui.stdin) if ui.stdin && harness
     error_msg   = nil
-    old_trap    = trap('INT') { raise Interrupt }
+    old_trap    = trap("INT") { raise Interrupt }
 
     begin
       task.start
@@ -322,7 +322,7 @@ class Task
     ensure
       # Clean up the spinner and restore the pre-existing SIGINT handler.
       task.clear_all_spinners
-      trap('INT', old_trap)
+      trap("INT", old_trap)
     end
   end
 

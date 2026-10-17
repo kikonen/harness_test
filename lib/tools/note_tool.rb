@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
+require_relative "../tool"
 
 module Tools
 
@@ -14,21 +14,21 @@ module Tools
   class NoteTool < Tool
     def initialize
       super(
-        name: 'ui.note',
-        description: 'Records a short note about the current task in your own context, to remember it for the rest of the session. Use it right after a file/dir access grant was made (the tool result says so), stating which path was granted for what mode (read / write / delete) and the granularity (file, dir only, recursive). Keep it to one factual line. Do NOT use it for anything else.',
+        name: "ui.note",
+        description: "Records a short note about the current task in your own context, to remember it for the rest of the session. Use it right after a file/dir access grant was made (the tool result says so), stating which path was granted for what mode (read / write / delete) and the granularity (file, dir only, recursive). Keep it to one factual line. Do NOT use it for anything else.",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
-            text: { type: 'string', description: 'The note text (one factual line)' }
+            text: { type: "string", description: "The note text (one factual line)" }
           },
-          required: ['text']
+          required: ["text"]
         }
       )
     end
 
     def execute(args)
-      text = args['text'].to_s.strip
-      return 'error: empty note' if text.empty?
+      text = args["text"].to_s.strip
+      return "error: empty note" if text.empty?
 
       "ok: noted #{text.length} chars"
     end

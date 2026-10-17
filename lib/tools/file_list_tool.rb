@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
-require_relative '../file_list'
+require_relative "../tool"
+require_relative "../file_list"
 
 # Lists files matching a glob pattern under the harness working directory.
 # The pattern must reside inside the workdir (no escaping via ".." or
@@ -16,30 +16,30 @@ module Tools
     def initialize(file_list)
       @file_list = file_list
       super(
-        name: 'file.list',
-        description: 'Lists files matching a glob pattern under the harness working directory. ' \
+        name: "file.list",
+        description: "Lists files matching a glob pattern under the harness working directory. " \
                      'The pattern must reside inside the working directory (e.g. "lib/**/*.rb"). ' \
-                     'Sensitive files are excluded from the results.',
+                     "Sensitive files are excluded from the results.",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
-            pattern: { type: 'string', description: 'Glob pattern relative to the working directory (e.g. "lib/**/*.rb")' }
+            pattern: { type: "string", description: 'Glob pattern relative to the working directory (e.g. "lib/**/*.rb")' }
           },
-          required: ['pattern']
+          required: ["pattern"]
         }
       )
     end
 
     def execute(args)
-      pattern = args['pattern'].to_s.strip
-      return 'error: usage: file.list(pattern)' if pattern.empty?
+      pattern = args["pattern"].to_s.strip
+      return "error: usage: file.list(pattern)" if pattern.empty?
 
       expanded = File.expand_path(pattern, @file_list.workdir)
 
       # Listing a directory requires read access to that directory.
       # If stripping the glob changed the path, the result is already a dir.
       # Otherwise it's a file path and we need its parent.
-      stripped = expanded.sub(/\/\*\*?\/.*\z/, '').sub(/\/\*\*?\z/, '')
+      stripped = expanded.sub(/\/\*\*?\/.*\z/, "").sub(/\/\*\*?\z/, "")
       base_dir = (stripped != expanded) ? stripped : File.dirname(stripped)
       unless @file_list.can_list_dir?(base_dir)
         purpose = "to list files matching '#{pattern}'"

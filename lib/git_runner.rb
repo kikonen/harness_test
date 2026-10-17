@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require 'open3'
+require "open3"
 
-require_relative 'tool'
-require_relative 'text_normalizer'
+require_relative "tool"
+require_relative "text_normalizer"
 
 # Shared base class for the git.* tools.
 #
@@ -43,12 +43,12 @@ class GitRunner < Tool
   # Returns { status:, stdout:, stderr: } (stdout/stderr as strings).
   def run_git(*cmd)
     env = {
-      'GIT_PAGER'           => 'cat',
-      'PAGER'               => 'cat',
-      'GIT_TERMINAL_PROMPT' => '0',
-      'GIT_CONFIG_COUNT'    => '1',
-      'GIT_CONFIG_KEY_0'    => 'color.ui',
-      'GIT_CONFIG_VALUE_0'  => 'never'
+      "GIT_PAGER"           => "cat",
+      "PAGER"               => "cat",
+      "GIT_TERMINAL_PROMPT" => "0",
+      "GIT_CONFIG_COUNT"    => "1",
+      "GIT_CONFIG_KEY_0"    => "color.ui",
+      "GIT_CONFIG_VALUE_0"  => "never"
     }
 
     stdout, stderr, status = Open3.capture3(env, *cmd, chdir: workdir)
@@ -76,7 +76,7 @@ class GitRunner < Tool
   def relative_to_workdir(path)
     abs    = resolve_path(path)
     prefix = "#{workdir}/"
-    abs.start_with?(prefix) ? abs.sub(prefix, '') : abs
+    abs.start_with?(prefix) ? abs.sub(prefix, "") : abs
   end
 
   # Clamp a user-supplied `limit` argument: non-positive values fall back

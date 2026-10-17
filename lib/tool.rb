@@ -15,13 +15,13 @@ class Tool
   # e.g. "file.read" → "file", "ui.notify" → "ui"
   # If no dot is present, the entire name is the namespace.
   def namespace
-    @name.include?('.') ? @name.split('.').first : @name
+    @name.include?(".") ? @name.split(".").first : @name
   end
 
   # The tool's short name within its namespace.
   # e.g. "file.read" → "read", "ui.notify" → "notify"
   def short_name
-    @name.include?('.') ? @name.split('.').last : @name
+    @name.include?(".") ? @name.split(".").last : @name
   end
 
   def execute(args_hash)
@@ -38,8 +38,8 @@ class Tool
     task = defined?(Task) ? Task.current : nil
     return unless task
 
-    args = [''] if args.empty?
-    task.push_event(type: :text, origin: :tool, content: args.map(&:to_s).join(' '))
+    args = [""] if args.empty?
+    task.push_event(type: :text, origin: :tool, content: args.map(&:to_s).join(" "))
   end
 
   # True if a FileList#grant_access result means access was granted.
@@ -60,7 +60,7 @@ class Tool
 
   def to_openai
     {
-      type: 'function',
+      type: "function",
       function: {
         name: @name,
         description: @description,

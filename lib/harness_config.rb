@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require 'yaml'
-require 'fileutils'
+require "yaml"
+require "fileutils"
 
-require_relative 'harness_error'
+require_relative "harness_error"
 
 # -- HarnessConfig --------------------------------------------------------
 #
@@ -65,24 +65,24 @@ require_relative 'harness_error'
 #                # explicit intent. The disaster denylist still applies.
 #
 class HarnessConfig
-  HARNESS_DIR = '.harness'
+  HARNESS_DIR = ".harness"
 
   # issue #260: the user home is the default place for configuration - a repo
   # .harness/config.yml is only an override for that one project. The old
   # install-dir tier is deliberately NOT part of the lookup: HARNESS_CONFIG
   # (or -c) already covers that special case.
-  HOME_CONFIG_DIR = File.join('.config', 'harness')
+  HOME_CONFIG_DIR = File.join(".config", "harness")
 
   # The user-home config file. Computed per call rather than baked into a
   # constant so the home directory can be resolved (and stubbed) at run time.
   def self.home_config_path
-    File.join(Dir.home, HOME_CONFIG_DIR, 'config.yml')
+    File.join(Dir.home, HOME_CONFIG_DIR, "config.yml")
   end
 
   # The config template lives in the repo (config/config.example.yml), not
   # embedded in this file: it is the single source for both the committed
   # example and what a first run writes to the user home config (issue #260).
-  TEMPLATE_FILE = File.expand_path('../config/config.example.yml', __dir__)
+  TEMPLATE_FILE = File.expand_path("../config/config.example.yml", __dir__)
 
   attr_reader :models, :default_model, :system_prompt_file
 
@@ -154,8 +154,8 @@ class HarnessConfig
   # Candidate config file paths, in priority order. The first existing one wins.
   def self.default_paths(workdir)
     paths = []
-    paths << ENV['HARNESS_CONFIG'] if ENV['HARNESS_CONFIG']
-    paths << File.join(workdir, HARNESS_DIR, 'config.yml') if workdir
+    paths << ENV["HARNESS_CONFIG"] if ENV["HARNESS_CONFIG"]
+    paths << File.join(workdir, HARNESS_DIR, "config.yml") if workdir
     paths << home_config_path
     paths
   end
@@ -269,7 +269,7 @@ class HarnessConfig
     return nil unless models_configured?
 
     key = nonblank(selection) || @default_model
-    raise HarnessError, 'no model selected and no default_model configured' if key.nil?
+    raise HarnessError, "no model selected and no default_model configured" if key.nil?
 
     match = @models.find { |m| m[:name] == key || m[:model] == key }
     raise HarnessError, "unknown model '#{key}'. Available: #{@models.map { |m| m[:name] || m[:model] }.join(', ')}" unless match

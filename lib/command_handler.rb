@@ -1,32 +1,32 @@
 # frozen_string_literal: true
 
-require_relative 'harness'
-require_relative 'file_list'
-require_relative 'task'
-require_relative 'task_runner'
-require_relative 'command_runner'
-require_relative 'command'
+require_relative "harness"
+require_relative "file_list"
+require_relative "task"
+require_relative "task_runner"
+require_relative "command_runner"
+require_relative "command"
 
 # Individual command classes.
-require_relative 'commands/grant_command'
-require_relative 'commands/clear_command'
-require_relative 'commands/retry_command'
-require_relative 'commands/session_command'
-require_relative 'commands/session_clear_command'
-require_relative 'commands/compact_command'
-require_relative 'commands/ctx_command'
-require_relative 'commands/reload_command'
-require_relative 'commands/save_command'
-require_relative 'commands/resume_command'
-require_relative 'commands/reasoning_command'
-require_relative 'commands/sessions_command'
-require_relative 'commands/tools_command'
-require_relative 'commands/models_command'
-require_relative 'commands/model_command'
-require_relative 'commands/param_command'
-require_relative 'commands/help_command'
-require_relative 'commands/exit_command'
-require_relative 'commands/yolo_command'
+require_relative "commands/grant_command"
+require_relative "commands/clear_command"
+require_relative "commands/retry_command"
+require_relative "commands/session_command"
+require_relative "commands/session_clear_command"
+require_relative "commands/compact_command"
+require_relative "commands/ctx_command"
+require_relative "commands/reload_command"
+require_relative "commands/save_command"
+require_relative "commands/resume_command"
+require_relative "commands/reasoning_command"
+require_relative "commands/sessions_command"
+require_relative "commands/tools_command"
+require_relative "commands/models_command"
+require_relative "commands/model_command"
+require_relative "commands/param_command"
+require_relative "commands/help_command"
+require_relative "commands/exit_command"
+require_relative "commands/yolo_command"
 
 # Thin dispatcher: checks if input starts with "/", extracts the first word,
 # looks up the command class in a registry map, and delegates.
@@ -40,25 +40,25 @@ class CommandHandler
 
   # Registry: command name (without slash) -> class
   COMMANDS = {
-    'grant'         => Commands::GrantCommand,
-    'clear'         => Commands::ClearCommand,
-    'retry'         => Commands::RetryCommand,
-    'session'       => Commands::SessionCommand,
-    'session-clear' => Commands::SessionClearCommand,
-    'compact'       => Commands::CompactCommand,
-    'ctx'           => Commands::CtxCommand,
-    'reload'        => Commands::ReloadCommand,
-    'save'          => Commands::SaveCommand,
-    'reasoning'     => Commands::ReasoningCommand,
-    'resume'        => Commands::ResumeCommand,
-    'sessions'      => Commands::SessionsCommand,
-    'tools'         => Commands::ToolsCommand,
-    'models'        => Commands::ModelsCommand,
-    'model'         => Commands::ModelCommand,
-    'param'         => Commands::ParamCommand,
-    'help'          => Commands::HelpCommand,
-    'exit'          => Commands::ExitCommand,
-    'yolo'          => Commands::YoloCommand,
+    "grant"         => Commands::GrantCommand,
+    "clear"         => Commands::ClearCommand,
+    "retry"         => Commands::RetryCommand,
+    "session"       => Commands::SessionCommand,
+    "session-clear" => Commands::SessionClearCommand,
+    "compact"       => Commands::CompactCommand,
+    "ctx"           => Commands::CtxCommand,
+    "reload"        => Commands::ReloadCommand,
+    "save"          => Commands::SaveCommand,
+    "reasoning"     => Commands::ReasoningCommand,
+    "resume"        => Commands::ResumeCommand,
+    "sessions"      => Commands::SessionsCommand,
+    "tools"         => Commands::ToolsCommand,
+    "models"        => Commands::ModelsCommand,
+    "model"         => Commands::ModelCommand,
+    "param"         => Commands::ParamCommand,
+    "help"          => Commands::HelpCommand,
+    "exit"          => Commands::ExitCommand,
+    "yolo"          => Commands::YoloCommand,
   }.freeze
 
   def initialize(
@@ -91,8 +91,8 @@ class CommandHandler
     input = input.strip
     return if input.empty?
 
-    unless input.start_with?('/')
-      if input.start_with?('!')
+    unless input.start_with?("/")
+      if input.start_with?("!")
         run_bang_command(input[1..].to_s.strip)
         return
       end
@@ -101,10 +101,10 @@ class CommandHandler
     end
 
     # Flatten multiline slash commands into one line.
-    input = input.gsub(/\s*\n\s*/, ' ')
+    input = input.gsub(/\s*\n\s*/, " ")
 
-    name, args = input[1..].split(' ', 2)
-    args ||= ''
+    name, args = input[1..].split(" ", 2)
+    args ||= ""
 
     cmd_class = COMMANDS[name]
     if cmd_class
@@ -125,12 +125,12 @@ class CommandHandler
   # console, no Task involved.
   def run_bang_command(command)
     if command.empty?
-      ui.puts '  usage: ! <command> (runs locally, never sent to the model)'
+      ui.puts "  usage: ! <command> (runs locally, never sent to the model)"
       return
     end
 
     # Flatten multiline input the same way slash commands are flattened.
-    command = command.gsub(/\s*\n\s*/, ' ').strip
+    command = command.gsub(/\s*\n\s*/, " ").strip
 
     # Issue #221: the bang path is the one place where the harness asks a
     # human to confirm a command the SAME human just typed - the purest form
@@ -145,7 +145,7 @@ class CommandHandler
     runner = CommandRunner.new(
       @file_list,
       @options,
-      label: 'shell',
+      label: "shell",
       harness: @harness, # failed commands traced in harness.log (issue #185)
       title_fmt: CommandRunner::BANG_TITLE,
       ui: @ui,
@@ -154,9 +154,9 @@ class CommandHandler
       auto_approve_all: @options[:bang_requires_confirmation] == false)
     result = runner.run(command).to_s
 
-    if result.start_with?('error: user denied')
+    if result.start_with?("error: user denied")
       # The runner already printed the denial status line.
-    elsif result.start_with?('error:')
+    elsif result.start_with?("error:")
       ui.puts "  [error] #{result.delete_prefix('error: ')}"
     else
       ui.puts result

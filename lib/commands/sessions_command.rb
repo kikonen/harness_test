@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require_relative '../command'
-require_relative '../session_locator'
+require_relative "../command"
+require_relative "../session_locator"
 
 module Commands
   # /sessions - list saved sessions.

@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
-require 'net/http'
-require 'uri'
-require 'json'
+require "net/http"
+require "uri"
+require "json"
 
-require_relative 'shared'
-require_relative '../keep_alive_http'
-require_relative '../harness_error'
-require_relative '../text_normalizer'
+require_relative "shared"
+require_relative "../keep_alive_http"
+require_relative "../harness_error"
+require_relative "../text_normalizer"
 
 module LLM
   # Shared request machinery for the per-backend clients (issue #197):
@@ -50,14 +50,14 @@ module LLM
       uri  = URI("#{base_url}#{endpoint_path}")
       http = KeepAliveHTTP.new(uri.host, uri.port)
       http.logger             = @logger
-      http.use_ssl            = (uri.scheme == 'https')
+      http.use_ssl            = (uri.scheme == "https")
       http.open_timeout       = LLM::DEFAULT_OPEN_TIMEOUT
       http.read_timeout       = timeout
       http.keep_alive_timeout = LLM::KEEP_ALIVE_TIMEOUT
 
       req = Net::HTTP::Post.new(uri.request_uri)
-      req['Content-Type'] = 'application/json'
-      req['Authorization'] = "Bearer #{@options[:token]}" if @options[:token]
+      req["Content-Type"] = "application/json"
+      req["Authorization"] = "Bearer #{@options[:token]}" if @options[:token]
       # Convert the backend-agnostic message chain to this endpoint's wire
       # shape before building the body (see #serialize_messages).
       req.body = JSON.generate(build_body(serialize_messages(messages), tools))
@@ -186,15 +186,15 @@ module LLM
     # stats line in Harness#format_elapsed factors minutes out; the log wants
     # one comparable number per attempt).
     def format_seconds(seconds)
-      format('%.2f', seconds.to_f)
+      format("%.2f", seconds.to_f)
     end
 
     # Token counts for the RESP line (issue #231: prompt-processing speed can
     # be derived from the logged time + tokens). Empty when the backend
     # reports none.
     def usage_note(usage)
-      return '' if usage.nil?
-      return '' if usage[:prompt_tokens].nil? || usage[:completion_tokens].nil?
+      return "" if usage.nil?
+      return "" if usage[:prompt_tokens].nil? || usage[:completion_tokens].nil?
 
       " - #{usage[:prompt_tokens]} -> #{usage[:completion_tokens]} tokens"
     end

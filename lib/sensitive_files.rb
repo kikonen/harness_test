@@ -10,14 +10,14 @@ module SensitiveFiles
   # Glob patterns matched against the file's basename (so e.g.
   # 'config/.env.production' is also blocked).
   SENSITIVE_PATTERNS = [
-    '.env*'
+    ".env*"
   ].freeze
 
   # Directory names that must never be traversed into (matched against every
   # path component, so e.g. '.git/config' and 'vendor/.git/HEAD' are blocked).
   SENSITIVE_DIRS = [
-    '.git',
-    '.harness'
+    ".git",
+    ".harness"
   ].freeze
 
   def self.sensitive?(path)
@@ -26,7 +26,7 @@ module SensitiveFiles
 
     # File.expand_path normalizes separators to "/" regardless of platform,
     # so splitting on "/" works on both Windows and Unix.
-    components = File.expand_path(path.to_s).split('/')
+    components = File.expand_path(path.to_s).split("/")
     SENSITIVE_DIRS.any? { |dir| components.include?(dir) }
   end
 end

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative '../tool'
+require_relative "../tool"
 
 # Meta-tool: searches available tools by name or description
 # (case-insensitive substring match). The registry is passed in at
@@ -12,23 +12,23 @@ module Tools
     def initialize(registry)
       @registry = registry
       super(
-        name: 'tools.search',
-        description: 'Searches available tools by name or description (case-insensitive substring match). ' \
-                     'Returns matching tools with their full descriptions. ' \
-                     'Use this to find a specific tool when you are not sure of its exact name.',
+        name: "tools.search",
+        description: "Searches available tools by name or description (case-insensitive substring match). " \
+                     "Returns matching tools with their full descriptions. " \
+                     "Use this to find a specific tool when you are not sure of its exact name.",
         parameters: {
-          type: 'object',
+          type: "object",
           properties: {
-            query: { type: 'string', description: 'Search term to match against tool names and descriptions' }
+            query: { type: "string", description: "Search term to match against tool names and descriptions" }
           },
-          required: ['query']
+          required: ["query"]
         }
       )
     end
 
     def execute(args)
-      query = args['query'].to_s.strip
-      return 'error: usage: tools.search(query)' if query.empty?
+      query = args["query"].to_s.strip
+      return "error: usage: tools.search(query)" if query.empty?
 
       matches = @registry.search(query)
       if matches.empty?

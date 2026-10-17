@@ -22,12 +22,12 @@
 # or pick up the newest one with --continue.
 # List saved sessions without starting the harness: --list-sessions.
 
-LOG_FILE = ENV['HARNESS_LOG_FILE'] || 'harness.log'
+LOG_FILE = ENV["HARNESS_LOG_FILE"] || "harness.log"
 
-require 'debug'
-require 'amazing_print'
+require "debug"
+require "amazing_print"
 
-require_relative 'lib/cli'
+require_relative "lib/cli"
 
 # -- Entry point ----------------------------------------------------------
 
