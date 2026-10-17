@@ -11,6 +11,10 @@ require 'history_manager'
 # history file (.harness/sessions/<session-id>/harness_history) so entries
 # from different sessions are never mixed, and concurrent runs in the same
 # workdir can no longer overwrite each other's shared history file.
+#
+# issue #280: the id arrives as a CONSTRUCTOR parameter. The old mid-run
+# re-bind (#bind_session) is gone - a mid-run /resume builds a NEW manager
+# under the resumed id, exactly like startup does.
 RSpec.describe HistoryManager do
   let(:workdir) { Dir.mktmpdir('history-spec') }
   after { FileUtils.remove_entry(workdir) if File.directory?(workdir) }
@@ -22,8 +26,8 @@ RSpec.describe HistoryManager do
   # example depends on (or leaks) the previous example's entries.
   before { Reline::HISTORY.clear }
 
-  def manager
-    described_class.new(workdir)
+  def manager(session_id = nil)
+    described_class.new(workdir, session_id: session_id)
   end
 
   def history_entries
@@ -34,46 +38,40 @@ RSpec.describe HistoryManager do
     File.join(workdir, '.harness', 'sessions', sid, 'harness_history')
   end
 
-  describe '#bind_session (issue #119)' do
-    it 'stores the per-session history file under the session id' do
-      m = manager
-      m.bind_session(sid_a)
-      expect(m.history_file).to eq(
-        File.join(workdir, '.harness', 'sessions', sid_a, 'harness_history')
-      )
+  describe 'naming the file under the session id (issues #119 / #280)' do
+    it 'derives the per-session history file from the id at construction' do
+      expect(manager(sid_a).history_file).to eq(session_file(sid_a))
     end
 
-    it 'uses the legacy shared file when no session is bound' do
+    it 'uses the legacy shared file when no session id is given' do
       expect(manager.history_file).to eq(
         File.join(workdir, '.harness', 'harness_history')
       )
     end
 
-    it 're-resolves the file when the bound session changes' do
-      m = manager
-      m.bind_session(sid_a)
-      m.bind_session(sid_b)
-      expect(m.history_file).to eq(
-        File.join(workdir, '.harness', 'sessions', sid_b, 'harness_history')
-      )
+    it 'a resumed run gets its OWN manager under the resumed id' do
+      first = manager(sid_a)
+      resumed = manager(sid_b)
+
+      expect(resumed).not_to equal(first)
+      expect(resumed.history_file).to eq(session_file(sid_b))
+      # The manager of the replaced run keeps pointing at its own session.
+      expect(first.history_file).to eq(session_file(sid_a))
     end
   end
 
   describe '#load / #save round trip' do
-    it 'saves to and loads from the bound session file only' do
-      m = manager
-      m.bind_session(sid_a)
+    it 'saves to and loads from the session file only' do
+      m = manager(sid_a)
 
       Reline::HISTORY << 'prompt one'
       Reline::HISTORY << 'line1\nline2' # multiline survives the round trip
       m.save
 
-      per_session = File.join(workdir, '.harness', 'sessions', sid_a, 'harness_history')
-      expect(File.file?(per_session)).to be true
+      expect(File.file?(session_file(sid_a))).to be true
 
       # A different session must NOT see sid_a's entries.
-      other = manager
-      other.bind_session(sid_b)
+      other = manager(sid_b)
       Reline::HISTORY.clear
       other.load
       expect(history_entries).to be_empty
@@ -83,9 +81,8 @@ RSpec.describe HistoryManager do
       expect(history_entries).to eq(['prompt one', "line1\nline2"])
     end
 
-    it 'does not write to the legacy shared file when a session is bound' do
-      m = manager
-      m.bind_session(sid_a)
+    it 'does not write to the legacy shared file when a session is named' do
+      m = manager(sid_a)
 
       Reline::HISTORY << 'prompt'
       m.save
@@ -99,8 +96,7 @@ RSpec.describe HistoryManager do
       FileUtils.mkdir_p(File.dirname(legacy))
       File.write(legacy, "old prompt\n")
 
-      m = manager
-      m.bind_session(sid_a) # sid_a has no file of its own yet
+      m = manager(sid_a) # sid_a has no file of its own yet
       m.load
       expect(history_entries).to eq(['old prompt'])
     end
@@ -108,22 +104,20 @@ RSpec.describe HistoryManager do
 
   # issue #135's symptom was a dummy dir for a throwaway id. Issue #276 made
   # it structurally impossible: the CLI resolves the resumed id BEFORE
-  # constructing anything, so the manager is bound to sid_a once and sid_b -
-  # the id the run never used - is never bound at all.
+  # constructing anything, so the manager names sid_a once and sid_b - the id
+  # the run never used - is never named at all.
   describe 'resume keeps history in the RESUMED session (issues #135 / #276)' do
     before do
       # Session A persisted a few entries. A fresh process RESUMES A: the id is
-      # resolved first (SessionLocator) and the manager is bound to it once.
-      seed = manager
-      seed.bind_session(sid_a)
+      # resolved first (SessionLocator) and the manager is named once.
+      seed = manager(sid_a)
       Reline::HISTORY.clear
       Reline::HISTORY << 'first prompt'
       Reline::HISTORY << 'second prompt'
       seed.save
       expect(File.file?(session_file(sid_a))).to be true
 
-      @m = manager
-      @m.bind_session(sid_a) # the id this run owns - no fresh id in between
+      @m = manager(sid_a) # the id this run owns - no fresh id in between
       Reline::HISTORY.clear
       @m.load # <- A's entries are now in the buffer for the resumed run
       expect(history_entries).to eq(['first prompt', 'second prompt'])
@@ -151,20 +145,15 @@ RSpec.describe HistoryManager do
 
   describe '#load robustness' do
     it 'starts fresh when the history file is missing' do
-      m = manager
-      m.bind_session(sid_a)
-      expect { m.load }.not_to raise_error
+      expect { manager(sid_a).load }.not_to raise_error
       expect(history_entries).to be_empty
     end
 
     it 'skips blank lines' do
-      per_session = File.join(workdir, '.harness', 'sessions', sid_a, 'harness_history')
-      FileUtils.mkdir_p(File.dirname(per_session))
-      File.write(per_session, "a\n\nb\n")
+      FileUtils.mkdir_p(File.dirname(session_file(sid_a)))
+      File.write(session_file(sid_a), "a\n\nb\n")
 
-      m = manager
-      m.bind_session(sid_a)
-      m.load
+      manager(sid_a).load
       expect(history_entries).to eq(%w[a b])
     end
   end

@@ -209,7 +209,7 @@ RSpec.describe Tools::DirDeleteTool do
       end
     end
 
-    it 'reads the logger live so a rebind after /resume is followed' do
+    it 'reads the logger live so the harness swapped in by /resume is followed' do
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, 'one'))
         list = FileList.new(workdir: dir)
@@ -222,7 +222,7 @@ RSpec.describe Tools::DirDeleteTool do
         harness.logger = Logger.new(log_a)
 
         tool = build(list, harness: harness)
-        harness.logger = Logger.new(log_b) # mid-run /resume rebind
+        harness.logger = Logger.new(log_b) # the fresh harness of a resumed run
         tool.execute('path' => 'one')
 
         expect(log_a.string).to be_empty

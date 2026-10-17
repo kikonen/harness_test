@@ -45,11 +45,6 @@ RSpec.describe SessionManager do
 
       attr_reader :options, :logger
 
-      # issue #113: resume re-points the logger; no-op in the stub.
-      def rebind_logger
-        @logger
-      end
-
       def compact_recent_messages
         Session::COMPACT_RECENT_MESSAGES
       end
@@ -317,73 +312,6 @@ RSpec.describe SessionManager do
 
   end
 
-  describe '#resume_session (issue #113)' do
-    it 're-points the logger at the resumed session id' do
-      Dir.mktmpdir do |dir|
-        # issue #207: the JSON lives inside the session's own directory.
-        sid = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-        sessions = File.join(dir, '.harness/sessions', sid)
-        FileUtils.mkdir_p(sessions)
-        saved = session.to_h(file_list)
-        saved[:session_id] = sid # the file on disk carries the resumed id
-        File.write(File.join(sessions, 'session.json'), JSON.generate(saved))
-
-        file_list = FileList.new([], workdir: dir)
-        manager   = described_class.new(harness, file_list)
-        expect(harness).to receive(:rebind_logger)
-
-        manager.resume_session(sid)
-
-        # The session id must have been swapped to the resumed one.
-        expect(session.session_id).to eq(sid)
-      end
-    end
-  end
-
-  # issue #119: command history is per session - resume must re-point the
-  # history manager at the new session id so up/down arrows (and the saved
-  # file) follow the resumed session instead of mixing entries across ids.
-  describe '#resume_session (issue #119)' do
-    # issue #207: seed a saved session in the per-directory layout
-    # (<sessions>/<id>/session.json).
-    def seed_saved_session(dir)
-      sid = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-      sessions = File.join(dir, '.harness/sessions', sid)
-      FileUtils.mkdir_p(sessions)
-      saved = session.to_h(file_list)
-      saved[:session_id] = sid
-      File.write(File.join(sessions, 'session.json'), JSON.generate(saved))
-      sid
-    end
-
-    it 're-binds the history manager to the resumed session id' do
-      Dir.mktmpdir do |dir|
-        sid = seed_saved_session(dir)
-
-        file_list = FileList.new([], workdir: dir)
-        manager   = described_class.new(harness, file_list)
-        history   = double('history')
-        harness.history = history
-
-        expect(history).to receive(:bind_session).with(sid)
-
-        manager.resume_session(sid)
-      end
-    end
-
-    it 'does not break resume when no history manager is attached' do
-      Dir.mktmpdir do |dir|
-        sid = seed_saved_session(dir)
-
-        file_list = FileList.new([], workdir: dir)
-        manager   = described_class.new(harness, file_list)
-        harness.history = nil
-
-        expect { manager.resume_session(sid) }.not_to raise_error
-      end
-    end
-  end
-
   # issue #207: the session JSON lives INSIDE the session's own directory
   # (.harness/sessions/<id>/session.json), alongside its log and history -
   # not as <id>.json next to the per-session dirs.
@@ -424,25 +352,12 @@ RSpec.describe SessionManager do
           .to be false
       end
     end
-
-    it '#resume_session resolves an abbreviated id by directory name' do
-      Dir.mktmpdir do |dir|
-        seed_saved_session(dir)
-
-        file_list = FileList.new([], workdir: dir)
-        manager   = described_class.new(harness, file_list)
-
-        expect { manager.resume_session(sid[0, 8]) }.not_to raise_error
-        expect(session.session_id).to eq(sid)
-      end
-    end
   end
   # issue #221: the YOLO consent posture travels with the session save
   # (like active_model / param_overrides - it is harness state, not
-  # conversation state). A session saved with YOLO ON resumes with consent
-  # still OFF for the dialog; saved OFF resumes OFF even when the config
-  # initial posture would be ON (what the session had is what it gets
-  # back). A session saved BEFORE the feature has no key and stays MANUAL.
+  # conversation state) and is written as a plain boolean, so a session saved
+  # before the feature has no key. The RESUME side of the round trip is
+  # Harness#apply_resume_state, covered in spec/lib/harness_spec.rb.
   describe 'YOLO posture round trip (issue #221)' do
     def save_with_yolo(dir, on)
       file_list = FileList.new([], workdir: dir)
@@ -460,57 +375,6 @@ RSpec.describe SessionManager do
 
         data = save_with_yolo(dir, false)
         expect(data['yolo']).to be(false)
-      end
-    end
-
-    it 'resume restores a saved YOLO-ON posture even when the harness starts OFF' do
-      Dir.mktmpdir do |dir|
-        data = save_with_yolo(dir, true)
-
-        # Fresh session, harness OFF (the config default): the saved
-        # posture must win - consent stays off, not silently re-enabled.
-        new_session = Session.new('system prompt')
-        harness.session = new_session
-        harness.yolo = false
-        file_list = FileList.new([], workdir: dir)
-        manager   = described_class.new(harness, file_list)
-
-        manager.resume_session(data['session_id'])
-        expect(harness.yolo?).to be(true)
-      end
-    end
-
-    it 'resume turns a saved YOLO-OFF posture back off even when the harness starts ON' do
-      Dir.mktmpdir do |dir|
-        data = save_with_yolo(dir, false)
-
-        # Harness left YOLO ON (e.g. from the config initial posture):
-        # what the SESSION had is what it gets back.
-        new_session = Session.new('system prompt')
-        harness.session = new_session
-        harness.yolo = true
-        file_list = FileList.new([], workdir: dir)
-        manager   = described_class.new(harness, file_list)
-
-        manager.resume_session(data['session_id'])
-        expect(harness.yolo?).to be(false)
-      end
-    end
-
-    it 'a session saved BEFORE the feature (no yolo key) resumes MANUAL' do
-      Dir.mktmpdir do |dir|
-        # The pre-#221 JSON simply has no 'yolo' key at all.
-        data = save_with_yolo(dir, false)
-        data.delete('yolo')
-        path = File.join(dir, '.harness', 'sessions', data['session_id'], 'session.json')
-        File.write(path, JSON.generate(data))
-
-        harness.yolo = true
-        file_list = FileList.new([], workdir: dir)
-        manager   = described_class.new(harness, file_list)
-
-        manager.resume_session(data['session_id'])
-        expect(harness.yolo?).to be(false)
       end
     end
   end
@@ -546,7 +410,6 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       # issue #221: stub mirrors Harness#yolo? / yolo= (save/resume).
       attr_writer :yolo
       def yolo?; @yolo == true; end
-      def rebind_logger; @logger; end
       def compact_recent_messages; 6; end
       def compact_auto_threshold; 88; end
       def compact_reserved_tokens; 8192; end
@@ -588,22 +451,6 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       path = mgr.session_file_path(session.session_id)
       data = JSON.parse(File.read(path))
       expect(data['param_overrides']).to include('reasoning_effort')
-    end
-  end
-
-  it 'resume_session restores and re-applies param_overrides' do
-    Dir.mktmpdir do |dir|
-      fl = FileList.new([], workdir: dir)
-      mgr = described_class.new(harness, fl)
-      mgr.param_overrides.set('reasoning_effort', 'low')
-      session.add_user('hello')
-      mgr.save_session
-
-      # Simulate: the option was reset (new profile applied).
-      options[:reasoning_effort] = 'medium'
-
-      mgr.resume_session(session.session_id[0, 8])
-      expect(options[:reasoning_effort]).to eq('low')
     end
   end
 end

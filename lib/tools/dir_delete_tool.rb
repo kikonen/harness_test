@@ -16,8 +16,8 @@ module Tools
       @file_list = file_list
       # issue #170: deleted files lose their digest-cache entry.
       @session   = session
-      # Read live (#harness&.logger) so a mid-run /resume logger rebind is
-      # followed - a stored Logger would keep writing to the old file.
+      # Read live (#harness&.logger): a mid-run /resume (#280) hands the tools a
+      # NEW harness, so storing a Logger here would write to the replaced run.
       @harness   = harness
       super(
         name: 'dir.delete',

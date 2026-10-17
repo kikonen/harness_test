@@ -123,14 +123,6 @@ class Harness
     logger
   end
 
-  # Mid-run /resume only - startup resume never rebinds.
-  def rebind_logger
-    @logger.close if @logger.respond_to?(:close)
-    @logger = build_logger
-    @client.logger = @logger if @client.respond_to?(:logger=)
-    @logger
-  end
-
   def build_tool_registry
     registry = ToolRegistry.new
     registry.register(Tools::EchoTool.new)

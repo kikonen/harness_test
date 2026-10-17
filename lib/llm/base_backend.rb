@@ -42,9 +42,9 @@ module LLM
     # (openai profiles -> .../v1 base, ollama profiles -> server root).
     def base_url = @options[:base_url]
 
-    # issue #113: re-point the logger after a session resume swaps in a
-    # different session id. KeepAliveHTTP reads it on every request.
-    attr_accessor :logger
+    # No setter: a resume builds a NEW backend under the new session's logger
+    # (issue #280) rather than re-pointing this one.
+    attr_reader :logger
 
     def chat(messages, tools: nil, timeout: LLM::DEFAULT_READ_TIMEOUT)
       uri  = URI("#{base_url}#{endpoint_path}")
