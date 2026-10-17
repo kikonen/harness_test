@@ -438,11 +438,6 @@ class SessionManager
     true
   end
 
-  # Reset the rules mtime tracker (called after session restore).
-  def reset_rules_mtime
-    @rules_mtime = current_rules_mtime
-  end
-
   # Explicitly reload the system prompt (called by /reload command). This
   # re-reads BOTH the base prompt file and harness.md (issue #223): the base
   # file is read on demand by build_system_prompt, so an edit to either file
@@ -609,50 +604,10 @@ class SessionManager
     id
   end
 
-  # Resume a saved session by id (full or abbreviated UUID) MID-RUN (the
-  # /resume command). Startup resume/continue no longer comes through here:
-  # issue #276 resolves the id in CLI before the Harness is built, so the
-  # logger and the history file were already created under it. THIS path
-  # legitimately changes identity while everything is already running, which
-  # is why the derived resources are re-pointed here and only here.
-  def resume_session(id)
-    id = id.to_s.strip
-    raise HarnessError, 'usage: /resume <session-id>' if id.empty?
-
-    path = find_session_file(id)
-    raise HarnessError, "no saved session matching '#{id}' (see /sessions)" unless path
-
-    data = JSON.parse(File.read(path), symbolize_names: true)
-    @harness.session.restore(data, @file_list)
-    # issue #113: the log path is per-session, and this resume swaps in a
-    # saved id the logger was not built under - close and reopen it on the
-    # new session's directory.
-    @harness.rebind_logger
-    # issue #119: command history is per session too - re-point the history
-    # manager so up/down arrows and the saved file follow the new session.
-    @harness.history&.bind_session(@harness.session.session_id)
-    restore_session_model(data[:active_model])
-    # issue #219: bring the saved session-level parameter overrides back
-    # and re-apply them on top of the restored profile so they win again.
-    param_overrides.load(data[:param_overrides])
-    param_overrides.restore!
-    # issue #221: restore the YOLO posture the session was saved with. A
-    # session saved with YOLO ON resumes with consent still off (the denylist
-    # floor unchanged); a session saved with it OFF does NOT inherit the
-    # config's initial posture - what the session had is what it gets back.
-    # Sessions saved before this feature have no key and stay MANUAL.
-    @harness.yolo = data[:yolo] == true
-    @harness.logger.info("yolo posture restored: #{@harness.yolo? ? 'ON' : 'OFF'}")
-    reset_rules_mtime
-    # issue #207: the id is the directory name (the file is session.json).
-    @harness.logger.info("session resumed: #{File.basename(File.dirname(path))} (#{path})")
-    path
-  end
-
-  # Restore the model a session was saved with (used by #resume_session AND,
-  # since issue #276, by Harness#apply_resume_state on a startup resume - so
-  # it cannot stay private). When the stored model is no longer configured,
-  # report it and fall back to the config default model.
+  # Restore the model a session was saved with. Harness#apply_resume_state
+  # calls it while building a resumed run (issue #276), so it cannot stay
+  # private. When the stored model is no longer configured, report it and
+  # fall back to the config default model.
   def restore_session_model(name)
     restore_active_model(name)
   rescue HarnessError => e
@@ -674,9 +629,4 @@ class SessionManager
     return '' unless @harness.client.respond_to?(:backend)
     (@harness.client.backend&.api_type).to_s.strip
   end
-
-  # Find a saved session file by (abbreviated) id - SessionLocator's lookup
-  # (issue #276), so startup resolution and a mid-run /resume resolve an id
-  # the same way.
-  def find_session_file(id) = @locator.find_session_file(id)
 end

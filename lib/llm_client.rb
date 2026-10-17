@@ -33,12 +33,6 @@ class LLMClient
     @backend = build_backend(logger)
   end
 
-  # issue #113: re-point the logger after a session resume swaps in a
-  # different session id. KeepAliveHTTP reads it on every request.
-  def logger=(value)
-    @backend.logger = value
-  end
-
   # Sends one chat completion request. Returns the normalized response
   # hash (symbolized keys, {choices: [...], usage: {...}}). Raises LLMError
   # when all attempts fail.

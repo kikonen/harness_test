@@ -214,6 +214,100 @@ RSpec.describe CLI do
     end
   end
 
+  # issue #280: a mid-run /resume re-runs #setup (through the on_resume action
+  # injected into the CommandHandler) and the WHOLE run is rebuilt under the
+  # resumed id - nothing of the replaced run is patched in place.
+  describe 'mid-run /resume (issue #280)' do
+    # A saved session WITH grants, so the resumed run has something to restore
+    # onto its own FileList.
+    def seed_saved_session_with_grants(id)
+      dir  = File.join(workdir, '.harness', 'sessions', id)
+      FileUtils.mkdir_p(dir)
+      data = {
+        session_id:    id,
+        created_at:    Time.now.iso8601,
+        system_prompt: 'saved system prompt',
+        user_prompts:  2,
+        messages:      [{ role: 'system', content: 'saved system prompt' },
+                        { role: 'user', content: 'earlier prompt' }],
+        yolo:          true,
+        workdir:       workdir,
+        access:        { both:  { files: ['lib/foo.rb'], dirs: [], flat_dirs: [] },
+                         read:  { files: [], dirs: ['spec/lib'], flat_dirs: [] },
+                         write: { files: [], dirs: [], flat_dirs: [] },
+                         delete: { files: [], dirs: [], flat_dirs: [] } }
+      }
+      File.write(File.join(dir, 'session.json'), JSON.generate(data))
+    end
+
+    def log_path(id)
+      File.join(workdir, '.harness', 'sessions', id, 'harness.log')
+    end
+
+    # ResumeCommand reports through the UI (the run's own console).
+    before { allow(ui).to receive(:puts) }
+
+    it 'rebuilds the run under the resumed id and repoints every holder' do
+      saved  = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session_with_grants(saved)
+      cli       = build_cli
+      old       = cli.harness
+      first_id  = cli.harness.session.session_id
+      old_fl    = cli.file_list
+      old_cmds  = cli.commands
+      old_hist  = cli.history
+
+      cli.commands.handle("/resume #{saved[0, 8]}")
+
+      # Identity: the whole run is the saved session's now.
+      expect(cli.session_id).to eq(saved)
+      expect(cli.harness).not_to equal(old)
+      expect(cli.harness.session.session_id).to eq(saved)
+      contents = cli.harness.session.messages.map { |m| m[:content] }
+      expect(contents).to include('earlier prompt')
+      expect(cli.harness.yolo?).to be(true)
+      # Holders repointed (Task.harness comes from CommandHandler#harness at
+      # every run_on_task, so this is the one wiring that matters).
+      expect(cli.commands).not_to equal(old_cmds)
+      expect(cli.commands.harness).to equal(cli.harness)
+      expect(cli.history).not_to equal(old_hist)
+      expect(cli.history.history_file).to eq(
+        File.join(workdir, '.harness', 'sessions', saved, 'harness_history')
+      )
+      # No throwaway id: only the run's first session and the resumed one.
+      expect(session_dirs).to eq([first_id, saved].sort)
+      # The resume is reported on the NEW session's log (#113 was about the
+      # log following the id; now the log is simply built under it).
+      expect(File.read(log_path(saved))).to include('session resumed')
+      # Grants restored onto a FileList of its own.
+      expect(cli.file_list).not_to equal(old_fl)
+      expect(cli.harness.file_list).to equal(cli.file_list)
+      expect(cli.file_list.readable?('lib/foo.rb')).to be true
+      expect(cli.file_list.writable?('lib/foo.rb')).to be true
+      expect(cli.file_list.readable?('spec/lib/cli.rb')).to be true
+      expect(cli.file_list.writable?('spec/lib/cli.rb')).to be false
+    end
+
+    it 'closes the replaced run\'s logger and gives the fresh one its own client' do
+      saved = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session_with_grants(saved)
+      cli   = build_cli
+      old   = cli.harness
+      before = File.read(log_path(old.session.session_id))
+
+      cli.commands.handle("/resume #{saved}")
+
+      # The old logdev is closed: a late write cannot append to it.
+      old.logger.info('late write to the replaced session')
+      expect(File.read(log_path(old.session.session_id))).to eq(before)
+      # A fresh client built under the resumed id, logging to the fresh logger
+      # (the #197 wiring - the backend holds the logger - with no setter).
+      expect(cli.harness.client).not_to equal(old.client)
+      expect(cli.harness.client.backend.logger).to equal(cli.harness.logger)
+      expect(cli.harness.session_log_path).to eq(log_path(saved))
+    end
+  end
+
   # issue #221 review (bug 2): the shell consent posture is stated in the
   # startup banner so the run's approval behavior is visible from the first
   # line (YOLO ON must never look like "nothing ever asks").

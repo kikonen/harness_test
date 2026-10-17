@@ -18,10 +18,16 @@ class Command
 
   attr_reader :harness, :file_list, :options, :ui
 
-  def initialize(harness:, file_list:, options:, ui:)
-    @harness   = harness
-    @file_list = file_list
-    @options   = options
-    @ui        = ui
+  # on_resume: the mid-run /resume action (issue #280) - a callable that
+  # takes a session id and rebuilds the whole run under it. Only the owner
+  # of the run (CLI) can do that, so the action arrives as a callable
+  # instead of the command reaching for a live Harness to mutate. nil for
+  # every other command.
+  def initialize(harness:, file_list:, options:, ui:, on_resume: nil)
+    @harness    = harness
+    @file_list  = file_list
+    @options    = options
+    @ui         = ui
+    @on_resume  = on_resume
   end
 end

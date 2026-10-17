@@ -30,7 +30,7 @@ class CLI
   def initialize(options = nil, ui = nil)
     @options   = options || parse_options
     @ui        = ui || UI::Console.new(stdout: $stdout, stdin: $stdin)
-    @file_list = FileList.new([], workdir: @options[:workdir])
+    @file_list = build_file_list
     @locator = SessionLocator.new(@options[:workdir])
     list_sessions_and_exit if @options[:list_sessions]
 
@@ -55,12 +55,22 @@ class CLI
                   end
     resume_data = (resume_id || resumed_run?) ? @locator.read_session(session_id) : nil
 
+    # A resumed run takes its grants from the session file onto an object of
+    # its own: the tools of the run being replaced keep their own list.
+    @file_list = build_file_list if resume_id
+
+    replaced = @harness
     @harness  = Harness.new(@options, @file_list,
                             session_id: session_id, resume_data: resume_data)
     @history  = HistoryManager.new(@file_list.workdir, session_id: session_id)
     @harness.history = @history
     @commands = CommandHandler.new(harness: @harness, file_list: @file_list,
-                                   options: @options, ui: @ui)
+                                   options: @options, ui: @ui,
+                                   on_resume: ->(id) { setup(resume_id: id) })
+    if resume_id
+      @harness.logger.info("session resumed: #{session_id}")
+      replaced&.logger&.close
+    end
     @harness
   end
 
@@ -305,6 +315,12 @@ class CLI
   end
 
   private
+
+  # Each run owns its grant list: startup and a mid-run /resume build it the
+  # same way (one expression of the empty state a session file fills in).
+  def build_file_list
+    FileList.new([], workdir: @options[:workdir])
+  end
 
   # issue #189: the log path relative to the workdir (absolute paths would
   # duplicate the Working directory line above).

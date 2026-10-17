@@ -65,12 +65,14 @@ class CommandHandler
     harness:,
     file_list:,
     options:,
-    ui:)
+    ui:,
+    on_resume: nil)
     @harness   = harness
     @file_list = file_list
     @options   = options
     @exiting   = false
     @ui      = ui
+    @on_resume = on_resume
   end
 
   def exiting?
@@ -106,7 +108,7 @@ class CommandHandler
 
     cmd_class = COMMANDS[name]
     if cmd_class
-      cmd = cmd_class.new(harness:, file_list:, options:, ui:)
+      cmd = cmd_class.new(harness:, file_list:, options:, ui:, on_resume: @on_resume)
       cmd.handle(args)
       @exiting = true if cmd.respond_to?(:exited?) && cmd.exited?
     else

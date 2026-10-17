@@ -88,12 +88,12 @@ Keep this in mind:
 - Resolve identity before constructing what derives from it (issue #276).
   A session id is identity: the log file, the history file and the session
   directory are all DERIVED from it. Constructing an object that derives from
-  an id before the id is settled forces every derived resource to be chased
-  and re-pointed afterwards (`rebind_logger`, `client.logger=`,
-  `history.bind_session` - issues #113 / #119 / #123 / #135 / #270 were all
-  one ordering bug). Resolve first (`SessionLocator`), construct once; a
-  mid-run identity change (`/resume`) is the only case that rebinds, and it
-  says so explicitly.
+  an id before the id is settled forces every derived resource to be chased and
+  re-pointed afterwards - the `rebind_logger` / `client.logger=` /
+  `history.bind_session` trio issues #113 / #119 / #123 / #135 / #270 were one
+  ordering bug of, all since deleted. Resolve first (`SessionLocator`), construct
+  once. A mid-run identity change (`/resume`) re-runs the construction under the
+  new id (issue #280); it does not rebind anything on the live run.
 - Re-running identity-derived construction goes through `CLI#setup` (it builds
   a fresh Harness / history / CommandHandler under the id it is given) - never
   mutate a live Harness object-by-object to swap its identity.

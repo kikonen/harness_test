@@ -7,6 +7,56 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - mid-run /resume builds a FRESH Harness (issue #280)
+
+- `/resume <id>` no longer patches the live Harness. `CLI#setup` (issue #282) is
+  RUN AGAIN with the resumed id, so the new run is CONSTRUCTED under it: fresh
+  Harness, logger, LLM client, HistoryManager, CommandHandler and FileList, and
+  `cli.harness` / `cli.history` / `cli.commands` / `cli.file_list` are repointed
+  at it. The replaced run's logger is closed after the new one logs the resume.
+- `CLI#setup` gains the resume path fully: a `resume_id:` resolves the id through
+  `SessionLocator` first (an abbreviated id resolves exactly as `--resume <id>`
+  does), reads the saved data, and builds a FileList of its own for the resumed
+  run (`build_file_list`) so its grants cannot be shared with the tools of the
+  run being replaced (a live FileList is mutable shared state - issue #300).
+- `on_resume:` is the wiring: CLI passes `->(id) { setup(resume_id: id) }` to the
+  CommandHandler, which forwards it to every command class (`Command` stores it;
+  only /resume uses it). A command that has no action says
+  `[error] resume is not available in this run` instead of half-resuming, and
+  /resume reports through the Harness the ACTION returned - its own `@harness` is
+  by definition the session being left behind.
+- Delete: `Harness#rebind_logger`, `LLMClient#logger=`, the backend's
+  `attr_accessor :logger` (`LLM::BaseBackend` is now `attr_reader` - a resume
+  builds a new backend, it never re-points a live one), `HistoryManager#bind_session`
+  and `SessionManager#resume_session` with its private `find_session_file` and
+  `reset_rules_mtime` (a fresh SessionManager stamps the rules mtime at
+  construction, so the reset call was a no-op on this path). Every mid-run
+  re-bind API is gone; `SessionManager#restore_session_model` stays public
+  because `Harness#apply_resume_state` calls it.
+- What a resume restores is now restore of a session FILE (`Session#restore`)
+  plus `Harness#apply_resume_state` (model profile, param overrides, YOLO
+  posture) - the same code path startup resume uses, so the two cannot drift
+  apart the way the mid-run copy of startup behaviour did.
+- Fix: the run being replaced used to keep its log open, so anything still
+  holding that Logger (a tool object of the old session, a late write) could
+  append to a log that is no longer the run's. `setup` closes it after the new
+  run has logged the resume, and /resume reports through
+  `resumed.session.session_id` - never through a file path.
+- New `spec/lib/commands/resume_command_spec.rb` (5 examples: usage line, the
+  no-action error, delegation + reporting through the action's Harness, no
+  partial resume when the action raises, `resume_cli_string`). `spec/lib/cli_spec.rb`
+  gains `mid-run /resume (issue #280)` (2 examples, real saved session with
+  grants): the whole run is replaced, grants land on a new FileList, the old
+  logdev is closed (a late write cannot append), the fresh client's backend holds
+  the fresh logger, and only the two real session dirs exist (no throwaway id).
+- `spec/lib/history_manager_spec.rb`: `bind_session` examples replaced by
+  "a resumed run gets its OWN manager" (the file is derived from the id at
+  construction; nothing re-binds).
+- `spec/lib/session_manager_spec.rb`: the mid-run resume examples (the #113 log
+  rebind, the #119 history rebind, the #207 abbreviated id, YOLO-resume and the
+  param-override restore) are gone with the method they tested - save-side and
+  JSON-override examples stay. `spec/lib/harness_spec.rb` loses `rebind_logger`.
+
 ## Unreleased - CLI heavy construction moved into #setup (issue #282)
 
 - `CLI#initialize` kept the basics only (options, UI, FileList, SessionLocator,
@@ -64,15 +114,16 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
 - Mandatory audit trail: every removed path is written to the harness log
   (`dir.delete: deleted file tree/sub/b.txt`, ... plus the summary), and only
   the summary line reaches the console, so a 1400-path tree cannot flood the
-  terminal or the LLM context. The logger is read live from the harness so a
-  mid-run /resume rebind is followed. Deleted files also leave the session's
+  terminal or the LLM context. The logger is read live from the harness, so the
+  tools built by a mid-run /resume (issue #280 rebuilt them under the fresh
+  harness) reach the new session's log. Deleted files also leave the session's
   digest cache (issue #170).
 - Fix found by the new specs: the log line named the entry kind AFTER the
   removal, so directories were logged as files.
 - New `spec/lib/tools/dir_delete_tool_spec.rb` (14 examples: recursive
   delete, empty dir, symlink leaf, workdir refusal, sensitive-subtree refusal,
   one-dialog-per-call, partial-grant refusal leaving the tree intact, denial
-  note forwarding, per-path logging, live-logger rebind, digest-cache drop).
+  note forwarding, per-path logging, live logger read, digest-cache drop).
 - Contract kept honest: the tool description, `README.md` and harness.md all
   used to promise that recursive deletion does not exist. harness.md now states
   the opposite rule - `rm -rf` through `run.command` is never needed (the
@@ -222,6 +273,10 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
 - `rebind_logger` survives ONLY as the mid-run `/resume` case (identity changes
   while everything is already running); startup resume no longer rebinds
   anything, and `SessionManager#resume_session` is now the mid-run path alone.
+  (Superseded by issue #280 above: the mid-run case re-runs `CLI#setup` instead,
+  so `rebind_logger`, `client.logger=` and `history.bind_session` no longer exist
+  anywhere and `SessionManager#resume_session` is gone - nothing rebinds on any
+  path.)
 - Startup resume also applies the session's harness-side state (model profile,
   param overrides, YOLO posture) during construction via
   `Harness#apply_resume_state`, so a `--resume` run no longer silently drops

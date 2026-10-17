@@ -292,53 +292,9 @@ RSpec.describe Harness do
     end
   end
 
-  describe '#rebind_logger (mid-run /resume only, issue #113)' do
-    it 'points the logger at the CURRENT session id after a resume swaps it in' do
-      harness = build_harness
-      fresh_id   = harness.session.session_id
-      resumed_id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-
-      # Mid-run /resume: the id changes while this Harness is already running.
-      harness.session.instance_variable_set(:@session_id, resumed_id)
-
-      expect(harness.session_log_path).to include(resumed_id)
-
-      new_logger = harness.rebind_logger
-      new_logger.info('after the swap')
-
-      expect(new_logger).to be_a(Logger)
-      expect(File.file?(session_path(resumed_id))).to be true
-      # The old session's log is CLOSED by the swap: nothing written under it
-      # after the id changed (that was the point of the rebind).
-      fresh_log = File.read(session_path(fresh_id))
-      expect(fresh_log).not_to include('after the swap')
-    end
-
-    it 'closes the old logger when re-binding after a late id change' do
-      harness = build_harness
-      old_logger = harness.instance_variable_get(:@logger)
-
-      harness.session.instance_variable_set(:@session_id, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
-      harness.rebind_logger
-
-      expect(harness.instance_variable_get(:@logger)).not_to equal(old_logger)
-    end
-
-    it 're-points the LLM client so HTTP logging follows the new session' do
-      harness = build_harness
-
-      harness.session.instance_variable_set(:@session_id, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
-      harness.rebind_logger
-
-      # issue #197: the client is a dispatcher; the backend holds the logger.
-      expect(harness.client.backend.logger).to equal(harness.logger)
-    end
-  end
-
-  # issue #276: startup resume (the id is resolved BEFORE this Harness exists)
-  # and mid-run /resume (the id is swapped while it runs) must end with the
-  # same single identity for log, history and session dir. Startup resume does
-  # no rebind at all; mid-run /resume still rebinds, and only there.
+  # issue #276 / #280: a resumed run - startup OR mid-run /resume - is one
+  # Harness built under the settled id, so log, history and session dir all
+  # carry that single identity and no rebind exists anywhere.
   describe 'startup resume via resume_data (issue #276)' do
     def seed_saved_session(id, yolo: true)
       FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
