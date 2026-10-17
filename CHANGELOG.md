@@ -7,6 +7,27 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - CLI heavy construction moved into #setup (issue #282)
+
+- `CLI#initialize` kept the basics only (options, UI, FileList, SessionLocator,
+  `--list-sessions` exit, idle draft) and the heavy part moved to a new public
+  `CLI#setup(resume_id:)`: resolve the id -> read the saved data -> build
+  Harness -> HistoryManager -> CommandHandler. `initialize` calls it, so
+  `CLI.new.run` is unchanged.
+- The point is RE-RUNNABILITY, which issue #280 needs: a mid-run /resume can
+  call `setup(resume_id: <id>)` and get a FRESH Harness, history file and
+  CommandHandler under that id, instead of mutating the live one. A `setup`
+  call with NO resume_id keeps the id the run already owns - a re-run never
+  mints a throwaway id (the #123 / #135 symptom) - and a failing setup leaves
+  the previous objects in place.
+- `cli.session_id` is now exposed (the settled identity, not just the
+  Harness's copy of it).
+- New specs in `spec/lib/cli_spec.rb` (`#setup`, 4 examples): a second setup
+  with a resume id builds a fresh Harness AND repoints `cli.harness` /
+  `cli.commands.harness` / the history file; a bad resume id raises before any
+  construction and the prior objects survive; re-setup keeps a fresh run's id
+  and a --continue run's id.
+
 ## Unreleased - development environments documented (issue #295)
 
 - New `doc/dev_environment.md`: what each environment actually runs (Ruby and

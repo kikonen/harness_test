@@ -18,6 +18,7 @@ class CLI
   attr_reader :options,
     :harness,
     :file_list,
+    :session_id,
     :commands,
     :history,
     :ui
@@ -26,56 +27,41 @@ class CLI
 
   # Defaults keep the entry point (`CLI.new.run`) unchanged; the tests inject
   # pre-parsed options and a stubbed UI instead.
-  #
-  # Construction order is the point of this method (issue #276): the session
-  # identity is resolved FIRST, and only then are the objects that DERIVE from
-  # it (log file, history file, session directory, LLM client) constructed -
-  # once, under an id that never changes again. The old order built a Harness
-  # (and with it a logger under a freshly minted random id) before consulting
-  # --resume / --continue, so every derived resource had to be chased down and
-  # re-pointed afterwards (issues #113, #119, #123, #135, #270).
   def initialize(options = nil, ui = nil)
     @options   = options || parse_options
     @ui        = ui || UI::Console.new(stdout: $stdout, stdin: $stdin)
     @file_list = FileList.new([], workdir: @options[:workdir])
-
-    # 1. Identity: which session IS this run. Needs the workdir and nothing
-    #    else - no Harness, no logger, no client (that is what makes this
-    #    step possible before step 2).
     @locator = SessionLocator.new(@options[:workdir])
     list_sessions_and_exit if @options[:list_sessions]
-
-    # Identity FIRST: which session IS this run (--resume <id> / --continue
-    # newest / a fresh UUID). Resolution happens before ANY Harness exists: a
-    # typo'd or ambiguous id raises here, where no session directory has been
-    # created yet - the old order had already minted (and could already have
-    # logged under) a random id the run then threw away.
-    session_id  = @locator.resolve_id(
-      resume: @options[:resume], newest: !!@options[:continue]
-    )
-    resume_data = resumed_run? ? @locator.read_session(session_id) : nil
-
-    # 2. Construct: every identity-derived object is built under the id
-    #    settled above. Nothing below this line can ever change the id, so
-    #    nothing below it needs a "re-point me after the id changed" hook.
-    @harness = Harness.new(@options, @file_list,
-                           session_id: session_id, resume_data: resume_data)
-
-    # issue #119: the per-session history file is derived from the same id,
-    # so it is named AT construction (issue #276) - never rebound after a
-    # resume swapped the id under it (issue #135's throwaway-dir symptom).
-    @history = HistoryManager.new(@file_list.workdir, session_id: session_id)
-    @harness.history = @history
-
-    @commands = CommandHandler.new(
-      harness: @harness,
-      file_list: @file_list,
-      options: @options,
-      ui: @ui)
 
     # issue #198 phase 3: draft of an Esc-cancelled idle-prompt read (the
     # buffer is prefilled at the next prompt instead of being dropped).
     @idle_draft = nil
+
+    setup
+  end
+
+  # The heavy construction, split out so it can be RUN AGAIN: a mid-run
+  # /resume (#280) re-runs this with a resume_id and gets a FRESH Harness
+  # instead of mutating the live one. Identity stays first (#276) and a
+  # re-run keeps the id this run owns - it never mints a throwaway one.
+  def setup(resume_id: nil)
+    @session_id = if resume_id
+                    @locator.resolve_id(resume: resume_id)
+                  else
+                    @session_id ||
+                      @locator.resolve_id(resume: @options[:resume],
+                                          newest: !!@options[:continue])
+                  end
+    resume_data = (resume_id || resumed_run?) ? @locator.read_session(session_id) : nil
+
+    @harness  = Harness.new(@options, @file_list,
+                            session_id: session_id, resume_data: resume_data)
+    @history  = HistoryManager.new(@file_list.workdir, session_id: session_id)
+    @harness.history = @history
+    @commands = CommandHandler.new(harness: @harness, file_list: @file_list,
+                                   options: @options, ui: @ui)
+    @harness
   end
 
   def parse_options
