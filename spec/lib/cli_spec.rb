@@ -148,6 +148,72 @@ RSpec.describe CLI do
     end
   end
 
+  # issue #282: the heavy construction lives in #setup, so it can be RUN
+  # AGAIN with a different id (the shape issue #280 needs for a mid-run
+  # /resume: build a FRESH Harness instead of mutating the live one). The
+  # identity-first order (#276) is now the order INSIDE setup.
+  describe '#setup (issue #282)' do
+    it 'a second setup with a resume id builds a FRESH Harness under that id' do
+      saved = 'aabbccdd-1111-2222-3333-444444444444'
+      seed_saved_session(saved)
+
+      cli    = build_cli
+      before = cli.harness
+      built  = cli.setup(resume_id: saved)
+
+      expect(built).to be_a(Harness)
+      expect(built).not_to equal(before)
+      expect(built.session.session_id).to eq(saved)
+      # Every holder is repointed at the fresh object (the repoint #280 needs).
+      expect(cli.harness).to equal(built)
+      expect(cli.commands.harness).to equal(built)
+      expect(cli.history.history_file).to eq(
+        File.join(workdir, '.harness', 'sessions', saved, 'harness_history')
+      )
+    end
+
+    # The identity-first guarantee, asserted through setup: the id is resolved
+    # BEFORE Harness.new, so a bad id cannot leave a half-built run behind -
+    # the previous Harness, history file and commands are still in place.
+    it 'a failing setup resolves the id before constructing anything' do
+      cli    = build_cli
+      before = cli.harness
+      before_history = cli.history
+      before_commands = cli.commands
+
+      expect {
+        cli.setup(resume_id: 'deadbeef')
+      }.to raise_error(HarnessError, /no saved session matching 'deadbeef'/)
+
+      expect(cli.harness).to equal(before)
+      expect(cli.history).to equal(before_history)
+      expect(cli.commands).to equal(before_commands)
+    end
+
+    # A re-run must never mint a throwaway id (issues #123 / #135): the id
+    # this run owns is kept, whatever the startup flags were.
+    it 'setup without a resume id keeps the id this run already owns' do
+      cli = build_cli                    # fresh run: its own random id
+      id  = cli.harness.session.session_id
+
+      cli.setup
+      expect(cli.harness.session.session_id).to eq(id)
+      expect(session_dirs).to eq([id])
+    end
+
+    it 'setup without a resume id keeps a --continue id too' do
+      saved = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(saved)
+
+      cli = described_class.new(options.merge(continue: true), ui)
+      expect(cli.harness.session.session_id).to eq(saved)
+
+      cli.setup
+      expect(cli.harness.session.session_id).to eq(saved)
+      expect(session_dirs).to eq([saved])
+    end
+  end
+
   # issue #221 review (bug 2): the shell consent posture is stated in the
   # startup banner so the run's approval behavior is visible from the first
   # line (YOLO ON must never look like "nothing ever asks").

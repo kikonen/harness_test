@@ -94,6 +94,9 @@ Keep this in mind:
   one ordering bug). Resolve first (`SessionLocator`), construct once; a
   mid-run identity change (`/resume`) is the only case that rebinds, and it
   says so explicitly.
+- Re-running identity-derived construction goes through `CLI#setup` (it builds
+  a fresh Harness / history / CommandHandler under the id it is given) - never
+  mutate a live Harness object-by-object to swap its identity.
 - Line endings: the harness normalizes to LF for LLM-facing operations
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.
