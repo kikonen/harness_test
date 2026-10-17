@@ -56,6 +56,13 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   rebind, the #119 history rebind, the #207 abbreviated id, YOLO-resume and the
   param-override restore) are gone with the method they tested - save-side and
   JSON-override examples stay. `spec/lib/harness_spec.rb` loses `rebind_logger`.
+- harness.md: the "resolve identity before constructing what derives from it"
+  convention (added by #276) is DELETED from the file. It was subsystem history
+  - issue numbers, APIs that no longer exist, and an explanation of `val == true`
+  - which is exactly what the file's own comment rule forbids; a reader gets the
+  rationale from the `SessionLocator` header, `CLI#setup` and this file. The
+  consent bullet keeps only the half the code cannot state (consent state is
+  never conversation state).
 
 ## Unreleased - CLI heavy construction moved into #setup (issue #282)
 
@@ -294,6 +301,8 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   advertised `DeferredLogger` as a reusable pattern) is replaced by the
   ordering rule - resolve identity before constructing what derives from it.
   Issues #113 / #119 / #123 / #135 / #270 were five symptoms of this one bug.
+  (The ordering rule itself was later deleted from harness.md by #280 - see the
+  entry at the top of this file.)
 
 ## Unreleased - first prompt no longer dies on a nil logger (issue #270)
 
