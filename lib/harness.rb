@@ -147,7 +147,11 @@ class Harness
     registry.register(Tools::FileCopyTool.new(@file_list))
     registry.register(Tools::FileInfoTool.new(@file_list))
     registry.register(Tools::DirCreateTool.new(@file_list))
-    registry.register(Tools::DirDeleteTool.new(@file_list))
+    registry.register(Tools::DirDeleteTool.new(
+      @file_list,
+      session: @session,
+      harness: self
+    ))
     registry.register(Tools::NoteTool.new)
     registry.register(Tools::GitDiffTool.new(@file_list))
     registry.register(Tools::GitShowTool.new(@file_list))
