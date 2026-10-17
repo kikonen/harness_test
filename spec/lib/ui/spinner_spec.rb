@@ -289,4 +289,59 @@ RSpec.describe UI::Spinner do
       expect(out).to include("#{UI::Spinner::FRAMES[0]} Working...")
     end
   end
+
+  # Issue #277: the turn's elapsed time, drawn right after the frame glyph so
+  # the counter sits at a fixed column no matter what the message says.
+  describe '#elapsed (issue #277: turn clock right after the glyph)' do
+    it 'is nil by default (renders nothing, frame format unchanged)' do
+      spinner = described_class.new('Working', ui: quiet_console)
+      expect(spinner.elapsed).to be_nil
+      expect(spinner.line(0)).to eq("#{UI::Spinner::FRAMES[0]} Working...")
+    end
+
+    it 'renders a plain-string elapsed segment between the glyph and the message' do
+      out = capture('Sending to gpt-x') do |spinner|
+        spinner.elapsed = '12s'
+        spinner.start
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include("#{UI::Spinner::FRAMES[0]} 12s Sending to gpt-x...")
+    end
+
+    it 're-evaluates a callable elapsed clock every frame' do
+      secs = 0
+      out = capture('Working', 'ctx 1/2 (50%)') do |spinner|
+        spinner.elapsed = -> { "#{secs}s" }
+        spinner.start
+        spinner.render!
+        secs = 3
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include("#{UI::Spinner::FRAMES[0]} 0s Working... ctx 1/2 (50%)")
+      expect(out).to include("#{UI::Spinner::FRAMES[1]} 3s Working... ctx 1/2 (50%)")
+    end
+
+    it 'renders nothing when the clock resolves to nil (task not started)' do
+      out = capture('Working') do |spinner|
+        spinner.elapsed = -> { nil }
+        spinner.start
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include("#{UI::Spinner::FRAMES[0]} Working...")
+      expect(out).not_to include("#{UI::Spinner::FRAMES[0]}  Working")
+    end
+
+    it 'falls back to no segment when the clock raises' do
+      out = capture('Working') do |spinner|
+        spinner.elapsed = -> { raise 'boom' }
+        spinner.start
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include("#{UI::Spinner::FRAMES[0]} Working...")
+    end
+  end
 end

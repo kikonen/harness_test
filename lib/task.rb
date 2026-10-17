@@ -49,6 +49,7 @@ class Task
     @dialog_open = false           # true while perform_direct is on stdin
     @note_editor  = nil
     @note_draft   = nil            # draft kept by a cancelled Esc
+    @started_at   = nil            # turn clock (issue #277), set by #start
     @harness      = nil
   end
 
@@ -75,6 +76,7 @@ class Task
   # `Task.current` and push events onto its outbox. No buffer reference is
   # exposed to task code - the buffer is runner-side only.
   def start
+    @started_at = Time.now
     @thread = Thread.new do
       Thread.current[:harness_task] = self
 
@@ -88,6 +90,18 @@ class Task
         @inbox << STOP
       end
     end
+  end
+
+  # The turn clock for the spinner's elapsed segment (issue #277): whole
+  # seconds under a minute ("12s"), minutes beyond it ("2m 03s"). nil before
+  # #start (a spinner built by a unit test that never started the task).
+  def elapsed_label
+    return nil if @started_at.nil?
+
+    secs = (Time.now - @started_at).to_i
+    return "#{secs}s" if secs < 60
+
+    "#{(secs / 60)}m #{format('%02d', secs % 60)}s"
   end
 
   # Non-blocking poll: returns one message from the outbox, or nil after
@@ -325,6 +339,9 @@ class Task
     # A live badge so a mid-turn /yolo or Ctrl+A toggle is visible at once.
     harness = task.harness
     spinner.badge = -> { mode_badge(harness) } if harness.respond_to?(:command_mode_label)
+    # The turn clock (issue #277): a live callable, so every rebuilt spinner
+    # of the same turn keeps counting from the turn's start, not its own.
+    spinner.elapsed = -> { task.elapsed_label }
     spinner.start
     task.spinner = spinner
   end

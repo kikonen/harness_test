@@ -354,6 +354,47 @@ RSpec.describe Task do
       expect(line).to include('ctx 12%')
       expect(line).not_to include('Working')
     end
+
+    # Issue #277: the spinner shows how long the TURN has been running. The
+    # clock belongs to the Task (it survives the spinner rebuilds), and the
+    # spinner gets it as a callable so a rebuilt spinner keeps counting from
+    # the turn's start instead of from its own construction.
+    it 'installs a live elapsed clock on the spinner' do
+      task = described_class.new { |_t| }
+      task.ui = UI::Console.new(stdout: StringIO.new)
+      task.harness = mode_harness('MANUAL')
+      task.start
+
+      described_class.ensure_spinner_running(task)
+      expect(task.visible_spinner.elapsed).to respond_to(:call)
+      expect(task.visible_spinner.elapsed.call).to match(/\A\d+s\z/)
+    end
+
+    it 'elapsed_label is nil before the task is started (no turn to measure)' do
+      task = described_class.new { |_t| }
+      task.ui = UI::Console.new(stdout: StringIO.new)
+
+      expect(task.elapsed_label).to be_nil
+      described_class.ensure_spinner_running(task)
+      expect(task.visible_spinner.frame_line)
+        .to eq("#{UI::Spinner::FRAMES[0]} Working...")
+    end
+  end
+
+  describe 'Task#elapsed_label (issue #277)' do
+    it 'counts whole seconds below a minute' do
+      task = described_class.new { |_t| }
+      task.instance_variable_set(:@started_at, Time.now - 12.7)
+
+      expect(task.elapsed_label).to eq('12s')
+    end
+
+    it 'switches to minutes past a minute, zero-padded seconds' do
+      task = described_class.new { |_t| }
+      task.instance_variable_set(:@started_at, Time.now - 123)
+
+      expect(task.elapsed_label).to eq('2m 03s')
+    end
   end
 
   describe 'Task.run (drain loop, issue #40)' do
@@ -393,6 +434,20 @@ RSpec.describe Task do
       end
 
       expect(io_out.string).to include('Working...')
+    end
+
+    # issue #277: a waiting turn shows its elapsed time right after the glyph.
+    it 'shows the turn elapsed segment in the spinner frames' do
+      io_out = StringIO.new
+      io_in  = StringIO.new
+
+      described_class.run(harness: nil,
+                          ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
+        sleep 0.35
+      end
+
+      expect(io_out.string)
+        .to match(/#{Regexp.escape(UI::Spinner::FRAMES[0])} \d+s Working\.\.\./)
     end
 
     it 're-points the spinner from :spinner_detail events' do

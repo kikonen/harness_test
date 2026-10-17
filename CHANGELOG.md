@@ -7,6 +7,19 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - turn elapsed time in the spinner (issue #277)
+
+- The spinner line now shows how long the CURRENT turn has been running, in
+  the slot right after the frame glyph so the counter sits at a fixed column
+  whatever the message says: "⠼ 12s Sending (qwen / openai)... 🧠 12% (160K)
+  [YOLO]". Whole seconds below a minute, minutes past it ("2m 03s").
+- The clock is the TURN's, not the wait's: `Task#start` stamps `@started_at`
+  and `Task#elapsed_label` formats it. The drain loop rebuilds the spinner
+  every time the outbox empties again, so a spinner-owned clock would restart
+  on every rebuild; the runner hands the spinner a callable instead, which is
+  why `UI::Spinner#elapsed` follows the same live-callable contract as the
+  suffix and the badge (nil or a raise renders no segment).
+
 ## Unreleased - compact spinner line (issue #271)
 
 - The per-request spinner line was the longest UI line of a turn and its
