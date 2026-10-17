@@ -83,20 +83,7 @@ Keep this in mind:
   auto-approves a command without a dialog must print a status line AND log
   it to harness.log.
 - Consent state is user-side harness state, never conversation state: it is
-  not injected into the chain, and every posture setter compares strictly to
-  `true` (`val == true`), so only a literal true turns a posture on.
-- Resolve identity before constructing what derives from it (issue #276).
-  A session id is identity: the log file, the history file and the session
-  directory are all DERIVED from it. Constructing an object that derives from
-  an id before the id is settled forces every derived resource to be chased and
-  re-pointed afterwards - the `rebind_logger` / `client.logger=` /
-  `history.bind_session` trio issues #113 / #119 / #123 / #135 / #270 were one
-  ordering bug of, all since deleted. Resolve first (`SessionLocator`), construct
-  once. A mid-run identity change (`/resume`) re-runs the construction under the
-  new id (issue #280); it does not rebind anything on the live run.
-- Re-running identity-derived construction goes through `CLI#setup` (it builds
-  a fresh Harness / history / CommandHandler under the id it is given) - never
-  mutate a live Harness object-by-object to swap its identity.
+  never injected into the conversation chain.
 - Line endings: the harness normalizes to LF for LLM-facing operations
   (read, search, patch matching) but preserves the file's original
   line-ending style on write. Do not introduce mixed line endings.
