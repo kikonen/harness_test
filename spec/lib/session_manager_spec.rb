@@ -90,10 +90,11 @@ RSpec.describe SessionManager do
         "🧠 ctx #{used[:estimated] ? '~' : ''}#{used[:tokens]}/#{@options[:num_ctx]} (0%)"
       end
 
-      # Mirrors Harness#context_indicator_live (issue #126): estimates the
-      # current chain. The spinner calls this every frame, so it must exist.
+      # Mirrors Harness#context_indicator_live (issue #126, compact form per
+      # issue #271): estimates the current chain. The spinner calls this every
+      # frame, so it must exist.
       def context_indicator_live(_messages = nil)
-        "🧠 ctx ~1/65536 (0%)"
+        '🧠 ~0% (66K)'
       end
     end.new(session, client)
   end
@@ -102,10 +103,10 @@ RSpec.describe SessionManager do
   let(:client) { double('client', chat: nil, backend: backend) }
   let(:manager) { described_class.new(harness, file_list) }
 
-  # issue #217: the UI (spinner, /model, /models, startup banner) shows
-  # WHERE a call goes via target_display - api type + endpoint path. The
-  # request spinner line carries the same tail (see the #request_spinner_detail
-  # specs), so this harness's stub client has a backend.
+  # issue #217: the UI (/model, /models, startup banner) shows WHERE a call
+  # goes via target_display - api type + endpoint path. This harness's stub
+  # client has a backend because the spinner line names its api type (see the
+  # #request_spinner_detail specs).
   describe '#target_display' do
     it 'shows the openai target' do
       expect(backend).to receive(:api_type).and_return(:openai)
@@ -144,7 +145,10 @@ RSpec.describe SessionManager do
       end
     end
 
-    it 'emits exactly one spinner_detail with the model and the backend target' do
+    # Issue #271 compacted the line: the who sits in parentheses after the
+    # verb and only the API TYPE is named (the endpoint path stays in
+    # target_display for /model, /models and the startup banner).
+    it 'emits exactly one spinner_detail with the model and the api type' do
       harness.options[:model] = 'qwen2.5-coder:32b'
 
       events = emitted_details
@@ -152,22 +156,22 @@ RSpec.describe SessionManager do
       expect(events.map { |e| e[:type] }).to eq([:spinner_detail])
       expect(events.first[:origin]).to eq(:session_manager)
       expect(events.first[:content][:message])
-        .to eq('Sending to qwen2.5-coder:32b (openai /chat/completions)')
+        .to eq('Sending (qwen2.5-coder:32b / openai)')
       expect(events.first[:content][:suffix]).to respond_to(:call)
     end
 
-    it 'names the target only when the client reports a backend' do
+    it 'names the api type only when the client reports a backend' do
       harness.options[:model] = 'raw-model'
       harness.client = Class.new { def chat(*) = nil; }.new
 
-      expect(emitted_details.first[:content][:message]).to eq('Sending to raw-model')
+      expect(emitted_details.first[:content][:message]).to eq('Sending (raw-model)')
     end
 
     it 'still emits a bare Sending line when no model is configured' do
       harness.options.delete(:model)
 
       expect(emitted_details.first[:content][:message])
-        .to eq('Sending (openai /chat/completions)')
+        .to eq('Sending (openai)')
     end
   end
 
@@ -646,7 +650,7 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
 
       # issue #126: the spinner calls this every frame (with the local chain).
       def context_indicator_live(_messages = nil)
-        "🧠 ctx ~1/1000 (0%)"
+        '🧠 ~0% (1K)'
       end
     end.new(session, client)
   end

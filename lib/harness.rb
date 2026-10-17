@@ -473,6 +473,11 @@ class Harness
   # Unlike #context_indicator (the LAST response's number), this measures the
   # CURRENT chain, including mid-turn tool results. An explicit messages:
   # chain (in-loop compaction's local chain) is always an estimate.
+  #
+  # This one is the SPINNER's context segment, so it is the glanceable form
+  # (issue #271): the percentage, plus the window it is a percentage of. The
+  # raw token arithmetic stays in #context_indicator (modeline, stats line)
+  # and in the /ctx report.
   def context_indicator_live(messages = nil)
     window = options[:num_ctx] || LLMClient::NUM_CTX
     if messages
@@ -486,7 +491,7 @@ class Harness
     end
 
     pct = (tokens.to_f / window * 100).round
-    "🧠 ctx #{label}#{tokens}/#{window} (#{pct}%)"
+    "🧠 #{label}#{pct}% (#{window_label(window)})"
   end
 
   def context_report
@@ -538,6 +543,14 @@ class Harness
     return File.read(path) if path && File.file?(path)
 
     File.read(DEFAULT_SYSTEM_PROMPT_FILE)
+  end
+
+  # 65536 -> "66K", 160000 -> "160K", 1000 -> "1K". A window size is only
+  # ever read as an order of magnitude, and five digits of it is noise in a
+  # per-frame line; windows under 1000 stay exact.
+  def window_label(window)
+    w = window.to_i
+    w < 1000 ? w.to_s : "#{(w / 1000.0).round}K"
   end
 
   def execute_tool_call(tool_call)
