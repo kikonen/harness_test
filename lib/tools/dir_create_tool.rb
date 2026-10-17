@@ -58,7 +58,7 @@ module Tools
       # not make existing siblings of the parent writeable.
       if !@file_list.writable?(path) && !@file_list.writable?(File.dirname(path))
         purpose = "to create directory '#{shown}'"
-        result  = @file_list.grant_access(path, :w, purpose: purpose)
+        result  = @file_list.grant_access(path, :w, purpose:)
         return Tool.denial_error(
           "error: write access denied for '#{shown}'", result
         ) unless Tool.granted?(result)

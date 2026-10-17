@@ -250,7 +250,7 @@ module Tools
           recounted_new = hunk_lines.count { |t, _| t == " " || t == "+" }
 
           hunks << {
-            old_start: old_start,
+            old_start:,
             old_count: recounted_old,
             new_count: recounted_new,
             lines:     hunk_lines

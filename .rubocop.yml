@@ -145,6 +145,12 @@ Layout/SpaceInsideBlockBraces:
 Layout/ExtraSpacing:
   AllowForAlignment: true
 
+# 0 offenses today (measured over lib/, harness.rb and spec/), but the layout
+# corrector itself leaves trailing spaces when it breaks an argument list - this
+# is what keeps a -a run from quietly dirtying the tree.
+Layout/TrailingWhitespace:
+  Enabled: true
+
 Layout/EndOfLine:
   # native fires on all 131 files on a Windows checkout (native means CRLF
   # there); the tree is LF (.gitattributes eol=lf, core.autocrlf false).
@@ -180,6 +186,18 @@ Style/FrozenStringLiteralComment:
 Style/StringLiterals:
   Enabled: true
   EnforcedStyle: double_quotes
+  Exclude:
+    - spec/**/*
+
+# 1.9-style keys are already the repo's practice (measured: 821 offenses against
+# 'hash_rockets'), so the live part of this cop is the VALUE omission: when the
+# value is the variable the key is named after, write { tools: } not
+# { tools: tools }. Measured: 48 such calls in lib/ + harness.rb (127 more in
+# specs, which this cop skips).
+Style/HashSyntax:
+  Enabled: true
+  EnforcedStyle: ruby19
+  EnforcedShorthandSyntax: always
   Exclude:
     - spec/**/*
 

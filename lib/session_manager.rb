@@ -222,10 +222,10 @@ class SessionManager
     # that compaction freed space without burning tokens on a follow-up.
     {
       summary: summary_text,
-      before: before,
-      after: after,
-      retained: retained,
-      context_before: context_before,
+      before:,
+      after:,
+      retained:,
+      context_before:,
       context_line: @harness.context_indicator
     }
   end
@@ -566,7 +566,7 @@ class SessionManager
     if profiles.empty?
       @harness.options[:model]        = name
       @harness.options[:active_model] = name
-      return { name: name, model: name }
+      return { name:, model: name }
     end
 
     match = find_profile(name)

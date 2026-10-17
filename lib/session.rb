@@ -100,7 +100,7 @@ class Session
   end
 
   def add_user(content)
-    @messages << { role: "user", content: content }
+    @messages << { role: "user", content: }
     @user_prompts += 1
     self
   end
@@ -130,7 +130,7 @@ class Session
   end
 
   def add_assistant(content)
-    @messages << { role: "assistant", content: content }
+    @messages << { role: "assistant", content: }
     self
   end
 
@@ -352,7 +352,7 @@ class Session
     used = context_used
     return false if used.nil? || window_size.to_i <= 0
 
-    used[:tokens] >= compact_trigger(window_size, threshold_pct, reserved_tokens: reserved_tokens)
+    used[:tokens] >= compact_trigger(window_size, threshold_pct, reserved_tokens:)
   end
 
   # The usage level (in tokens) at which auto-compaction fires: the lower

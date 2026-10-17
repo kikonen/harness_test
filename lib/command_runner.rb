@@ -245,8 +245,8 @@ class CommandRunner
 
     dialog = UI::Dialog.new(
       title: format(@title_fmt, command, shown, timeout),
-      options: options,
-      note: note,
+      options:,
+      note:,
       # Multi-select lets the user save several prefixes in one line
       # (e.g. "2 4") - issue #102. Only meaningful when there is at
       # least one grantable prefix.
@@ -311,7 +311,7 @@ class CommandRunner
 
     saved = values.select { |v| v.is_a?(Hash) && v[:always_allow] }
                 .map { |v| v[:always_allow] }
-    { saved: saved }
+    { saved: }
   end
 
   # issue #224: the verdict for THIS command. Priority: a batch pre-check
@@ -434,7 +434,7 @@ class CommandRunner
       status("✗ denied by user")
     end
     { denied: true,
-      denial: Tool.denial_error("error: #{message}", note ? { note: note } : nil) }
+      denial: Tool.denial_error("error: #{message}", note ? { note: } : nil) }
   end
 
   # Runs the command (after any required confirmation) and formats the result.

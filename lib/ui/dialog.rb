@@ -154,7 +154,7 @@ module UI
         # The explicit "Additional details" option: the hint (when given)
         # IS the option's label, otherwise the generic default.
         title = @free_text_prompt.empty? ? FREE_TEXT_OPTION : @free_text_prompt
-        options << Option.new(title: title, value: FREE_TEXT)
+        options << Option.new(title:, value: FREE_TEXT)
       end
       options << Option.new(title: "Cancel", value: CANCEL_VALUE)
       @options = options
@@ -195,7 +195,7 @@ module UI
         raise ArgumentError, "no Task active: show requires an explicit ui: console" \
           if ui.nil?
 
-        perform_direct(ui: ui)
+        perform_direct(ui:)
       end
     end
 

@@ -40,7 +40,7 @@ class SessionFileCache
   # the file had no cached entry - nothing to move.
   def rename(old_path, new_path, workdir: nil)
     old_key = key_for(old_path, workdir)
-    return self unless known?(old_path, workdir: workdir)
+    return self unless known?(old_path, workdir:)
 
     @digests[key_for(new_path, workdir)] = @digests.delete(old_key)
     self

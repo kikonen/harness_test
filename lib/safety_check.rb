@@ -76,7 +76,7 @@ module SafetyCheck
       question = format(CHECK_PROMPT, commands.each_with_index.map { |c, i| "#{i + 1}. #{c}" }.join("\n"))
       fork = base + [{ role: "user", content: question }]
 
-      data = client.chat(fork, tools: nil, timeout: timeout)
+      data = client.chat(fork, tools: nil, timeout:)
       text = data.dig(:choices, 0, :message, :content).to_s
       lines = text.split("\n").map(&:strip).reject(&:empty?)
       lines.each_with_index do |line, idx|

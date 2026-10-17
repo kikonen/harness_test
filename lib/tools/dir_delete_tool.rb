@@ -126,7 +126,7 @@ module Tools
 
       purpose = "to delete directory '#{shown}' with its contents " \
                 "(#{entries.size} entries)"
-      result  = @file_list.grant_access(path, :d, purpose: purpose)
+      result  = @file_list.grant_access(path, :d, purpose:)
       unless Tool.granted?(result)
         return Tool.denial_error("error: delete access denied for '#{shown}'", result)
       end

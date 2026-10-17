@@ -31,7 +31,7 @@ module LLM
     end
 
     def build_body(messages, tools)
-      body = { model: @options[:model], messages: messages, stream: false,
+      body = { model: @options[:model], messages:, stream: false,
                options: sampling_options }
       body[:tools] = tools if tools && !tools.empty?
       # issue #215: the native API has no 'reasoning_effort' option

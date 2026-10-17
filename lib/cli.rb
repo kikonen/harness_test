@@ -61,8 +61,8 @@ class CLI
 
     replaced = @harness
     @harness  = Harness.new(@options, @file_list,
-                            session_id: session_id, resume_data: resume_data)
-    @history  = HistoryManager.new(@file_list.workdir, session_id: session_id)
+                            session_id:, resume_data:)
+    @history  = HistoryManager.new(@file_list.workdir, session_id:)
     @harness.history = @history
     @commands = CommandHandler.new(harness: @harness, file_list: @file_list,
                                    options: @options, ui: @ui,
