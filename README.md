@@ -54,6 +54,9 @@ cp -a _env .env            # env file (currently just points at the config)
 bundle install
 ```
 
+Which Ruby and git actually run where (CI, Windows, WSL2), and what their
+differences mean for reading a test result: `doc/dev_environment.md`.
+
 On first run, a config template is written to the user home config
 (`~/.config/harness/config.yml`, issue #260). Edit it to set your model(s),
 endpoint and token:
@@ -240,4 +243,5 @@ lib/command_handler.rb + lib/commands/*.rb  # one class per /command
 lib/tools/*.rb      # one file per tool
 config/system_prompt.txt                  # built-in system prompt
 doc/*.md            # design documents (why a subsystem is shaped as it is)
+doc/dev_environment.md  # which Ruby/git runs where (CI vs local), pinned
 ```

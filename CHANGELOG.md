@@ -7,6 +7,23 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - development environments documented (issue #295)
+
+- New `doc/dev_environment.md`: what each environment actually runs (Ruby and
+  git pinned per platform, measured 2026-10-17) and what the differences mean
+  for reading a test result. Environment facts stayed OUT of harness.md - that
+  file is injected into every system prompt and holds coding rules only.
+- The asymmetry stated plainly: `.ruby-version` is honored by rbenv, not by
+  Ruby itself, so on Windows (no rbenv on PATH) `bin/harness` and `bin/rspec`
+  run the system Ruby; the baseline is 4.0.1 and Windows runs 4.0.7 for
+  technical reasons. CI pins Ruby in the workflow because ruby/setup-ruby does
+  not resolve `file://` here, so a `.ruby-version` bump must bump the workflow
+  in the same commit.
+- Why a green local run does not settle a CI-only failure: the git versions
+  differ in both directions (CI 2.55.0, WSL2 2.43.0, Windows 2.56.0), and
+  issue #292 - CI-only, real, proven with `GIT_TRACE2` - is the worked
+  example. WSL2 is the closest local environment to CI.
+
 ## Unreleased - dir.delete deletes a tree and logs every path (issue #290)
 
 - `dir.delete` used to refuse a non-empty directory ("recursive deletion is
