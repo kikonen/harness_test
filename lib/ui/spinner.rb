@@ -24,6 +24,16 @@ module UI
 
     attr_reader :badge
 
+    # Elapsed-time segment drawn right after the frame glyph (issue #277),
+    # e.g. "12s" or "2m 03s". It measures the TURN, not the wait, so the
+    # runner - not the spinner - owns the clock (a spinner-built clock would
+    # restart on every drain-loop rebuild). Callable or plain string.
+    def elapsed=(value)
+      @elapsed = value
+    end
+
+    attr_reader :elapsed
+
     # suffix is optional extra text appended after the message (issue #115,
     # e.g. the current context-usage estimate). It may be a plain string or a
     # callable (lambda/proc) that is re-evaluated on EVERY frame so it always
@@ -41,6 +51,7 @@ module UI
       @resumable = false  # started and not yet stopped
       @frame     = 0
       @badge     = nil
+      @elapsed   = nil
       raise ArgumentError, 'Spinner requires a ui: console' if ui.nil?
 
       @ui = ui
@@ -107,7 +118,9 @@ module UI
     # One spinner frame as a plain string (no \r, no write). Public so tests
     # can assert the exact frame text without capturing stdout.
     def line(i)
-      "#{FRAMES[i % FRAMES.size]} #{@message}...#{render_suffix}#{render_badge}"
+      glyph  = FRAMES[i % FRAMES.size]
+      "#{glyph}#{render_elapsed} #{@message}..." \
+        "#{render_suffix}#{render_badge}"
     end
 
     def frame_line
@@ -123,6 +136,17 @@ module UI
     end
 
     private
+
+    # Resolve the elapsed segment for this frame. A callable is invoked fresh
+    # each frame; a plain string is used as-is. Any failure (or a nil clock)
+    # resolves to no segment, same contract as the badge and the suffix.
+    def render_elapsed
+      value = @elapsed.respond_to?(:call) ? @elapsed.call : @elapsed
+      text  = value.to_s.strip
+      text.empty? ? '' : " #{text}"
+    rescue StandardError
+      ''
+    end
 
     # Resolve the badge to text for this frame. A callable is invoked fresh
     # each frame so it tracks live state (e.g. a mid-turn mode toggle); a

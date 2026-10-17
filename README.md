@@ -188,7 +188,8 @@ context), `test.echo` (test-only)
 - The active posture is ALWAYS labeled so you can see what a run will do
   before you type anything: the startup banner ("Command consent: MANUAL -
   ..."), the prompt line ("[model (effort)] [MANUAL] >") and the
-  spinner badge at the end of its line ("... Sending (model / api type)...
+  spinner line, which also carries the turn's elapsed time after the glyph
+  and the posture badge at its end ("⠼ 12s Sending (model / api type)...
   🧠 12% (160K) [YOLO]").
 - The disaster denylist overrides every posture AND every stored grant: a
   well-known disaster (`rm -rf`, `mkfs`, `dd of=/dev/`, `sudo`, `git push -f`,
