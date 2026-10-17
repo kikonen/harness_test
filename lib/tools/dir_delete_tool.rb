@@ -5,8 +5,10 @@ require_relative '../file_list'
 
 # Deletes a directory WITH ITS WHOLE TREE (issue #290): the whole tree is
 # validated BEFORE a single entry is removed, one DELETE grant covers it, and
-# every path removed is written to harness.log. Children before their
-# directory; a symlink is unlinked, never walked into.
+# every path removed is written to harness.log. Children are removed before
+# their directory; a symlink INSIDE the tree is unlinked as a leaf and never
+# followed, and a target path that is itself a symlink is refused outright
+# (following it would delete a tree outside the granted path).
 module Tools
 
   class DirDeleteTool < Tool
@@ -24,8 +26,9 @@ module Tools
                      'directory require explicit user approval; the working directory ' \
                      'itself can never be deleted, and a tree containing a sensitive ' \
                      'subdir (.git, .harness, .env*) is refused. Deleting requires a ' \
-                     'DELETE access grant (its own mode, independent from read/write); ' \
-                     'every deleted path is recorded in harness.log.',
+                     'DELETE access grant (its own mode, independent from read/write). ' \
+                     'A path that is itself a symlink is refused - unlink it with ' \
+                     'file.delete. Every deleted path is recorded in harness.log.',
         parameters: {
           type: 'object',
           properties: {
@@ -46,6 +49,15 @@ module Tools
       if @file_list.sensitive?(path)
         Tool.puts "  [dir.delete] ✗ #{shown} (blocked: sensitive path)"
         return "error: path '#{shown}' is blocked and can never be deleted"
+      end
+
+      # A symlink is deleted by file.delete: following it here would delete
+      # the target's tree, which lives OUTSIDE what the grant and the log
+      # describe. Checked before File.directory?, which follows the link.
+      if File.symlink?(path)
+        Tool.puts "  [dir.delete] ✗ #{shown} (a symlink)"
+        return "error: '#{shown}' is a symlink - delete it with file.delete " \
+               '(following it here would delete a tree outside the granted path)'
       end
 
       unless File.directory?(path)

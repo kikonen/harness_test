@@ -75,7 +75,7 @@ RSpec.describe Tools::DirDeleteTool do
       end
     end
 
-    it 'removes a symlink-to-directory as a leaf without walking into it' do
+    it 'refuses to delete a symlink: file.delete is the unlink path' do
       skip 'symlinks need developer mode on Windows' if Gem.win_platform?
       Dir.mktmpdir do |dir|
         target = File.join(dir, 'keep')
@@ -89,8 +89,8 @@ RSpec.describe Tools::DirDeleteTool do
 
         out = build(list).execute('path' => 'link')
 
-        expect(out).to start_with("ok: directory 'link'")
-        expect(File.symlink?(link)).to be(false)
+        expect(out).to include('is a symlink - delete it with file.delete')
+        expect(File.symlink?(link)).to be(true)
         expect(File.exist?(File.join(target, 'inside.txt'))).to be(true)
       end
     end
