@@ -7,6 +7,23 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - CI flake: git maintenance raced the spec's tmpdir cleanup (issue #292)
+
+- `git_apply_tool_spec` "rejects a hunk without file headers up front" failed
+  intermittently in CI on a path the example never touches:
+  `Errno::ENOENT ... /tmp/d.../.git/objects/maintenance.lock`, raised from
+  `Dir.mktmpdir`'s teardown. The example's own assertions passed - only the
+  cleanup died.
+- Cause, measured with `GIT_TRACE2`: `git commit` spawns
+  `git maintenance run --auto --quiet --detach` (git's default
+  `maintenance.auto`), and that detached child writes
+  `.git/objects/maintenance.lock` inside the tmp repo AFTER the example has
+  finished, while the cleanup is walking the same tree.
+- Fix: the spec's `GIT_ENV` carries `maintenance.auto=false` and `gc.auto=0`
+  through git's own config env mechanism (`GIT_CONFIG_COUNT` /
+  `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`) - no global git config is
+  touched, and `GIT_TRACE2` then shows no maintenance child at all.
+
 ## Unreleased - turn elapsed time in the spinner (issue #277)
 
 - The spinner line now shows how long the CURRENT turn has been running, in
