@@ -17,13 +17,19 @@ Keep this in mind:
   sees the accurate contract.
 - If you change CLI commands or `/help` text, keep them in sync with the
   actual behavior in `lib/cli.rb`.
-- When creating temporary directories or files for testing use the "tmp"
-  directory, not the root directory of the project.
+- Scratch files go under `tmp/`, never in the project root - and under their
+  OWN subdir named for the issue or PR they belong to (`tmp/271/`,
+  `tmp/pr-289/`), not loose in `tmp/` itself: loose files there become
+  unattributable clutter. A scratch subdir is removed when its PR merges
+  (`dir.delete` takes the tree). `tmp/.gitkeep` stays.
 
 ## Code Style
 
 - Ruby, `frozen_string_literal: true` magic comment at the top of every file.
 - 2-space indentation, no tabs.
+- Continuation lines of a wrapped call or hash get 2 spaces from the line that
+  opened them - never aligned under the opening parenthesis (deep alignment
+  pushes arguments to the right edge and grows on every rename).
 - Preserve existing formatting and style when editing - do not reformat
   untouched code.
 - Comments: hard budget, enforced by a delete test. A comment may say ONLY
@@ -66,8 +72,11 @@ Keep this in mind:
 - Access modes (read / write / delete) are tracked separately: a write grant
   implies read, but neither read nor write implies delete.
 - Destructive operations (file delete, dir delete) require a DELETE grant
-  from the tool layer - do not bypass it, and never try to reach the same
-  result through a shell command instead.
+  from the tool layer - do not bypass it, and never reach the same result
+  through a shell command instead. `dir.delete` takes a whole tree (the tree
+  is validated up front, one grant covers it, every removed path is logged);
+  `rm -rf` through `run.command` is therefore never needed and logs only the
+  command string, not what it removed.
 - Consent code: new code must never weaken the disaster denylist
   (`CommandAllowlist.disaster?`) - a well-known disaster keeps the consent
   dialog in EVERY posture with no "Always allow" option - and anything that

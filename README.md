@@ -154,10 +154,10 @@ The model has access to these tools:
 `file.search` (regex grep), `file.list` (glob), `file.info` (metadata),
 `file.copy`, `file.rename`, `file.delete` (needs a DELETE grant)
 
-**Directories** - `dir.create`, `dir.delete` (empty dirs only, needs a
-DELETE grant)
+**Directories** - `dir.create`, `dir.delete` (a whole tree, validated up
+front and logged path by path; needs one DELETE grant - so `rm -rf` through
+`run.command` is never needed)
 
-**Git** - `git.status`, `git.diff`, `git.log`, `git.show`,
 `git.grep` (search commit diffs for when code was added/removed),
 `git.apply` (apply a unified diff; `dry_run` validates it without applying)
 

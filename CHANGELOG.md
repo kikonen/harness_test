@@ -7,6 +7,47 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - dir.delete deletes a tree and logs every path (issue #290)
+
+- `dir.delete` used to refuse a non-empty directory ("recursive deletion is
+  not supported"). In practice that pushed the model to `rm -rf` through
+  `run.command`, which is the WORSE route for a destructive operation: the
+  shell consent decision replaces the tool's DELETE grant, and the log gets
+  the command string only - never the paths that vanished.
+- The tool now walks the tree: post-order (children before their directory),
+  a symlink INSIDE the tree unlinked as a leaf and never followed. The walk
+  happens BEFORE anything is removed, so the whole tree is validated first and
+  a refusal deletes nothing at all.
+- Safety floor: the tree is refused by name when it contains a sensitive
+  subtree (`.git`, `.harness`, `.env*`) instead of silently deleting around
+  it; the working directory itself is never deletable; ONE DELETE grant must
+  cover the whole tree - a flat grant on a nested tree is refused rather than
+  deleting half of it.
+- Mandatory audit trail: every removed path is written to the harness log
+  (`dir.delete: deleted file tree/sub/b.txt`, ... plus the summary), and only
+  the summary line reaches the console, so a 1400-path tree cannot flood the
+  terminal or the LLM context. The logger is read live from the harness so a
+  mid-run /resume rebind is followed. Deleted files also leave the session's
+  digest cache (issue #170).
+- Fix found by the new specs: the log line named the entry kind AFTER the
+  removal, so directories were logged as files.
+- New `spec/lib/tools/dir_delete_tool_spec.rb` (14 examples: recursive
+  delete, empty dir, symlink leaf, workdir refusal, sensitive-subtree refusal,
+  one-dialog-per-call, partial-grant refusal leaving the tree intact, denial
+  note forwarding, per-path logging, live-logger rebind, digest-cache drop).
+- Contract kept honest: the tool description, `README.md` and harness.md all
+  used to promise that recursive deletion does not exist. harness.md now states
+  the opposite rule - `rm -rf` through `run.command` is never needed (the
+  disaster denylist is untouched: it still forces the shell dialog).
+- harness.md scratch rule: loose files in `tmp/` became 180 unattributable
+  leftovers, so scratch now gets its own subdir per issue/PR (`tmp/271/`) and
+  is deleted when that PR merges.
+- Fix found by CI (not locally reproducible): the target path itself may be a
+  symlink. `File.directory?` follows it, so a symlinked target reached
+  `Dir.rmdir` (`Errno::ENOTDIR`). It is now refused outright and `file.delete`
+  is named as the unlink path - following a link would delete a tree outside
+  the path the DELETE grant and the audit log describe.
+
 ## Unreleased - CI flake: git maintenance raced the spec's tmpdir cleanup (issue #292)
 
 - `git_apply_tool_spec` "rejects a hunk without file headers up front" failed
