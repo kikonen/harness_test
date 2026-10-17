@@ -107,7 +107,7 @@ class Task
   # Non-blocking poll: returns one message from the outbox, or nil after
   # the timeout elapses with no message available.
   def poll(timeout = DEFAULT_POLL_TIMEOUT)
-    @outbox.pop(false, timeout: timeout)
+    @outbox.pop(false, timeout:)
   rescue ThreadError
     nil
   end
@@ -143,7 +143,7 @@ class Task
   # Push a typed event onto the single event queue (the outbox). This is the
   # ONLY way task-thread code communicates output to the main thread.
   def push_event(type:, origin: nil, content: nil, **extra)
-    event = { type: type.to_sym, origin: origin, content: content }
+    event = { type: type.to_sym, origin:, content: }
     event.merge!(extra) unless extra.empty?
     @outbox << event
   end
@@ -176,7 +176,7 @@ class Task
     task = current
     return nil unless task
 
-    task.push_event(type: type, origin: origin, content: content)
+    task.push_event(type:, origin:, content:)
   end
 
   # Write lines as :text events on the active task's outbox. One event per
@@ -459,7 +459,7 @@ class Task
         # nothing to race for the keyboard; the Console wraps the task's streams
         # so output keeps its single-thread order.
         ui = UI::Console.new(stdout: task.ui.stdout, stdin: task.ui.stdin)
-        answer = dialog.perform_direct(ui: ui)
+        answer = dialog.perform_direct(ui:)
         task.respond(answer)
       ensure
         task.instance_variable_set(:@dialog_open, false)

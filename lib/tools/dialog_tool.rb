@@ -118,14 +118,14 @@ module Tools
 
         options << UI::Dialog::Option.new(
           title: opt_title,
-          value: value,
+          value:,
           description: raw["description"]
         )
       end
 
       choice = UI::Dialog.new(
-        title: title,
-        options: options,
+        title:,
+        options:,
         note: args["note"],
         free_text: true,
         free_text_prompt: args["free_text_prompt"],

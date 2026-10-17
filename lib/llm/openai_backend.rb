@@ -23,7 +23,7 @@ module LLM
     private
 
     def build_body(messages, tools)
-      body = { model: @options[:model], messages: messages }
+      body = { model: @options[:model], messages: }
 
       # Config owns the sampling values: send each key ONLY when set
       # (issue #215), so the server default applies to anything omitted.

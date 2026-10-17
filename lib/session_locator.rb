@@ -135,7 +135,7 @@ class SessionLocator
       data = JSON.parse(File.read(path), symbolize_names: true)
       {
         id:       File.basename(File.dirname(path)),
-        path:     path,
+        path:,
         saved_at: File.mtime(path),
         messages: (data[:messages] || []).size,
         files:    (data[:files] || []).size,

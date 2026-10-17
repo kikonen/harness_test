@@ -15,7 +15,7 @@ require_relative "task"
 module TaskRunner
   def run_on_task
     ui.puts
-    error, _task = Task.run(harness: harness, ui: ui) { |_t| yield }
+    error, _task = Task.run(harness:, ui:) { |_t| yield }
     ui.puts "  [task error] #{error}" if error
     ui.puts
   end

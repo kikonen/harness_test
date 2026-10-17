@@ -347,8 +347,8 @@ class FileList
 
     choice = UI::Dialog.new(
       title: "Access requested (#{verb}): #{shown}",
-      options: options,
-      note: note,
+      options:,
+      note:,
     ).show(ui: nil)
 
     # The user may attach a one-line reason to the CANCEL choice

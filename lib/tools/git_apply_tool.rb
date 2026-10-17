@@ -180,7 +180,7 @@ module Tools
         next unless File.file?(path)
 
         current = FileList.sha256(path)
-        cached  = @session.file_cache.digest(path, workdir: workdir)
+        cached  = @session.file_cache.digest(path, workdir:)
         next unless cached && current != cached
 
         shown = @file_list.display_path(path)
@@ -202,7 +202,7 @@ module Tools
         next unless File.file?(path)
 
         sha = FileList.sha256(path)
-        @session.file_cache.record(path, sha, workdir: workdir) if sha
+        @session.file_cache.record(path, sha, workdir:) if sha
       end
     end
 

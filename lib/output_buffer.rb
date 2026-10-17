@@ -49,7 +49,7 @@ class OutputBuffer
     origin = normalize(origin)
     last = nil
     parts.each do |part|
-      last = put(type: :text, origin: origin, content: part.to_s)
+      last = put(type: :text, origin:, content: part.to_s)
     end
     last
   end

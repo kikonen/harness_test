@@ -78,7 +78,7 @@ class Harness
     @options       = options
     @file_list     = file_list
     @locator       = SessionLocator.new(file_list.workdir)
-    @session       = Session.new(build_system_prompt, session_id: session_id)
+    @session       = Session.new(build_system_prompt, session_id:)
     if resume_data
       saved_id = resume_data[:session_id]
       if saved_id && saved_id != session_id
@@ -322,7 +322,7 @@ class Harness
       # in-loop compaction) cannot outlive it.
       @session_manager.request_spinner_detail
 
-      data    = @client.chat(messages, tools: tools)
+      data    = @client.chat(messages, tools:)
       message = data[:choices][0][:message]
 
       print_step_display(iteration, message) if message[:tool_calls]
@@ -412,7 +412,7 @@ class Harness
       return {
         reasoning: message[:reasoning],
         content:   message[:content],
-        stats:     stats
+        stats:
       }
     end
   end
