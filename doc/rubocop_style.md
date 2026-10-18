@@ -189,17 +189,23 @@ baseline (1149 baselined offenses kept firing on a clean tree). Removing
 
 ## Line endings, and what autocorrect does to them
 
-`Layout/EndOfLine: lf` is the honest rule even on a Windows checkout: `native`
-fires on all 131 inspected files there (native means CRLF) while `lf` is clean,
-because the tree is LF (`.gitattributes` `* text=auto eol=lf`, `core.autocrlf
-false`).
+`Layout/EndOfLine` is **disabled** (issue #318). The default style `native`
+means CRLF on a Windows checkout and fires on all 83 files of `lib/**/*.rb` +
+`harness.rb` there (measured with RuboCop 1.92.0; all 83 are LF on disk) - a cop
+whose idea of correct depends on the OS of whoever runs it cannot be a house
+rule. `EnforcedStyle: lf` is not the fix either: the tree deliberately allows
+CRLF files (`*.bat`, `*.cmd` are `eol=crlf` in `.gitattributes`), so `lf` would
+flag legitimately-CRLF files, and its autocorrect would rewrite them and fight
+`FileText`, which now owns the style of every file the model edits (a file keeps
+its OWN endings - `doc/file_editing_design.md`). Line endings are enforced at
+the git boundary (`.gitattributes` `* text=auto eol=lf`, `core.autocrlf false`)
+and at the edit boundary, not by a layout cop.
 
-Corollary: `rubocop -a` WRITES NATIVE ENDINGS, so a correction on this Windows
-tree turns files into CRLF on disk even though git normalizes them back to LF on
-commit. Convert the touched files back to LF after any `-a` run, or `EndOfLine:
-lf` stops meaning anything locally. `-a` also leaves trailing whitespace where it
-split an argument list - `Layout/TrailingWhitespace` (already on via the Layout
-department, 0 offenses) is what catches that residue.
+Corollary: `rubocop -a` WRITES NATIVE ENDINGS, and with the cop off nothing
+catches it - convert the touched files back to LF after any `-a` run and check
+`git diff --stat` for files that changed only in endings. `-a` also leaves
+trailing whitespace where it split an argument list - `Layout/TrailingWhitespace`
+(on via the Layout department, 0 offenses) is what catches that residue.
 
 ## Quotes
 

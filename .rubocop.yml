@@ -155,9 +155,13 @@ Layout/TrailingWhitespace:
   Enabled: true
 
 Layout/EndOfLine:
-  # native fires on all 131 files on a Windows checkout (native means CRLF
-  # there); the tree is LF (.gitattributes eol=lf, core.autocrlf false).
-  EnforcedStyle: lf
+  # Line endings are owned by .gitattributes (eol=lf) at the git boundary and
+  # by FileText at the edit boundary (a file keeps its OWN style). The default
+  # style 'native' means CRLF on Windows and fires on all 83 files of
+  # lib/ + harness.rb (all LF on disk) for an OS-dependent idea of correct;
+  # EnforcedStyle: lf instead would flag every legitimately CRLF file the
+  # tree allows (*.bat, *.cmd) and its autocorrect would fight FileText.
+  Enabled: false
 
 # Constants belong at the top of the class, not scattered between its methods.
 # The default ExpectedOrder also demands a public_class_methods / initializer
