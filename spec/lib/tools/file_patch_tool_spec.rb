@@ -201,10 +201,10 @@ RSpec.describe Tools::FilePatchTool do
       end
     end
 
-    it 'handles CRLF files and restores CRLF after patching' do
+    it 'keeps the CRLF bytes of a CRLF file (issue #318)' do
       Dir.mktmpdir do |dir|
         target = File.join(dir, 'crlf.txt')
-        File.write(target, "line1\r\nline2\r\nline3\r\n")
+        File.binwrite(target, "line1\r\nline2\r\nline3\r\n")
         list   = FileList.new(workdir: dir)
         list.add_file('crlf.txt', :rw)
         tool   = described_class.new(list)
@@ -221,7 +221,138 @@ RSpec.describe Tools::FilePatchTool do
 
         out = tool.execute('path' => 'crlf.txt', 'diff' => diff)
         expect(out).to start_with('ok: applied 1 hunk(s)')
-        expect(File.read(target)).to eq("line1\r\nline2-new\r\nline3\r\n")
+        # Asserted on BYTES: File.read translates them and hides the damage.
+        expect(File.binread(target)).to eq("line1\r\nline2-new\r\nline3\r\n")
+      end
+    end
+
+    it 'leaves an LF file as LF bytes (issue #318)' do
+      Dir.mktmpdir do |dir|
+        target = File.join(dir, 'lf.txt')
+        File.binwrite(target, "line1\nline2\nline3\n")
+        list   = FileList.new(workdir: dir)
+        list.add_file('lf.txt', :rw)
+        tool   = described_class.new(list)
+
+        diff = <<~DIFF
+          --- a/lf.txt
+          +++ b/lf.txt
+          @@ -1,3 +1,3 @@
+           line1
+          -line2
+          +line2-new
+           line3
+        DIFF
+
+        tool.execute('path' => 'lf.txt', 'diff' => diff)
+        expect(File.binread(target)).to eq("line1\nline2-new\nline3\n")
+      end
+    end
+
+    it 'repairs a doubled CR instead of amplifying it (issue #318)' do
+      Dir.mktmpdir do |dir|
+        target = File.join(dir, 'cr.txt')
+        File.binwrite(target, "line1\r\r\nline2\r\nline3\r\n")
+        list   = FileList.new(workdir: dir)
+        list.add_file('cr.txt', :rw)
+        tool   = described_class.new(list)
+
+        diff = <<~DIFF
+          --- a/cr.txt
+          +++ b/cr.txt
+          @@ -1,3 +1,3 @@
+           line1
+          -line2
+          +line2-new
+           line3
+        DIFF
+
+        out = tool.execute('path' => 'cr.txt', 'diff' => diff)
+        expect(out).to include('1 bare CR normalized to CRLF')
+        expect(File.binread(target)).to eq("line1\r\nline2-new\r\nline3\r\n")
+        expect(File.binread(target)).not_to include("\r\r\n")
+      end
+    end
+
+    it "repairs mixed endings to the file's majority style" do
+      Dir.mktmpdir do |dir|
+        target = File.join(dir, 'mixed.txt')
+        File.binwrite(target, "line1\r\nline2\r\nline3\n")
+        list   = FileList.new(workdir: dir)
+        list.add_file('mixed.txt', :rw)
+        tool   = described_class.new(list)
+
+        diff = <<~DIFF
+          --- a/mixed.txt
+          +++ b/mixed.txt
+          @@ -1,3 +1,3 @@
+           line1
+          -line2
+          +line2-new
+           line3
+        DIFF
+
+        out = tool.execute('path' => 'mixed.txt', 'diff' => diff)
+        expect(out).to include('mixed CRLF/LF normalized to CRLF')
+        expect(File.binread(target)).to eq("line1\r\nline2-new\r\nline3\r\n")
+      end
+    end
+
+    it 'keeps a trailing blank line (issue #318)' do
+      Dir.mktmpdir do |dir|
+        target = File.join(dir, 'trail.txt')
+        File.binwrite(target, "a\nb\n\n")
+        list   = FileList.new(workdir: dir)
+        list.add_file('trail.txt', :rw)
+        tool   = described_class.new(list)
+
+        diff = <<~DIFF
+          --- a/trail.txt
+          +++ b/trail.txt
+          @@ -1,2 +1,2 @@
+           a
+          -b
+          +B
+        DIFF
+
+        tool.execute('path' => 'trail.txt', 'diff' => diff)
+        expect(File.binread(target)).to eq("a\nB\n\n")
+      end
+    end
+
+    it 'keeps a missing final newline missing' do
+      Dir.mktmpdir do |dir|
+        target = File.join(dir, 'nofin.txt')
+        File.binwrite(target, "a\nb")
+        list   = FileList.new(workdir: dir)
+        list.add_file('nofin.txt', :rw)
+        tool   = described_class.new(list)
+
+        diff = <<~DIFF
+          --- a/nofin.txt
+          +++ b/nofin.txt
+          @@ -1,2 +1,2 @@
+           a
+          -b
+          +B
+        DIFF
+
+        tool.execute('path' => 'nofin.txt', 'diff' => diff)
+        expect(File.binread(target)).to eq("a\nB")
+      end
+    end
+
+    it 'refuses a file whose bytes are not valid UTF-8 instead of raising' do
+      Dir.mktmpdir do |dir|
+        target = File.join(dir, 'cp.txt')
+        File.binwrite(target, ['a', "\xE4", "b\n"].join.b)
+        list   = FileList.new(workdir: dir)
+        list.add_file('cp.txt', :rw)
+        tool   = described_class.new(list)
+
+        out = tool.execute('path' => 'cp.txt', 'diff' => "@@ -1,1 +1,1 @@\n-ab\n+AB\n")
+        expect(out).to start_with("error: 'cp.txt' is not valid UTF-8")
+        expect(File.binread(target)).to eq(['a', "\xE4", "b\n"].join.b)
       end
     end
 

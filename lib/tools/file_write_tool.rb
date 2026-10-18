@@ -2,8 +2,11 @@
 
 require_relative "../tool"
 require_relative "../file_list"
+require_relative "../file_text"
 require "fileutils"
 
+# Writes a COMPLETE file. An existing file keeps its own line-ending style (read
+# from its bytes); see FileText and doc/file_editing_design.md.
 module Tools
 
   class FileWriteTool < Tool
@@ -19,6 +22,8 @@ module Tools
         description: "Writes content to a file. " \
                      "Paths are relative to the harness working directory. " \
                      "The content must be the COMPLETE file content. " \
+                     "An existing file keeps its own line-ending style; content " \
+                     "carrying the other style is normalized to it. " \
                      "If the file may have been modified EXTERNALLY since you last read it " \
                      "(you can tell, e.g. from a git diff or another tool's output), re-read " \
                      "it with file.read first so the write is based on fresh content.",
@@ -61,7 +66,18 @@ module Tools
 
       dir = File.dirname(path)
       FileUtils.mkdir_p(dir) unless dir == "."
-      File.write(path, content)
+
+      # An EXISTING file keeps its own line-ending style (read from its bytes);
+      # a new file follows the content's majority style.
+      existing = File.file?(path) ? FileText.from_disk(path) : nil
+      model    = FileText.from_text(content)
+      separator = existing ? existing.separator : model.separator
+      notes = []
+      notes << FileText.repair_note(model, separator) if FileText.dirty?(model)
+      notes << "previous bytes were not valid UTF-8 and are now UTF-8" if existing&.lossy
+      note = notes.empty? ? "" : " (#{notes.join('; ')})"
+      Tool.puts "  [file.write] ! #{shown}#{note}" if notes.any?
+      FileText.write(path, model.text, separator)
 
       # issue #170: our own write refreshes the cache (the file is now in
       # the exact state we wrote it).
@@ -71,7 +87,7 @@ module Tools
       end
 
       Tool.puts "  [file.write] ✓ #{shown} (#{content.length} chars)"
-      "ok: wrote #{content.length} chars to #{shown}"
+      "ok: wrote #{content.length} chars to #{shown}#{note}"
     end
   end
 end
