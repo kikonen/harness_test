@@ -85,8 +85,8 @@ Keep this in mind:
 - Consent state is user-side harness state, never conversation state: it is
   never injected into the conversation chain.
 - Line endings: the harness normalizes to LF for LLM-facing operations
-  (read, search, patch matching) but preserves the file's original
-  line-ending style on write. Do not introduce mixed line endings.
+  (read, search, patch matching) but a file's own style is read from its BYTES
+  (a text-mode read erases it) and preserved on write: `doc/file_editing_design.md`.
 - Encoding: text from OUTSIDE the process (shell output, file reads,
   model-supplied tool arguments, git output, LLM bodies) is normalized once at
   each read boundary by `TextNormalizer`, which always returns valid UTF-8.

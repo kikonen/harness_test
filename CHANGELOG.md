@@ -7,6 +7,48 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - line endings decided from file bytes (issue #318)
+
+- `file.patch` detected a file's line-ending style with
+  `content.include?("\r\n")` on content read by `File.read` - which on Windows
+  has ALREADY translated every CRLF to LF, so the test was false for a genuine
+  CRLF file. A patch touching one line rewrote the whole file with the opposite
+  style while reporting `ok: applied 1 hunk(s)`, and `file.write` doubled
+  model-supplied CRLF (`"X\r\n"` reached disk as `"X\r\r\n"`).
+- Three further defects the same measurements exposed: `file.patch` RAISED
+  `ArgumentError: invalid byte sequence in UTF-8` on a cp1252 file (the file was
+  left intact, the call died); it DROPPED a trailing blank line
+  (`"a\nb\n\n"` -> `"a\r\nB\r\n"`); and a lone CR was AMPLIFIED - a file with 3
+  CRs came out with 4, because the old code appended `"\n"` to a line already
+  ending in a stray CR, so every patch deepened the damage.
+- New `lib/file_text.rb` is the byte boundary both editing tools now go
+  through: `binread` so the style is visible at all, majority-decided separator,
+  `binwrite` so nothing is translated on the way out. A bare CR is deleted
+  (converting it into a newline would invent a blank line and change the file's
+  line count); a CR-only file is its own style, not damage. Design and every
+  measurement: new `doc/file_editing_design.md`.
+- A repair is never silent: the tool result names what the source already
+  carried (`1 bare CR normalized to CRLF`, `mixed CRLF/LF normalized to LF`).
+  Plain LF text into a CRLF file is the NORMAL path (the model only ever sees LF)
+  and carries no note.
+- `file.patch` now REFUSES a file whose bytes are not valid UTF-8 instead of
+  raising: the model only ever sees the `?`-scrubbed view, so writing it back
+  would destroy bytes the harness never read correctly. `file.write` is a
+  complete rewrite the model asked for, so it proceeds and says so.
+- `Layout/EndOfLine` is set to `Enabled: false` with the reason recorded: the
+  default `native` fires on all 83 files of `lib/` + `harness.rb` on a Windows
+  checkout (all LF on disk) for an OS-dependent idea of correct, and
+  `EnforcedStyle: lf` - which doc/rubocop_style.md previously claimed - would
+  flag the CRLF files the tree deliberately allows (`*.bat`, `*.cmd`) and its
+  autocorrect would fight `FileText`. The old comment's "131 files" was the
+  whole inspected set, not the lib/+harness.rb set the number was about.
+- Spec rule that the old spec violated: a line-ending assertion must use
+  `binread`/`binwrite`. `file_patch_tool_spec.rb`'s CRLF case PASSED while the
+  file on disk was `CR CR LF`, because it asserted with `File.read` - the same
+  translation that hides the damage. Now asserted on bytes, plus LF-kept,
+  doubled-CR, mixed-majority, trailing-blank, missing-final-newline and
+  UTF-8-refusal cases, and a new `file_write_tool_spec.rb` (the tool had none).
+
 ## Unreleased - scratch areas split into tmp/scratch, tmp/keep and local/ (issue #317)
 
 - harness.md's single scratch rule ("a scratch subdir is removed when its PR
