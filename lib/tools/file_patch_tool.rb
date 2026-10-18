@@ -2,10 +2,12 @@
 
 require_relative "../tool"
 require_relative "../file_list"
+require_relative "../file_text"
 
 # Applies a standard unified diff patch to a file.
-# The model provides the file path and a unified diff; the patch is applied
-# to the file content and the result is written back.
+# The model provides the file path and a unified diff; the patch is applied to
+# LF-normalized content and written back with the file's OWN line endings (the
+# style is decided from the file's bytes - see FileText and doc/file_editing_design.md).
 #
 # Unified diff format (standard):
 #   --- a/path
@@ -63,6 +65,8 @@ module Tools
                      "Hunk line numbers are used as a hint - the hunk is located by matching its context lines, " \
                      "so small line-number errors are tolerated. " \
                      "Use this for targeted edits instead of rewriting the entire file with file.write. " \
+                     "Context lines are matched against LF-normalized content and the file is written back " \
+                     "with its own line endings. " \
                      "If the file may have been modified EXTERNALLY since you last read it, " \
                      "re-read it with file.read first so the patch applies to fresh content.",
         parameters: {
@@ -115,16 +119,19 @@ module Tools
         return "error: the diff contains no hunks (no @@ ... @@ sections)"
       end
 
-      content = File.read(path)
+      source = FileText.from_disk(path)
+      if source.lossy
+        Tool.puts "  [file.patch] ✗ #{shown} (file bytes are not valid UTF-8)"
+        return "error: '#{shown}' is not valid UTF-8, and this patch would rewrite those " \
+               "bytes as '?' replacements. Convert the file's encoding first."
+      end
 
-      # Detect and normalize line endings so context matching works
-      # regardless of whether the file uses CRLF (Windows) or LF.
-      # Also remember whether the file ends with a newline: Ruby's split
-      # drops trailing empty strings, so restore it after join.
-      trailing_nl = content.end_with?("\n")
-      crlf    = content.include?("\r\n")
-      content = content.gsub("\r\n", "\n") if crlf
-      lines   = content.split("\n")
+      # The model only ever sees LF text; the file's own style is decided from its
+      # bytes (see FileText), never from a text-mode read.
+      lines = source.text.split("\n", -1)
+      # split(-1) keeps every separator, so exactly one trailing empty element
+      # belongs to the final newline itself and must go.
+      lines.pop if source.trailing_newline && lines.last == ""
 
       # Apply hunks in reverse order so line numbers from earlier hunks
       # are not invalidated by later ones.
@@ -142,11 +149,11 @@ module Tools
       end
 
       new_content = lines.join("\n")
-      new_content += "\n" if trailing_nl
-      # Restore the original line-ending style.
-      new_content = new_content.gsub("\n", "\r\n") if crlf
+      new_content += "\n" if source.trailing_newline
+      FileText.write(path, new_content, source.separator)
 
-      File.write(path, new_content)
+      repaired = FileText.dirty?(source) ? " (#{FileText.repair_note(source)})" : ""
+      Tool.puts "  [file.patch] ! #{shown}#{repaired}" if FileText.dirty?(source)
 
       # issue #170: our own patch refreshes the cache (the file is now in
       # the exact state we wrote it).
@@ -156,7 +163,7 @@ module Tools
       end
 
       Tool.puts "  [file.patch] ✓ #{shown} (#{applied} hunk(s) applied)"
-      "ok: applied #{applied} hunk(s) to #{shown}"
+      "ok: applied #{applied} hunk(s) to #{shown}#{repaired}"
     end
 
     private
