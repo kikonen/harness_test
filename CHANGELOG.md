@@ -28,9 +28,9 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   `EmptyLinesAround{Class,Method,Block}Body`. `EmptyLinesAroundMethodBody` does
   NOT accept `EnforcedStyle` (rubocop warns on every run and ignores it) - a
   measurement taken with that setting on is meaningless.
-- `Layout/ClassStructure` with `ExpectedOrder` trimmed to constants-first (4
-  offenses; the default order demands arrangements this repo does not follow).
-  Its autocorrect is unsafe, so reordering stays a reviewed edit.
+- `Layout/ClassStructure` with `ExpectedOrder` trimmed to constants-first (3
+  offenses baselined; the default order would make it 12). Its autocorrect is
+  unsafe, so reordering stays a reviewed edit.
 - `Style/HashSyntax` with `EnforcedShorthandSyntax: always`: `tools: tools` ->
   `tools:`. 48 sites in `lib/` corrected outright (commit 528cf10).
 - Quotes flipped in its own commit (7d1dd32): 989 lines across 81 files (single
