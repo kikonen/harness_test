@@ -97,7 +97,8 @@ enabled: a guard clause glued to what follows it reads as trailing noise on the
 line above, which is where a wall of text starts.
 
 `EmptyLinesAround{Class,Block}Body` are pinned to `no_empty_lines` (the repo's
-practice: 162 / 202 offenses for the opposite style).
+practice: the `empty_lines` style would fire 162 times on ClassBody and 204 on
+BlockBody over `lib/` + `harness.rb`).
 `EmptyLinesAroundMethodBody` is plain `Enabled: true` - **it does not accept
 `EnforcedStyle`**, and rubocop warns on every run and ignores the setting, so a
 measurement made with that setting on is meaningless.
@@ -114,10 +115,11 @@ gain, so this remains a harness.md rule checked in review.
 `Layout/ClassStructure` with `ExpectedOrder` trimmed to
 `module_inclusion, constants, initializer, public_methods, private_methods`:
 constants belong at the top of the class, not scattered between its methods
-(4 offenses; the default order also demands a public_class_methods arrangement
-this repo does not follow, which would have added 9 more). Its autocorrect is
-UNSAFE - a constant read by an earlier method changes meaning - so reordering is
-a reviewed edit, never a blind `-a`.
+(3 offenses baselined; the default order also demands a public_class_methods
+arrangement this repo does not follow, which would make it 12). Its autocorrect
+is UNSAFE - a constant read by an earlier method changes meaning - so reordering
+is a reviewed edit, never a blind `-a`. The 4th offense, the constant sitting
+mid-class in `session_manager.rb`, was moved by the pilot reformat commit.
 
 ## Metrics department: off
 
@@ -139,9 +141,10 @@ zero arguments must reach the parent).
 
 Measured, the repo already followed this: all 62 `logger.*` calls parenthesised,
 zero bare; zero `super()`; six bare `super`. These cops lock in a habit rather
-than fix a defect (2 offenses in `lib/`: an optparse `separator ''` and a
-`yield`). `AllowedMethods` covers the calls Ruby itself writes without parens
-(`puts`, `print`, `p`, `warn`, `raise`, `exit`, `sleep`, `yield`, `emit_line`).
+than fix a defect (1 offense baselined: an optparse `separator ""` in `cli.rb`).
+`AllowedMethods` covers the calls Ruby itself writes without parens (`puts`,
+`print`, `p`, `warn`, `raise`, `exit`, `sleep`, `yield`, `emit_line`), which is
+why the config's `yield` entry never fires.
 
 ## Hash values: no `x: x` tautology
 
