@@ -324,6 +324,20 @@ RSpec.describe CLI do
       cli.run
     end
 
+    # issue #303: the palette this run renders with is a fact about the run,
+    # so it is named in the banner next to the consent posture.
+    it 'names the output palette and how to switch it' do
+      cli = build_cli
+      allow(cli).to receive(:get_command).and_return(nil)
+
+      expect(ui).to receive(:puts)
+        .with(/^Output palette: default \(\/palette <name> switches it\)/)
+        .ordered
+      expect(ui).to receive(:puts).at_least(:once)
+
+      cli.run
+    end
+
     it 'names YOLO with the disaster floor still asking' do
       cli = build_cli
       allow(cli).to receive(:get_command).and_return(nil)

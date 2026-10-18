@@ -14,6 +14,9 @@ module Commands
           /clear         Remove all grants from the list
           /yolo          Toggle the YOLO shell-consent posture (see Command
                          safety below); /yolo on|off|status also available
+          /palette       Show or switch the output palette (/palette <name>);
+                         colored output lines (issue #303); saved with the
+                         session (resume keeps it)
 
           /retry         Re-send the chain after a failed request; tool work
                          already done is kept, so the turn resumes from there

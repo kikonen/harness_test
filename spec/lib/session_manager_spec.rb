@@ -34,6 +34,8 @@ RSpec.describe SessionManager do
       # stub mirrors Harness#yolo? / yolo=.
       attr_writer :yolo
       def yolo?; @yolo == true; end
+      # issue #303: stub mirrors Harness#output_palette (save_session).
+      def output_palette = UI::Palette.fetch(nil)
 
       def initialize(session, client)
         @session = session
@@ -378,6 +380,24 @@ RSpec.describe SessionManager do
       end
     end
   end
+
+  # issue #303: the palette the user picked for this session travels with the
+  # save too (same treatment as the posture). Stored as its NAME, not as a
+  # color table, so the resume side can validate it against the palettes this
+  # build has. RESUME side: Harness#apply_resume_state, in harness_spec.rb.
+  describe 'output palette round trip (issue #303)' do
+    it 'saves the palette name' do
+      Dir.mktmpdir do |dir|
+        file_list = FileList.new([], workdir: dir)
+        manager   = described_class.new(harness, file_list)
+        session.add_user('hello')
+        manager.save_session
+        data = JSON.parse(File.read(manager.session_file_path(session.session_id)))
+
+        expect(data['output_palette']).to eq('default')
+      end
+    end
+  end
 end
 
 RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
@@ -410,6 +430,8 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       # issue #221: stub mirrors Harness#yolo? / yolo= (save/resume).
       attr_writer :yolo
       def yolo?; @yolo == true; end
+      # issue #303: stub mirrors Harness#output_palette (save_session).
+      def output_palette = UI::Palette.fetch(nil)
       def compact_recent_messages; 6; end
       def compact_auto_threshold; 88; end
       def compact_reserved_tokens; 8192; end

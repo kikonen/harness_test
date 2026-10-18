@@ -685,6 +685,12 @@ class SessionManager
     # state - the same treatment as active_model / param_overrides.
     data[:yolo] = @harness.yolo? == true
 
+    # issue #303: the rendered-output palette travels with the session too.
+    # A display preference the user chose for THIS session; resuming it must
+    # not drop back to the startup default. Stored as the palette NAME so the
+    # resume side can validate it against the palettes this build has.
+    data[:output_palette] = @harness.output_palette.name
+
     json = JSON.generate(data)
 
     File.write(path, json)

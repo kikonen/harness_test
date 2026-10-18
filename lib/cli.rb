@@ -271,6 +271,9 @@ class CLI
     # model and the session - and the disaster floor is named with it so
     # YOLO ON is never mistaken for "nothing asks".
     ui.puts "Command consent: #{consent_posture_display}"
+    # issue #303: same reasoning - which palette this run renders with is a
+    # fact about the run, and /palette is the way to change it mid-session.
+    ui.puts "Output palette: #{@harness.output_palette.name} (/palette <name> switches it)"
     ui.puts "Tip: type a plain message (no /) to send it directly to the model."
     ui.puts "Tip: Enter adds a newline; paste multiline text directly. The " \
          "submit key sends the whole buffer: Ctrl+Enter (Windows console, or " \
