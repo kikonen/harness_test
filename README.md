@@ -244,4 +244,6 @@ lib/tools/*.rb      # one file per tool
 config/system_prompt.txt                  # built-in system prompt
 doc/*.md            # design documents (why a subsystem is shaped as it is)
 doc/dev_environment.md  # which Ruby/git runs where (CI vs local), pinned
+doc/rubocop_style.md    # which style rules the cops enforce, and why the rest
+                        # are off (measured against rubocop 1.92)
 ```
