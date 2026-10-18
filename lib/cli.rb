@@ -112,6 +112,15 @@ class CLI
       end
       o.on("-v", "--verbose",
            "Show full prompt and raw response") { |v| opts[:verbose] = v }
+      o.on("-p NAME", "--palette NAME",
+           "Output palette for rendered lines (issue #303): " \
+           "#{UI::Palette.names.join(', ')}. 'none' is the same as --no-color.") do |v|
+        opts[:output_palette] = v
+      end
+      o.on("--no-color",
+           "Render every line in the terminal's own color (palette 'none').") do
+        opts[:output_palette] = "none"
+      end
       o.on("-h", "--help") { puts o; exit }
     end
     parser.parse!
@@ -201,6 +210,13 @@ class CLI
     # issue #226: max tool-loop iterations for a turn (config key).
     # nil here lets Harness fall back to its built-in default.
     opts[:max_tool_iterations] = config.max_tool_iterations
+
+    # issue #303: rendered-output palette. CLI flag > config > default palette.
+    # Validated HERE rather than when the Harness builds the palette, so a typo
+    # is reported before the model is contacted (and --list-sessions, which
+    # never builds a Harness, validates too).
+    opts[:output_palette] ||= config.output_palette_name
+    UI::Palette.validate!(opts[:output_palette]) unless opts[:output_palette].nil?
 
     # issue #198: opt-in double-Enter submit for the multiline editor
     # (remote setups where no submit key reaches the terminal). Applied

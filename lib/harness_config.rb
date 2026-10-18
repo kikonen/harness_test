@@ -97,6 +97,10 @@ class HarnessConfig
     @command_safety_auto_approve = data[:command_safety_auto_approve] == true
     @double_enter_submit = data[:double_enter_submit] == true
     @max_tool_iterations = int_or_nil(data[:max_tool_iterations])
+    # issue #303: rendered-output palette name (nil = the default palette).
+    # Validated by UI::Palette.validate! in the CLI, not here: this class does
+    # not know the palette list and must not start requiring the UI layer.
+    @output_palette = nonblank(data[:output_palette])
     # issue #221: YOLO is opt-in (default off) - the harness never assumes
     # the user wants consent removed. Bang confirmation defaults to ON
     # (today's behavior): the user has to explicitly turn it off.
@@ -228,6 +232,11 @@ class HarnessConfig
   # Max tool-loop iterations for one turn (or nil; the built-in default then applies).
   def max_tool_iterations
     @max_tool_iterations
+  end
+
+  # Rendered-output palette name (issue #303), or nil for the default one.
+  def output_palette_name
+    @output_palette
   end
 
   # Number of recent messages retained verbatim after compaction (or nil).

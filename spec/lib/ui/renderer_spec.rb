@@ -72,4 +72,40 @@ RSpec.describe UI::Renderer do
       expect(renderer.labeled?(:nope)).to eq(false)
     end
   end
+
+  describe 'with a palette (issue #303)' do
+    subject(:painted) do
+      described_class.new(palette: UI::Palette.fetch('default'))
+    end
+
+    it 'labels and colors the same line' do
+      expect(painted.line(type: :plan, content: 'read the tool')).to eq(
+        "\e[34mplan:  read the tool\e[0m"
+      )
+    end
+
+    it 'colors the label too, so the label is part of the role presentation' do
+      line = painted.line(type: :step_label, content: 3)
+
+      expect(line).to start_with("\e[38;5;240mstep 3")
+      expect(line).to end_with("\e[0m")
+    end
+
+    it 'leaves a role the palette does not color in the terminal color' do
+      expect(painted.line(type: :response, content: 'done')).to eq('model: done')
+    end
+
+    it 'colors verbatim roles the palette names (stats and system notes)' do
+      expect(painted.line(type: :stats, content: '  [3 iterations]')).to eq(
+        "\e[38;5;240m  [3 iterations]\e[0m"
+      )
+    end
+
+    it 'never bleeds a color past the line it painted' do
+      lines = %i[plan error warn step_label].map { |t| painted.line(type: t, content: 'x') }
+
+      expect(lines).to all(end_with("\e[0m"))
+      expect(lines.join("\n")).not_to include("\e[0m\e[")
+    end
+  end
 end

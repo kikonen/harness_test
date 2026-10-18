@@ -33,6 +33,10 @@ class Task
 
   attr_reader :thread, :buffer, :ui, :renderer
 
+  # Set by #run from the harness's configured palette; the constructor's own
+  # renderer colors nothing, which is what a Task without a harness needs.
+  attr_writer :renderer
+
   attr_accessor :note_editor
   attr_accessor :harness
 
@@ -41,9 +45,10 @@ class Task
     @inbox   = Thread::Queue.new   # main -> task (responses, stop)
     @outbox  = Thread::Queue.new   # task -> main (SINGLE event queue)
     @buffer  = OutputBuffer.new    # structured log (runner fills it)
-    # Patterns and (issue #303) colors are the renderer's decision, so the
-    # drain loop asks it instead of printing content as the emitter wrote it.
-    @renderer = UI::Renderer.new
+    # Patterns and colors are the renderer's decision, so the drain loop asks
+    # it instead of printing content as the emitter wrote it. #run replaces it
+    # with the harness's configured palette; this one colors nothing.
+    @renderer  = UI::Renderer.new
     @spinner = nil
     @thread  = nil
     # The drain loop rebuilds the spinner whenever the outbox empties;
@@ -249,6 +254,11 @@ class Task
     # The editor only PEEKS stdin: no reader thread, so nothing races for
     # the keyboard. Notes need a harness to land on (nil = unit test).
     task.harness = harness
+    # The palette is the harness's (issue #303). A harness double in a spec
+    # may not answer #output_palette, and a Task without a harness colors
+    # nothing, so the constructor's plain renderer stays unless one is given.
+    palette = harness.respond_to?(:output_palette) ? harness.output_palette : nil
+    task.renderer = UI::Renderer.new(palette:)
     task.note_editor = UI::Editor.new(ui.stdin) if ui.stdin && harness
     error_msg   = nil
     old_trap    = trap("INT") { raise Interrupt }

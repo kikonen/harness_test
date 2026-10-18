@@ -43,6 +43,16 @@ auto_save: true
 # (issue #226). Built-in default: 200.
 # max_tool_iterations: 200
 
+# Rendered-output palette (issue #303): colors the lines the output renderer
+# prints (step labels, plan/say lines, warn/error, stats). Available:
+# 'default' (colored), 'basic16' (16-color band only - no 256/truecolor),
+# 'none' (plain, what --no-color selects). Omit the key for 'default'.
+# The flag -p/--palette NAME overrides it. Terminal notes: the bright 90-97
+# band, background colors and bold are all unreadable on a light background,
+# so recessive lines use a real dark gray (38;5;240) - see
+# doc/output_rendering_design.md.
+# output_palette: default
+
 # Automatic retries for transient network errors.
 retry:
   count: 3                 # total attempts (1 initial + N-1 retries)

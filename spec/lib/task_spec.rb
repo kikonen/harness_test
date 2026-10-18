@@ -398,6 +398,31 @@ RSpec.describe Task do
   end
 
   describe 'Task.run (drain loop, issue #40)' do
+    # issue #303 / #146: color reaches the CONSOLE only. The buffer is the
+    # durable record a future renderer re-renders, so an escape byte in it
+    # would be baked in forever.
+    it 'colors the console line but stores plain role content in the buffer' do
+      io_out = StringIO.new
+      io_in  = StringIO.new
+      palette = UI::Palette.fetch('default')
+      harness = Class.new do
+        define_method(:output_palette) { palette }
+      end.new
+
+      _err, task = described_class.run(harness: harness,
+                                       ui: UI::Console.new(stdout: io_out, stdin: io_in)) do
+        Task.emit(:plan, origin: :harness, content: 'read the tool first')
+        Task.emit(:error, origin: :session_manager, content: 'hunk did not apply')
+      end
+
+      expect(io_out.string).to include("\e[34mplan:  read the tool first\e[0m")
+
+      stored = task.buffer.instance_variable_get(:@entries)
+      expect(stored.map(&:content)).to eq(['read the tool first', 'hunk did not apply'])
+      expect(stored.map(&:type)).to eq(%i[plan error])
+      expect(stored.any? { |e| e.content.to_s.include?("\e") }).to eq(false)
+    end
+
     it 'runs the block and drains all output' do
       io_out = StringIO.new
       io_in = StringIO.new

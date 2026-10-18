@@ -1,7 +1,7 @@
 # Output rendering: which layer owns the pattern
 
 Why an output event carries a ROLE and nothing else, and why the label (and
-from issue #303 on, the color) is decided by `lib/ui/renderer.rb` instead of
+the color, issue #303) is decided by `lib/ui/renderer.rb` instead of
 being written into the string by the emitter. Issues #303 / #146.
 
 ---
@@ -69,6 +69,38 @@ A type in neither list renders its content followed by ` [untyped:name]`.
 #146 asked for this explicitly: a new output kind must announce itself until a
 label is written for it, otherwise a silently unstyled line looks like a
 renderer bug.
+
+## Palettes (issue #303)
+
+`UI::Palette` maps a ROLE to SGR parameters; `nil` means "the terminal's own
+color". `UI::Renderer` composes them: label first, then color around the whole
+line with a trailing reset, so a color can never bleed into the next line.
+
+**Color lands on the console line only.** `store_and_render` asks the renderer
+for the line it prints and puts the ROLE CONTENT (no escape bytes, no label)
+into the `OutputBuffer`. That is load-bearing for #146: the buffer is the
+durable, re-renderable record, and a color baked into it is permanent.
+`spec/lib/task_spec.rb` asserts exactly this (console colored, buffer plain).
+
+Three named palettes, `default` in use unless told otherwise:
+
+| name | idea |
+| --- | --- |
+| `default` | hues from the dark 16-color band (30..36) + a real dark gray and a brown from the extended ramp |
+| `basic16` | same roles, but every code stays inside 30..37: for a terminal that renders only a 16-color palette, and recessive roles fall back to the terminal's own color |
+| `none` | nothing colored (`--no-color` selects it) |
+
+Resolution order is `-p/--palette NAME` > config `output_palette:` > `default`.
+The CLI validates the name at parse time, so a typo is reported before the
+model is contacted (`--list-sessions`, which never builds a Harness, validates
+too). `Harness#output_palette` resolves it ONCE at construction: the drain loop
+must not re-resolve a name per rendered line.
+
+**There is no tty probe.** On this setup a piped `$stdout.tty?` is false even
+when the user's terminal understands SGR (the spinner has printed raw
+`\e[2K` unconditionally since issue #125), so an auto-detecting gate would
+silently disable the feature in exactly the setup it was built for. The switch
+is explicit instead.
 
 ## Terminal measurements (measured on the owner's setup, light background)
 

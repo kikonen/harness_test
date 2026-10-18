@@ -99,6 +99,8 @@ bin/harness --continue                 # resume the newest saved session in this
 bin/harness --no-auto-save             # disable periodic auto-save at prompt boundaries
 bin/harness --system-file my.md        # override the system prompt
 bin/harness -v                         # verbose: full prompt + raw response in the log
+bin/harness -p basic16                 # output palette: default | basic16 | none
+bin/harness --no-color                 # same as -p none
 ```
 
 `bin/rspec` runs the harness's own test suite (rspec), from any directory.
