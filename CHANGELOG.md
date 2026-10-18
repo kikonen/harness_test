@@ -9,31 +9,46 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
 ## Unreleased - rubocop with loosened defaults (issue #302)
 
-- `rubocop` 1.92 added to the development group, `.rubocop.yml` written from
-  scratch with `DisabledByDefault: true`: only the mechanical house rules
-  harness.md already states are enforced (Layout, the paren/super/string/
-  frozen-literal Style cops, Lint, Naming). Metrics is off entirely - at the
-  default thresholds it fires 363 times on this tree, and class/method size is
-  review judgement, not a house rule.
-- Layout and the Style cops are scoped to `lib/`: formatting rules in specs buy
-  nothing (spec/**/* is where nearly every formatting offense lives). Lint and
-  Naming stay on everywhere - they catch real mistakes, not taste.
-- Continuation style is CONFIGURED rather than disabled, from a probe file the
-  user wrote (args hanging under the opening call = wrong; 2-space continuation
-  with the closing bracket on the last argument's line = right):
-  `with_fixed_indentation`, `MultilineMethodCallBraceLayout: same_line`,
-  `HashAlignment: EnforcedColonStyle: key`.
+- `rubocop` 1.92 in the development group, `.rubocop.yml` from scratch with
+  `DisabledByDefault: true` (37 cops named) plus a `.rubocop_todo.yml` baseline
+  (46 cops, 740 offenses): the mechanical house rules harness.md states are
+  enforced by CI instead of memorized per session. Design and the measured
+  numbers behind every choice - why Metrics is off (363), the continuation-style
+  probe table, the rules with NO cop behind them: new `doc/rubocop_style.md`.
+- Layout and the Style cops skip `spec/**/*` (formatting rules in test code buy
+  nothing); Lint and Naming stay on everywhere.
+- Continuation style CONFIGURED from a probe file the owner wrote (one
+  model-produced version of a call, one hand-written): the line-break cops
+  (`FirstMethodArgumentLineBreak`, `MultilineMethodArgumentLineBreaks`,
+  `FirstHashElementLineBreak`, `MultilineHashKeyLineBreaks`) plus
+  `MultilineHashBraceLayout: symmetrical` make the corrector turn the model's
+  shape into the hand-written one line for line. `HashAlignment: key` (no value
+  table padding).
+- Separators enabled: `EmptyLineAfterGuardClause`, `EmptyLineBetweenDefs`,
+  `EmptyLinesAround{Class,Method,Block}Body`. `EmptyLinesAroundMethodBody` does
+  NOT accept `EnforcedStyle` (rubocop warns on every run and ignores it) - a
+  measurement taken with that setting on is meaningless.
+- `Layout/ClassStructure` with `ExpectedOrder` trimmed to constants-first (4
+  offenses; the default order demands arrangements this repo does not follow).
+  Its autocorrect is unsafe, so reordering stays a reviewed edit.
+- `Style/HashSyntax` with `EnforcedShorthandSyntax: always`: `tools: tools` ->
+  `tools:`. 48 sites in `lib/` corrected outright (commit 528cf10).
+- Quotes flipped in its own commit (7d1dd32): 989 lines across 81 files (single
+  -> double), specs untouched.
+- `session_manager.rb` reformatted from the owner's own hand-tuned version
+  (blank lines between semantic blocks, the stray constant moved to the
+  constants block): 632 -> 725 lines, blank 81 -> 110, comment blocks glued to
+  code 16 -> 4, lines over 90 27 -> 11. Suite unchanged throughout (924 examples,
+  0 failures).
 - `inherit_mode: merge: [Exclude]` is load-bearing: without it an Exclude set in
-  `.rubocop.yml` REPLACES the per-cop Exclude lists `.rubocop_todo.yml`
-  generates, silently discarding the baseline (1149 baselined offenses kept
+  `.rubocop.yml` REPLACES the per-cop Exclude lists `.rubocop_todo.yml` generates
+  and the whole baseline is silently discarded (1149 baselined offenses were
   firing before this was found).
-- Quotes flipped repo-wide in one pass: 989 lines across 81 files of `lib/` +
-  `harness.rb`, single -> double (the repo's older single-quote habit is
-  dropped). Specs untouched. Suite unchanged: 924 examples, 0 failures.
-- `.rubocop_todo.yml` baselines what is left (633 offenses across 41 cops,
-  biggest: LineLength 193, HashAlignment 87, ArgumentAlignment 50) so new code
-  is held to the rules while old debt is cleaned step by step.
 - CI runs `bundle exec rubocop --format github` after rspec.
+- Two rules the config CANNOT express stay review judgement: a trailing
+  `if`/`unless` carrying one condition, and a blank line before a comment block
+  (161 such places in `lib/`; rubocop ships no cop for either). A custom cop was
+  considered and rejected as too much machinery.
 
 ## Unreleased - mid-run /resume builds a FRESH Harness (issue #280)
 

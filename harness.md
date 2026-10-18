@@ -25,21 +25,11 @@ Keep this in mind:
 
 ## Code Style
 
-- `.rubocop.yml` enforces the mechanical rules below (`bundle exec rubocop`,
-  also a CI step); where a rule here and the config disagree, the config is
-  what CI checks. Rules with no cop behind them (comment budget, trailing
-  `if` / `unless` shape) stay review judgement.
-- Ruby, `frozen_string_literal: true` magic comment at the top of every file.
-- 2-space indentation, no tabs.
-- Parentheses on a call that takes arguments (`some_method(a, b, c)`), never on
-  one that takes none; `super` stays bare unless suppressing the forwarding is
-  the point.
-- Double-quoted strings.
-- A trailing `if` / `unless` carries ONE condition: `x = foo(a, b, c) unless
-  conda && condb && condc` is unreadable - use a leading `if` for a chain.
-- Continuation lines of a wrapped call or hash get 2 spaces from the line that
-  opened them - never aligned under the opening parenthesis (deep alignment
-  pushes arguments to the right edge and grows on every rename).
+- `.rubocop.yml` enforces the mechanical house rules (indentation, continuation
+  shape, line length, frozen_string_literal, quotes, parens) - `bundle exec
+  rubocop`, also in CI; rationale: `doc/rubocop_style.md`. Do not restate here.
+- A trailing `if` / `unless` carries ONE condition - `foo(a, b, c) unless conda
+  && condb && condc` is unreadable - no cop checks it, review judgement.
 - Preserve existing formatting and style when editing - do not reformat
   untouched code.
 - Comments: hard budget, enforced by a delete test. A comment may say ONLY
