@@ -4,6 +4,7 @@
 # for it (single-thread I/O rule); design and protocol: doc/task_design.md
 
 require_relative "output_buffer"
+require_relative "ui/renderer"
 require_relative "ui/editor"
 require_relative "ui/spinner"
 
@@ -30,7 +31,7 @@ class Task
   # ([:__request__], answered on the main thread).
   CONTROL_EVENTS = %i[error_ctrl __request__].freeze
 
-  attr_reader :thread, :buffer, :ui
+  attr_reader :thread, :buffer, :ui, :renderer
 
   attr_accessor :note_editor
   attr_accessor :harness
@@ -40,6 +41,9 @@ class Task
     @inbox   = Thread::Queue.new   # main -> task (responses, stop)
     @outbox  = Thread::Queue.new   # task -> main (SINGLE event queue)
     @buffer  = OutputBuffer.new    # structured log (runner fills it)
+    # Patterns and (issue #303) colors are the renderer's decision, so the
+    # drain loop asks it instead of printing content as the emitter wrote it.
+    @renderer = UI::Renderer.new
     @spinner = nil
     @thread  = nil
     # The drain loop rebuilds the spinner whenever the outbox empties;
@@ -470,13 +474,15 @@ class Task
   end
 
   # Store one output event into the OutputBuffer (structured log) and render
-  # it to the task's console. The buffer is the durable record; the console
-  # is what the user sees right now. Both happen on the main thread, in
-  # outbox order.
+  # it to the task's console. The buffer keeps the ROLE CONTENT as the emitter
+  # stated it; the console line is UI::Renderer's decision (label, and from
+  # issue #303 the color) - so a future renderer can re-render the buffer
+  # another way without the record carrying today's formatting (issue #146).
   def self.store_and_render(task, msg)
     ui = task.ui
+    type = msg[:type]
 
-    case msg[:type]
+    case type
     when :spinner_detail
       payload = msg[:content].is_a?(Hash) ? msg[:content] : { message: msg[:content].to_s }
       # Ensure the spinner is alive for this re-point (it may have been
@@ -488,10 +494,13 @@ class Task
       task.record_spinner_detail(payload)
       task.buffer.put(type: :spinner_detail, origin: msg[:origin] || :task, content: msg[:content])
     when :text
-      ui.puts(msg[:content].to_s)
+      # A Task with a stand-in console (specs) may carry no renderer at all.
+      line = task.renderer&.line(type:, content: msg[:content]) || msg[:content].to_s
+      ui.puts(line)
       task.buffer.put(type: :text, origin: msg[:origin] || :task, content: msg[:content])
     else
-      ui.puts(msg[:content].to_s) if msg[:content]
+      line = task.renderer&.line(type:, content: msg[:content]) || msg[:content].to_s
+      ui.puts(line) if msg[:content]
       task.buffer.put(type: msg[:type], origin: msg[:origin] || :task, content: msg[:content])
     end
   end

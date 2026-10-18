@@ -142,9 +142,9 @@ class SessionManager
       @harness.logger.info("auto-save (#{tag})")
     rescue StandardError => e
       Task.emit(
-        :error,
+        :warn,
         origin: :session_manager,
-        content: "  [warning] auto-save failed: #{e.message}")
+        content: "auto-save failed: #{e.message}")
     end
   end
 
@@ -331,9 +331,9 @@ class SessionManager
     # turn - the next request will simply hit the server-side limit and the
     # existing context-exceeded recovery path applies.
     Task.emit(
-      :error,
+      :warn,
       origin: :session_manager,
-      content: "  [in-loop compaction failed: #{e.message} - continuing with the existing chain]")
+      content: "in-loop compaction failed: #{e.message} - keeping the existing chain")
     false
   end
 
@@ -400,14 +400,12 @@ class SessionManager
     log_response(reasoning: response[:reasoning], content: response[:content])
 
     reason = [response[:reasoning]].map { |m| m.to_s.strip }.reject(&:empty?).first
-    Task.emit(
-      :response,
-      origin: :session_manager,
-      content: ">>> #{reason} <<<") if reason
+    Task.emit(:plan, origin: :session_manager, content: reason) if reason
 
-    Task.emit(:response, origin: :session_manager, content: "=" * 80)
+    # ONE entry for the answer (issue #146): the "=" * 80 and "-" * 80 rules
+    # were two buffer entries whose only job was to frame a line the renderer
+    # can frame itself. The rules are gone; the model's text is the content.
     Task.emit(:response, origin: :session_manager, content: response[:content].to_s)
-    Task.emit(:response, origin: :session_manager, content: "-" * 80)
 
     @harness.print_stats(response[:stats])
 
@@ -454,9 +452,9 @@ class SessionManager
     end
   rescue => e
     Task.emit(
-      :error,
+      :warn,
       origin: :session_manager,
-      content: "  [auto-compact failed: #{e.message} - try /compact manually]")
+      content: "auto-compact failed: #{e.message} - try /compact manually")
   end
 
   # The effective auto-compact trigger for the active window (issue #151):
@@ -701,7 +699,7 @@ class SessionManager
   def restore_session_model(name)
     restore_active_model(name)
   rescue HarnessError => e
-    Task.emit(:error, origin: :session_manager, content: "  [error] #{e.message}")
+    Task.emit(:error, origin: :session_manager, content: e.message)
 
     default = default_model_name
     raise HarnessError,

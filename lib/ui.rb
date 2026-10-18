@@ -9,4 +9,5 @@ module UI; end
 require_relative "ui/console"
 require_relative "ui/editor"
 require_relative "ui/dialog"
+require_relative "ui/renderer"
 require_relative "ui/spinner"

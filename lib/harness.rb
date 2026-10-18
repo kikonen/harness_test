@@ -523,11 +523,15 @@ class Harness
     content = first_line.call(:content)
 
     tools  = message[:tool_calls].map { |tc| tc[:function][:name] }
-    Task.emit(:step, origin: :harness, content: "[step #{iteration}]")
-    Task.emit(:step, origin: :harness, content: ">>> #{reason} <<<") if reason
-    Task.emit(:step, origin: :harness, content: "||| #{content} |||") if content
-
-    Task.emit(:step, origin: :harness, content: "    -> #{tools.join(', ')}")
+    # One ROLE per event (issue #146): the old single :step type carried the
+    # label, the reasoning digest, the interstitial and the tool list, with the
+    # pattern baked into each string - a renderer could not tell them apart
+    # without regexing the markers back out. The number is emitted here, the
+    # word "step" belongs to UI::Renderer.
+    Task.emit(:step_label, origin: :harness, content: iteration)
+    Task.emit(:plan, origin: :harness, content: reason) if reason
+    Task.emit(:interstitial, origin: :harness, content:) if content
+    Task.emit(:tool_plan, origin: :harness, content: tools.join(", "))
   end
 
   def step_display_disabled?
