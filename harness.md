@@ -18,9 +18,9 @@ Keep this in mind:
 - If you change CLI commands or `/help` text, keep them in sync with the
   actual behavior in `lib/cli.rb`.
 - Scratch files go under `tmp/`, never in the project root - and under their
-  OWN subdir named for the issue they belong to (`tmp/271/`) - loose files there
-  become unattributable clutter. Delete-at-merge covers `tmp/scratch/` ONLY:
-  `tmp/keep/` holds analysis an OPEN issue quotes and goes when it closes.
+  OWN subdir named for the issue they belong to: `tmp/scratch/<issue>/`, or
+  `tmp/keep/<issue>/` for analysis an OPEN issue still quotes (kept until that
+  issue closes). Loose files in `tmp/` itself become unattributable clutter.
   `local/` is the owner's space (never write, never delete); `tmp/.gitkeep` stays.
 
 ## Code Style
