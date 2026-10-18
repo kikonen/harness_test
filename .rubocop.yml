@@ -25,6 +25,9 @@ AllCops:
     # Racc output; its own header says DO NOT MODIFY.
     - lib/shell_parser.rb
     - tmp/**/*
+    # The owner's own working files (sample data, notes) are not this project's
+    # code and are not held to its style.
+    - local/**/*
     - .harness/**/*
     - vendor/**/*
 

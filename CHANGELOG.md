@@ -7,6 +7,23 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - scratch areas split into tmp/scratch, tmp/keep and local/ (issue #317)
+
+- harness.md's single scratch rule ("a scratch subdir is removed when its PR
+  merges") was a licence to delete whatever a session found in `tmp/`: it did not
+  say WHICH directory it meant, so notes an OPEN issue still quoted were equally
+  in scope. The rule now names the zones.
+- `tmp/scratch/<issue>/` is transient model work (probe configs, `-a` copies,
+  one-run dumps) and keeps the delete-at-merge licence. `tmp/keep/<issue>/` holds
+  analysis an open issue still quotes and is removed only when that issue itself
+  closes. `local/` is the owner's own space (sample data, notes): the model may
+  read it, never writes there and never deletes from it.
+- Convention only, no code: nothing in `lib/` references `tmp/` (measured), so
+  the grant machinery is untouched. `.gitignore` gains `local/**`;
+  `AllCops: Exclude` gains `local/**/*` so the owner's Ruby files are not held to
+  this project's style; README's project layout names all three zones. harness.md
+  stays at 128 lines - the single bullet is rewritten, not added to.
+
 ## Unreleased - rubocop with loosened defaults (issue #302)
 
 - `rubocop` 1.92 in the development group, `.rubocop.yml` from scratch with
