@@ -351,6 +351,8 @@ RSpec.describe Harness do
 
   describe '#print_step_display (issue #131)' do
     let(:harness) { build_harness }
+    # The roles print_step_display is allowed to emit (issue #146).
+    let(:step_roles) { %i[step_label plan interstitial tool_plan] }
     # issue #40 follow-up: print_step_display emits typed events onto the
     # Task's outbox (single event queue) via Task.emit. Set the thread-local
     # task so Task.emit finds it, then drain the outbox to assert on the
@@ -387,9 +389,12 @@ RSpec.describe Harness do
       harness.send(:print_step_display, 3, message)
       lines = drained_lines
 
-      expect(lines).to include('[step 3]')
-      expect(lines).to include('>>> First I will inspect the spinner, then run the specs. <<<')
-      expect(lines).to include('    -> file.read, run.command')
+      # Content is the ROLE the emitter stated; the pattern ('step ',
+      # 'plan:  ') belongs to UI::Renderer, so it is asserted here on the
+      # rendered line (spec/lib/ui/renderer_spec.rb covers the labels).
+      expect(lines).to include(3)
+      expect(lines).to include('First I will inspect the spinner, then run the specs.')
+      expect(lines).to include('file.read, run.command')
     end
 
     it 'falls back to message content when there is no reasoning' do
@@ -398,8 +403,17 @@ RSpec.describe Harness do
       harness.send(:print_step_display, 2, msg)
       lines = drained_lines
 
-      expect(lines).to include('||| checking the test suite |||')
-      expect(lines).to include('    -> run.command')
+      expect(lines).to include('checking the test suite')
+      expect(lines).to include('run.command')
+    end
+
+    it 'emits the reasoning digest and the interstitial as distinct roles' do
+      harness.send(:print_step_display, 3, message)
+      rendered = drain_outbox(task).map { |m| UI::Renderer.new.line(type: m[:type], content: m[:content]) }
+
+      expect(rendered).to include('plan:  First I will inspect the spinner, then run the specs.')
+      expect(rendered).not_to include(a_string_matching(/>>>/))
+      expect(rendered).not_to include(a_string_matching(/\|\|\|/))
     end
 
     it 'prints only the tool line when there is no reasoning text at all' do
@@ -408,14 +422,14 @@ RSpec.describe Harness do
       harness.send(:print_step_display, 4, msg)
       lines = drained_lines
 
-      expect(lines).to include('    -> file.search')
+      expect(lines).to include('file.search')
     end
 
-    it 'emits only :step entries - no spinner pause/resume (drain loop owns that)' do
+    it 'emits only the step roles - no spinner pause/resume (drain loop owns that)' do
       harness.send(:print_step_display, 1, message)
 
       types = drain_outbox(task).map { |m| m[:type] }
-      expect(types).to all(eq(:step))
+      expect(types - step_roles).to be_empty
       expect(types).not_to include(:progress_pause, :progress_resume, :spinner_detail)
     end
 

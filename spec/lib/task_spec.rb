@@ -179,15 +179,15 @@ RSpec.describe Task do
       Thread.current[:harness_task] = task
 
       begin
-        Task.emit(:step, origin: :harness, content: '[step 1] did a thing')
+        Task.emit(:plan, origin: :harness, content: 'read the tool first')
       ensure
         Thread.current[:harness_task] = old_current
       end
 
       events = drain_outbox(task)
-      expect(events[0][:type]).to eq(:step)
+      expect(events[0][:type]).to eq(:plan)
       expect(events[0][:origin]).to eq(:harness)
-      expect(events[0][:content]).to eq('[step 1] did a thing')
+      expect(events[0][:content]).to eq('read the tool first')
     end
 
     it 'is a no-op when no task is active (nothing to drain for)' do
