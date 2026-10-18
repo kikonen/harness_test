@@ -296,7 +296,7 @@ RSpec.describe Harness do
   # Harness built under the settled id, so log, history and session dir all
   # carry that single identity and no rebind exists anywhere.
   describe 'startup resume via resume_data (issue #276)' do
-    def seed_saved_session(id, yolo: true)
+    def seed_saved_session(id, yolo: true, output_palette: 'basic16')
       FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
       data = {
         session_id:    id,
@@ -307,6 +307,7 @@ RSpec.describe Harness do
                         { role: 'user', content: 'earlier' },
                         { role: 'assistant', content: 'reply' }],
         yolo:          yolo,
+        output_palette: output_palette,
         workdir:       workdir
       }
       File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate(data))
@@ -333,6 +334,28 @@ RSpec.describe Harness do
       expect(harness.session_log_path).to include(id)
       # Only the resumed session's directory exists (issues #123 / #135).
       expect(saved_session_ids).to eq([id])
+    end
+
+    # issue #303: the palette the session was saved with is restored during
+    # construction, like the YOLO posture - a session the user set to 'none'
+    # must not come back colored.
+    it 'restores the output palette the session was saved with' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(id, output_palette: 'none')
+
+      harness = build_harness(session_id: id, resume_data: saved_data(id),
+                              output_palette: 'default')
+
+      expect(harness.output_palette.name).to eq('none')
+    end
+
+    it 'falls back to the default palette when the stored name no longer exists' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(id, output_palette: 'crayola')
+
+      harness = build_harness(session_id: id, resume_data: saved_data(id))
+
+      expect(harness.output_palette.name).to eq('default')
     end
 
     it 'refuses a session file whose stored id is not the one it lives under' do

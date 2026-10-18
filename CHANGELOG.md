@@ -37,6 +37,22 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   16-color band has NO way to de-emphasize a line. Recessive roles therefore use
   a real dark gray (`38;5;240`) and warnings a brown (`38;5;130`). Full list in
   `doc/output_rendering_design.md`.
+- New `/palette` command (`/palette`, `/palette status`, `/palette <name>`):
+  switches the palette mid-session and acks with the new label PLUS a sample
+  line rendered through the same `UI::Renderer` the drain loop uses, so the
+  change is visible without starting a turn. It says plainly that it is
+  effective from the NEXT turn - a running `Task` built its renderer already at
+  `Task.run`. Validation lives in `Harness#output_palette=`, not in the
+  command, so CLI flag, config key, `/palette` and resume all go through one
+  name check.
+- The palette is saved with the session as its NAME and restored during
+  construction (`apply_resume_state`), like `active_model` / `param_overrides` /
+  `yolo`: a session the user set to `none` must not come back colored. A stored
+  name this build does not have falls back to the default palette instead of
+  failing the resume - a name the USER typed is validated strictly, a name read
+  from a file only has to be usable.
+- The startup banner names the palette for the same reason it names the consent
+  posture (issue #221's rule): it is a fact about how this run renders.
 - No tty probe: a piped `$stdout.tty?` is false on this setup even though the
   terminal understands SGR (the spinner has printed raw `\e[2K` unconditionally
   since #125), so the switch is explicit - `-p/--palette NAME`, `--no-color`, or

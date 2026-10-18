@@ -96,7 +96,7 @@ class Harness
     @session_manager = SessionManager.new(self, file_list)
     @command_safety_auto_approve = options[:command_safety_auto_approve] == true
     @yolo = options[:yolo] == true
-    @output_palette = UI::Palette.fetch(options[:output_palette])
+    self.output_palette = options[:output_palette]
     apply_resume_state(resume_data) if resume_data
   end
 
@@ -185,6 +185,16 @@ class Harness
   # paints nothing.
   def output_palette
     @output_palette
+  end
+
+  # /palette switches it mid-session. Resolved and validated HERE, not in the
+  # command, so every route (CLI flag, config key, /palette, resume) goes
+  # through the same name check. options keeps the name so a later rebuild of
+  # the Harness (a mid-run /resume) reproduces the choice.
+  def output_palette=(name)
+    palette = UI::Palette.fetch(name)
+    @output_palette = palette
+    options[:output_palette] = palette.name
   end
 
   def command_safety_check
@@ -590,5 +600,12 @@ class Harness
     @session_manager.param_overrides.restore!
     self.yolo = data[:yolo] == true
     logger.info("yolo posture restored: #{yolo? ? 'ON' : 'OFF'}")
+    # issue #303: the palette the session was saved with. Unknown names are
+    # NOT fatal here (a session saved by another build may name a palette this
+    # one does not have) - HarnessConfig/CLI validate a name the user typed,
+    # a stored name only has to be usable.
+    restored = UI::Palette.names.include?(data[:output_palette].to_s) ? data[:output_palette] : nil
+    self.output_palette = restored
+    logger.info("output palette restored: #{output_palette.name}")
   end
 end

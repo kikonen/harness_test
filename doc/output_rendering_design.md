@@ -96,6 +96,24 @@ model is contacted (`--list-sessions`, which never builds a Harness, validates
 too). `Harness#output_palette` resolves it ONCE at construction: the drain loop
 must not re-resolve a name per rendered line.
 
+### Switching it mid-session: `/palette`
+
+`/palette` reports the current palette and its colored roles; `/palette <name>`
+switches it for the rest of the session. The name is validated in
+`Harness#output_palette=`, not in the command, so every route (CLI flag, config
+key, `/palette`, resume) goes through the same check, and `options` keeps the
+name so a mid-run Harness rebuild reproduces it.
+
+The switch takes effect FROM THE NEXT TURN: a Task builds its `UI::Renderer`
+once at `Task#run`, so a turn already draining keeps the palette it started
+with. The command prints a sample line through the same renderer to make the
+change visible at once.
+
+The choice is saved with the session as the palette NAME (never the SGR codes)
+and restored on resume; a stored name this build does not have falls back to
+`default` instead of raising, because only a name the user typed has to be
+valid, whereas a stored one only has to be usable.
+
 **There is no tty probe.** On this setup a piped `$stdout.tty?` is false even
 when the user's terminal understands SGR (the spinner has printed raw
 `\e[2K` unconditionally since issue #125), so an auto-detecting gate would

@@ -103,6 +103,9 @@ bin/harness -p basic16                 # output palette: default | basic16 | non
 bin/harness --no-color                 # same as -p none
 ```
 
+`/palette` shows or switches the output palette during a run; the choice is
+saved with the session, so a resumed session keeps it.
+
 `bin/rspec` runs the harness's own test suite (rspec), from any directory.
 
 Type a plain message to send it to the model. Lines starting with `/` are

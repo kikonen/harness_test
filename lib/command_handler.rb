@@ -27,6 +27,7 @@ require_relative "commands/param_command"
 require_relative "commands/help_command"
 require_relative "commands/exit_command"
 require_relative "commands/yolo_command"
+require_relative "commands/palette_command"
 
 # Thin dispatcher: checks if input starts with "/", extracts the first word,
 # looks up the command class in a registry map, and delegates.
@@ -59,6 +60,7 @@ class CommandHandler
     "help"          => Commands::HelpCommand,
     "exit"          => Commands::ExitCommand,
     "yolo"          => Commands::YoloCommand,
+    "palette"       => Commands::PaletteCommand,
   }.freeze
 
   def initialize(
