@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "palette"
+
 # Renders one output entry to a console line. The PATTERN (the label, and from
 # issue #303 on the color) belongs to the renderer, not to the emitter: a
 # sender states one role's content and this class decides how the user sees it.
@@ -25,9 +27,28 @@ module UI
     # those prefixes here is the continuation of issue #146.
     VERBATIM = %i[system text stats compact spinner_detail].freeze
 
+    attr_reader :palette
+
+    # palette: a UI::Palette, or nil to render without color (a Task with no
+    # harness: specs, a bare console).
+    def initialize(palette: nil)
+      @palette = palette
+    end
+
     def line(type:, content:)
       type = type.to_sym
-      return content.to_s if VERBATIM.include?(type)
+      paint(type, labeled(type, content.to_s))
+    end
+
+    def labeled?(type)
+      type = type.to_sym
+      !VERBATIM.include?(type) && LABELS.key?(type)
+    end
+
+    private
+
+    def labeled(type, content)
+      return content if VERBATIM.include?(type)
 
       label = LABELS[type]
       # An entry whose type is in neither list is a MISSING type: render it,
@@ -37,9 +58,8 @@ module UI
       "#{label}#{content}"
     end
 
-    def labeled?(type)
-      type = type.to_sym
-      !VERBATIM.include?(type) && LABELS.key?(type)
+    def paint(type, text)
+      palette.nil? ? text : palette.paint(type, text)
     end
   end
 end

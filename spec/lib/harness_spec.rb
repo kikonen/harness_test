@@ -728,6 +728,24 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #303: the rendered-output palette is resolved once, at construction,
+  # so the drain loop never re-resolves a name per line.
+  describe '#output_palette (issue #303)' do
+    it 'resolves to the default palette when the option is absent' do
+      expect(build_harness.output_palette.name).to eq('default')
+    end
+
+    it 'resolves a configured name to that palette' do
+      expect(build_harness(output_palette: 'basic16').output_palette.name).to eq('basic16')
+      expect(build_harness(output_palette: 'none').output_palette.name).to eq('none')
+    end
+
+    it 'rejects an unknown name at construction, before any LLM call' do
+      expect { build_harness(output_palette: 'crayola') }
+        .to raise_error(HarnessError, /unknown output palette/)
+    end
+  end
+
   # issue #224 follow-up: the session-level command consent posture
   # (MANUAL / AUTO-APPROVE), toggled live with Ctrl+A and always visible
   # in the spinner via the mode badge.

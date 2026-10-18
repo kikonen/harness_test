@@ -7,6 +7,43 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - output roles, UI::Renderer, and named palettes (issue #303, first step of #146)
+
+- `Harness#print_step_display` emitted ONE type (`:step`) for four roles and
+  baked the pattern into every string (`"[step N]"`, `">>> reason <<<"`,
+  `"||| content |||"`, `"    -> tools"`). Measured while prototyping the color
+  layer: the only way a renderer could color `plan` differently from `tools` was
+  to REGEX the markers back out of the content. So the roles are real event
+  types now - `:step_label` (the number), `:plan`, `:interstitial`,
+  `:tool_plan` - and no marker string exists anywhere in the buffer.
+- New `lib/ui/renderer.rb` owns the pattern: labels replace the markers, an
+  unknown type renders `content [untyped:name]` loudly (#146 asked for exactly
+  this), and `VERBATIM` names the roles whose prefix/indent an emitter still
+  owns (`:text`, `:system`, `:stats`, `:compact`) - that list IS the remaining
+  scope of #146, written down instead of implied.
+- The response block's `"=" * 80` / `"-" * 80` decoration entries are gone:
+  three buffer entries became one and the framing moved to the renderer.
+- Three compaction / auto-save failures move `:error` -> `:warn`: they cost
+  bookkeeping, not the turn, and the alert color on them reads as a broken turn.
+- New `lib/ui/palette.rb`: three named palettes (`default` in use, `basic16`
+  for a 16-color-only terminal, `none` = plain). `store_and_render` asks the
+  renderer for the CONSOLE line and stores the plain role content in the
+  OutputBuffer - a color baked into the durable record would be permanent, and
+  #146's whole point is re-rendering that record. Asserted directly in
+  `spec/lib/task_spec.rb`.
+- Colors come from the owner's terminal measurements, not from convention: the
+  bright 90-97 band, background colors and bold are unreadable on a light
+  background, and 90 (dim) is indistinguishable from 2 (faint) there, so the
+  16-color band has NO way to de-emphasize a line. Recessive roles therefore use
+  a real dark gray (`38;5;240`) and warnings a brown (`38;5;130`). Full list in
+  `doc/output_rendering_design.md`.
+- No tty probe: a piped `$stdout.tty?` is false on this setup even though the
+  terminal understands SGR (the spinner has printed raw `\e[2K` unconditionally
+  since #125), so the switch is explicit - `-p/--palette NAME`, `--no-color`, or
+  the config `output_palette:` key, validated at CLI parse time so a typo is
+  reported before the model is contacted. `Harness#output_palette` resolves it
+  once at construction, never per rendered line.
+
 ## Unreleased - line endings decided from file bytes (issue #318)
 
 - `file.patch` detected a file's line-ending style with

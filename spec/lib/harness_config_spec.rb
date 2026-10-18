@@ -86,6 +86,24 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  describe '#output_palette_name (issue #303)' do
+    it 'defaults to nil when the key is absent (the default palette applies)' do
+      expect(described_class.new({}).output_palette_name).to be_nil
+    end
+
+    it 'reads the output_palette key as a name' do
+      expect(described_class.new(output_palette: 'basic16').output_palette_name).to eq('basic16')
+    end
+
+    it 'treats a blank value as absent' do
+      expect(described_class.new(output_palette: '   ').output_palette_name).to be_nil
+    end
+
+    it 'mentions the key in the default template' do
+      expect(template).to include('output_palette')
+    end
+  end
+
   describe '#system_prompt_file (issue #223)' do
     it 'defaults to nil when the key is absent (built-in default file is used)' do
       expect(described_class.new({}).system_prompt_file).to be_nil

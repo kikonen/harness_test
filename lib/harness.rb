@@ -96,6 +96,7 @@ class Harness
     @session_manager = SessionManager.new(self, file_list)
     @command_safety_auto_approve = options[:command_safety_auto_approve] == true
     @yolo = options[:yolo] == true
+    @output_palette = UI::Palette.fetch(options[:output_palette])
     apply_resume_state(resume_data) if resume_data
   end
 
@@ -177,6 +178,13 @@ class Harness
 
   def max_tool_iterations
     options[:max_tool_iterations] || MAX_TOOL_ITERATIONS
+  end
+
+  # The rendered-output palette for this run (issue #303). Always a
+  # UI::Palette: an absent option resolves to the default one, and 'none'
+  # paints nothing.
+  def output_palette
+    @output_palette
   end
 
   def command_safety_check
