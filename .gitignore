@@ -4,5 +4,6 @@
 .emacs*
 tmp/**
 !tmp/.gitkeep
+local/**
 *_copy.rb
 .harness/**

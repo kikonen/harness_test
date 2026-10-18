@@ -241,6 +241,12 @@ lib/shell_tokenizer.rb  # StringScanner lexer for shell commands
 lib/shell_parser.y  # Racc grammar source (regenerate .rb with racc)
 lib/command_handler.rb + lib/commands/*.rb  # one class per /command
 lib/tools/*.rb      # one file per tool
+tmp/scratch/<n>/    # transient model scratch (probes, -a copies, dumps); deleted
+                    # when its PR merges
+tmp/keep/<n>/       # measurements an OPEN issue #<n> still quotes; kept until
+                    # that issue closes
+local/              # the owner's own working files (sample data, notes): the
+                    # model may read them, never writes or deletes there
 config/system_prompt.txt                  # built-in system prompt
 doc/*.md            # design documents (why a subsystem is shaped as it is)
 doc/dev_environment.md  # which Ruby/git runs where (CI vs local), pinned
