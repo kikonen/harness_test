@@ -13,6 +13,13 @@ module Commands
   # Output lines go through TaskRunner#emit_line (the event queue), never
   # straight to the stream.
   class CompactCommand < Command
+    HELP = CommandHelp.new(
+      usage: "compact",
+      summary: "Summarize the conversation to free context window space (an " \
+               "LLM round: reports the message and context size before/after)",
+      group: :session,
+      see_also: %w[ctx session conversation])
+
     def handle(_args)
       run_on_task do |_t|
         result = @harness.session_manager.compact_session

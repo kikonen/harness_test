@@ -278,7 +278,7 @@ class CLI
     ui.puts "Tip: Enter adds a newline; paste multiline text directly. The " \
          "submit key sends the whole buffer: Ctrl+Enter (Windows console, or " \
          "to a remote host via Windows Terminal) or Alt/AltGr+Enter (Unix " \
-         "terminal). See /help for details."
+         "terminal). See /help input for details."
     ui.puts "Tip: a line starting with ! runs a shell command locally (not sent " \
          "to the model)."
     ui.puts "Tip: a line starting with / is a command (executed immediately)."
@@ -286,7 +286,7 @@ class CLI
     # any keypress while the model works opens the note editor (see /help).
     ui.puts "Tip: type a note while the model is working to steer it mid-turn " \
          "(Enter = newline, submit key sends the whole block as one note; " \
-         "no Ctrl+C; see /help)."
+         "no Ctrl+C; see /help notes)."
     ui.puts
 
     begin

@@ -12,6 +12,13 @@ module Commands
   # main thread broke that rule: no spinner was driven and any dialog
   # blocked the console, so the log moved but the console looked stuck.
   class RetryCommand < Command
+    HELP = CommandHelp.new(
+      usage: "retry",
+      summary: "Re-send the message chain after a failed request. Tool work " \
+        "already done is kept, so the turn resumes from exactly there",
+      group: :session,
+      see_also: %w[conversation session saving])
+
     def handle(_args)
       run_on_task do |_t|
         @harness.session_manager.retry

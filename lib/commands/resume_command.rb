@@ -13,6 +13,13 @@ module Commands
   # object's logger, history file and options one by one is what made the
   # derived resources chaseable (issues #113 / #119 / #276).
   class ResumeCommand < Command
+    HELP = CommandHelp.new(
+      usage: "resume <id>",
+      summary: "Restore a saved session: the whole run is rebuilt under that " \
+        "id (conversation, grants, log and history file)",
+      group: :session,
+      see_also: %w[sessions save saving])
+
     def handle(args)
       id = args.strip
       if id.empty?

@@ -24,6 +24,14 @@ module Commands
   # The state is persisted with the session (SessionManager#save_session),
   # so a resumed session keeps the posture the user chose.
   class YoloCommand < Command
+    HELP = CommandHelp.new(
+      usage: "yolo [on|off|status]",
+      summary: "Toggle the YOLO shell-consent posture for run.command (saved " \
+               "with the session). The disaster denylist keeps asking",
+      group: :access,
+      forms: ["yolo", "yolo on", "yolo off", "yolo status"],
+      see_also: %w[consent shell grant])
+
     def handle(args)
       case args.to_s.strip.downcase
       when "status"

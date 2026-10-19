@@ -14,6 +14,19 @@ module Commands
   # Values: 'off' (reasoning_effort: use the server default / no reasoning),
   # 'default' (reset), or a number/word parsed to the parameter's type.
   class ParamCommand < Command
+    HELP = CommandHelp.new(
+      usage: "param [key [value]]",
+      summary: "List, show, override or reset a model parameter for this " \
+        "session (value: a number/word, \"off\", or \"default\")",
+      group: :model,
+      forms: [
+        "param",
+        "param <key>",
+        "param <key> <value>",
+        "param <key> default"
+      ],
+      see_also: %w[model models])
+
     def handle(args)
       args  = args.strip
       words = args.split(/\s+/).reject(&:empty?)

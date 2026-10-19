@@ -7,6 +7,14 @@ module Commands
   # /model        - show the currently active model and its parameters
   #                 (issue #219: every parameter plus the session overrides).
   class ModelCommand < Command
+    HELP = CommandHelp.new(
+      usage: "model [name]",
+      summary: "Show the active model (with every parameter and its session " \
+               "override), or switch it for this run",
+      group: :model,
+      forms: ["model", "model <name>"],
+      see_also: %w[models param])
+
     def handle(args)
       name = args.strip
       if name.empty?
