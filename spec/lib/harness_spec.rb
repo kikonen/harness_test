@@ -663,7 +663,9 @@ RSpec.describe Harness do
         Thread.current[:harness_task] = old_current
       end
 
-      expect(drained_lines(task)).to include('  [note] sent to model')
+      # The ack is a STATUS event: content is the message, the bracket label
+      # is the origin and UI::Renderer supplies the indent and the bracket.
+      expect(drained_lines(task)).to include('sent to model')
     end
 
     it 'shows no "sent to model" ack when there is no note' do
@@ -677,7 +679,7 @@ RSpec.describe Harness do
         Thread.current[:harness_task] = old_current
       end
 
-      expect(drained_lines(task)).not_to include('  [note] sent to model')
+      expect(drained_lines(task)).not_to include('sent to model')
     end
   end
 

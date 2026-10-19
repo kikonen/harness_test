@@ -54,12 +54,12 @@ module Tools
       end.sort
 
       if matches.empty?
-        Tool.puts "  [file.list] (no files match '#{pattern}')"
+        status(:fail, "(no files match '#{pattern}')")
         return "no files match '#{pattern}' under #{@file_list.workdir}"
       end
 
       shown = matches.first(MAX_RESULTS).map { |p| @file_list.display_path(p) }
-      Tool.puts "  [file.list] #{matches.size} file(s) match '#{pattern}'"
+      status(:info, "#{matches.size} file(s) match '#{pattern}'")
 
       result = shown.map { |p| "- #{p}" }.join("\n")
       if matches.size > MAX_RESULTS

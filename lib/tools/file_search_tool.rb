@@ -105,12 +105,12 @@ module Tools
       end
 
       if matches.empty?
-        Tool.puts "  [file.search] no matches for /#{pattern_str}/"
+        status(:fail, "no matches for /#{pattern_str}/")
         return "no matches for /#{pattern_str}/"
       end
 
       shown_matches = matches.first(MAX_RESULTS)
-      Tool.puts "  [file.search] #{matches.size} match(es) for /#{pattern_str}/"
+      status(:info, "#{matches.size} match(es) for /#{pattern_str}/")
 
       result = shown_matches.map do |m|
         if context > 0

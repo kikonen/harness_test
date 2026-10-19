@@ -149,26 +149,36 @@ RSpec.describe Task do
     end
   end
 
-  describe 'Tool.puts (tools push onto the active task outbox)' do
-    it 'pushes a :text event with origin :tool' do
+  # Tool.puts is gone (issue #146): a status emitter states a VERDICT and the
+  # bracket label, and UI::Renderer builds the line from them.
+  describe 'Tool#status (tools push a verdict event onto the active task outbox)' do
+    it 'pushes the verdict type with the tool name as origin' do
       task = described_class.new { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
+      tool = Class.new(Tool) do
+        def initialize
+          super(name: 'test.tool', description: 'spec tool', parameters: {})
+        end
+      end.new
 
       begin
-        Tool.puts "  [test.tool] ok"
+        tool.status(:ok, 'ok')
       ensure
         Thread.current[:harness_task] = old_current
       end
 
       events = drain_outbox(task)
-      expect(events[0][:type]).to eq(:text)
-      expect(events[0][:origin]).to eq(:tool)
-      expect(events[0][:content]).to eq("  [test.tool] ok")
+      expect(events[0][:type]).to eq(:status_ok)
+      expect(events[0][:origin]).to eq('test.tool')
+      expect(events[0][:content]).to eq('ok')
+      expect(UI::Renderer.new.line(**events[0].slice(:type, :content, :origin))).to eq(
+        '  [test.tool] ✓ ok'
+      )
     end
 
     it 'is a no-op when no task is active (CLI owns main-thread output)' do
-      expect { Tool.puts "  [test.tool] ok" }.not_to raise_error
+      expect { Tool.push_status(label: 'test.tool', verdict: :ok, message: 'ok') }.not_to raise_error
     end
   end
 
@@ -421,6 +431,35 @@ RSpec.describe Task do
       expect(stored.map(&:content)).to eq(['read the tool first', 'hunk did not apply'])
       expect(stored.map(&:type)).to eq(%i[plan error])
       expect(stored.any? { |e| e.content.to_s.include?("\e") }).to eq(false)
+    end
+
+    # A multi-line status message is ONE buffer entry but MANY console lines:
+    # the gutter and the closing rule are renderer output, never record bytes.
+    it 'renders a multi-line status entry with a gutter but stores one plain entry' do
+      io_out = StringIO.new
+      io_in  = StringIO.new
+      message = "ruby -e '\nputs 1\nputs 2\n'"
+
+      _err, task = described_class.run(harness: nil,
+                                       ui: UI::Console.new(stdout: io_out, stdin: io_in)) do
+        Tool.push_status(label: 'run.command', verdict: :ok, message:)
+      end
+
+      expect(io_out.string.lines.map(&:chomp)).to eq(
+        ["  [run.command] ✓ ruby -e '",
+         '  | puts 1',
+         '  | puts 2',
+         "  | '",
+         '  ------------']
+      )
+
+      stored = task.buffer.instance_variable_get(:@entries)
+      expect(stored.size).to eq(1)
+      expect(stored.first.type).to eq(:status_ok)
+      # OutputBuffer#normalize turns every origin into a symbol, so the bracket
+      # label travels as :"run.command" and the renderer interpolates it back.
+      expect(stored.first.origin).to eq(:'run.command')
+      expect(stored.first.content).to eq(message)
     end
 
     it 'runs the block and drains all output' do

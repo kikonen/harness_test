@@ -106,6 +106,10 @@ bin/harness --no-color                 # same as -p none
 `/palette` shows or switches the output palette during a run; the choice is
 saved with the session, so a resumed session keeps it.
 
+Rendered output is typed (issue #303 / #146): the step boundary, the reasoning
+line, the tool plan and every tool status verdict (`✓` / `✗` / `⚠` / `!` / `=`)
+get their own color, and a multi-line command block gets a `  |` gutter.
+
 `bin/rspec` runs the harness's own test suite (rspec), from any directory.
 
 Type a plain message to send it to the model. Lines starting with `/` are

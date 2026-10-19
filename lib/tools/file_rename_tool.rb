@@ -42,7 +42,7 @@ module Tools
       end
 
       if @file_list.sensitive?(new_path)
-        Tool.puts "  [file.rename] ✗ #{new_shown} (blocked: sensitive file)"
+        status(:fail, "#{new_shown} (blocked: sensitive file)")
         return "error: new path '#{new_shown}' is blocked and can never be written"
       end
 
@@ -53,12 +53,12 @@ module Tools
       end
 
       unless File.file?(old_path)
-        Tool.puts "  [file.rename] ✗ #{old_shown} (file does not exist)"
+        status(:fail, "#{old_shown} (file does not exist)")
         return "error: file '#{old_shown}' does not exist on disk"
       end
 
       if File.exist?(new_path)
-        Tool.puts "  [file.rename] ✗ #{new_shown} (destination already exists)"
+        status(:fail, "#{new_shown} (destination already exists)")
         return "error: destination '#{new_shown}' already exists - choose a different new path"
       end
 
@@ -69,7 +69,7 @@ module Tools
       # issue #170: the digest travels with the file - re-key the cache.
       @session&.file_cache.rename(old_path, new_path, workdir: @file_list.workdir)
 
-      Tool.puts "  [file.rename] ✓ #{old_shown} → #{new_shown}"
+      status(:ok, "#{old_shown} → #{new_shown}")
       "ok: renamed #{old_shown} to #{new_shown}"
     end
   end

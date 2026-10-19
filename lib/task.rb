@@ -504,13 +504,14 @@ class Task
       task.record_spinner_detail(payload)
       task.buffer.put(type: :spinner_detail, origin: msg[:origin] || :task, content: msg[:content])
     when :text
-      # A Task with a stand-in console (specs) may carry no renderer at all.
-      line = task.renderer&.line(type:, content: msg[:content]) || msg[:content].to_s
+      # For a status type the origin IS the bracket label. A Task with a
+      # stand-in console (specs) may carry no renderer at all.
+      line = task.renderer&.line(type:, content: msg[:content], origin: msg[:origin]) || msg[:content].to_s
       ui.puts(line)
       task.buffer.put(type: :text, origin: msg[:origin] || :task, content: msg[:content])
     else
-      line = task.renderer&.line(type:, content: msg[:content]) || msg[:content].to_s
-      ui.puts(line) if msg[:content]
+      line = task.renderer&.line(type:, content: msg[:content], origin: msg[:origin]) || msg[:content].to_s
+      ui.puts(line) unless msg[:content].nil?
       task.buffer.put(type: msg[:type], origin: msg[:origin] || :task, content: msg[:content])
     end
   end

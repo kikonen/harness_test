@@ -38,7 +38,7 @@ module Tools
       end
 
       unless File.file?(path)
-        Tool.puts "  [file.read] ✗ #{shown} (not found)"
+        status(:fail, "#{shown} (not found)")
         return "error: file not found: #{shown}"
       end
 
@@ -60,7 +60,7 @@ module Tools
         @session.file_cache.record(path, sha, workdir: @file_list.workdir) if sha
       end
 
-      Tool.puts "  [file.read] ✓ #{shown}"
+      status(:ok, shown)
 
       content
     end

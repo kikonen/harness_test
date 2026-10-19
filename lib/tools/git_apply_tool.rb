@@ -77,7 +77,7 @@ module Tools
       end
 
       if files.any?
-        Tool.puts "  [git.apply] #{dry_run ? 'would patch' : 'patching'}: #{files.join(', ')}"
+        status(:info, "#{dry_run ? 'would patch' : 'patching'}: #{files.join(', ')}")
       end
 
       # issue #170: external-change detection (see file.write /
@@ -105,7 +105,7 @@ module Tools
           detail = result[:stderr].strip.empty? ? result[:stdout].strip : result[:stderr].strip
           msg = "error: git apply failed (exit #{result[:status]}): #{detail.lines.first&.strip || 'no error message'}"
           msg += ". The patch does not match the working tree - check the context lines and retry, or use file.patch per file."
-          Tool.puts "  [git.apply] ✗ #{msg}"
+          status(:fail, msg)
           return "#{msg}\nfiles: #{files.join(', ')}" if files.any?
           msg
         end
@@ -115,8 +115,8 @@ module Tools
 
         applied = result[:stdout].strip
         label   = dry_run ? "validated (dry run)" : "applied"
-        Tool.puts "  [git.apply] ✓ #{label} (#{files.join(', ')})" if files.any?
-        Tool.puts "  [git.apply] ✓ #{label}" unless files.any?
+        message = files.any? ? "#{label} (#{files.join(', ')})" : label
+        status(:ok, message)
         note = applied.empty? ? "" : "\n#{applied}"
         files_note = files.any? ? " [#{files.join(', ')}]" : ""
         dry_run ? "ok: patch is valid (dry run, nothing changed)#{files_note}#{note}" \
@@ -184,7 +184,7 @@ module Tools
         next unless cached && current != cached
 
         shown = @file_list.display_path(path)
-        Tool.puts "  [git.apply] ✗ #{shown} (externally changed since last read)"
+        status(:fail, "#{shown} (externally changed since last read)")
         return "error: '#{shown}' has changed externally since you last read it. " \
                "Re-read the file with file.read, or report the external change " \
                "with file.touch if you know what happened."

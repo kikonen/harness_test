@@ -35,7 +35,7 @@ module Tools
       end
 
       unless File.file?(path)
-        Tool.puts "  [file.info] ✗ #{shown} (not found)"
+        status(:fail, "#{shown} (not found)")
         return "error: file not found: #{shown}"
       end
 
@@ -51,7 +51,7 @@ module Tools
              "permissions: #{perms}\n" \
              "lines: #{lines}"
 
-      Tool.puts "  [file.info] ✓ #{shown} (#{human_size(size)}, #{lines} lines)"
+      status(:ok, "#{shown} (#{human_size(size)}, #{lines} lines)")
       info
     end
 

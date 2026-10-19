@@ -51,11 +51,13 @@ class GitRunner < Tool
       "GIT_CONFIG_VALUE_0"  => "never"
     }
 
-    stdout, stderr, status = Open3.capture3(env, *cmd, chdir: workdir)
+    # exit_status, NOT a local named status: Tool#status (the status-line
+    # emitter) is a method this class inherits, and a local would shadow it.
+    stdout, stderr, exit_status = Open3.capture3(env, *cmd, chdir: workdir)
     # issue #257: git output can carry bytes that are not valid UTF-8 (a
     # binary file in a diff, a path in a legacy code page). Normalize at this
     # read boundary so the callers' strip / split / regex match never raise.
-    { status: status.exitstatus,
+    { status: exit_status.exitstatus,
       stdout: TextNormalizer.normalize(stdout),
       stderr: TextNormalizer.normalize(stderr) }
   end
@@ -105,8 +107,9 @@ class GitRunner < Tool
     msg = "error: git #{tag} failed (exit #{result[:status]}): #{detail.lines.first&.strip || 'no error message'}"
     msg += ". #{hint}" if hint
     # issue #40 single-thread I/O rule: tools run on the task thread, so
-    # route through Tool.puts (event queue), never bare puts / stdout.
-    Tool.puts("  [#{tag}] ✗ #{msg}")
+    # route through the event queue, never bare puts / stdout. "tag" is the git
+    # subcommand the bracket shows.
+    self.class.push_status(label: tag, verdict: :fail, message: msg)
     msg
   end
 end

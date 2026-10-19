@@ -13,12 +13,14 @@ later a TUI) advances a read waterline (`#drain`) and renders whatever is new.
 This replaces fire-and-forget "puts to stdout" with a durable, inspectable log
 of `{type, origin, content}` blobs:
 
-- `type` - what KIND of output this is (`:response`, `:stats`, `:step`,
-  `:system`, `:error`, ...), so a renderer can style it distinctly.
-- `origin` - WHERE it came from (`:session_manager`, `:harness`, a tool name,
-  ...), so a renderer or future TUI can attribute it.
-- `content` - the text itself (a single line; multi-part output is either one
-  blob or several entries, in order).
+- `type` - what KIND of output this is (`:response`, `:stats`, `:plan`,
+  `:status_ok`, `:system`, `:error`, ...), so a renderer can style it distinctly.
+- `origin` - WHERE it came from (`:session_manager`, `:harness`, ...). For a
+  STATUS entry it is the tool or caller NAME (`"file.read"`, `"run.command"`,
+  `"access"`): the bracket label a renderer needs in order to rebuild the line.
+- `content` - the text itself. A status entry may hold a MULTI-LINE message (a
+  pasted multiline command); the renderer turns that into several console lines
+  with a gutter, but the entry stays ONE plain string.
 
 ## Ownership
 

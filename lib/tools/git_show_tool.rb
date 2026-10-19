@@ -58,7 +58,7 @@ module Tools
         end
 
         text, _truncated = truncate_output(result[:stdout], limit)
-        Tool.puts "  [git.show] ✓ #{shown} @ #{revision} (#{text.lines.size} line(s))"
+        status(:ok, "#{shown} @ #{revision} (#{text.lines.size} line(s))")
         return text.empty? ? "no changes for #{shown} in #{revision}" : text
       end
 
@@ -68,7 +68,7 @@ module Tools
       end
 
       text, _truncated = truncate_output(result[:stdout], limit)
-      Tool.puts "  [git.show] ✓ #{revision} (#{text.lines.size} line(s))"
+      status(:ok, "#{revision} (#{text.lines.size} line(s))")
       text.empty? ? "no changes in #{revision}" : text
     end
   end

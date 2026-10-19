@@ -39,7 +39,7 @@ module Tools
       end
 
       if @file_list.sensitive?(dst)
-        Tool.puts "  [file.copy] ✗ #{dst_shown} (blocked: sensitive file)"
+        status(:fail, "#{dst_shown} (blocked: sensitive file)")
         return "error: destination '#{dst_shown}' is blocked and can never be written"
       end
 
@@ -50,12 +50,12 @@ module Tools
       end
 
       unless File.file?(src)
-        Tool.puts "  [file.copy] ✗ #{src_shown} (file does not exist)"
+        status(:fail, "#{src_shown} (file does not exist)")
         return "error: source file '#{src_shown}' does not exist on disk"
       end
 
       if File.exist?(dst)
-        Tool.puts "  [file.copy] ✗ #{dst_shown} (destination already exists)"
+        status(:fail, "#{dst_shown} (destination already exists)")
         return "error: destination '#{dst_shown}' already exists - choose a different path"
       end
 
@@ -63,7 +63,7 @@ module Tools
       FileUtils.mkdir_p(dir) unless dir == "."
       FileUtils.cp(src, dst)
 
-      Tool.puts "  [file.copy] ✓ #{src_shown} → #{dst_shown}"
+      status(:ok, "#{src_shown} → #{dst_shown}")
       "ok: copied #{src_shown} to #{dst_shown}"
     end
   end

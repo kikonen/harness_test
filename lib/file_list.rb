@@ -4,6 +4,7 @@ require "digest"
 
 require_relative "sensitive_files"
 require_relative "ui/dialog"
+require_relative "tool"
 
 # Single source of truth for file access permissions.
 #
@@ -358,45 +359,47 @@ class FileList
     note_text = choice.is_a?(Array) ? choice[1] : nil
     choice    = choice[0] if choice.is_a?(Array)
     # Feedback line. grant_access runs on the task thread, so this must go
-    # through the task's event queue (Tool.puts), never a bare puts onto
-    # $stdout from the wrong thread (issue #40). No task active = no-op
-    # (the CLI owns main-thread output through its UI::Console).
-    report = lambda { |line| Tool.puts line }
+    # through the task's event queue, never a bare puts onto $stdout from the
+    # wrong thread (issue #40). "access" is the bracket label the renderer
+    # will put back on the line.
+    report = lambda do |verdict, message|
+      Tool.push_status(label: "access", verdict:, message:)
+    end
     case choice
     when :target
       add_file(path, mode)
-      report.call("  [access] ✓ #{shown}/ (dir itself only, #{mode_label(mode)})")
+      report.call(:ok, "#{shown}/ (dir itself only, #{mode_label(mode)})")
       :granted
     when :file
       add_file(path, mode)
-      report.call("  [access] ✓ #{shown} (#{mode_label(mode)})")
+      report.call(:ok, "#{shown} (#{mode_label(mode)})")
       :granted
     when :flat
       if is_dir
         add_flat_dir(path, mode)
-        report.call("  [access] ✓ #{shown}/ (dir only, #{mode_label(mode)})")
+        report.call(:ok, "#{shown}/ (dir only, #{mode_label(mode)})")
       else
         add_file(path, mode)
-        report.call("  [access] ✓ #{shown} (#{mode_label(mode)})")
+        report.call(:ok, "#{shown} (#{mode_label(mode)})")
       end
       :granted
     when :recursive
       add_dir(path, mode)
-      report.call("  [access] ✓ #{shown}/ (recursive, #{mode_label(mode)})")
+      report.call(:ok, "#{shown}/ (recursive, #{mode_label(mode)})")
       :granted
     when :parent_flat
       add_flat_dir(parent, mode)
-      report.call("  [access] ✓ #{parent_shown}/ (dir only, #{mode_label(mode)})")
+      report.call(:ok, "#{parent_shown}/ (dir only, #{mode_label(mode)})")
       :granted
     when :parent_recursive
       add_dir(parent, mode)
-      report.call("  [access] ✓ #{parent_shown}/ (recursive, #{mode_label(mode)})")
+      report.call(:ok, "#{parent_shown}/ (recursive, #{mode_label(mode)})")
       :granted
     else
       if note_text
-        report.call("  [access] ✗ denied (user's note: \"#{note_text}\")")
+        report.call(:fail, "denied (user's note: \"#{note_text}\")")
       else
-        report.call("  [access] ✗ denied")
+        report.call(:fail, "denied")
       end
       { status: :denied, note: note_text }
     end

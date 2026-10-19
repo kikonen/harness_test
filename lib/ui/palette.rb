@@ -18,7 +18,9 @@ module UI
 
     PALETTES = {
       "default" => {
-        step_label: GRAY,
+        # Cyan: the free dark-band hue once plan/tool_plan/error/warn took the
+        # others (measurements: a HUE is the only reliable differentiator).
+        step_label: "36",
         plan: "34",
         interstitial: "35",
         tool_plan: "32",
@@ -28,13 +30,23 @@ module UI
         system: GRAY,
         stats: GRAY,
         compact: BROWN,
-        text: nil
+        text: nil,
+        # MARKER / RULE are the recessive decoration of a status line; the
+        # verdict role colors its message.
+        marker: GRAY,
+        rule: GRAY,
+        status_ok: "32",
+        status_fail: "31",
+        status_warn: BROWN,
+        status_note: BROWN,
+        status_same: GRAY,
+        status_info: nil
       },
       # No 256-color or truecolor dependency: recessive roles fall back to the
       # terminal's own color, so this works on a terminal with a 16-color
       # palette only. Warning moves to the dark yellow of the 16-color band.
       "basic16" => {
-        step_label: nil,
+        step_label: "36",
         plan: "34",
         interstitial: "35",
         tool_plan: "32",
@@ -44,7 +56,15 @@ module UI
         system: nil,
         stats: nil,
         compact: "33",
-        text: nil
+        text: nil,
+        marker: nil,
+        rule: nil,
+        status_ok: "32",
+        status_fail: "31",
+        status_warn: "33",
+        status_note: "33",
+        status_same: nil,
+        status_info: nil
       },
       # Every role uncolored: what --no-color selects.
       "none" => {}.freeze

@@ -257,8 +257,8 @@ class Harness
     logger.info("safety pre-check: #{skipped} allowlisted command(s) skipped") if skipped.positive?
 
     logger.info("safety pre-check (#{unapproved.size} run.command in batch)")
-    Task.emit(:text, origin: :harness,
-              content: "  [safety] checking #{unapproved.size} commands before the consent dialog...")
+    Tool.push_status(label: "safety", verdict: :info,
+                     message: "checking #{unapproved.size} commands before the consent dialog...")
     Task.emit(:spinner_detail, origin: :harness,
               content: { message: "Model safety check (#{unapproved.size} commands)" })
     options[:safety_verdicts] =
@@ -333,7 +333,7 @@ class Harness
         @user_notes << note
         logger.info("user mid-turn note injected: #{note}")
         messages << { role: "user", content: "User note (mid-turn): #{note}" }
-        Task.emit(:text, origin: :harness, content: "  [note] sent to model")
+        Tool.push_status(label: "note", verdict: :info, message: "sent to model")
       end
 
       # Each request announces its own wait, so an earlier re-point (an

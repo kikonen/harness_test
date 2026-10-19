@@ -7,13 +7,14 @@ require_relative "command_allowlist"
 require_relative "ui/dialog"
 require_relative "safety_check"
 require_relative "text_normalizer"
+require_relative "ui/renderer"
 
 # Shared consent + execution logic for shell commands (issue #129).
 #
 # Used by both callers of this harness's shell execution:
 #   * Tools::RunCommandTool - LLM-driven, runs inside a Task thread. The
 #     confirmation dialog is routed through the task to the MAIN THREAD
-#     (ui: nil), status lines go over Tool.puts, and the formatted result
+#     (ui: nil), status lines go over the task's event queue, and the formatted result
 #     string is returned to the model.
 #   * CommandHandler bang syntax (`! cmd`) - user-typed, runs on the main
 #     thread directly. The dialog is served in place (perform_direct on
@@ -154,7 +155,7 @@ class CommandRunner
     unless disaster
       # Auto-approve when the command prefix is in the user's allowlist.
       if @allowlist.allowed?(command)
-        status("✓ auto-approved (allowlist): #{command}")
+        status(:ok, "auto-approved (allowlist): #{command}")
         return execute(command, dir, shown, timeout, limit)
       end
 
@@ -169,12 +170,12 @@ class CommandRunner
       # The status line + harness.log entry are what keep it auditable.
       if auto_approve_all?
         reason = yolo_active? ? "YOLO" : "bang consent off"
-        status("✓ auto-approved (#{reason}): #{command}")
+        status(:ok, "auto-approved (#{reason}): #{command}")
         log_auto_approved(command, reason)
         return execute(command, dir, shown, timeout, limit)
       end
     else
-      status("⚠ denylisted (auto-approval refused in every posture): #{command}")
+      status(:warn, "denylisted (auto-approval refused in every posture): #{command}")
       @harness&.logger&.warn("denylisted command needs an explicit Allow: #{command}")
     end
 
@@ -193,7 +194,7 @@ class CommandRunner
     # command is never auto-approved just because the model called it safe.
     if !disaster && auto_approve_mode? && verdict
       if auto_approve_safe?(verdict)
-        status("✓ auto-approved (model verdict: safe): #{command}")
+        status(:ok, "auto-approved (model verdict: safe): #{command}")
         return execute(command, dir, shown, timeout, limit)
       end
       # dangerous -> fall through to the dialog with the verdict note.
@@ -262,7 +263,7 @@ class CommandRunner
 
     if result[:saved] && !result[:saved].empty?
       result[:saved].each { |p| @allowlist.add(p) }
-      status("✓ always-allowed: #{result[:saved].join(', ')} (saved to allowlist)")
+      status(:ok, "always-allowed: #{result[:saved].join(', ')} (saved to allowlist)")
     end
 
     execute(command, dir, shown, timeout, limit)
@@ -270,15 +271,24 @@ class CommandRunner
 
   private
 
-  # Console status line. Within a Task thread goes over Tool.puts (event
-  # queue, rendered by the drain loop); on the main thread writes to @ui.
-  def status(msg)
-    text = "  [#{@label}] #{msg}"
+  # Status line for this caller's label ("run.command" / "shell"). Within a
+  # Task thread it goes onto the event queue; on the main thread the runner
+  # renders the SAME UI::Renderer pattern itself, so a bang command looks like
+  # a tool one.
+  def status(verdict, msg)
     if defined?(Task) && Task.current
-      Tool.puts(text)
+      Tool.push_status(label: @label, verdict:, message: msg)
     elsif @ui
-      @ui.puts(text)
+      type = Tool.status_type(verdict)
+      @ui.puts(renderer.line(type:, content: msg, origin: @label))
     end
+  end
+
+  # NOT memoized: the main thread has no turn boundary, so the palette is
+  # re-read per line and a /palette switch shows up in the next bang command.
+  def renderer
+    palette = @harness.respond_to?(:output_palette) ? @harness.output_palette : nil
+    UI::Renderer.new(palette:)
   end
 
   # Interpret the raw dialog answer. Returns a hash with :denied and
@@ -398,7 +408,7 @@ class CommandRunner
     results = SafetyCheck.run(safety_client, session_chain, commands)
     verdicts = results.values.compact
     if verdicts.any?
-      status("✓ model verdict: #{verdicts.join(' | ')}")
+      status(:ok, "model verdict: #{verdicts.join(' | ')}")
     end
     results
   rescue StandardError => e
@@ -429,9 +439,9 @@ class CommandRunner
 
   def denial(message, note: nil)
     if note
-      status("✗ denied by user (note: \"#{note}\")")
+      status(:fail, "denied by user (note: \"#{note}\")")
     else
-      status("✗ denied by user")
+      status(:fail, "denied by user")
     end
     { denied: true,
       denial: Tool.denial_error("error: #{message}", note ? { note: } : nil) }
@@ -440,24 +450,24 @@ class CommandRunner
   # Runs the command (after any required confirmation) and formats the result.
   def execute(command, dir, shown, timeout, limit)
     started = Time.now
-    output, status = run_in_shell(command, dir, timeout)
+    output, shell_status = run_in_shell(command, dir, timeout)
     # Symbol (not Process::Status) signals the timeout path.
-    if status == :timeout
+    if shell_status == :timeout
       # The tree was already killed by run_in_shell (issue #202); nothing
       # more can hang here.
-      status("✗ #{command} (timed out after #{timeout}s)")
+      status(:fail, "#{command} (timed out after #{timeout}s)")
       log_failure(command, "TIMED OUT after #{timeout}s", output)
       return "error: command timed out after #{timeout}s"
     end
     elapsed = (Time.now - started).round(2)
-    code    = status.exitstatus
+    code    = shell_status.exitstatus
 
     out            = truncate(output, limit)[0]
 
     if code.zero?
-      status("✓ #{command} (exit 0, #{elapsed}s)")
+      status(:ok, "#{command} (exit 0, #{elapsed}s)")
     else
-      status("✗ #{command} (exit #{code}, #{elapsed}s)")
+      status(:fail, "#{command} (exit #{code}, #{elapsed}s)")
     end
 
     format_result(command, code, elapsed, output, out)
@@ -570,8 +580,8 @@ class CommandRunner
     Process.spawn(cmd, *args, chdir: dir, in: File::NULL,
                   out: out_w, err: out_w, PGROUP_SPAWN_KEY => true)
   rescue ArgumentError
-    status("note: process-group spawn unsupported by this Ruby; " \
-           "a timeout kill may not reach the child tree")
+    status(:warn, "process-group spawn unsupported by this Ruby; " \
+                  "a timeout kill may not reach the child tree")
     Process.spawn(cmd, *args, chdir: dir, in: File::NULL,
                   out: out_w, err: out_w)
   end

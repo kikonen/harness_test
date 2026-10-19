@@ -21,7 +21,7 @@ module Tools
 
     def execute(args)
       msg = args["message"] || ""
-      Tool.puts "  [ui.notify] #{msg}"
+      status(:info, msg)
       "ok"
     end
   end
