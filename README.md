@@ -109,6 +109,10 @@ saved with the session, so a resumed session keeps it.
 Rendered output is typed (issue #303 / #146): the step boundary, the reasoning
 line, the tool plan and every tool status verdict (`✓` / `✗` / `⚠` / `!` / `=`)
 get their own color, and a multi-line command block gets a `  |` gutter.
+The two block boundaries - the start of an iteration and the start of the final
+answer - are framed by the same 80-column gray rule that names the role
+(`------- step 8 -------`, `------- model -------`), and the answer itself is
+printed untouched.
 
 `bin/rspec` runs the harness's own test suite (rspec), from any directory.
 

@@ -65,6 +65,13 @@ RSpec.describe Commands::PaletteCommand do
       expect(out).to include("\e[36mstep 1\e[0m")
     end
 
+    it 'the sample shows the answer boundary the real renderer gives it' do
+      out = run_command('', build_harness('none'))
+
+      expect(out).to include("#{'-' * 36} model #{'-' * 37}")
+      expect(out).to include("Done. The answer keeps its own formatting.")
+    end
+
     it 'the none palette paints nothing in the sample either' do
       out = run_command('', build_harness('none'))
 

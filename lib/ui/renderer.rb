@@ -39,7 +39,18 @@ module UI
     STATUS_RULE = "#{INDENT}#{"-" * 12}"
     # Fixed width, NOT the terminal width: a boundary that depends on a
     # terminal setting is a boundary that moves.
-    STEP_RULE_WIDTH = 80
+    RULE_WIDTH = 80
+
+    # The start of an iteration and the start of the final answer are the two
+    # BLOCK boundaries, and both get the same fused rule. plan / say / tools /
+    # warn / error stay plain labels: they are lines INSIDE a block.
+    BOUNDARY_ROLES = %i[step_label response].freeze
+
+    # The word a boundary rule fuses: the role's label without its ":  " padding
+    # ("model") - a rule reads like a short word, not like a label.
+    def self.boundary_label(type)
+      LABELS.fetch(type.to_sym).sub(/:\s+\z/, "")
+    end
 
     attr_reader :palette
 
@@ -56,7 +67,7 @@ module UI
       text = content.to_s
 
       return status_line(type, text, origin) if STATUS_GLYPHS.key?(type)
-      return step_line(text) if type == :step_label
+      return boundary_line(type, text) if BOUNDARY_ROLES.include?(type)
 
       paint(type, labeled(type, text))
     end
@@ -89,14 +100,23 @@ module UI
       out.join("\n")
     end
 
-    def step_line(number)
-      label = "#{LABELS[:step_label]}#{number}"
-      # The spare is split in two; an odd one (a wider number) gives its extra
-      # dash to the right, so the line is always exactly STEP_RULE_WIDTH wide.
-      spare = [STEP_RULE_WIDTH - label.length - 2, 2].max
+    # A full-width fused rule naming the role, then the content EXACTLY as
+    # emitted (no label, no indent: a model answer keeps its own paragraphs).
+    # :step_label IS its rule - its content is the number fused inside it.
+    def boundary_line(type, content)
+      label = type == :step_label ? "step #{content}" : self.class.boundary_label(type)
+      rule  = fused_rule(label, type)
+      return rule if type == :step_label || content.empty?
+
+      "#{rule}\n#{paint(type, content)}"
+    end
+
+    # The spare is split in two; an odd one (a wider label) gives its extra dash
+    # to the right, so the line is always exactly RULE_WIDTH wide.
+    def fused_rule(label, type)
+      spare = [RULE_WIDTH - label.length - 2, 2].max
       left  = spare / 2
-      segment(:rule, "#{"-" * left} ") +
-        segment(:step_label, label) +
+      segment(:rule, "#{"-" * left} ") + segment(type, label) +
         segment(:rule, " #{"-" * (spare - left)}")
     end
 

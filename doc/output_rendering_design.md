@@ -39,11 +39,11 @@ decoration that a renderer can produce itself.
 
 | type | emitted content | rendered line |
 | --- | --- | --- |
-| `:step_label` | the iteration NUMBER | `------- step 3 -------` (see "The iteration boundary") |
+| `:step_label` | the iteration NUMBER | fused gray rule (see "Block boundaries") |
 | `:plan` | the reasoning digest | `plan:  I will read the tool first` |
 | `:interstitial` | the model's interim text | `say:   checking one more site` |
 | `:tool_plan` | the tool names | `tools: file.read, file.search` |
-| `:response` | the model's answer | `model: Done.` |
+| `:response` | the model's answer | fused gray rule + answer verbatim ("Block boundaries") |
 | `:warn` | a recovered failure | `warn:  auto-save failed: EACCES` |
 | `:error` | a real error | `error: hunk did not apply` |
 | `:status_ok` ... `:status_info` | the verdict's message | `  [label] ✓ message` (see below) |
@@ -167,18 +167,40 @@ when the user's terminal understands SGR (the spinner has printed raw
 silently disable the feature in exactly the setup it was built for. The switch
 is explicit instead.
 
-## The iteration boundary
+## Block boundaries
 
-`:step_label` renders as the number FUSED with short rules, exactly 80 columns
-wide whatever the number is:
+Two roles are boundaries of a BLOCK rather than lines inside one, and they get
+the SAME shape - `BOUNDARY_ROLES` in `UI::Renderer` is that decision written as
+a list:
+
+- `:step_label` IS its rule: the number sits fused inside it, exactly 80
+  columns whatever the number is.
 
     ------------------------------------ step 8 ------------------------------------
 
-The complaint this answers: a turn's iterations could not be found by looking at
-the output at all. Bold was measured as not perceptible on this terminal, so the
-boundary carries SHAPE (the rules, gray) plus a HUE on the number - the two
-means this terminal does respond to. The width is a constant, not the terminal
-width: a boundary that depends on a terminal setting is one that moves.
+- `:response` gets the rule as its own line, naming the role, and the answer
+  below it EXACTLY as emitted - no label, no indent, so a model answer keeps
+  its own paragraphs and indentation.
+
+    ------------------------------------ model -------------------------------------
+    Done. The palette now colors three roles.
+
+    Two things to check in your terminal:
+      - the gray bracket vs the green command text
+
+`plan` / `say` / `tools` / `warn` / `error` deliberately keep their plain label:
+they are lines INSIDE a block, and giving them a full-width rule too would make
+the boundary say nothing.
+
+The complaint this answers: neither a turn's iterations nor where its answer
+began could be found by looking at the output at all. Bold was measured as not
+perceptible on this terminal, so the boundary's differentiator is SHAPE: the
+rules, gray. `:step_label` adds a HUE on the number it fuses; `:response` does
+not, because the palette must leave `:response` uncolored for the answer text
+itself to stay in the terminal's own color - the renderer paints the rule and
+the fused word with the same role code. The width is a constant (`RULE_WIDTH`),
+not the terminal width: a boundary that depends on a terminal setting is one
+that moves.
 
 ## Terminal measurements (measured on the owner's setup, light background)
 
