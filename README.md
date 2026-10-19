@@ -117,7 +117,11 @@ printed untouched.
 `bin/rspec` runs the harness's own test suite (rspec), from any directory.
 
 Type a plain message to send it to the model. Lines starting with `/` are
-commands. Multiline input: paste a block, or end a line with `\`.
+commands. `/help` lists every command and topic; `/help <command>` shows one
+command's accepted forms and `/help <topic>` one topic (keys, consent postures,
+multiline input, sessions, ...) - the help text is generated from the command
+registry (`doc/command_help_design.md`).
+Multiline input: paste a block; the submit key sends it (Enter adds a newline).
 Keys: `Ctrl+C` cancel/interrupt, `Ctrl+D` quit (empty prompt), `Ctrl+A`
 toggle the command consent mode (MANUAL / AUTO-APPROVE, issue #224),
 Up/Down browse history. A line starting with `!` runs a shell command
@@ -159,6 +163,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/ctx` | Show context usage (tokens, %, headroom, auto-compact status) |
 | `/reasoning` | Show the reasoning text of the last response |
 | `/yolo [on|off|status]` | Toggle the YOLO shell-consent posture (saved with the session) |
+| `/palette [name\|status]` | Show or switch the output palette (saved with the session) |
 | `/help` | Show command help |
 | `/exit` | Quit (auto-saves the session) |
 
@@ -253,6 +258,8 @@ lib/git_runner.rb   # safe git invocation base for the git tools
 lib/shell_tokenizer.rb  # StringScanner lexer for shell commands
 lib/shell_parser.y  # Racc grammar source (regenerate .rb with racc)
 lib/command_handler.rb + lib/commands/*.rb  # one class per /command
+lib/command_help.rb + lib/help_topics.rb + lib/help_renderer.rb
+                    # /help data (per-command entries, topics) and its renderer
 lib/tools/*.rb      # one file per tool
 tmp/scratch/<n>/    # transient model scratch (probes, -a copies, dumps); deleted
                     # when its PR merges
