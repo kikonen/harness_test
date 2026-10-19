@@ -91,7 +91,7 @@ module Tools
       end
 
       unless File.file?(path)
-        Tool.puts "  [file.patch] ✗ #{shown} (file does not exist)"
+        status(:fail, "#{shown} (file does not exist)")
         return "error: file '#{shown}' does not exist on disk"
       end
 
@@ -102,7 +102,7 @@ module Tools
         current = FileList.sha256(path)
         cached  = @session.file_cache.digest(path, workdir: @file_list.workdir)
         if cached && current != cached
-          Tool.puts "  [file.patch] ✗ #{shown} (externally changed since last read)"
+          status(:fail, "#{shown} (externally changed since last read)")
           return "error: '#{shown}' has changed externally since you last read it. " \
                  "Re-read the file with file.read, or report the external change " \
                  "with file.touch if you know what happened."
@@ -111,17 +111,17 @@ module Tools
 
       hunks = parse_unified_diff(diff)
       if hunks.nil?
-        Tool.puts "  [file.patch] ✗ #{shown} (invalid diff format)"
+        status(:fail, "#{shown} (invalid diff format)")
         return "error: could not parse the diff - expected unified diff format with @@ hunks"
       end
       if hunks.empty?
-        Tool.puts "  [file.patch] ✗ #{shown} (no hunks in diff)"
+        status(:fail, "#{shown} (no hunks in diff)")
         return "error: the diff contains no hunks (no @@ ... @@ sections)"
       end
 
       source = FileText.from_disk(path)
       if source.lossy
-        Tool.puts "  [file.patch] ✗ #{shown} (file bytes are not valid UTF-8)"
+        status(:fail, "#{shown} (file bytes are not valid UTF-8)")
         return "error: '#{shown}' is not valid UTF-8, and this patch would rewrite those " \
                "bytes as '?' replacements. Convert the file's encoding first."
       end
@@ -140,7 +140,7 @@ module Tools
         result = apply_hunk(lines, hunk)
         if result.nil?
           diag = diagnose(lines, hunk)
-          Tool.puts "  [file.patch] ✗ #{shown} (hunk at line #{hunk[:old_start]} did not apply)"
+          status(:fail, "#{shown} (hunk at line #{hunk[:old_start]} did not apply)")
           return "error: hunk at old-line #{hunk[:old_start]} did not apply cleanly. #{diag} " \
                  "Re-read the file with file.read and adjust the diff so its context lines match exactly."
         end
@@ -153,7 +153,7 @@ module Tools
       FileText.write(path, new_content, source.separator)
 
       repaired = FileText.dirty?(source) ? " (#{FileText.repair_note(source)})" : ""
-      Tool.puts "  [file.patch] ! #{shown}#{repaired}" if FileText.dirty?(source)
+      status(:note, "#{shown}#{repaired}") if FileText.dirty?(source)
 
       # issue #170: our own patch refreshes the cache (the file is now in
       # the exact state we wrote it).
@@ -162,7 +162,7 @@ module Tools
         @session.file_cache.record(path, sha, workdir: @file_list.workdir) if sha
       end
 
-      Tool.puts "  [file.patch] ✓ #{shown} (#{applied} hunk(s) applied)"
+      status(:ok, "#{shown} (#{applied} hunk(s) applied)")
       "ok: applied #{applied} hunk(s) to #{shown}#{repaired}"
     end
 

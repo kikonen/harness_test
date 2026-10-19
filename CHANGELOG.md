@@ -7,7 +7,7 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
-## Unreleased - output roles, UI::Renderer, and named palettes (issue #303, first step of #146)
+## Unreleased - output roles, UI::Renderer, and named palettes (issue #303, steps 1-4 of #146)
 
 - `Harness#print_step_display` emitted ONE type (`:step`) for four roles and
   baked the pattern into every string (`"[step N]"`, `">>> reason <<<"`,
@@ -59,6 +59,29 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   the config `output_palette:` key, validated at CLI parse time so a typo is
   reported before the model is contacted. `Harness#output_palette` resolves it
   once at construction, never per rendered line.
+- Tool and command STATUS lines were the last pattern an emitter owned: 83 call
+  sites (measured: 60 in the tools, 9 grant reports, 12 shell-runner lines, 2
+  harness notes) wrote the whole line - indent, bracket and glyph - and pushed
+  it as `:text`, which is the renderer's VERBATIM list, so coloring `✓`
+  differently from `✗` needed regexing the glyph back out of the string. They
+  are typed by VERDICT now (`:status_ok` / `:status_fail` / `:status_warn` /
+  `:status_note` /
+  `:status_same` / `:status_info`, `Tool#status` / `Tool.push_status`), the
+  bracket label travels in the event's ORIGIN, and `UI::Renderer` builds the
+  line: gray bracket + glyph, message in the verdict's hue. The bang path
+  (`! cmd`) renders the same pattern itself, so both callers look identical.
+- A multi-line status message (a pasted multiline script is the everyday case)
+  is ONE buffer entry rendered as several console lines with a `  |` gutter on
+  every continuation line and a short gray rule after the last one: where a
+  command block ends became visible instead of blurring into the next entry.
+- `:step_label` renders as the number fused with short gray rules, exactly 80
+  columns whatever the number is (`-------- step 8 --------`). Bold was
+  measured as not perceptible on the owner's terminal, so the boundary is SHAPE
+  plus a hue on the number. `Tool.puts` is gone.
+- Still emitter-shaped (deliberately, tracked by #146): `:text` command output
+  and the bracketed `:system` / `:stats` / `:compact` notes, plus Task's own
+  mid-turn acks (`[note] got it - ...`, `[YOLO ON]`), which write straight to
+  ui + buffer. `VERBATIM` is the exact list.
 
 ## Unreleased - line endings decided from file bytes (issue #318)
 

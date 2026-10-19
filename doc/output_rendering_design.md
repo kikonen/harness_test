@@ -39,13 +39,14 @@ decoration that a renderer can produce itself.
 
 | type | emitted content | rendered line |
 | --- | --- | --- |
-| `:step_label` | the iteration NUMBER | `step 3` |
+| `:step_label` | the iteration NUMBER | `------- step 3 -------` (see "The iteration boundary") |
 | `:plan` | the reasoning digest | `plan:  I will read the tool first` |
 | `:interstitial` | the model's interim text | `say:   checking one more site` |
 | `:tool_plan` | the tool names | `tools: file.read, file.search` |
 | `:response` | the model's answer | `model: Done.` |
 | `:warn` | a recovered failure | `warn:  auto-save failed: EACCES` |
 | `:error` | a real error | `error: hunk did not apply` |
+| `:status_ok` ... `:status_info` | the verdict's message | `  [label] ✓ message` (see below) |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
 | `:spinner_detail` | the spinner payload | no line at all (animated) |
 
@@ -54,14 +55,56 @@ which object caught the exception: three compaction/auto-save failures that
 only cost bookkeeping moved from `:error` to `:warn`, because rendering a
 recoverable bookkeeping failure in the alert color reads as a broken turn.
 
+## Status lines: the verdict is the type, the bracket is the origin
+
+Tool and command status lines were the last pattern an EMITTER owned: 83 call
+sites (measured) wrote the whole line - indent, bracket and glyph included -
+`Tool.puts "  [file.read] ✓ #{shown}"`, and pushed it as `:text`, i.e. as the
+renderer's VERBATIM list: 60 in the tools themselves, 9 grant reports in
+`file_list`, 12 shell-runner lines in `command_runner`, 2 harness notes.
+Coloring `✓` differently from `✗` was therefore impossible without regexing the
+glyph back out of the string, the exact machinery commit 1 removed for `:step`.
+
+They are now typed by VERDICT and the label travels in the event's ORIGIN:
+
+| verdict | type | glyph | rendered line |
+| --- | --- | --- | --- |
+| `:ok` | `:status_ok` | `✓` | `  [file.read] ✓ lib/foo.rb` |
+| `:fail` | `:status_fail` | `✗` | `  [file.read] ✗ lib/foo.rb (not found)` |
+| `:warn` | `:status_warn` | `⚠` | `  [dir.delete] ⚠ no harness attached - ...` |
+| `:note` | `:status_note` | `!` | `  [file.write] ! lib/foo.rb (line endings repaired)` |
+| `:same` | `:status_same` | `=` | `  [dir.create] = tmp/ (already exists)` |
+| `:info` | `:status_info` | none | `  [tools.list] 12 tool(s)` |
+
+`Tool#status(verdict, message)` is the emitter API (the bracket label is the
+tool's own name); `Tool.push_status(label:, verdict:, message:)` is the same
+thing for the emitters that are NOT tools - the shell runner (`run.command` /
+bang `shell`), the grant reports (`access`), the safety pre-check (`safety`)
+and the harness's own note ack. `:info` deliberately has no glyph: a count or
+a progress line is not a verdict about an operation.
+
+**One buffer entry, one OR MORE console lines.** A status message can be
+multi-line (a pasted multiline script is the everyday case). The renderer puts a
+`  |` gutter on every continuation line and closes the entry with a short gray
+rule, so where a command block ENDS is visible instead of blurring into the
+next entry. The gutter and the rule are renderer output only: the buffer still
+holds the single plain message.
+
+The main-thread bang path renders the SAME pattern itself (`CommandRunner#renderer`,
+asking the harness for the palette) so `! cmd` and the tool path look identical.
+
 ## What is deliberately NOT moved yet
 
-`:text` (tool status lines, command output) and the bracketed `:system` /
+`:text` (command output, `/compact` report lines) and the bracketed `:system` /
 `:stats` / `:compact` notes are rendered VERBATIM: their emitters still own the
-indentation and the `[...]` wrapper. Moving those into the renderer is the rest
-of #146 and touches every tool, so it is tracked there rather than smuggled
-into this change. `VERBATIM` in `UI::Renderer` is the exact list of what is
-still emitter-shaped.
+indentation and the `[...]` wrapper. `VERBATIM` in `UI::Renderer` is the exact
+list of what is still emitter-shaped.
+
+Task's own main-thread acks (`  [note] got it - ...`, `  [YOLO ON]`,
+`  [mode is now ...]`) are still hand-written to ui + buffer as `:text`, so
+they are not colorable by type and the buffer content is not the printed line
+(`commit_note` stores `"note received: ..."`). They sit in the note plumbing the
+gesture-dispatch refactor (issue #267) already marks as a HACK.
 
 ## Unknown types are loud
 
@@ -75,6 +118,10 @@ renderer bug.
 `UI::Palette` maps a ROLE to SGR parameters; `nil` means "the terminal's own
 color". `UI::Renderer` composes them: label first, then color around the whole
 line with a trailing reset, so a color can never bleed into the next line.
+
+A status line is TWO runs, not one: the bracket/gutter/rule is the recessive
+`marker` / `rule` role and the message carries the verdict's own hue. Both runs
+are individually wrapped and reset, so the two-tone line cannot bleed either.
 
 **Color lands on the console line only.** `store_and_render` asks the renderer
 for the line it prints and puts the ROLE CONTENT (no escape bytes, no label)
@@ -119,6 +166,19 @@ when the user's terminal understands SGR (the spinner has printed raw
 `\e[2K` unconditionally since issue #125), so an auto-detecting gate would
 silently disable the feature in exactly the setup it was built for. The switch
 is explicit instead.
+
+## The iteration boundary
+
+`:step_label` renders as the number FUSED with short rules, exactly 80 columns
+wide whatever the number is:
+
+    ------------------------------------ step 8 ------------------------------------
+
+The complaint this answers: a turn's iterations could not be found by looking at
+the output at all. Bold was measured as not perceptible on this terminal, so the
+boundary carries SHAPE (the rules, gray) plus a HUE on the number - the two
+means this terminal does respond to. The width is a constant, not the terminal
+width: a boundary that depends on a terminal setting is one that moves.
 
 ## Terminal measurements (measured on the owner's setup, light background)
 

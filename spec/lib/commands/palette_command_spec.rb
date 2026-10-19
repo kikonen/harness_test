@@ -53,20 +53,24 @@ RSpec.describe Commands::PaletteCommand do
 
       expect(out).to include('plan=34')
       expect(out).to include('warn=38;5;130')
-      expect(out).to include('model answer, tool and command lines')
+      expect(out).to include('status_ok=32')
+      expect(out).to include('marker=38;5;240')
+      expect(out).to include('model answer, tool notes, command output')
     end
 
     it 'shows a sample line so the change is visible without a new turn' do
       out = run_command('', build_harness('default'))
 
       expect(out).to include("\e[34mplan:  inspect the drain loop first\e[0m")
-      expect(out).to include('step 1')
+      expect(out).to include("\e[36mstep 1\e[0m")
     end
 
     it 'the none palette paints nothing in the sample either' do
       out = run_command('', build_harness('none'))
 
-      expect(out).to include('colored roles: (none)')
+      # Every role group falls back to the terminal's own color, and the
+      # sample carries no escape bytes at all.
+      expect(out.scan(/\(terminal color\)/).size).to eq(Commands::PaletteCommand::ROLE_GROUPS.size)
       expect(out).not_to include("\e[")
     end
   end

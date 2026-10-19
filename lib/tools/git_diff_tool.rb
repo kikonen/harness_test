@@ -45,7 +45,7 @@ module Tools
         end
 
         text, _truncated = truncate_output(result[:stdout], limit)
-        Tool.puts "  [git.diff] ✓ #{shown} (#{text.lines.size} line(s))"
+        status(:ok, "#{shown} (#{text.lines.size} line(s))")
         return text.empty? ? "no changes for #{shown}" : text
       end
 
@@ -55,7 +55,7 @@ module Tools
       end
 
       text, _truncated = truncate_output(result[:stdout], limit)
-      Tool.puts "  [git.diff] ✓ working tree (#{text.lines.size} line(s))"
+      status(:ok, "working tree (#{text.lines.size} line(s))")
       text.empty? ? "working tree is clean (no changes vs HEAD)" : text
     end
   end

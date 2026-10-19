@@ -66,7 +66,7 @@ module Tools
       end
 
       text, _truncated = truncate_output(result[:stdout], limit)
-      Tool.puts "  [git.grep] ✓ #{text.lines.size} line(s)"
+      status(:ok, "#{text.lines.size} line(s)")
       text.empty? ? "no commits found matching '#{pattern}'" : text
     end
   end

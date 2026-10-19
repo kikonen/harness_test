@@ -32,12 +32,12 @@ module Tools
 
       matches = @registry.search(query)
       if matches.empty?
-        Tool.puts "  [tools.search] no tools match '#{query}'"
+        status(:fail, "no tools match '#{query}'")
         return "no tools match '#{query}'"
       end
 
       lines = matches.map { |t| "#{t.name} - #{t.description}" }
-      Tool.puts "  [tools.search] #{matches.size} tool(s) match '#{query}'"
+      status(:info, "#{matches.size} tool(s) match '#{query}'")
       lines.join("\n")
     end
   end

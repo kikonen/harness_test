@@ -5,6 +5,17 @@
 class Tool
   attr_reader :name, :description, :parameters
 
+  # The verdict IS the type the drain loop renders. Names are verdict-neutral
+  # because the emitters are not only tools (shell runner, grant reports).
+  STATUS_TYPES = {
+    ok: :status_ok,
+    fail: :status_fail,
+    warn: :status_warn,
+    note: :status_note,
+    same: :status_same,
+    info: :status_info
+  }.freeze
+
   def initialize(name:, description:, parameters:)
     @name        = name
     @description = description
@@ -28,18 +39,27 @@ class Tool
     raise NotImplementedError, "#{self.class}#execute not implemented"
   end
 
-  # Print a status line to the console. Tools run INSIDE the active task's
-  # thread, so this pushes a :text event onto that task's outbox and the
-  # drain loop renders it in order with the rest of the turn's output.
-  # It NEVER writes to a stream directly - doing so would bypass the single
-  # event queue and corrupt the output. No task active = no-op (the CLI owns
-  # main-thread output through its UI::Console).
-  def self.puts(*args)
-    task = defined?(Task) ? Task.current : nil
-    return unless task
+  def self.status_type(verdict)
+    STATUS_TYPES.fetch(verdict) do
+      raise ArgumentError,
+        "unknown status verdict #{verdict.inspect} " \
+          "(available: #{STATUS_TYPES.keys.join(', ')})"
+    end
+  end
 
-    args = [""] if args.empty?
-    task.push_event(type: :text, origin: :tool, content: args.map(&:to_s).join(" "))
+  # Single-thread I/O rule (issue #40): never a stream write, no task active =
+  # no-op. The label travels as the event's ORIGIN so the buffer entry alone is
+  # enough to re-render the line.
+  def self.push_status(label:, verdict:, message:)
+    task = defined?(Task) ? Task.current : nil
+    return nil unless task
+
+    task.push_event(type: status_type(verdict), origin: label.to_s, content: message.to_s)
+  end
+
+  # Status line of THIS tool: the label is the tool's own name.
+  def status(verdict, message = "")
+    self.class.push_status(label: name, verdict:, message:)
   end
 
   # True if a FileList#grant_access result means access was granted.

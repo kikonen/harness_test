@@ -27,7 +27,7 @@ module Tools
       lines = @registry.sorted_tools.map do |t|
         "#{t.name} - #{t.description}"
       end
-      Tool.puts "  [tools.list] #{lines.size} tool(s)"
+      status(:info, "#{lines.size} tool(s)")
       lines.join("\n")
     end
   end

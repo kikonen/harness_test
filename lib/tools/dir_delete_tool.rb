@@ -47,7 +47,7 @@ module Tools
       shown = @file_list.display_path(path)
 
       if @file_list.sensitive?(path)
-        Tool.puts "  [dir.delete] ✗ #{shown} (blocked: sensitive path)"
+        status(:fail, "#{shown} (blocked: sensitive path)")
         return "error: path '#{shown}' is blocked and can never be deleted"
       end
 
@@ -55,18 +55,18 @@ module Tools
       # the target's tree, which lives OUTSIDE what the grant and the log
       # describe. Checked before File.directory?, which follows the link.
       if File.symlink?(path)
-        Tool.puts "  [dir.delete] ✗ #{shown} (a symlink)"
+        status(:fail, "#{shown} (a symlink)")
         return "error: '#{shown}' is a symlink - delete it with file.delete " \
                "(following it here would delete a tree outside the granted path)"
       end
 
       unless File.directory?(path)
-        Tool.puts "  [dir.delete] ✗ #{shown} (not a directory)"
+        status(:fail, "#{shown} (not a directory)")
         return "error: '#{shown}' does not exist or is not a directory"
       end
 
       if path == @file_list.workdir
-        Tool.puts "  [dir.delete] ✗ #{shown} (the working directory itself)"
+        status(:fail, "#{shown} (the working directory itself)")
         return "error: '#{shown}' is the working directory - it can never be deleted"
       end
 
@@ -78,7 +78,7 @@ module Tools
       blocked = entries.find { |e| @file_list.sensitive?(e) }
       if blocked
         blocked_shown = @file_list.display_path(blocked)
-        Tool.puts "  [dir.delete] ✗ #{shown} (blocked: contains #{blocked_shown})"
+        status(:fail, "#{shown} (blocked: contains #{blocked_shown})")
         return "error: directory '#{shown}' contains the sensitive path " \
                "'#{blocked_shown}' - nothing was deleted"
       end
@@ -91,7 +91,7 @@ module Tools
       Dir.rmdir(path)
       log("deleted directory #{shown} (#{files} file(s), #{dirs} dir(s))")
 
-      Tool.puts "  [dir.delete] ✓ #{shown} (#{files} file(s), #{dirs} dir(s) deleted)"
+      status(:ok, "#{shown} (#{files} file(s), #{dirs} dir(s) deleted)")
       "ok: directory '#{shown}' and its contents have been deleted " \
         "(#{files} file(s), #{dirs} dir(s); each path logged)"
     end
@@ -134,7 +134,7 @@ module Tools
       uncovered = entries.find { |e| !@file_list.deletable?(e) }
       return nil unless uncovered
 
-      Tool.puts "  [dir.delete] ✗ #{shown} (grant does not cover the tree)"
+      status(:fail, "#{shown} (grant does not cover the tree)")
       "error: the delete grant on '#{shown}' does not cover its contents " \
         "(#{uncovered_entry(uncovered)}) - choose the recursive grant to delete a tree"
     end
@@ -175,7 +175,7 @@ module Tools
     def warn_unlogged
       return if @harness&.logger
 
-      Tool.puts "  [dir.delete] ! no harness attached - deleted paths are not logged"
+      status(:warn, "no harness attached - deleted paths are not logged")
     end
   end
 end

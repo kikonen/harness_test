@@ -45,7 +45,8 @@ RSpec.describe UI::Palette do
     end
 
     it 'paints the recessive roles with the measured dark gray (SGR 90 is unreadable here)' do
-      expect(palette.color_for(:step_label)).to eq('38;5;240')
+      expect(palette.color_for(:marker)).to eq('38;5;240')
+      expect(palette.color_for(:rule)).to eq('38;5;240')
       expect(palette.color_for(:stats)).to eq('38;5;240')
       expect(palette.color_for(:system)).to eq('38;5;240')
     end

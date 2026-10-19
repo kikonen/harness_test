@@ -5,28 +5,28 @@ require_relative "../ui/palette"
 require_relative "../ui/renderer"
 
 module Commands
-  # /palette [name|status] - show or switch the rendered-output palette for
-  # this session (issue #303).
-  #
-  # What it changes: the palette Harness hands to every Task it runs, so the
-  # NEXT turn renders with it (a Task builds its UI::Renderer once, at #run).
-  # What it does NOT change: the OutputBuffer entries, which stay plain role
-  # content whatever the console line looks like.
-  #
-  # A sample line is printed with the NEW palette so the change is visible
-  # immediately instead of only from the next turn.
-  #
-  # The choice is saved with the session (SessionManager#save_session) like the
-  # active model and the YOLO posture, so a resumed session keeps it. An
-  # unknown name raises HarnessError, which the CLI prints as [error].
+  # /palette [name|status] - show or switch the rendered-output palette for this
+  # session. The switch lands on the NEXT turn (a Task builds its renderer once
+  # at Task#run); the choice is saved with the session. Validation is not here -
+  # it is Harness#output_palette=. Rules: doc/output_rendering_design.md.
   class PaletteCommand < Command
-    # Roles shown in the sample line: the three the user asked to be told
-    # apart (issue #303) plus one alert role.
+    # [type, content, bracket label] - a status role's label travels in the
+    # origin, and the renderer supplies the indent.
     SAMPLE = [
-      [:step_label, 1],
-      [:plan, "inspect the drain loop first"],
-      [:tool_plan, "file.read, file.search"],
-      [:error, "hunk at old-line 42 did not apply"]
+      [:step_label, 1, nil],
+      [:plan, "inspect the drain loop first", nil],
+      [:tool_plan, "file.read, file.search", nil],
+      [:status_ok, "lib/foo.rb", "file.read"],
+      [:status_fail, "lib/bar.rb (not found)", "file.read"],
+      [:error, "hunk at old-line 42 did not apply", nil]
+    ].freeze
+
+    # Reported grouped by KIND so the list is readable, not one long run.
+    ROLE_GROUPS = [
+      ["turn roles", UI::Renderer::LABELS.keys],
+      ["status roles", UI::Renderer::STATUS_TYPES],
+      ["marker roles", %i[marker rule]],
+      ["note roles", %i[system stats compact]]
     ].freeze
 
     def handle(args)
@@ -50,8 +50,6 @@ module Commands
       changed = current.name != previous
       label   = changed ? "(was #{previous || 'none'})" : "(unchanged)"
       @ui.puts "  [palette: #{current.name}] #{label}"
-      # A Task builds its renderer once at Task.run, so a turn already running
-      # keeps the palette it started with; the sample line shows the new one.
       @ui.puts "  Effective from the next turn (this turn's Task already chose)."
       print_roles(current)
       print_sample(current)
@@ -72,25 +70,27 @@ module Commands
 
     # What the palette actually paints, so the names are not guesswork.
     def print_roles(palette)
-      roles = palette_roles(palette).filter_map do |role|
-        code = palette&.color_for(role)
-        code.nil? ? nil : "#{role}=#{code}"
+      ROLE_GROUPS.each do |heading, roles|
+        painted = roles.filter_map do |role|
+          code = palette&.color_for(role)
+          code.nil? ? nil : "#{role}=#{code}"
+        end
+        shown = painted.empty? ? "(terminal color)" : painted.join(" ")
+        @ui.puts "  #{heading}: #{shown}"
       end
-      @ui.puts "  colored roles: #{roles.empty? ? '(none)' : roles.join(' ')}"
-      @ui.puts "  plain roles: model answer, tool and command lines"
+      @ui.puts "  plain roles: model answer, tool notes, command output"
     end
 
     # Rendered through the SAME UI::Renderer the drain loop uses, so the
     # preview is the real thing and not a hand-built approximation.
     def print_sample(palette)
       renderer = UI::Renderer.new(palette:)
-      SAMPLE.each { |type, text| @ui.puts "  #{renderer.line(type:, content: text)}" }
-    end
-
-    def palette_roles(palette)
-      return [] if palette.nil?
-
-      UI::Renderer::LABELS.keys + %i[system stats compact text]
+      SAMPLE.each do |type, content, origin|
+        line = renderer.line(type:, content:, origin:)
+        # A status line and the step rule carry their own shape; a labeled
+        # role is indented here the way the sample used to indent it.
+        @ui.puts(origin || type == :step_label ? line : "  #{line}")
+      end
     end
   end
 end

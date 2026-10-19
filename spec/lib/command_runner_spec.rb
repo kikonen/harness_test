@@ -601,6 +601,40 @@ RSpec.describe CommandRunner do
     end
   end
 
+  # The main-thread path renders UI::Renderer's pattern itself, so a bang
+  # command looks exactly like a tool one (issue #303 / #146).
+  describe 'main-thread status lines use the renderer pattern' do
+    it 'indents, brackets and glyphs the line the way the drain loop would' do
+      Dir.mktmpdir do |dir|
+        runner, out = make_main_runner(dir, auto_approve_all: true)
+        runner.run('echo hi')
+
+        expect(out.string).to include('  [shell] ✓ auto-approved (bang consent off): echo hi')
+        expect(out.string).to match(/^ {2}\[shell\] ✓ echo hi \(exit 0, [\d.]+s\)/)
+      end
+    end
+
+    it 'reads the harness palette per line, so a mid-session switch is honored' do
+      Dir.mktmpdir do |dir|
+        runner, out = make_main_runner(dir, auto_approve_all: true,
+                                       harness: double('harness',
+                                                      output_palette: UI::Palette.fetch('none'),
+                                                      logger: nil))
+        runner.run('echo one')
+        # StringIO#string is the LIVE buffer: copy it before the next run.
+        plain = out.string.dup
+        runner.instance_variable_set(:@harness,
+                                     double('harness', output_palette: UI::Palette.fetch('default'),
+                                            logger: nil))
+        runner.run('echo two')
+        colored = out.string[plain.length..]
+
+        expect(plain).not_to include("\e[")
+        expect(colored).to include("\e[32m ✓ echo two")
+      end
+    end
+  end
+
   # issue #221: the YOLO posture (Harness#yolo? / /yolo). Every run.command
   # skips the consent dialog - including UNSAFE-construct commands the
   # allowlist could never grant - and NO model safety check runs (issue

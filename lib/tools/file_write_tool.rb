@@ -57,7 +57,7 @@ module Tools
         current = FileList.sha256(path)
         cached  = @session.file_cache.digest(path, workdir: @file_list.workdir)
         if cached && current != cached
-          Tool.puts "  [file.write] ✗ #{shown} (externally changed since last read)"
+          status(:fail, "#{shown} (externally changed since last read)")
           return "error: '#{shown}' has changed externally since you last read it. " \
                  "Re-read the file with file.read, or report the external change " \
                  "with file.touch if you know what happened."
@@ -76,7 +76,7 @@ module Tools
       notes << FileText.repair_note(model, separator) if FileText.dirty?(model)
       notes << "previous bytes were not valid UTF-8 and are now UTF-8" if existing&.lossy
       note = notes.empty? ? "" : " (#{notes.join('; ')})"
-      Tool.puts "  [file.write] ! #{shown}#{note}" if notes.any?
+      status(:note, "#{shown}#{note}") if notes.any?
       FileText.write(path, model.text, separator)
 
       # issue #170: our own write refreshes the cache (the file is now in
@@ -86,7 +86,7 @@ module Tools
         @session.file_cache.record(path, sha, workdir: @file_list.workdir) if sha
       end
 
-      Tool.puts "  [file.write] ✓ #{shown} (#{content.length} chars)"
+      status(:ok, "#{shown} (#{content.length} chars)")
       "ok: wrote #{content.length} chars to #{shown}#{note}"
     end
   end

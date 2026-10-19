@@ -33,7 +33,7 @@ module Tools
       shown = @file_list.display_path(path)
 
       if @file_list.sensitive?(path)
-        Tool.puts "  [file.delete] ✗ #{shown} (blocked: sensitive file)"
+        status(:fail, "#{shown} (blocked: sensitive file)")
         return "error: file '#{shown}' is blocked and can never be deleted"
       end
 
@@ -45,12 +45,12 @@ module Tools
       end
 
       unless File.file?(path)
-        Tool.puts "  [file.delete] ✗ #{shown} (file does not exist)"
+        status(:fail, "#{shown} (file does not exist)")
         return "error: file '#{shown}' does not exist on disk"
       end
 
       File.delete(path)
-      Tool.puts "  [file.delete] ✓ #{shown} (deleted)"
+      status(:ok, "#{shown} (deleted)")
       # issue #170: the file is gone - drop its cache entry.
       @session&.file_cache.clear(path, workdir: @file_list.workdir)
 
