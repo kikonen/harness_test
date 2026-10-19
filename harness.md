@@ -15,8 +15,10 @@ Keep this in mind:
   error messages), also update the system prompt (`config/system_prompt.txt`)
   and/or the tool's own description so the LLM (you, in future sessions)
   sees the accurate contract.
-- If you change CLI commands or `/help` text, keep them in sync with the
-  actual behavior in `lib/cli.rb`.
+- If you add or change a slash command, register it in
+  `CommandHandler::COMMANDS` AND declare its `HELP` entry in the command class
+  - `/help` is generated from the registry, and README's table is checked against
+  it (`doc/command_help_design.md`). CLI flag changes stay in sync with `lib/cli.rb`.
 - Scratch files go under `tmp/`, never in the project root - and under their
   OWN subdir named for the issue they belong to: `tmp/scratch/<issue>/`, or
   `tmp/keep/<issue>/` for analysis an OPEN issue still quotes (kept until that

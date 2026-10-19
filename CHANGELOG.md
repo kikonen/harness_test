@@ -7,6 +7,50 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - /help from data: registry, entries, topics, renderer (issue #323)
+
+- `HelpCommand#handle` was one 182-line heredoc printing 169 lines (both
+  measured): ~35 hand-typed, hand-padded command lines PLUS ~134 lines of prose
+  (keys, multiline input, consent postures, sessions) glued into the same page.
+  It listed the commands a SECOND time - `CommandHandler::COMMANDS` already IS
+  the dispatch registry - and README's table was the third copy. Nothing checked
+  the three agreed, and `/palette` is the near-miss this found: its README row was
+  missing.
+- Help is now four layers with one owner each: the registry (WHICH commands
+  exist), a `HELP = CommandHelp.new(usage:, summary:, group:, forms:, see_also:)`
+  constant in every command class (WHAT one command is), `lib/help_topics.rb`
+  (the prose, as named topics with paragraph bodies) and `lib/help_renderer.rb`
+  (HOW it looks). `Command.help` RAISES for a command that declares no `HELP`, so
+  a registered command cannot be silently missing from the listing - the same
+  "unknown types are loud" rule #146 uses for output.
+- What the reader gets: bare `/help` is the grouped table (column width computed
+  from the entries, one width for the whole table) + the topic index - 73 lines
+  instead of 169; `/help <command>` is one command's forms; `/help <topic>` is one
+  topic page; the prose is no longer forced on every `/help`.
+- `see_also` names are resolved against BOTH registries (`/name` vs `/help name`),
+  and `HelpRenderer#help_entries` refuses a usage that does not start with its
+  registered name - the table prints the usage in the command's slot, so a
+  mismatch advertises a form the dispatcher rejects.
+- Topic names must not collide with command names or `/help session` is
+  ambiguous: `HelpTopics.validate!` runs at `CommandHandler` construction (the
+  first topic set DID collide on `session`, which is why that topic is
+  `conversation`).
+- Unknown input now names the closest registered names instead of repeating "type
+  /help": `/garnt` says `Did you mean /grant?`, from the same registry the lookup
+  just missed. The typo band is `max_distance: 2`, MEASURED over this set - at 3
+  an unrelated name qualifies (`helo` -> yolo), at 1 only the nearest survives; a
+  prefix counts as exact so `/res` is an abbreviation, not a misspelling.
+- README's command table is checked against the registry by spec (a missing row
+  AND a row for a command the dispatcher would reject both fail). README's usage
+  text is corrected too: `end a line with "\"` described backslash continuation,
+  which issue #198 phase 3 REMOVED (`CLI#get_command`: "no backslash continuation").
+- New `doc/command_help_design.md` (the layers, what each owns, which rules are
+  checked by spec and which are measured); new specs `spec/lib/command_help_spec.rb`
+  (11), `spec/lib/help_renderer_spec.rb` (18), `spec/lib/help_topics_spec.rb` (10),
+  `spec/lib/commands/help_command_spec.rb` (16, incl. the drift contract); 2 new
+  dispatcher examples (unknown-command suggestions) and the startup tips now point
+  at `/help input` / `/help notes` instead of "see /help for details".
+
 ## Unreleased - output roles, UI::Renderer, and named palettes (issue #303, the #146 renderer work)
 
 - `Harness#print_step_display` emitted ONE type (`:step`) for four roles and
