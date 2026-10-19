@@ -7,6 +7,20 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - the command registry is checked against the command classes (issue #327)
+
+- #323's drift spec compared the registry with README and with the HELP entries,
+  but every one of those examples ITERATES the registry: a command class written,
+  required, and never registered was found by nothing, and the user's symptom was
+  `Unknown command: /foo` at runtime. Measured on 2663103: 20 classes, 20 registry
+  entries, 20 README rows all agreed - the guard was simply absent.
+- Test-only: `spec/lib/commands/help_command_spec.rb` now asserts
+  `COMMANDS.values` == the `Commands` subclasses of `Command` (both directions, so
+  a class registered twice or a key pointing at a non-command also fails), and
+  that every registry key is the first word of its entry's usage form - the check
+  `HelpRenderer` already makes when /help renders, now asserted without rendering.
+  16 -> 19 examples. `doc/command_help_design.md` lists the two new rules.
+
 ## Unreleased - /help from data: registry, entries, topics, renderer (issue #323)
 
 - `HelpCommand#handle` was one 182-line heredoc printing 169 lines (both

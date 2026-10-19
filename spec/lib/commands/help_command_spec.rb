@@ -7,7 +7,7 @@ require 'commands/help_command'
 
 # issue #323: /help is GENERATED from the dispatch registry. These examples are
 # the drift contract: the registry, the per-command HELP entries and README's
-# table must cover the same set, or a command exists that no help page mentions.
+# table, AND the command classes themselves must cover the same set.
 RSpec.describe Commands::HelpCommand do
   let(:registry) { CommandHandler::COMMANDS }
 
@@ -57,8 +57,28 @@ RSpec.describe Commands::HelpCommand do
     it 'no topic name collides with a command name, and every topic has a body' do
       expect { HelpTopics.validate!(registry.keys) }.not_to raise_error
     end
-  end
 
+    # issue #327: the examples above iterate the registry, so they can find a
+    # missing HELP - never a command class that was written and required but
+    # never registered, which is the failure that reaches the user as
+    # "Unknown command: /foo". The registry must equal the class set, both ways.
+    it 'every command class under Commands is registered (nothing is unreachable)' do
+      unregistered = command_classes - registry.values
+
+      expect(unregistered.map(&:name)).to eq([])
+    end
+
+    it 'every registry value is a command class, registered exactly once' do
+      expect(registry.values.uniq.size).to eq(registry.size)
+      expect((registry.values - command_classes).map(&:name)).to eq([])
+    end
+
+    it 'a registry key is the word the dispatch looks up and the usage form names' do
+      mismatched = registry.reject { |name, klass| klass.help.usage.split(/\s+/).first == name }
+
+      expect(mismatched.map { |name, klass| "#{name} => #{klass.help.usage}" }).to eq([])
+    end
+  end
   describe 'bare /help' do
     it 'lists EVERY registered command (nothing is hand-copied any more)' do
       out = run('')
@@ -145,5 +165,11 @@ RSpec.describe Commands::HelpCommand do
   def readme_command_names
     readme = File.read(File.expand_path('../../../README.md', __dir__))
     readme.scan(/^\| `(\/[a-z-]+)\b/).flatten.map { |cell| cell.delete('/') }
+  end
+
+  # The classes lib/commands/ actually defines - what a new command adds. The
+  # registry is checked against THIS, not only against README.
+  def command_classes
+    Commands.constants.filter_map { |name| Commands.const_get(name) }.select { |k| k.is_a?(Class) && k < Command }
   end
 end
