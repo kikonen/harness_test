@@ -64,6 +64,12 @@ data-then-render split the output layer uses.
 - bare `/help` contains every registered command;
 - README's table covers exactly the registry - neither a missing row nor a row
   for a command the dispatcher would reject;
+- `CommandHandler::COMMANDS.values` is EXACTLY the set of `Commands` classes that
+  subclass `Command` (issue #327). The examples above iterate the registry, so
+  they can find a missing `HELP` but never a command class that was written,
+  required, and never registered - the failure that reaches the user as
+  `Unknown command: /foo`. Checking the set both ways also catches a class
+  registered twice, and a key pointing at something that is not a command;
 - no topic name collides with a command name. `HelpTopics.validate!` runs that
   at `CommandHandler` construction too: the collision is what would make
   `/help session` ambiguous (the first topic set did collide on `session`, which
@@ -71,7 +77,8 @@ data-then-render split the output layer uses.
 
 `HelpRenderer#help_entries` additionally refuses an entry whose usage does not
 start with its registered name: the table prints the usage form in the command's
-slot, so a mismatched one would advertise a form the dispatcher does not accept.
+slot, so a mismatched one would advertise a form the dispatcher does not accept -
+the spec asserts the same thing for every entry, without running the renderer.
 
 ## The typo band is measured
 
