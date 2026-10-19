@@ -9,13 +9,12 @@ require 'command_runner'
 RSpec.describe CommandHandler do
   def make_handler(dir, console)
     # harness: nil is fine for the bang/prompt routing paths (not touched).
-    handler = described_class.allocate
-    handler.instance_variable_set(:@harness, nil)
-    handler.instance_variable_set(:@file_list, FileList.new([], workdir: dir))
-    handler.instance_variable_set(:@options, {})
-    handler.instance_variable_set(:@exiting, false)
-    handler.instance_variable_set(:@ui, console)
-    handler
+    described_class.new(
+      harness: nil,
+      file_list: FileList.new([], workdir: dir),
+      options: {},
+      ui: console
+    )
   end
 
   def drive_bang(dir, *dialog_lines)
@@ -162,6 +161,36 @@ RSpec.describe CommandHandler do
           handler = handler_with_options(dir, { bang_requires_confirmation: false })
           expect(captured_auto_approve(handler, '! echo x')).to be(true)
         end
+      end
+    end
+  end
+
+  # issue #323: an unregistered name gets its suggestion from the SAME registry
+  # the dispatch just missed (the old message only said "type /help").
+  describe '#handle unknown command (issue #323)' do
+    def drive_command(dir, line)
+      stdout = StringIO.new
+      handler = make_handler(dir, UI::Console.new(stdout: stdout, stdin: StringIO.new('')))
+      handler.handle(line)
+      stdout.string
+    end
+
+    it 'suggests the closest registered command for a typo' do
+      Dir.mktmpdir do |dir|
+        out = drive_command(dir, '/garnt')
+
+        expect(out).to include('Unknown command: /garnt')
+        expect(out).to include('Did you mean /grant?')
+      end
+    end
+
+    it 'falls back to pointing at /help when nothing is close' do
+      Dir.mktmpdir do |dir|
+        out = drive_command(dir, '/xyzzy')
+
+        expect(out).to include('Unknown command: /xyzzy')
+        expect(out).not_to include('Did you mean')
+        expect(out).to include('/help')
       end
     end
   end

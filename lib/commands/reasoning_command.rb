@@ -7,6 +7,13 @@ module Commands
   # (issue #98). Normally only visible in the log file; this makes it an
   # explicit console operation since reasoning can be lengthy.
   class ReasoningCommand < Command
+    HELP = CommandHelp.new(
+      usage: "reasoning",
+      summary: "Show the reasoning text of the last response (the model's " \
+        "extended thinking; normally only in the session's harness.log)",
+      group: :session,
+      see_also: %w[model param])
+
     def handle(_args)
       reasoning = @harness.session.last_reasoning
       if reasoning.nil? || reasoning.strip.empty?

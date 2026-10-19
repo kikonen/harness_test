@@ -11,6 +11,13 @@ module Commands
   # with harness: nil, before any Harness exists. This class is the single
   # renderer of the session list (both entry points show the same columns).
   class SessionsCommand < Command
+    HELP = CommandHelp.new(
+      usage: "sessions",
+      summary: "List saved sessions in this working directory (id, saved-at, " \
+               "message and grant counts)",
+      group: :session,
+      see_also: %w[resume save saving])
+
     def handle(_args)
       locator  = SessionLocator.new(@file_list.workdir)
       sessions = locator.list

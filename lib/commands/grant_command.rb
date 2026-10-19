@@ -8,6 +8,13 @@ module Commands
   # delete) and command allowlist prefixes. Replaces the constant grant
   # display that used to be printed above every prompt (issue #101).
   class GrantCommand < Command
+    HELP = CommandHelp.new(
+      usage: "grant",
+      summary: "Show every current grant: file/dir access per mode and both " \
+        "command allowlists (run.command and shell !) separately",
+      group: :access,
+      see_also: %w[clear access consent shell])
+
     def handle(_args)
       access = @file_list.accessible_paths
       labels = { both: "Read + write", read: "Read only", write: "Write only", delete: "Delete" }

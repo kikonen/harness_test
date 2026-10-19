@@ -5,6 +5,13 @@ require_relative "../command"
 module Commands
   # /models - list configured models (marks the default and active one).
   class ModelsCommand < Command
+    HELP = CommandHelp.new(
+      usage: "models",
+      summary: "List the configured model profiles (model, endpoint, API " \
+        "type), marking the default and the active one",
+      group: :model,
+      see_also: %w[model param])
+
     def handle(_args)
       profiles = @harness.session_manager.model_profiles
       current  = @harness.session_manager.active_model_name

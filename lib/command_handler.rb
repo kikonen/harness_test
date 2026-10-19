@@ -29,6 +29,9 @@ require_relative "commands/exit_command"
 require_relative "commands/yolo_command"
 require_relative "commands/palette_command"
 
+require_relative "help_renderer"
+require_relative "help_topics"
+
 # Thin dispatcher: checks if input starts with "/", extracts the first word,
 # looks up the command class in a registry map, and delegates.
 class CommandHandler
@@ -75,6 +78,10 @@ class CommandHandler
     @exiting   = false
     @ui      = ui
     @on_resume = on_resume
+    # One renderer for the whole run: it reads the registry this class owns,
+    # so /help can never list a different set than /dispatch accepts.
+    @help_renderer = HelpRenderer.new(registry: COMMANDS)
+    HelpTopics.validate!(COMMANDS.keys)
   end
 
   def exiting?
@@ -110,11 +117,17 @@ class CommandHandler
 
     cmd_class = COMMANDS[name]
     if cmd_class
-      cmd = cmd_class.new(harness:, file_list:, options:, ui:, on_resume: @on_resume)
+      cmd = cmd_class.new(
+        harness:,
+        file_list:,
+        options:,
+        ui:,
+        on_resume: @on_resume,
+        help_renderer: @help_renderer)
       cmd.handle(args)
       @exiting = true if cmd.respond_to?(:exited?) && cmd.exited?
     else
-      ui.puts "Unknown command: /#{name}.\n----\nType /help for available commands."
+      unknown_command(name)
     end
   end
 
@@ -177,5 +190,19 @@ class CommandHandler
     run_on_task do |_t|
       @harness.session_manager.run_prompt(text)
     end
+  end
+
+  # A wrong command name is usually a typo, so name the closest registered
+  # names - all of them derived from the SAME registry the dispatch just
+  # missed (issue #323).
+  def unknown_command(name)
+    suggestions = @help_renderer.command_suggestions(name)
+    if suggestions.empty?
+      ui.puts "Unknown command: /#{name}. Type /help for available commands."
+      return
+    end
+
+    named = suggestions.map { |s| "/#{s}" }.join(", ")
+    ui.puts "Unknown command: /#{name}. Did you mean #{named}? (/help lists all)"
   end
 end

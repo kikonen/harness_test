@@ -10,6 +10,14 @@ module Commands
   # at Task#run); the choice is saved with the session. Validation is not here -
   # it is Harness#output_palette=. Rules: doc/output_rendering_design.md.
   class PaletteCommand < Command
+    HELP = CommandHelp.new(
+      usage: "palette [name|status]",
+      summary: "Show or switch the output palette for this session " \
+        "(default | basic16 | none); saved with the session",
+      group: :output,
+      forms: ["palette", "palette status", "palette <name>"],
+      see_also: %w[help])
+
     # [type, content, bracket label] - a status role's label travels in the
     # origin, and the renderer supplies the indent.
     SAMPLE = [

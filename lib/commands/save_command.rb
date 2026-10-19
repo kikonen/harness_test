@@ -5,6 +5,13 @@ require_relative "../command"
 module Commands
   # /save - save the session (conversation + access list) to disk.
   class SaveCommand < Command
+    HELP = CommandHelp.new(
+      usage: "save",
+      summary: "Save the session (conversation + access list) now and print " \
+        "the id, plus the command line that resumes it",
+      group: :session,
+      see_also: %w[sessions resume saving])
+
     def handle(_args)
       id = @harness.session_manager.save_session
       # issue #207: the session JSON lives inside the session's own dir.
