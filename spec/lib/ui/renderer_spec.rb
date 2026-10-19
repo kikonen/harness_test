@@ -19,8 +19,7 @@ RSpec.describe UI::Renderer do
       )
     end
 
-    it 'labels the model answer and the two alert roles' do
-      expect(renderer.line(type: :response, content: 'done')).to eq('model: done')
+    it 'labels the two alert roles' do
       expect(renderer.line(type: :error, content: 'auto-save failed')).to eq(
         'error: auto-save failed'
       )
@@ -58,18 +57,51 @@ RSpec.describe UI::Renderer do
       expect(renderer.line(type: :step_label, content: 8)).to eq("#{'-' * 36} step 8 #{'-' * 36}")
     end
 
-    it 'is exactly STEP_RULE_WIDTH wide whatever the number is' do
+    it 'is exactly RULE_WIDTH wide whatever the number is' do
       widths = [1, 9, 10, 99, 100].map do |n|
         renderer.line(type: :step_label, content: n).length
       end
 
-      expect(widths).to all(eq(described_class::STEP_RULE_WIDTH))
+      expect(widths).to all(eq(described_class::RULE_WIDTH))
     end
 
     it 'gives the odd spare dash to the right side (a wider number)' do
       expect(renderer.line(type: :step_label, content: 12)).to eq(
         "#{'-' * 35} step 12 #{'-' * 36}"
       )
+    end
+  end
+
+  # The final answer gets the SAME boundary shape as an iteration start, which
+  # is what makes it locatable instead of "in between" the turn's lines.
+  describe '#line (:response) - the answer boundary' do
+    it 'names the role in a full-width fused rule, then the answer as emitted' do
+      expect(renderer.line(type: :response, content: 'done')).to eq(
+        "#{'-' * 36} model #{'-' * 37}\ndone"
+      )
+    end
+
+    it 'every boundary rule is exactly RULE_WIDTH wide' do
+      widths = [
+        renderer.line(type: :response, content: 'x'),
+        renderer.line(type: :step_label, content: 1),
+        renderer.line(type: :step_label, content: 1234)
+      ].map { |line| line.lines.first.chomp.length }
+
+      expect(widths).to all(eq(described_class::RULE_WIDTH))
+    end
+
+    it 'non-boundary roles keep their plain label (no rule)' do
+      expect(renderer.line(type: :plan, content: 'read the tool')).to eq('plan:  read the tool')
+      expect(renderer.line(type: :warn, content: 'x')).to eq('warn:  x')
+      expect(renderer.line(type: :error, content: 'x')).to eq('error: x')
+    end
+
+    it 'keeps the answer text untouched (own paragraphs and indentation)' do
+      answer = "first paragraph\n\n  - indented item\n  - another"
+      out = renderer.line(type: :response, content: answer).lines[1..].map(&:chomp)
+
+      expect(out).to eq(answer.split("\n"))
     end
   end
 
@@ -158,7 +190,11 @@ RSpec.describe UI::Renderer do
     end
 
     it 'leaves a role the palette does not color in the terminal color' do
-      expect(painted.line(type: :response, content: 'done')).to eq('model: done')
+      # :response is a BOUNDARY role: the rule is gray and the answer text stays
+      # in the terminal's own color (the palette colors no :response role).
+      expect(painted.line(type: :response, content: 'done')).to eq(
+        "\e[38;5;240m#{'-' * 36} \e[0mmodel\e[38;5;240m #{'-' * 37}\e[0m\ndone"
+      )
     end
 
     it 'colors verbatim roles the palette names (stats and system notes)' do

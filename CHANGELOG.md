@@ -78,6 +78,15 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   columns whatever the number is (`-------- step 8 --------`). Bold was
   measured as not perceptible on the owner's terminal, so the boundary is SHAPE
   plus a hue on the number. `Tool.puts` is gone.
+- The final answer now gets the SAME boundary: `BOUNDARY_ROLES` is the decision
+  written as a list (`:step_label`, `:response`), and a role in it is framed by
+  one full-width fused gray rule that NAMES the role
+  (`----------- model -----------`), followed by the answer EXACTLY as emitted -
+  no label, no indent, so its own paragraphs and indentation survive. The old
+  `model: ` prefix is gone; `plan` / `say` / `tools` / `warn` / `error` keep
+  their plain labels, because they are lines INSIDE a block and framing them
+  too would make the boundary say nothing. `STEP_RULE_WIDTH` became `RULE_WIDTH`
+  - there is one width for boundaries now.
 - Still emitter-shaped (deliberately, tracked by #146): `:text` command output
   and the bracketed `:system` / `:stats` / `:compact` notes, plus Task's own
   mid-turn acks (`[note] got it - ...`, `[YOLO ON]`), which write straight to

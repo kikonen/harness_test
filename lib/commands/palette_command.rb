@@ -18,7 +18,8 @@ module Commands
       [:tool_plan, "file.read, file.search", nil],
       [:status_ok, "lib/foo.rb", "file.read"],
       [:status_fail, "lib/bar.rb (not found)", "file.read"],
-      [:error, "hunk at old-line 42 did not apply", nil]
+      [:error, "hunk at old-line 42 did not apply", nil],
+      [:response, "Done. The answer keeps its own formatting.", nil]
     ].freeze
 
     # Reported grouped by KIND so the list is readable, not one long run.
@@ -87,9 +88,10 @@ module Commands
       renderer = UI::Renderer.new(palette:)
       SAMPLE.each do |type, content, origin|
         line = renderer.line(type:, content:, origin:)
-        # A status line and the step rule carry their own shape; a labeled
-        # role is indented here the way the sample used to indent it.
-        @ui.puts(origin || type == :step_label ? line : "  #{line}")
+        # A boundary or status line already carries its own shape; a labeled
+        # role gets the sample's own indent.
+        shaped = origin || UI::Renderer::BOUNDARY_ROLES.include?(type)
+        @ui.puts(shaped ? line : "  #{line}")
       end
     end
   end
