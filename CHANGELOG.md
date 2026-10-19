@@ -7,7 +7,7 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
-## Unreleased - output roles, UI::Renderer, and named palettes (issue #303, steps 1-4 of #146)
+## Unreleased - output roles, UI::Renderer, and named palettes (issue #303, the #146 renderer work)
 
 - `Harness#print_step_display` emitted ONE type (`:step`) for four roles and
   baked the pattern into every string (`"[step N]"`, `">>> reason <<<"`,
