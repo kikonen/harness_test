@@ -76,7 +76,7 @@ module LLM
       req = Net::HTTP::Post.new(uri.request_uri)
       req["Content-Type"] = "application/json"
       req["Authorization"] = "Bearer #{@options[:token]}" if @options[:token]
-      body = build_body(serialize_messages(messages), tools, stream: stream)
+      body = build_body(serialize_messages(messages), tools, stream:)
       req.body = JSON.generate(body)
       req
     end

@@ -6,90 +6,94 @@ require 'stringio'
 require 'socket'
 require 'llm/base_backend'
 
+# The helpers are defined at TOP LEVEL, not inside the example group: a class
+# written inside a block still lands in the enclosing scope, so defining it
+# there only hides where it lands (Lint/ConstantDefinitionInBlock).
+
+# A concrete backend over the shared machinery (BaseBackend is abstract).
+class StreamingBackend < LLM::BaseBackend
+  def api_type = LLM::OPENAI
+  def endpoint_path = '/chat/completions'
+
+  private
+
+  def build_body(messages, _tools, stream: false)
+    { model: @options[:model], messages: messages, stream: stream }
+  end
+
+  def parse_response(json) = json
+end
+
+# Minimal chunked-response server. Each part is flushed separately so the
+# client sees them as separate chunks (the condition the reader exists for).
+class ChunkedServer
+  attr_reader :port, :requests, :bodies
+
+  def initialize(status: "200 OK", parts:, chunked: true, close_early: false)
+    @status      = status
+    @parts       = parts
+    @chunked     = chunked
+    @close_early = close_early
+    @requests    = []
+    @bodies      = []
+    @server      = TCPServer.new("127.0.0.1", 0)
+    @port        = @server.addr[1]
+    @thread      = Thread.new { serve }
+  end
+
+  # Closing the listening socket makes the blocked accept raise, which ends
+  # the server thread: joining first would wait out a timeout per example.
+  def close
+    @server.close
+  rescue IOError
+    nil
+  ensure
+    @thread&.join(1)
+  end
+
+  private
+
+  def serve
+    loop do
+      conn = @server.accept
+      @requests << read_headers(conn)
+      if @chunked
+        conn.print("HTTP/1.1 #{@status}\r\nTransfer-Encoding: chunked\r\n\r\n")
+        @parts.each do |part|
+          conn.print("#{part.bytesize.to_s(16)}\r\n#{part}\r\n")
+          conn.flush
+        end
+        conn.print("0\r\n\r\n") unless @close_early
+      else
+        body = @parts.join
+        conn.print("HTTP/1.1 #{@status}\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}")
+      end
+      conn.flush
+      conn.close
+    end
+  rescue IOError, Errno::ECONNRESET
+    nil
+  end
+
+  # Reads the request headers AND the body they declare, so a spec can
+  # assert what the client actually sent rather than poking the builder.
+  def read_headers(conn)
+    lines = []
+    while (line = conn.gets)
+      break if line.strip.empty?
+
+      lines << line
+    end
+    length = lines.map { |l| l[/Content-Length: (\d+)/i, 1] }.compact.first.to_i
+    @bodies << (length.positive? ? conn.read(length) : "")
+    lines.join
+  end
+end
+
 # The streamed request path, exercised against a REAL chunked HTTP server: the
 # behavior under test is transport behavior (chunk boundaries, the retry
 # boundary, status handling), which a stubbed response object cannot show.
 RSpec.describe "BaseBackend streaming" do
-  # A concrete backend over the shared machinery (BaseBackend is abstract).
-  class StreamingBackend < LLM::BaseBackend
-    def api_type = LLM::OPENAI
-    def endpoint_path = '/chat/completions'
-
-    private
-
-    def build_body(messages, _tools, stream: false)
-      { model: @options[:model], messages: messages, stream: stream }
-    end
-
-    def parse_response(json) = json
-  end
-
-  # Minimal chunked-response server. Each part is flushed separately so the
-  # client sees them as separate chunks (the condition the reader exists for).
-  class ChunkedServer
-    attr_reader :port, :requests, :bodies
-
-    def initialize(status: "200 OK", parts:, chunked: true, close_early: false)
-      @status      = status
-      @parts       = parts
-      @chunked     = chunked
-      @close_early = close_early
-      @requests    = []
-      @bodies      = []
-      @server      = TCPServer.new("127.0.0.1", 0)
-      @port        = @server.addr[1]
-      @thread      = Thread.new { serve }
-    end
-
-    # Closing the listening socket makes the blocked accept raise, which ends
-    # the server thread: joining first would wait out a timeout per example.
-    def close
-      @server.close
-    rescue IOError
-      nil
-    ensure
-      @thread&.join(1)
-    end
-
-    private
-
-    def serve
-      loop do
-        conn = @server.accept
-        @requests << read_headers(conn)
-        if @chunked
-          conn.print("HTTP/1.1 #{@status}\r\nTransfer-Encoding: chunked\r\n\r\n")
-          @parts.each do |part|
-            conn.print("#{part.bytesize.to_s(16)}\r\n#{part}\r\n")
-            conn.flush
-          end
-          conn.print("0\r\n\r\n") unless @close_early
-        else
-          body = @parts.join
-          conn.print("HTTP/1.1 #{@status}\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}")
-        end
-        conn.flush
-        conn.close
-      end
-    rescue IOError, Errno::ECONNRESET
-      nil
-    end
-
-    # Reads the request headers AND the body they declare, so a spec can
-    # assert what the client actually sent rather than poking the builder.
-    def read_headers(conn)
-      lines = []
-      while (line = conn.gets)
-        break if line.strip.empty?
-
-        lines << line
-      end
-      length = lines.map { |l| l[/Content-Length: (\d+)/i, 1] }.compact.first.to_i
-      @bodies << (length.positive? ? conn.read(length) : "")
-      lines.join
-    end
-  end
-
   let(:log)    { StringIO.new }
   let(:logger) { Logger.new(log) }
   let(:options) do

@@ -46,8 +46,8 @@ module LLM
         out[:content] = text
       end
       think = text_of(delta, :reasoning) ||
-              text_of(delta, :reasoning_content) ||
-              text_of(delta, :thinking)
+        text_of(delta, :reasoning_content) ||
+        text_of(delta, :thinking)
       unless think.nil?
         @reasoning << think
         out[:reasoning] = think
