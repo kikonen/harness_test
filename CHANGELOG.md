@@ -7,6 +7,29 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - an auto-approved command is no longer printed twice (issue #325)
+
+The complaint: an auto-approved `run.command` showed the FULL command on two
+consecutive lines - the approval line (`✓ auto-approved (allowlist): <cmd>`) and
+the outcome line (`✓ <cmd> (exit 0, 3.18s)`) - which is exactly the noise that
+makes a YOLO or allowlist run hard to read.
+
+- `CommandRunner#execute` now takes `auto_approved:`, and the three
+  no-dialog entry points (stored allowlist grant, YOLO / bang consent off, the
+  AUTO-APPROVE model verdict) pass it: their outcome line names the command by
+  `command_handle` - the first `HANDLE_TOKENS` (4) tokens, with " ..." when a
+  tail was dropped - instead of repeating it. `✓ echo one two three ... (exit
+  0, 0.03s)`. The timeout line uses the same name.
+- Why the approval line stays: issue #221 requires every run that skipped the
+  consent dialog to leave a visible trace naming the POSTURE that let it
+  through, and the full command has to be on screen while a long one runs. One
+  of the two lines had to carry it; the approval line is the one that carries
+  the reason, so the outcome line yields.
+- A command that reached the consent dialog keeps its FULL text in the outcome
+  line, because that line is its only trace (there is no approval line for it).
+  `harness.log` is unchanged: the full command and the full output of every run
+  are still logged there.
+
 ## Unreleased - streamed LLM responses: the /stream posture and the live tail (issue #28, step 2 of 2)
 
 - The posture is harness state, not backend state (`Harness#stream?`): the config
