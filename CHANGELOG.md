@@ -7,6 +7,50 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - spec files for the mirror-missing classes (issue #306, tier A)
+
+#306 measured 36 `lib/**/*.rb` classes with no `spec/lib/` mirror. Re-measured at
+the start of this work: 35 (`sensitive_files.rb` gained its spec with #321; the
+empty `module UI; end` in `lib/ui.rb` is not a testable class). The owner chose
+**tier A - classes with branching** - and left the rule question (#306 item
+2: say in `harness.md` that a declarative wrapper needs no spec) open on the issue.
+
+- 29 new spec files. Tools: `file_copy`, `file_delete`, `file_info`, `file_list`,
+  `file_rename`, `git_diff`, `git_grep`, `git_log`, `git_show`, `git_status`,
+  `tools_list`, `tools_search`. Other: `Command`, `Tool` (renamed from
+  `tools/tool_base_spec.rb` - a spec must mirror its lib path, so a file named for
+  no class at all had to go), `ToolRegistry`, `GitRunner`, `UI::Console`,
+  `lib/llm/shared.rb` (module `LLM`: `.backend_type` + the constants both read),
+  `LLM::StreamError` / `StreamStatusError`, and 11 commands (`clear`, `ctx`,
+  `exit`, `model`, `models`, `reload`, `save`, `session`, `session_clear`,
+  `tools`). Suite: **1240 -> 1513 examples** (+273), 1 -> 3 pending.
+- `spec/` files mirror **lib files**, not one describe per class: the extra
+  classes inside a lib file (`StreamStatusError`, the `UI::Editor` helpers,
+  `UI::Option`) are covered in that file's spec, matching what the tree already did.
+- Deliberately NOT spec'd (the declarative wrappers): `echo_tool`,
+  `get_time_tool`, `notify_tool` - each is a name + a description + a one-line
+  call; the registry spec covers the shape, and `harness_spec.rb` already drives
+  `test.echo` and `ui.notify` end-to-end through the real tool loop.
+  `keep_alive_http_spec.rb` is left out until #334 (filed, unfixed) gets its lib fix
+  and the owner decides what behaviour to pin. `harness_error.rb` and `lib/ui.rb` are
+  three exception names and an empty module.
+- Two specs have NO lib mirror and stay that way: `llm/base_backend_streaming_spec.rb`
+  and `ui/spinner_tui_spec.rb`. Both test a facet of an existing class against a
+  real transport or a real terminal - a second file for behavior a stub cannot
+  show - not a second home for the class.
+- 2 pending specs mark real bugs instead of pinning them: `file_delete_tool_spec.rb`
+  and `file_rename_tool_spec.rb` expect the optional-session cache step to work; it
+  raises `NoMethodError` AFTER the file is already gone (`@session&.file_cache.clear`
+  safe-navigates only the next send). Tracked in #335.
+- Measured git behaviour pinned by the new git specs, each one an argument the tool
+  passes to git (so all five are unreachable fallbacks in the tool, kept as specs to
+  say so): `git status --branch` always emits a `## <branch>` line, so the
+  "working tree is clean" branch of `GitStatusTool` never runs; `git log` / `-G` in
+  a commit-less repo is git exit 128, not an empty result; `git show --stat` emits
+  no patch body (the class comment claims it does); a `-G` regex is applied to the
+  whole diff block, so a line-anchored `^[-+]beta` finds nothing; `--max-count`
+  bounds the matches SHOWN, not how deep the walk goes.
+
 ## Unreleased - an auto-approved command is no longer printed twice (issue #325)
 
 The complaint: an auto-approved `run.command` showed the FULL command on two
