@@ -7,6 +7,34 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - streamed LLM responses: the /stream posture and the live tail (issue #28, step 2 of 2)
+
+- The posture is harness state, not backend state (`Harness#stream?`): the config
+  key `streaming` (global) or a model profile's own tri-state `streaming` key
+  (true / false / absent = the global key decides) sets the initial value,
+  `/stream [on|off|status]` toggles it live, and the spinner badge reads
+  `[STREAM]` while it is on - `Task.mode_badge` now joins one bracket per
+  NON-default posture, so `[MANUAL] [STREAM]` is one badge line. Opt-in
+  everywhere: a server or proxy that mishandles a streamed response needs no
+  config at all.
+- The posture is read PER REQUEST (`Harness#request_chain`), so a mid-turn
+  `/stream` toggle applies to the next request of the same turn - the same rule
+  as the Ctrl+A / `/yolo` badges.
+- Live text goes to the spinner suffix, not to stdout (the single-thread I/O
+  rule): `LLM::StreamPreview` publishes FROZEN snapshots (the task thread writes
+  them from the delta callback, the main thread's spinner reads them per frame -
+  a reference assignment is atomic, an in-place append is not), and
+  `Harness#request_wait_suffix` returns the newest 60 chars of the answer once it
+  has started, falling back to the context estimate before that. The preview is
+  cleared in `request_chain`'s `ensure`, not after the call: a request that died
+  mid-stream must not leave its partial tail for the NEXT request to show.
+- The posture travels with the session (`SessionManager#save_session` /
+  `Harness#apply_resume_state`), like the YOLO posture: a session the user set to
+  streamed does not quietly come back buffered.
+- Specs: 26 new examples (preview 18, command 8) plus the posture coverage added
+  to the harness / session_manager / task / harness_config specs. Suite 1220
+  examples, 0 failures.
+
 ## Unreleased - streamed LLM responses: the transport path (issue #28, step 1 of 2)
 
 - The answer was printed only after the whole response had arrived: during a

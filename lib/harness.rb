@@ -15,6 +15,7 @@ require_relative "file_list"
 require_relative "session"
 require_relative "session_locator"
 require_relative "task"
+require_relative "llm/stream_preview"
 require_relative "tools/echo_tool"
 require_relative "tools/notify_tool"
 require_relative "tools/dialog_tool"
@@ -97,6 +98,11 @@ class Harness
     @command_safety_auto_approve = options[:command_safety_auto_approve] == true
     @yolo = options[:yolo] == true
     self.output_palette = options[:output_palette]
+    # Streaming posture (issue #28): the initial value comes from the config
+    # (global key or a profile's own key); /stream switches it for the rest of
+    # the session. Read per request, so a mid-turn toggle applies to the next.
+    @stream = options[:stream] == true
+    @stream_preview = nil
     apply_resume_state(resume_data) if resume_data
   end
 
@@ -237,6 +243,44 @@ class Harness
     @yolo ? "YOLO ON" : "YOLO OFF"
   end
 
+  # -- Streaming posture (issue #28) -----------------------------------------
+
+  def stream?
+    @stream
+  end
+
+  def stream=(val)
+    @stream = (val == true)
+  end
+
+  def toggle_stream
+    @stream = !@stream
+    stream_mode_label
+  end
+
+  # Badge label only when streaming is ON: the badge names a NON-default
+  # posture (the same rule as YOLO / AUTO-APPROVE), and buffered is the
+  # default. /stream status reports the off state.
+  def stream_mode_label
+    @stream ? "STREAM" : nil
+  end
+
+  # The live tail of the answer currently streaming, for the spinner suffix.
+  # nil when nothing has arrived yet (prefill) or when not streaming - the
+  # caller then shows the context indicator instead.
+  # THREADING: written by the task thread (the on_delta callback) and read by
+  # the main thread (the spinner's per-frame suffix call); StreamPreview
+  # publishes frozen snapshots so the reader never sees a partial append.
+  def stream_preview_line
+    @stream_preview&.tail_line
+  end
+
+  # The spinner suffix for the wait this request owns: the newest text of a
+  # streamed answer once it has started, otherwise the context estimate.
+  def request_wait_suffix
+    -> { stream_preview_line || context_indicator_live }
+  end
+
   def toggle_command_mode
     return nil unless command_safety_check
 
@@ -340,7 +384,7 @@ class Harness
       # in-loop compaction) cannot outlive it.
       @session_manager.request_spinner_detail
 
-      data    = @client.chat(messages, tools:)
+      data    = request_chain(messages, tools)
       message = data[:choices][0][:message]
 
       print_step_display(iteration, message) if message[:tool_calls]
@@ -531,6 +575,23 @@ class Harness
 
   private
 
+  # One LLM request. The streaming posture applies to THIS request only, so a
+  # streamed turn publishes its live tail for the spinner. The preview is
+  # cleared in the ensure, not after the call: a request that died mid-stream
+  # must not leave its partial tail for the NEXT request to show. Posture
+  # ownership and the retry boundary: doc/streaming_design.md.
+  def request_chain(messages, tools)
+    streaming = stream?
+    @stream_preview = streaming ? LLM::StreamPreview.new : nil
+    on_delta = @stream_preview ? ->(delta) { @stream_preview.record(delta) } : nil
+
+    begin
+      @client.chat(messages, tools:, stream: streaming, on_delta:)
+    ensure
+      @stream_preview = nil
+    end
+  end
+
   def print_step_display(iteration, message)
     return if step_display_disabled?
 
@@ -600,6 +661,8 @@ class Harness
     @session_manager.param_overrides.restore!
     self.yolo = data[:yolo] == true
     logger.info("yolo posture restored: #{yolo? ? 'ON' : 'OFF'}")
+    self.stream = data[:stream] == true
+    logger.info("streaming posture restored: #{stream? ? 'ON' : 'OFF'}")
     # issue #303: the palette the session was saved with. Unknown names are
     # NOT fatal here (a session saved by another build may name a palette this
     # one does not have) - HarnessConfig/CLI validate a name the user typed,

@@ -3,7 +3,8 @@
 Design notes for the streamed request path: `lib/llm/base_backend.rb`
 (`#chat_streamed` and its helpers) plus `lib/llm/stream_reader.rb`,
 `stream_decoder.rb`, `stream_accumulator.rb`, `stream_preview.rb` and
-`stream_error.rb`.
+`stream_error.rb`, and the posture that drives them
+(`Harness#stream?`, `Harness#request_chain`, `/stream`).
 
 Transport behavior below was measured on Ruby 4.0.1 (2026-01-13) against a
 local chunked-response server (probes kept in `tmp/keep/28/` while issue #28 is
@@ -15,7 +16,9 @@ Claims that come from the API reference rather than from a probe are marked.
 
 ## What streaming is for, and what it is not
 
-Streaming exists so the user sees the answer while the model writes it.
+Streaming exists so the user sees the answer while the model writes it: the
+spinner line carries the newest text of the answer instead of only the context
+estimate, and the spinner badge reads `[STREAM]` while the posture is on.
 
 It is NOT a second response format. Both paths return the identical normalized
 shape (`{ choices: [{ message: { role:, content:, reasoning:, tool_calls: } }],
@@ -23,6 +26,42 @@ usage: {...} }`), so `Harness#call_llm` - the tool loop, usage accounting, the
 session chain, compaction - is untouched by the choice. That is the invariant
 the whole design is built around: streaming is a TRANSPORT decision, and the
 transport is where it stays.
+
+## Who owns the posture
+
+Three layers, one owner each:
+
+- `Harness#stream?` - the user's posture for this session. The config key
+  `streaming` (global) or a model profile's own `streaming` key (tri-state:
+  true, false, or absent = "the global key decides") sets the initial value;
+  `/stream on|off|status` switches it live; `SessionManager#save_session`
+  persists it and `Harness#apply_resume_state` restores it, exactly like the
+  YOLO posture. It is a harness posture, not conversation state, so
+  `Session#restore` never sees it.
+- `BaseBackend#chat(..., stream:, on_delta:)` - the per-request decision. A
+  backend holds NO posture of its own: the caller passes the flag per request.
+  That is what keeps the advisory calls buffered - `SafetyCheck.run` and the
+  `/compact` summary call `chat` without the flag, so they keep the full retry
+  policy and have nothing to show live.
+- `Harness#request_chain` - the only caller that streams. It builds the
+  `on_delta` callback for the request in flight and clears the preview in an
+  `ensure` block.
+
+`stream: false` is the default at every layer, so a server or proxy that
+mishandles a streamed response needs no config at all.
+
+## The posture is read PER REQUEST
+
+`request_chain` reads `stream?` inside the tool loop, once per request, so a
+mid-turn `/stream` toggle applies to the NEXT request, not the one already in
+flight. The same rule as the Ctrl+A / `/yolo` badges: state is re-read every
+frame / every request, never cached for the duration of a turn.
+
+The live tail belongs to ONE request. `@stream_preview` is set at the start of
+`request_chain` and cleared in its `ensure` - not after the call - because a
+request that FAILED mid-stream would otherwise leave a partial answer's tail
+set, and the next request (a `/retry`, or the next turn) would show text from an
+answer that never completed.
 
 ## Transport facts that shaped the code
 
@@ -126,24 +165,47 @@ Each attempt builds a FRESH transport: a mid-stream abort closes the connection,
 so a keep-alive session cannot be reused after one. The request body itself is
 built once and re-sent byte-identically.
 
-## Who decides per request
+## Where the live text goes: the spinner suffix, not stdout
 
-`BaseBackend#chat(..., stream:, on_delta:)` takes the decision from its CALLER:
-a backend holds NO posture of its own. That is what keeps the advisory calls
-buffered - `SafetyCheck.run` and the `/compact` summary call `chat` without the
-flag, so they keep the full retry policy and have nothing to show live.
-`stream: false` is the default, so a server or proxy that mishandles a streamed
-response needs no config at all.
-
-## Files (transport half)
+The task thread never writes to an IO stream (the single-thread I/O rule,
+`doc/task_design.md`). So a delta is not printed - it is published as state:
 
 ```
-lib/llm/base_backend.rb       chat / chat_buffered / chat_streamed + retry policy
-lib/llm/stream_reader.rb      chunks -> complete lines (byte-level split)
-lib/llm/stream_decoder.rb     lines -> payloads (SSE + NDJSON)
-lib/llm/stream_accumulator.rb payloads -> the normalized response
-lib/llm/stream_error.rb       StreamError / StreamStatusError
+task thread (on_delta)  -> StreamPreview#record  -> frozen snapshot slot
+main thread (spinner)   -> Harness#request_wait_suffix -> StreamPreview#tail_line
 ```
+
+`SessionManager#request_spinner_detail` hands the spinner the harness's callable
+(`request_wait_suffix`), which returns the newest streamed text once the answer
+has started and falls back to `context_indicator_live` before that (and always,
+when not streaming). The spinner evaluates it on every drain frame, so the tail
+updates without any extra event on the outbox.
+
+`StreamPreview` publishes a FROZEN snapshot into one slot rather than appending
+to a shared String: the writer is the task thread, the reader is the main thread,
+and a reference assignment is atomic where an in-place append is not. The reader
+only ever sees a whole snapshot.
+
+The tail is 60 characters of the NEWEST text (`MAX_TAIL`), newlines collapsed to
+spaces (a spinner line is one line), with a leading `...` when it is a tail. The
+oldest part is what gets dropped.
+
+## Files
+
+```
+lib/llm/base_backend.rb        chat / chat_buffered / chat_streamed + retry policy
+lib/llm/stream_reader.rb       chunks -> complete lines (byte-level split)
+lib/llm/stream_decoder.rb      lines -> payloads (SSE + NDJSON)
+lib/llm/stream_accumulator.rb  payloads -> the normalized response
+lib/llm/stream_preview.rb      deltas -> the spinner's live tail (cross-thread)
+lib/llm/stream_error.rb        StreamError / StreamStatusError
+lib/commands/stream_command.rb /stream on|off|status (toggle)
+```
+
+On the harness side: `stream?` / `stream=` / `toggle_stream` /
+`stream_mode_label` / `stream_preview_line` / `request_wait_suffix` and the
+private `request_chain` own the posture and the live tail; `Task.mode_badge`
+renders the `[STREAM]` tag next to the consent-mode tag, both re-read per frame.
 
 ## Known limits
 
@@ -151,5 +213,8 @@ lib/llm/stream_error.rb       StreamError / StreamStatusError
   `/retry` re-sends the request from the last committed round (issue #208's
   trail), which is a NEW generation. That is the accepted cost of showing text
   as it arrives.
+- The tail is a display convenience, not a transcript: 60 characters of the
+  newest text, discarded when the request ends. The full answer is logged and
+  stored by the normal path.
 - Streaming is per-request, so a turn that mixes a streamed answer with an
   advisory buffered check shows only the answer live. That is intentional.

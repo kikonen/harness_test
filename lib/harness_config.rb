@@ -46,6 +46,9 @@ require_relative "harness_error"
 #   retry:
 #     count: 3                  # total attempts for transient network errors
 #     delay: 2                  # base delay (seconds) between retries
+#   streaming: false            # consume the LLM response chunk by chunk and
+#                               # show each part as it arrives (default off).
+#                               # A model profile's own key overrides this one.
 #   double_enter_submit: false # Enter on an empty last line submits the multiline buffer (issue #198)
 #   system_prompt_file: prompts/my.txt  # file with the full system prompt (issue #223)
 #                                       # overrides the built-in config/system_prompt.txt
@@ -97,6 +100,9 @@ class HarnessConfig
     @command_safety_auto_approve = data[:command_safety_auto_approve] == true
     @double_enter_submit = data[:double_enter_submit] == true
     @max_tool_iterations = int_or_nil(data[:max_tool_iterations])
+    # Opt-in streamed LLM responses (default off: a profile or global key
+    # that does not ask for it gets the buffered request unchanged).
+    @streaming = data[:streaming] == true
     # issue #303: rendered-output palette name (nil = the default palette).
     # Validated by UI::Palette.validate! in the CLI, not here: this class does
     # not know the palette list and must not start requiring the UI layer.
@@ -234,6 +240,12 @@ class HarnessConfig
     @max_tool_iterations
   end
 
+  # Opt-in streamed LLM responses (global key). Default false; a model
+  # profile's own 'streaming' key overrides it for that profile.
+  def streaming_enabled?
+    @streaming == true
+  end
+
   # Rendered-output palette name (issue #303), or nil for the default one.
   def output_palette_name
     @output_palette
@@ -312,7 +324,8 @@ class HarnessConfig
         top_k:            int_or_nil(m[:top_k]),
         min_p:            float_or_nil(m[:min_p]),
         presence_penalty: float_or_nil(m[:presence_penalty]),
-        repeat_penalty:   float_or_nil(m[:repeat_penalty])
+        repeat_penalty:   float_or_nil(m[:repeat_penalty]),
+        streaming:        bool_or_nil(m[:streaming])
       }
     end
   end
@@ -337,5 +350,13 @@ class HarnessConfig
     Float(val)
   rescue ArgumentError, TypeError
     raise HarnessError, "expected a number, got: #{val.inspect}"
+  end
+
+  # A tri-state flag: true, false, or nil for "not configured" (so a profile
+  # can leave the decision to the global key instead of overriding it).
+  def bool_or_nil(val)
+    return nil if val.nil?
+
+    val == true
   end
 end
