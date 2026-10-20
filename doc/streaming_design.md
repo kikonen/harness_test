@@ -6,11 +6,12 @@ Design notes for the streamed request path: `lib/llm/base_backend.rb`
 `stream_error.rb`, and the posture that drives them
 (`Harness#stream?`, `Harness#request_chain`, `/stream`).
 
-Transport behavior below was measured on Ruby 4.0.1 (2026-01-13) against a
-local chunked-response server (probes kept in `tmp/keep/28/` while issue #28 is
-open) and is asserted end-to-end by `spec/lib/llm/base_backend_streaming_spec.rb`,
-which runs a REAL chunked HTTP server rather than a stubbed response object.
-Claims that come from the API reference rather than from a probe are marked.
+Transport behavior below was measured on Ruby 4.0.1 (2026-10-20) against a local
+chunked-response server, and it is asserted end-to-end by
+`spec/lib/llm/base_backend_streaming_spec.rb`, which runs a REAL chunked HTTP
+server rather than a stubbed response object - that spec IS the surviving probe,
+the probe scripts themselves were scratch and went with issue #28.
+Claims that come from the API reference rather than from a measurement are marked.
 
 ---
 
