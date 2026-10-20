@@ -6,4 +6,10 @@ tmp/**
 !tmp/.gitkeep
 local/**
 *_copy.rb
-.harness/**
+
+# Harness state stays ignored, EXCEPT the project's own skills: a skill is repo
+# content the owner chose to keep in .harness/skills (issue #12). A negation under
+# '.harness/**' cannot re-include a file (git skips the excluded directory), so the
+# ignore rule is one level deep and the skills subtree is re-included.
+.harness/*
+!.harness/skills/

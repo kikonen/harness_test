@@ -17,6 +17,8 @@ scoped to a working directory you choose.
   are separate (a write grant implies read) and delete is its own mode.
   Sensitive paths (`.env*`, `.git/`, `.harness/`) are always blocked, except a
   nested one inside a scratch zone (`tmp/scratch/<n>/`, `tmp/keep/<n>/`).
+  `.harness/skills/` is the exception it is meant for: a skill is repo content
+  the owner chose to keep (see **Project skills** below).
 - **Shell execution with confirmation** - the `run.command` tool shows the
   full command before running it and requires an explicit "Allow" every
   single time, unless its prefix is already in the allowlist or the
@@ -42,6 +44,23 @@ scoped to a working directory you choose.
 - **Project rules** - a `harness.md` in the working directory is appended
   to the system prompt as project-specific rules (auto-reloaded when it
   changes).
+- **Project skills** - a skill is a named markdown procedure the owner wrote down
+  once, stored in `.harness/skills/`: either `<name>/SKILL.md` (when the skill
+  ships with companion files) or a single `<name>.md`. Optional `---` front
+  matter may carry `name:` and `description:`; without it the description is the
+  file's first prose line. Skills are NOT injected into the system prompt: only
+  names and one-line descriptions are reachable (`/skills`, `skills.list`), and a
+  body is loaded on demand (`/skills <name>`, `skills.read(name)`), so defining
+  many skills costs no context until one is used. `/help procedures` explains it.
+
+  ```
+  .harness/skills/changelog/SKILL.md
+  ---
+  name: changelog
+  description: Regenerate CHANGELOG.md from the merged PR bodies
+  ---
+  ## Procedure ...
+  ```
 
 ## Requirements
 
@@ -168,6 +187,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/param [key [value]]` | Show, override or reset a model parameter |
 | `/ctx` | Show context usage (tokens, %, headroom, auto-compact status) |
 | `/reasoning` | Show the reasoning text of the last response |
+| `/skills [name]` | List the project's skills (`.harness/skills/`), or print one skill's body |
 | `/yolo [on|off|status]` | Toggle the YOLO shell-consent posture (saved with the session) |
 | `/palette [name\|status]` | Show or switch the output palette (saved with the session) |
 | `/stream [on|off|status]` | Toggle streamed LLM responses - show each part as it arrives (saved with the session) |
@@ -199,6 +219,10 @@ messages to your console), `ui.dialog` (ask the user a question and wait
 for the picked option), `ui.note` (one-line note in the model's own
 context), `test.echo` (test-only)
 
+**Skills** - `skills.list` (the project's skills: name + one-line description),
+`skills.read(name)` (load one skill's body as instructions). Skills live in
+`.harness/skills/` and are NOT part of the system prompt.
+
 ## Access model
 
 - Grants are tracked per mode: **read**, **write** and **delete** are each
@@ -229,6 +253,10 @@ context), `test.echo` (test-only)
   inside a scratch zone (`tmp/scratch/<n>/`, `tmp/keep/<n>/`) is exempt, because
   there it is a disposable clone the harness created and the zone is meant to be
   deletable (`doc/sensitive_paths_design.md`).
+  `.harness/skills/` is the other exemption: a skill is repo content the owner chose
+  to keep, so its files are grantable for read, write and delete like any other
+  file. A `.env*` name stays blocked there too, and the rest of `.harness/` stays
+  ungrantable.
 
 ## Where things live
 
@@ -244,17 +272,22 @@ All harness state lives in `.harness/` inside the working directory:
       session.json  # the saved session (conversation + access list)
       harness.log   # that session's request/tool log
       harness_history  # that session's prompt history (issue #119)
+  skills/           # the project's own skills (issue #12) - the ONE part of
+    <name>/SKILL.md # .harness/ that is git-tracked and grantable
 ```
 
 `.harness/config.yml` is no longer auto-created there (issue #260): the
 template goes to the user home, and a file in the project's `.harness/` is a
 deliberate per-project override.
 
-Ignore it from git with a single `.harness/` entry.
+`.gitignore` keeps `.harness/` ignored EXCEPT that skills subtree
+(`.harness/*` + `!.harness/skills/`) - a negation under `.harness/**` cannot
+re-include anything, because git skips the excluded directory.
 
 ## Project layout
 
 ```
+lib/skills.rb       # the skills loader (.harness/skills) - index + body on demand
 harness.rb          # entry point
 bin/harness         # launcher (env, rbenv, bundle)
 bin/rspec           # test runner (same env hygiene as the launcher)
