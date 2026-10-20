@@ -258,7 +258,9 @@ Ignore it from git with a single `.harness/` entry.
 harness.rb          # entry point
 bin/harness         # launcher (env, rbenv, bundle)
 bin/rspec           # test runner (same env hygiene as the launcher)
-CHANGELOG.md        # per-issue history (harness.md holds coding rules only)
+CHANGELOG.md        # GENERATED per-issue history, regenerated from merged PR
+                    # bodies; the procedure is doc/changelog_generation.md
+                    # (harness.md holds coding rules only)
 lib/cli.rb          # option parsing, REPL loop, input handling
 lib/harness.rb      # tool loop, tool execution, registry
 lib/llm_client.rb   # HTTP, retries, request building
