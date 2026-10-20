@@ -614,6 +614,64 @@ RSpec.describe CommandRunner do
       end
     end
 
+    # issue #325: an auto-approved run printed its FULL command in the approval
+    # line, so the outcome line names it by handle instead of repeating it.
+    it 'prints a long auto-approved command once, then by handle' do
+      Dir.mktmpdir do |dir|
+        runner, out = make_main_runner(dir, auto_approve_all: true)
+        runner.run('echo one two three four five six')
+
+        expect(out.string).to include(
+          '[shell] ✓ auto-approved (bang consent off): echo one two three four five six'
+        )
+        expect(out.string).to match(
+          /^ {2}\[shell\] ✓ echo one two three \.\.\. \(exit 0, [\d.]+s\)/
+        )
+        # The tail tokens appear exactly once: no duplicated command line.
+        expect(out.string.scan('four five six').size).to eq(1)
+      end
+    end
+
+    # A command that reached the consent dialog has no approval line, so its
+    # outcome line stays its only trace and keeps the full text.
+    it 'keeps the full command in the outcome line of a dialog-approved run' do
+      Dir.mktmpdir do |dir|
+        runner, out = make_main_runner(dir, '1') # Allow(1), grants(2..), Cancel
+        runner.run('echo one two three four five six')
+
+        # The dialog prompt line has no trailing newline, so the status line
+        # continues on it - assert the text, not the line start.
+        expect(out.string).to include('[shell] ✓ echo one two three four five six (exit 0,')
+        expect(out.string).not_to include('echo one two three ...')
+      end
+    end
+
+    it 'marks only a dropped tail: a command that fits the handle is unchanged' do
+      Dir.mktmpdir do |dir|
+        runner, out = make_main_runner(dir, auto_approve_all: true)
+        runner.run('echo a b c') # exactly HANDLE_TOKENS tokens
+        expect(out.string).to match(/^ {2}\[shell\] ✓ echo a b c \(exit 0, [\d.]+s\)/)
+
+        runner.run('echo a b c d') # one token over
+        expect(out.string).to match(/^ {2}\[shell\] ✓ echo a b c \.\.\. \(exit 0, [\d.]+s\)/)
+      end
+    end
+
+    # Every auto-approval entry point passes the flag, not just the posture one:
+    # here a stored shell-list grant auto-approves on the main thread.
+    it 'shortens the outcome line for an allowlist auto-approval too' do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, '.harness'))
+        File.write(File.join(dir, '.harness', 'shell_commands.yml'),
+                   YAML.dump(['echo one']))
+        runner, out = make_main_runner(dir) # no dialog lines: nothing asks
+        runner.run('echo one two three four five six')
+
+        expect(out.string).to include('[shell] ✓ auto-approved (allowlist): echo one two')
+        expect(out.string).to match(/^ {2}\[shell\] ✓ echo one two three \.\.\. \(exit 0, [\d.]+s\)/)
+      end
+    end
+
     it 'reads the harness palette per line, so a mid-session switch is honored' do
       Dir.mktmpdir do |dir|
         runner, out = make_main_runner(dir, auto_approve_all: true,

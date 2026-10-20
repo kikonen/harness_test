@@ -65,7 +65,9 @@ class CommandRunner
   MAX_TIMEOUT     = 300   # hard cap
   DEFAULT_LIMIT   = 200   # output lines
   MAX_LIMIT       = 5000  # hard cap
-
+  # Tokens the outcome line keeps as the command's handle once the approval
+  # line has already printed the full command.
+  HANDLE_TOKENS   = 4
   # Spawn flag that puts the child in its own (process) group so the
   # timeout kill reaches the whole tree. The spelling is platform- and
   # Ruby-version-dependent: :new_pgroup on Windows, :pgroup on POSIX
@@ -156,7 +158,7 @@ class CommandRunner
       # Auto-approve when the command prefix is in the user's allowlist.
       if @allowlist.allowed?(command)
         status(:ok, "auto-approved (allowlist): #{command}")
-        return execute(command, dir, shown, timeout, limit)
+        return execute(command, dir, shown, timeout, limit, auto_approved: true)
       end
 
       # YOLO POSTURE (issue #221): the user turned consent off for this
@@ -172,7 +174,7 @@ class CommandRunner
         reason = yolo_active? ? "YOLO" : "bang consent off"
         status(:ok, "auto-approved (#{reason}): #{command}")
         log_auto_approved(command, reason)
-        return execute(command, dir, shown, timeout, limit)
+        return execute(command, dir, shown, timeout, limit, auto_approved: true)
       end
     else
       status(:warn, "denylisted (auto-approval refused in every posture): #{command}")
@@ -195,7 +197,7 @@ class CommandRunner
     if !disaster && auto_approve_mode? && verdict
       if auto_approve_safe?(verdict)
         status(:ok, "auto-approved (model verdict: safe): #{command}")
-        return execute(command, dir, shown, timeout, limit)
+        return execute(command, dir, shown, timeout, limit, auto_approved: true)
       end
       # dangerous -> fall through to the dialog with the verdict note.
     end
@@ -448,14 +450,18 @@ class CommandRunner
   end
 
   # Runs the command (after any required confirmation) and formats the result.
-  def execute(command, dir, shown, timeout, limit)
+  # An auto-approved run printed its FULL command in the approval line that
+  # skipped the dialog, so its outcome line names it by handle; a dialog-approved
+  # command keeps the full text here, because this line is its only trace.
+  def execute(command, dir, shown, timeout, limit, auto_approved: false)
+    name    = auto_approved ? command_handle(command) : command
     started = Time.now
     output, shell_status = run_in_shell(command, dir, timeout)
     # Symbol (not Process::Status) signals the timeout path.
     if shell_status == :timeout
       # The tree was already killed by run_in_shell (issue #202); nothing
       # more can hang here.
-      status(:fail, "#{command} (timed out after #{timeout}s)")
+      status(:fail, "#{name} (timed out after #{timeout}s)")
       log_failure(command, "TIMED OUT after #{timeout}s", output)
       return "error: command timed out after #{timeout}s"
     end
@@ -465,12 +471,20 @@ class CommandRunner
     out            = truncate(output, limit)[0]
 
     if code.zero?
-      status(:ok, "#{command} (exit 0, #{elapsed}s)")
+      status(:ok, "#{name} (exit 0, #{elapsed}s)")
     else
-      status(:fail, "#{command} (exit #{code}, #{elapsed}s)")
+      status(:fail, "#{name} (exit #{code}, #{elapsed}s)")
     end
 
     format_result(command, code, elapsed, output, out)
+  end
+
+  # The dropped tail is marked " ...", so a handle can never be read as the
+  # whole command.
+  def command_handle(command)
+    tokens = command.split(/\s+/)
+    head   = tokens.first(HANDLE_TOKENS)
+    head.join(" ") + (tokens.size > head.size ? " ..." : "")
   end
 
   # Builds the formatted result string. A FAILED command that produced no
