@@ -23,8 +23,8 @@ RSpec.describe LLM::BaseBackend do
 
     private
 
-    def build_body(messages, _tools)
-      { model: @options[:model], messages: messages }
+    def build_body(messages, _tools, stream: false)
+      { model: @options[:model], messages: messages, stream: stream }
     end
 
     # Returns the raw JSON so the usage of either wire shape is visible.

@@ -11,7 +11,9 @@ RSpec.describe LLM::OllamaBackend do
   end
   let(:backend) { described_class.new(options, logger) }
 
-  def body(messages, tools: nil) = backend.send(:build_body, messages, tools)
+  def body(messages, tools: nil, stream: false)
+    backend.send(:build_body, messages, tools, stream: stream)
+  end
   def parsed(json)               = backend.send(:parse_response, json)
 
   describe '#api_type' do
@@ -30,6 +32,21 @@ RSpec.describe LLM::OllamaBackend do
       expect(b[:model]).to eq('test-model')
       expect(b[:messages]).to eq([{ role: 'user', content: 'hi' }])
       expect(b[:stream]).to be(false)
+    end
+
+    # issue #28: the native endpoint streams NDJSON (one JSON object per line)
+    # when the CALLER asks. Unlike the OpenAI endpoint it reports the eval
+    # counts on the final line either way, so no extra request field is needed
+    # to keep the harness' token accounting.
+    it 'sends stream: true when the request asks for a stream' do
+      expect(body([{ role: 'user', content: 'hi' }], stream: true)[:stream]).to be(true)
+    end
+
+    it 'keeps the options block (num_ctx) alongside a stream request' do
+      b = body([{}], stream: true)
+
+      expect(b.dig(:options, :num_ctx)).to eq(LLM::NUM_CTX)
+      expect(b[:stream]).to be(true)
     end
 
     it 'includes num_ctx in the native options block (built-in window when unset)' do

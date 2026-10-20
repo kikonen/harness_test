@@ -35,7 +35,13 @@ class LLMClient
 
   # Sends one chat completion request. Returns the normalized response
   # hash (symbolized keys, {choices: [...], usage: {...}}). Raises LLMError
-  # when all attempts fail.
+  # when all attempts fail (LLM::StreamError when a STREAMED response was
+  # lost after part of the answer had already reached the caller - such a
+  # request is not re-sent, see BaseBackend#chat_streamed).
+  #
+  # stream: / on_delta: pass straight to the backend (see BaseBackend#chat):
+  # the CALLER decides per request, so an advisory call (the command safety
+  # check) can stay buffered while the turn's own calls stream.
   def chat(*args, **kwargs) = current_backend.chat(*args, **kwargs)
 
   private

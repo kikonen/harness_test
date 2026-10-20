@@ -7,6 +7,42 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - streamed LLM responses: the transport path (issue #28, step 1 of 2)
+
+- The answer was printed only after the whole response had arrived: during a
+  long generation the spinner had nothing to show but the context estimate, and
+  a turn that eventually died mid-generation looked identical to a slow one.
+  Streaming is now a real transport path, and the decision is the CALLER's per
+  request (`BaseBackend#chat(..., stream:, on_delta:)`): a backend holds no
+  posture of its own, so the advisory calls (the command safety check, the
+  /compact summary) stay buffered with the full retry policy. Both paths return
+  the identical normalized shape, so the tool loop, usage accounting and the
+  session chain do not care which one ran.
+- New transport pieces, none of them per-backend: `LLM::StreamReader` (chunks ->
+  complete lines, split on BYTES because a chunk can split a multi-byte character
+  but - 0x0A never occurring inside one - a line never can), `LLM::StreamDecoder`
+  (SSE `data:` / `[DONE]` and native NDJSON in one decoder; an odd line yields
+  nil instead of aborting the stream), `LLM::StreamAccumulator` (deltas -> the
+  normalized response, reading both wire shapes: OpenAI's `choices[0].delta` with
+  index-keyed argument fragments, native `message` with complete ones; both usage
+  shapes, with `total_tokens` derived when the streamed block omits it) and
+  `LLM::StreamError` / `StreamStatusError`. Design and the measured transport
+  facts: `doc/streaming_design.md`.
+- The retry boundary is the cost of streaming: a streamed request is re-sent only
+  while NOTHING has arrived. Once a delta has reached the console, re-sending
+  would duplicate an answer the user already saw, so the turn fails with
+  `LLM::StreamError` (an `LLMError`, so every existing lost-turn handler and
+  /retry work unchanged). A fresh transport per attempt: a mid-stream abort
+  closes the connection, so a keep-alive session cannot be reused after one.
+- `OpenaiBackend#build_body` sends `stream_options: {include_usage: true}`:
+  without it the OpenAI schema reports no usage at all on a streamed response
+  (OpenAI API reference - not measured against our local endpoint), which would
+  silently cost the harness its token accounting per streamed turn.
+- Specs: 72 new examples (reader 14, decoder 16, accumulator 25, and 17 in
+  `spec/lib/llm/base_backend_streaming_spec.rb` run against a REAL chunked HTTP
+  server - chunk boundaries, the retry boundary and status handling are transport
+  behavior a stubbed response cannot show).
+
 ## Unreleased - a scratch zone's nested .git is deletable (issue #321)
 
 - #317's keep-zone rule ("`tmp/keep/<issue>/` is removed when that issue closes")
@@ -55,6 +91,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   `lib/sensitive_files.rb`), the `/help access` topic and
   `config/system_prompt.txt` all state the exemption.
 
+
 ## Unreleased - the command registry is checked against the command classes (issue #327)
 
 - #323's drift spec compared the registry with README and with the HELP entries,
@@ -68,6 +105,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   that every registry key is the first word of its entry's usage form - the check
   `HelpRenderer` already makes when /help renders, now asserted without rendering.
   16 -> 19 examples. `doc/command_help_design.md` lists the two new rules.
+
 
 ## Unreleased - /help from data: registry, entries, topics, renderer (issue #323)
 
@@ -112,6 +150,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   `spec/lib/commands/help_command_spec.rb` (16, incl. the drift contract); 2 new
   dispatcher examples (unknown-command suggestions) and the startup tips now point
   at `/help input` / `/help notes` instead of "see /help for details".
+
 
 ## Unreleased - output roles, UI::Renderer, and named palettes (issue #303, the #146 renderer work)
 
@@ -198,6 +237,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   mid-turn acks (`[note] got it - ...`, `[YOLO ON]`), which write straight to
   ui + buffer. `VERBATIM` is the exact list.
 
+
 ## Unreleased - line endings decided from file bytes (issue #318)
 
 - `file.patch` detected a file's line-ending style with
@@ -240,6 +280,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   doubled-CR, mixed-majority, trailing-blank, missing-final-newline and
   UTF-8-refusal cases, and a new `file_write_tool_spec.rb` (the tool had none).
 
+
 ## Unreleased - scratch areas split into tmp/scratch, tmp/keep and local/ (issue #317)
 
 - harness.md's single scratch rule ("a scratch subdir is removed when its PR
@@ -256,6 +297,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   `AllCops: Exclude` gains `local/**/*` so the owner's Ruby files are not held to
   this project's style; README's project layout names all three zones. harness.md
   stays at 128 lines - the single bullet is rewritten, not added to.
+
 
 ## Unreleased - rubocop with loosened defaults (issue #302)
 
@@ -299,6 +341,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   `if`/`unless` carrying one condition, and a blank line before a comment block
   (161 such places in `lib/`; rubocop ships no cop for either). A custom cop was
   considered and rejected as too much machinery.
+
 
 ## Unreleased - mid-run /resume builds a FRESH Harness (issue #280)
 
@@ -357,6 +400,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   consent bullet keeps only the half the code cannot state (consent state is
   never conversation state).
 
+
 ## Unreleased - CLI heavy construction moved into #setup (issue #282)
 
 - `CLI#initialize` kept the basics only (options, UI, FileList, SessionLocator,
@@ -378,6 +422,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   construction and the prior objects survive; re-setup keeps a fresh run's id
   and a --continue run's id.
 
+
 ## Unreleased - development environments documented (issue #295)
 
 - New `doc/dev_environment.md`: what each environment actually runs (Ruby and
@@ -394,6 +439,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   differ in both directions (CI 2.55.0, WSL2 2.43.0, Windows 2.56.0), and
   issue #292 - CI-only, real, proven with `GIT_TRACE2` - is the worked
   example. WSL2 is the closest local environment to CI.
+
 
 ## Unreleased - dir.delete deletes a tree and logs every path (issue #290)
 
@@ -437,6 +483,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   is named as the unlink path - following a link would delete a tree outside
   the path the DELETE grant and the audit log describe.
 
+
 ## Unreleased - CI flake: git maintenance raced the spec's tmpdir cleanup (issue #292)
 
 - `git_apply_tool_spec` "rejects a hunk without file headers up front" failed
@@ -454,6 +501,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`) - no global git config is
   touched, and `GIT_TRACE2` then shows no maintenance child at all.
 
+
 ## Unreleased - turn elapsed time in the spinner (issue #277)
 
 - The spinner line now shows how long the CURRENT turn has been running, in
@@ -466,6 +514,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   on every rebuild; the runner hands the spinner a callable instead, which is
   why `UI::Spinner#elapsed` follows the same live-callable contract as the
   suffix and the badge (nil or a raise renders no segment).
+
 
 ## Unreleased - compact spinner line (issue #271)
 
@@ -488,6 +537,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   and the per-turn stats line) and `#context_report` (/ctx) keep the full
   token arithmetic, so /compact's before/after lines stay verbose.
 
+
 ## Unreleased - each LLM request announces its own spinner line (issue #283)
 
 - Fix: after an in-loop compaction the spinner kept saying
@@ -508,6 +558,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
 - doc/task_design.md: the spinner-ownership section now states the rule the
   bug was missing - a re-point describes ONE wait; the runner only remembers it
   so a spinner rebuilt INSIDE that wait keeps its message.
+
 
 ## Unreleased - comment rule made enforceable; offenders stripped (issue #281)
 
@@ -547,6 +598,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   own Encoding convention shrank to the actionable rule plus the pointer, since
   its rationale now lives in `doc/encoding_design.md` and harness.md is injected
   into every system prompt.
+
 
 ## Unreleased - session identity resolved before anything is built (issue #276)
 
@@ -597,6 +649,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   (The ordering rule itself was later deleted from harness.md by #280 - see the
   entry at the top of this file.)
 
+
 ## Unreleased - first prompt no longer dies on a nil logger (issue #270)
 
 - Fix: with `auto_save: false` (and verbose off), the FIRST prompt of a run
@@ -617,6 +670,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   deferred too - a nil placeholder is a snapshot of "not yet", not a deferred
   value.
 
+
 ## Unreleased - TextNormalizer preserves multi-byte text (issue #268)
 
 - Fix: command output lost every non-ASCII character. The child pipe
@@ -633,6 +687,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   tagged with that code page (scrub in place), re-introducing the
   Encoding::CompatibilityError the #257 boundary exists to prevent. scrub now
   runs on a UTF-8 copy, so the return type is always valid UTF-8.
+
 
 ## Unreleased - YOLO consent posture (PR #266, issues #221 / #254)
 
@@ -675,6 +730,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
 - Follow-up: issue #267 for the mid-turn gesture-dispatch refactor (remove
   the labeled `/yolo` HACK in `Task#commit_note`).
 
+
 ## 2026-10-15
 
 - #260: the user home config (`~/.config/harness/config.yml`) is the default
@@ -687,6 +743,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   arguments, git output, LLM bodies) is normalized once at each read boundary
   by `TextNormalizer`, so invalid bytes cannot break JSON generation or the
   console.
+
 
 ## 2026-10-14
 
@@ -701,6 +758,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
 - Fix: `require_relative` for `ui` in `command.rb` (the runtime bootstrap was
   broken).
 
+
 ## 2026-10-13
 
 - #235: `/retry` re-sends on a Task thread; the shared `TaskRunner` wrapper
@@ -713,12 +771,14 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
 - #226: elapsed time formatted with minutes for long turns;
   `max_tool_iterations` configurable.
 
+
 ## 2026-10-12
 
 - #219: session-level model parameter overrides (`/param`), unified with
   `/model` param listing; overridden lines show the config value.
 - #216: the live context estimate is anchored to the server-reported
   prompt-token count instead of drifting from a rough estimate.
+
 
 ## 2026-10-11
 
@@ -739,6 +799,7 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
 - #202: `run.command` owns the child process group so a timeout can never
   wedge the harness; CI fixes for the platform-specific spawn key and
   `Reline::Windows`.
+
 
 ## 2026-10-10
 
