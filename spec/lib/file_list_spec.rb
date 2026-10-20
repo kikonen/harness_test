@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'stringio'
 require 'tmpdir'
+require 'fileutils'
 
 RSpec.describe FileList do
   # Drive the grant dialog without any real I/O: intercept Dialog#show and
@@ -123,4 +124,61 @@ RSpec.describe FileList do
       end
     end
   end
+  describe 'the scratch-zone exemption (issue #321)' do
+    # The guard protects THIS project's git/harness state. A scratch repo the
+    # harness cloned under tmp/keep/<n>/ is disposable, and that zone is exactly
+    # the directory the scratch rule says must be deletable.
+    it 'lets a zone grant cover a nested .git, .harness and .env' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        list.add_dir('tmp/keep/318', :d)
+        %w[
+          tmp/keep/318
+          tmp/keep/318/repo/.git/config
+          tmp/keep/318/repo/.git/objects/pack/x.idx
+          tmp/keep/318/.harness/harness.log
+          tmp/keep/318/.env.production
+        ].each do |path|
+          expect(list.deletable?(path)).to be(true), path
+        end
+        list.add_dir('tmp/scratch/321', :d)
+        expect(list.deletable?('tmp/scratch/321/repo/.git/HEAD')).to be(true)
+      end
+    end
+
+    it 'keeps the guard everywhere else - a bare .git is never grantable' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        expect(list.sensitive?('.git/config')).to be(true)
+        expect(list.sensitive?('lib/.git/config')).to be(true)
+        expect(list.sensitive?('tmp/.git/config')).to be(true)
+        expect(list.sensitive?('tmp/keep/.git/config')).to be(true)
+        expect(list.sensitive?('tmp/scratch/.env')).to be(true)
+        expect(list.deletable?('.git/config')).to be(false)
+        expect(list.add_file('.git/config', :rw)).to eq(:blocked)
+        expect(list.add_dir('tmp/.git', :rw)).to eq(:blocked)
+        expect(list.grant_access('.git', :d)).to eq(:blocked)
+      end
+    end
+
+    it 'is decided on the RESOLVED path, so ".." cannot smuggle a name out of the zone' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        expect(list.scratch_zone?('tmp/keep/318/repo/.git/config')).to be(true)
+        expect(list.scratch_zone?('tmp/keep/318/../.git/config')).to be(false)
+        expect(list.sensitive?('tmp/keep/318/../.git/config')).to be(true)
+      end
+    end
+
+    it 'does not exempt a directory that merely looks like a zone segment' do
+      Dir.mktmpdir do |dir|
+        root = File.join(dir, 'keep')
+        FileUtils.mkdir_p(File.join(root, 'tmp/keep/318/.git'))
+        list = described_class.new(workdir: root)
+        expect(list.sensitive?('tmp/keep/318/.git/config')).to be(false)
+        expect(list.sensitive?('.git/config')).to be(true)
+      end
+    end
+  end
+
 end

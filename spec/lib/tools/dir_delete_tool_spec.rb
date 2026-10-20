@@ -123,6 +123,54 @@ RSpec.describe Tools::DirDeleteTool do
         expect(File.exist?(File.join(dir, 'proj/keep.txt'))).to be(true)
       end
     end
+
+    # issue #321: the scratch rule says tmp/keep/<n> is removed when its issue
+    # closes, but a git-related measurement needs REAL repos there, and a real
+    # repo has a .git - so the tree tool refused to delete the very zone the
+    # rule promised to clean. The exemption is the zone, not the name.
+    it 'deletes a scratch zone holding a nested .git (the #318 keep zone)' do
+      Dir.mktmpdir do |dir|
+        seed_scratch_zone(dir)
+        list = FileList.new(workdir: dir)
+        list.add_dir('tmp/keep/318', :d)
+        harness, log = harness_with_log
+
+        out = build(list, harness: harness).execute('path' => 'tmp/keep/318')
+
+        expect(out).to start_with("ok: directory 'tmp/keep/318' and its contents")
+        expect(File.exist?(File.join(dir, 'tmp/keep/318'))).to be(false)
+        expect(log.string).to include('dir.delete: deleted file tmp/keep/318/repo/.git/config')
+        # The zone list itself is still not a zone: its own .git stays guarded.
+        expect(File.directory?(File.join(dir, 'tmp/keep/.git'))).to be(true)
+      end
+    end
+
+    it 'still refuses a scratch zone whose SIBLING holds the real .git' do
+      Dir.mktmpdir do |dir|
+        seed_scratch_zone(dir)
+        list = FileList.new(workdir: dir)
+        list.add_dir('tmp', :d)
+
+        out = build(list).execute('path' => 'tmp')
+
+        expect(out).to include('contains the sensitive path')
+        expect(out).to include('tmp/keep/.git/config')
+        expect(File.exist?(File.join(dir, 'tmp/keep/318/repo/.git/config'))).to be(true)
+      end
+    end
+
+    it 'keeps the project own .git unremovable from inside a scratch zone path' do
+      Dir.mktmpdir do |dir|
+        seed_scratch_zone(dir)
+        list = FileList.new(workdir: dir)
+        list.add_dir('tmp/keep/318', :d)
+
+        out = build(list).execute('path' => 'tmp/keep/318/../.git')
+
+        expect(out).to include('blocked and can never be deleted')
+        expect(File.directory?(File.join(dir, '.git'))).to be(true)
+      end
+    end
   end
 
   describe 'the DELETE grant (issue #92)' do
@@ -271,5 +319,17 @@ RSpec.describe Tools::DirDeleteTool do
         expect(out).to include('blocked and can never be deleted')
       end
     end
+  end
+
+  # A keep zone with a scratch repo inside it, plus the zone-list .git that
+  # must stay guarded, plus the project own .git.
+  def seed_scratch_zone(dir)
+    FileUtils.mkdir_p(File.join(dir, 'tmp/keep/318/repo/.git'))
+    File.write(File.join(dir, 'tmp/keep/318/repo/.git/config'), 'x')
+    File.write(File.join(dir, 'tmp/keep/318/issue_crlf.md'), 'x')
+    FileUtils.mkdir_p(File.join(dir, 'tmp/keep/.git'))
+    File.write(File.join(dir, 'tmp/keep/.git/config'), 'x')
+    FileUtils.mkdir_p(File.join(dir, '.git'))
+    File.write(File.join(dir, '.git/config'), 'x')
   end
 end
