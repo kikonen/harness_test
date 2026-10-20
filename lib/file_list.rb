@@ -115,12 +115,16 @@ class FileList
     SensitiveFiles.scratch_zone?(relative_path(path))
   end
 
-  # The single decision point for "blocked whatever the grants": a sensitive
-  # NAME, unless the path sits inside a per-issue scratch zone - the guard
-  # protects THIS project's git/harness state, not a scratch repo the harness
-  # cloned under tmp/. doc/sensitive_paths_design.md.
+  # The single decision point for "blocked whatever the grants": a sensitive NAME,
+  # unless the path sits inside a scratch zone (a nested .git there is a disposable
+  # clone) or inside the project's own skills directory (repo content the owner
+  # chose to keep in .harness/skills) - where only a .env* NAME still blocks, since
+  # the exemption lifts the .harness component and never the secret-file rule.
+  # doc/sensitive_paths_design.md, doc/skills_design.md.
   def sensitive?(path)
-    return false if scratch_zone?(path)
+    rel = relative_path(path)
+    return false if SensitiveFiles.scratch_zone?(rel)
+    return SensitiveFiles.env_named?(path) if SensitiveFiles.skills_zone?(rel)
 
     SensitiveFiles.sensitive?(path)
   end

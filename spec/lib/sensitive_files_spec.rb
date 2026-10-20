@@ -84,6 +84,38 @@ RSpec.describe SensitiveFiles do
     end
   end
 
+  describe '.skills_zone? (the grantable subtree of .harness/)' do
+    it 'recognises the skills directory itself and anything under it' do
+      expect(described_class.skills_zone?('.harness/skills')).to be(true)
+      expect(described_class.skills_zone?('.harness/skills/changelog/SKILL.md')).to be(true)
+      expect(described_class.skills_zone?('.harness/skills/a/b/c.md')).to be(true)
+    end
+
+    it 'is one directory - a sibling of it is not the zone' do
+      expect(described_class.skills_zone?('.harness/skillsx')).to be(false)
+      expect(described_class.skills_zone?('.harness/sessions')).to be(false)
+      expect(described_class.skills_zone?('.harness/skills-backup/x')).to be(false)
+      expect(described_class.skills_zone?('.harness')).to be(false)
+    end
+
+    it 'is relative to the working directory, so an absolute or nested path is not it' do
+      expect(described_class.skills_zone?(nil)).to be(false)
+      expect(described_class.skills_zone?('lib/.harness/skills')).to be(false)
+      expect(described_class.skills_zone?('tmp/keep/12/.harness/skills')).to be(false)
+    end
+  end
+
+  describe '.env_named? and .state_dir? (the two halves of the name test)' do
+    it 'separates the secret-name rule from the state-directory rule' do
+      # The skills-zone exemption needs the NAME half WITHOUT the .harness component
+      # half, so .env_named? stands alone: it fires on a basename wherever it sits.
+      expect(described_class.env_named?('.harness/skills/.env')).to be(true)
+      expect(described_class.env_named?('lib/foo.rb')).to be(false)
+      expect(described_class.state_dir?('.harness/skills/a.md')).to be(true)
+      expect(described_class.state_dir?('lib/foo.rb')).to be(false)
+    end
+  end
+
   # issue #347: the zones are also a .gitignore rule, and the two halves must
   # agree. A keep zone is gitignored BY DESIGN (a real repo clone can live there),
   # which is why evidence an issue quotes from elsewhere lives in the tracked

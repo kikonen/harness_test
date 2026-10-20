@@ -127,6 +127,25 @@ module HelpTopics
           "the base prompt file and harness.md."
       ],
       see_also: %w[reload]),
+    "procedures" => Topic.new(
+      name: "procedures",
+      title: "Skills (written-down procedures)",
+      paragraphs: [
+        "A skill is a named markdown procedure stored in .harness/skills/: either " \
+          "<name>/SKILL.md (when the skill ships with companion files) or a single " \
+          "<name>.md. An optional --- front matter block may carry 'name:' and " \
+          "'description:'; without it the description is the file's first prose line.",
+        "Skills are NOT injected into the system prompt. Only the names and one-line " \
+          "descriptions are reachable (through /skills or the skills.list tool), and " \
+          "the body is loaded on demand with /skills <name> or skills.read(name) - so " \
+          "a project can define many skills without costing context for the ones no " \
+          "task uses.",
+        ".harness/skills is the one part of .harness/ a grant can cover: a skill is " \
+          "repo content the owner chose to keep, so its files are readable, writable " \
+          "and deletable through the normal file tools (with a grant, as everywhere). " \
+          "A .env* name inside it stays blocked."
+      ],
+      see_also: %w[skills reload rules access]),
     "input" => Topic.new(
       name: "input",
       title: "Multiline input and the submit key",

@@ -29,6 +29,7 @@ require_relative "commands/exit_command"
 require_relative "commands/yolo_command"
 require_relative "commands/palette_command"
 require_relative "commands/stream_command"
+require_relative "commands/skills_command"
 
 require_relative "help_renderer"
 require_relative "help_topics"
@@ -66,6 +67,7 @@ class CommandHandler
     "yolo"          => Commands::YoloCommand,
     "palette"       => Commands::PaletteCommand,
     "stream"        => Commands::StreamCommand,
+    "skills"        => Commands::SkillsCommand,
   }.freeze
 
   def initialize(
