@@ -69,8 +69,9 @@ Keep this in mind:
   a per-project override, and the lookup order is `-c` > `$HARNESS_CONFIG` >
   working-dir `.harness/config.yml` > user home. There is no installation-dir
   tier - `$HARNESS_CONFIG` / `-c` covers that case.
-- Sensitive files/dirs (`.env*`, `.git/`, `.harness/`) are blocked from
-  LLM access - do not try to work around this.
+- Sensitive files/dirs (`.env*`, `.git/`, `.harness/`) are blocked from LLM
+  access - do not try to work around this. A nested one inside a scratch zone
+  (`tmp/scratch/<n>/`, `tmp/keep/<n>/`) is exempt: `doc/sensitive_paths_design.md`.
 - Access modes (read / write / delete) are tracked separately: a write grant
   implies read, but neither read nor write implies delete.
 - Destructive operations (file delete, dir delete) require a DELETE grant

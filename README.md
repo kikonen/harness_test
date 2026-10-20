@@ -15,7 +15,8 @@ scoped to a working directory you choose.
   model requires a grant you approve interactively: single file, directory
   (direct children only), or directory tree (recursive). Read and write
   are separate (a write grant implies read) and delete is its own mode.
-  Sensitive paths (`.env*`, `.git/`, `.harness/`) are always blocked.
+  Sensitive paths (`.env*`, `.git/`, `.harness/`) are always blocked, except a
+  nested one inside a scratch zone (`tmp/scratch/<n>/`, `tmp/keep/<n>/`).
 - **Shell execution with confirmation** - the `run.command` tool shows the
   full command before running it and requires an explicit "Allow" every
   single time, unless its prefix is already in the allowlist or the
@@ -217,8 +218,11 @@ context), `test.echo` (test-only)
   `curl | sh`, a fork bomb, `format C:`, `diskpart`, `del /s /q`,
   `Remove-Item -Recurse -Force`, ...) always reaches the dialog as a one-off
   Allow, with no "Always allow" option offered (issue #221).
-- Sensitive files/dirs (`.env*`, `.git/`, `.harness/`) can never be
-  granted.
+- Sensitive files/dirs (`.env*`, `.git/`, `.harness/`) can never be granted -
+  the guard protects the working tree's own git and harness state. A nested one
+  inside a scratch zone (`tmp/scratch/<n>/`, `tmp/keep/<n>/`) is exempt, because
+  there it is a disposable clone the harness created and the zone is meant to be
+  deletable (`doc/sensitive_paths_design.md`).
 
 ## Where things live
 
@@ -254,6 +258,7 @@ lib/harness.rb      # tool loop, tool execution, registry
 lib/llm_client.rb   # HTTP, retries, request building
 lib/session*.rb     # conversation state, save/resume/compact
 lib/file_list.rb    # access grants (read / write / delete, files and dirs)
+lib/sensitive_files.rb  # the sensitive-name patterns + the scratch-zone shape
 lib/git_runner.rb   # safe git invocation base for the git tools
 lib/shell_tokenizer.rb  # StringScanner lexer for shell commands
 lib/shell_parser.y  # Racc grammar source (regenerate .rb with racc)
@@ -272,4 +277,6 @@ doc/*.md            # design documents (why a subsystem is shaped as it is)
 doc/dev_environment.md  # which Ruby/git runs where (CI vs local), pinned
 doc/rubocop_style.md    # which style rules the cops enforce, and why the rest
                         # are off (measured against rubocop 1.92)
+doc/sensitive_paths_design.md  # the sensitive-path guard and its scratch-zone
+                        # exemption
 ```
