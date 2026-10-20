@@ -22,8 +22,16 @@ module LLM
 
     private
 
-    def build_body(messages, tools)
+    def build_body(messages, tools, stream: false)
       body = { model: @options[:model], messages: }
+
+      # The OpenAI schema reads the flag at top level. Usage is NOT reported
+      # on a streamed response unless asked for explicitly, and without it the
+      # harness would lose its token accounting for every streamed turn.
+      if stream
+        body[:stream] = true
+        body[:stream_options] = { include_usage: true }
+      end
 
       # Config owns the sampling values: send each key ONLY when set
       # (issue #215), so the server default applies to anything omitted.

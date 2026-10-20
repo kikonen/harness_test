@@ -14,7 +14,9 @@ RSpec.describe LLM::OpenAIBackend do
   # build_body / parse_response are the backend's contract; test them
   # directly (no network layer). The subclass methods are private - that is
   # intentional - so send(:) is used here.
-  def body(messages, tools: nil) = backend.send(:build_body, messages, tools)
+  def body(messages, tools: nil, stream: false)
+    backend.send(:build_body, messages, tools, stream: stream)
+  end
   def parsed(json)               = backend.send(:parse_response, json)
 
   describe '#api_type' do
@@ -93,6 +95,36 @@ RSpec.describe LLM::OpenAIBackend do
 
     it 'omits tools when none provided' do
       expect(body([{}])).not_to have_key(:tools)
+    end
+
+    # issue #28: the CALLER's per-request decision reaches this endpoint's
+    # wire shape. The OpenAI schema reads the flag at top level, and usage is
+    # only reported on a streamed response when asked for explicitly - without
+    # stream_options the harness would lose its token accounting for every
+    # streamed turn.
+    it 'sends stream: true with include_usage when the request asks for a stream' do
+      b = body([{ role: 'user', content: 'hi' }], stream: true)
+
+      expect(b[:stream]).to be(true)
+      expect(b[:stream_options]).to eq(include_usage: true)
+    end
+
+    # The default (no stream asked for) sends NOTHING stream-related: the
+    # buffered request is byte-identical to what it was before streaming
+    # existed.
+    it 'sends no stream keys when the request does not ask for a stream' do
+      b = body([{ role: 'user', content: 'hi' }])
+
+      expect(b).not_to have_key(:stream)
+      expect(b).not_to have_key(:stream_options)
+    end
+
+    it 'keeps sampling fields alongside a stream request' do
+      options[:temperature] = 0.4
+      b = body([{}], stream: true)
+
+      expect(b[:temperature]).to eq(0.4)
+      expect(b[:stream]).to be(true)
     end
   end
 

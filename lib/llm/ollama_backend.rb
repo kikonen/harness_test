@@ -30,8 +30,11 @@ module LLM
       {}
     end
 
-    def build_body(messages, tools)
-      body = { model: @options[:model], messages:, stream: false,
+    def build_body(messages, tools, stream: false)
+      # The native endpoint streams NDJSON (one JSON object per line) when
+      # asked; it reports the eval counts on the final line either way, so no
+      # extra request field is needed to keep token accounting.
+      body = { model: @options[:model], messages:, stream: stream,
                options: sampling_options }
       body[:tools] = tools if tools && !tools.empty?
       # issue #215: the native API has no 'reasoning_effort' option
