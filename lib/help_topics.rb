@@ -25,7 +25,9 @@ module HelpTopics
         "Read, write and delete are tracked separately. A read grant never " \
           "implies write; a write grant implies read on the same path; delete " \
           "is its own mode - neither read nor write implies it. Sensitive paths " \
-          "(.env*, .git/, .harness/) can never be granted."
+          "(.env*, .git/, .harness/) can never be granted, except a nested one " \
+          "inside a scratch zone (tmp/scratch/<n>/, tmp/keep/<n>/), where it is " \
+          "a disposable clone rather than this project's own state."
       ],
       see_also: %w[grant clear]),
     "shell" => Topic.new(

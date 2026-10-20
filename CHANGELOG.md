@@ -7,6 +7,54 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - a scratch zone's nested .git is deletable (issue #321)
+
+- #317's keep-zone rule ("`tmp/keep/<issue>/` is removed when that issue closes")
+  proved unexecutable for git-related measurements: `dir.delete tmp/keep/318`
+  refused, because #318 had needed REAL repos to measure git's line-ending
+  behaviour and a real repo has a `.git`. Measured on that zone: 144 entries
+  (93 files, 51 dirs), 3 nested `.git`, 81 files under them - the tree walk
+  named `.../harnessrepo_realfile/.git/COMMIT_EDITMSG`, refused, and deleted 0
+  paths. The zone is not repo state: `git check-ignore -v` matches both a plain
+  note and that `.git` file to `.gitignore:5  tmp/**`, and `git ls-files
+  tmp/keep` is empty.
+- The guard protects THIS project's git and harness state, not a disposable
+  clone the harness itself created under `tmp/`. Inside `tmp/scratch/<n>/` or
+  `tmp/keep/<n>/` a nested `.git`, `.harness` or `.env*` is therefore no longer
+  sensitive. `<n>` is required (`tmp/keep/.git` - one level up, in the zone
+  LIST - stays blocked, so the exemption cannot be widened by targeting the
+  parent) and may be any name (`tmp/keep/309-316/` is a real zone) but never
+  starts with `.`; the test runs on the RESOLVED workdir-relative path, so
+  `tmp/keep/318/../.git/config` is the project's own `.git` and stays blocked,
+  and a workdir that merely looks like a zone segment gains nothing (the pattern
+  is anchored at `tmp/`). Grant machinery is untouched: an exemption makes a path
+  grantable, and `dir.delete` still needs one recursive DELETE grant over the
+  whole tree. Rejected: a delete-only exemption (a scratch repo is written by
+  `git`, not by the harness's file tools, and half-blocking leaves a zone that
+  can be created but never cleaned), hand-cleaning (outside the audit trail, and
+  it reproduces on every future git measurement), forbidding scratch repos under
+  `tmp/` (that forbids the measurement itself).
+- `FileList#sensitive?` (the instance method - the only one that owns a
+  workdir) is the single decision point; the zone-free class-level
+  `FileList.sensitive?` delegator is gone (measured: no caller left anywhere,
+  every tool pre-check and permission check already went through the instance
+  one). `relative_path` replaces the prefix-stripping half of `display_path`,
+  because the zone test needs the same relative form. Design and measurements:
+  new `doc/sensitive_paths_design.md`.
+- Specs: new `spec/lib/sensitive_files_spec.rb` (9: the name test, the zone
+  pattern, the `<n>`-required and lookalike cases); 4 in `file_list_spec.rb` (a
+  zone grant covers a nested `.git`/`.harness`/`.env*`, a bare `.git` is still
+  `:blocked` and `grant_access` still refuses it, `..` cannot smuggle a name out
+  of a zone); 3 in `dir_delete_tool_spec.rb` (a keep zone holding a scratch repo
+  is deleted path by path into harness.log while the zone list's own `.git` and
+  the project's `.git` survive the same call). The zone pattern was
+  mutation-probed: dropping the `<n>` requirement, exempting everything under
+  `tmp/`, or exempting `keep/` only are each caught by an existing assertion.
+- Contract kept honest: the `dir.delete` tool description, harness.md's sensitive
+  bullet, README (both mentions, plus the layout list which now names
+  `lib/sensitive_files.rb`), the `/help access` topic and
+  `config/system_prompt.txt` all state the exemption.
+
 ## Unreleased - the command registry is checked against the command classes (issue #327)
 
 - #323's drift spec compared the registry with README and with the HELP entries,
