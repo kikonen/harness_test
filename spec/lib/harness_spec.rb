@@ -1334,4 +1334,28 @@ RSpec.describe Harness do
       expect(h.request_wait_suffix.call).to eq(h.context_indicator_live)
     end
   end
+
+  describe '#skills (issue #12)' do
+    # The loader is built from the workdir at construction, so the tools the
+    # registry got and /skills read point at the SAME directory the harness owns.
+    it 'points at .harness/skills under this run\'s workdir' do
+      h = build_harness
+
+      expect(h.skills.dir).to eq(File.join(workdir, '.harness', 'skills'))
+      expect(h.skills.exist?).to be false
+      expect(h.skills.all).to eq([])
+    end
+
+    it 'registers skills.list and skills.read over that same loader' do
+      h = build_harness
+      list = h.tool_registry.get('skills.list')
+      read = h.tool_registry.get('skills.read')
+
+      expect(list).not_to be_nil
+      expect(read).not_to be_nil
+      expect(list.instance_variable_get(:@skills)).to equal(h.skills)
+      expect(read.instance_variable_get(:@skills)).to equal(h.skills)
+      expect(h.skills.dir).to eq(File.join(workdir, '.harness', 'skills'))
+    end
+  end
 end

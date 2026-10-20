@@ -181,4 +181,58 @@ RSpec.describe FileList do
     end
   end
 
+  describe 'the skills-zone exemption (issue #12)' do
+    # .harness/skills is repo content the owner chose to keep, so it is the one
+    # part of .harness/ a grant can cover. Everything else in .harness/ (sessions,
+    # logs, allowlists) stays blocked, and a .env* NAME inside skills stays blocked.
+    it 'lets a grant cover the skills directory and its files' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        list.add_dir('.harness/skills', :rw)
+
+        expect(list.sensitive?('.harness/skills')).to be(false)
+        expect(list.readable?('.harness/skills/changelog/SKILL.md')).to be(true)
+        expect(list.writable?('.harness/skills/changelog/SKILL.md')).to be(true)
+        expect(list.add_file('.harness/skills/triage.md', :r)).to eq(:added)
+        expect(list.add_dir('.harness/skills/changelog', :w)).to eq(:added)
+      end
+    end
+
+    it 'lets a DELETE grant cover a skill file (a skill is editable content)' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        list.add_file('.harness/skills/old.md', :d)
+
+        expect(list.deletable?('.harness/skills/old.md')).to be(true)
+      end
+    end
+
+    it 'keeps the rest of .harness/ blocked' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        expect(list.sensitive?('.harness/config.yml')).to be(true)
+        expect(list.sensitive?('.harness/sessions/id/session.json')).to be(true)
+        expect(list.sensitive?('.harness/skills/../sessions/id/session.json')).to be(true)
+        expect(list.add_dir('.harness/skills/../sessions', :r)).to eq(:blocked)
+        expect(list.sensitive?('.harness/skillsx/a.md')).to be(true)
+        expect(list.sensitive?('.harness/skills-backup/a.md')).to be(true)
+        expect(list.add_dir('.harness', :rw)).to eq(:blocked)
+      end
+    end
+
+    # The exemption lifts the .harness COMPONENT rule only. A secret-file name is
+    # still a secret file wherever it sits.
+    it 'keeps a .env* name blocked inside the skills directory' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        list.add_dir('.harness/skills', :rw)
+
+        expect(list.sensitive?('.harness/skills/.env')).to be(true)
+        expect(list.sensitive?('.harness/skills/changelog/.env.production')).to be(true)
+        expect(list.readable?('.harness/skills/.env')).to be(false)
+        expect(list.add_file('.harness/skills/.env', :r)).to eq(:blocked)
+      end
+    end
+  end
+
 end

@@ -41,6 +41,9 @@ require_relative "tools/git_apply_tool"
 require_relative "tools/run_command_tool"
 require_relative "tools/tools_list_tool"
 require_relative "tools/tools_search_tool"
+require_relative "skills"
+require_relative "tools/skills_list_tool"
+require_relative "tools/skills_read_tool"
 require_relative "tool_registry"
 require_relative "session_manager"
 require_relative "state_migrator"
@@ -62,7 +65,7 @@ class Harness
 
   SESSION_LOG_FILE = SessionLocator::SESSION_LOG_FILE
 
-  attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager, :client
+  attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager, :client, :skills
   attr_accessor :history
 
   # Only one note is in flight: a new assignment replaces the note that has
@@ -79,6 +82,7 @@ class Harness
     @options       = options
     @file_list     = file_list
     @locator       = SessionLocator.new(file_list.workdir)
+    @skills        = Skills.new(file_list.workdir)
     @session       = Session.new(build_system_prompt, session_id:)
     if resume_data
       saved_id = resume_data[:session_id]
@@ -162,6 +166,8 @@ class Harness
                                                 harness: self))
     registry.register(Tools::ToolsListTool.new(registry))
     registry.register(Tools::ToolsSearchTool.new(registry))
+    registry.register(Tools::SkillsListTool.new(@skills))
+    registry.register(Tools::SkillsReadTool.new(@skills))
   end
 
   def compact_recent_messages

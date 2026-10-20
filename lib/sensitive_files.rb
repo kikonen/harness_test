@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-# The paths a grant can NEVER cover, and the shape of the one region where a
+# The paths a grant can NEVER cover, and the shape of the regions where a
 # sensitive NAME does not count. Rationale and measurements:
-# doc/sensitive_paths_design.md.
+# doc/sensitive_paths_design.md and doc/skills_design.md.
 module SensitiveFiles
   # Basename patterns: config/.env.production is blocked too, not just a bare .env.
   SENSITIVE_PATTERNS = [
@@ -19,10 +19,21 @@ module SensitiveFiles
   # RELATIVE to the working directory. <n> is any zone name, not just a number.
   SCRATCH_ZONE = %r{\Atmp/(?:scratch|keep)/[^/.][^/]*/}
 
-  def self.sensitive?(path)
-    name = File.basename(path.to_s)
-    return true if SENSITIVE_PATTERNS.any? { |pat| File.fnmatch?(pat, name, File::FNM_DOTMATCH) }
+  # The project's own skills directory, relative to the working directory. A skill
+  # is repo content the owner chose to keep, so this subtree of .harness/ is
+  # grantable - the exemption lifts the .harness component only, never a .env* name.
+  SKILLS_DIR = ".harness/skills"
 
+  def self.sensitive?(path)
+    env_named?(path) || state_dir?(path)
+  end
+
+  def self.env_named?(path)
+    name = File.basename(path.to_s)
+    SENSITIVE_PATTERNS.any? { |pat| File.fnmatch?(pat, name, File::FNM_DOTMATCH) }
+  end
+
+  def self.state_dir?(path)
     # File.expand_path normalizes separators to "/" on every platform, so
     # splitting on "/" also works for a Windows path.
     components = File.expand_path(path.to_s).split("/")
@@ -34,5 +45,12 @@ module SensitiveFiles
   # project's own state. rel_path is nil for a path outside the working dir.
   def self.scratch_zone?(rel_path)
     !rel_path.nil? && SCRATCH_ZONE.match?(rel_path)
+  end
+
+  # True when a workdir-relative path IS the skills directory or lies inside it. An
+  # exact prefix test on the RELATIVE path (like the scratch zone test), so
+  # relative_path has already resolved .harness/skills/../sessions out of the zone.
+  def self.skills_zone?(rel_path)
+    !rel_path.nil? && (rel_path == SKILLS_DIR || rel_path.start_with?("#{SKILLS_DIR}/"))
   end
 end

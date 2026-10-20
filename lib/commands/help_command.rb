@@ -21,7 +21,9 @@ module Commands
         "help <command>",
         "help <topic>"
       ],
-      see_also: %w[tools access consent shell input keys notes saving rules conversation])
+      see_also: %w[
+        tools access consent shell input keys notes saving rules conversation procedures
+      ])
 
     def handle(args)
       raise HarnessError, "HelpCommand needs a help renderer" unless @help_renderer
