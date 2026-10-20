@@ -34,6 +34,9 @@ RSpec.describe SessionManager do
       # stub mirrors Harness#yolo? / yolo=.
       attr_writer :yolo
       def yolo?; @yolo == true; end
+      # issue #28: save/resume persists the streaming posture too.
+      attr_writer :stream
+      def stream?; @stream == true; end
       # issue #303: stub mirrors Harness#output_palette (save_session).
       def output_palette = UI::Palette.fetch(nil)
 
@@ -92,6 +95,13 @@ RSpec.describe SessionManager do
       # frame, so it must exist.
       def context_indicator_live(_messages = nil)
         '🧠 ~0% (66K)'
+      end
+
+      # Mirrors Harness#request_wait_suffix (issue #28): the spinner's suffix
+      # is a callable the harness owns, because a streaming turn swaps it for
+      # the live tail of the answer.
+      def request_wait_suffix
+        -> { context_indicator_live }
       end
     end.new(session, client)
   end
@@ -398,6 +408,28 @@ RSpec.describe SessionManager do
       end
     end
   end
+
+  # issue #28: the streaming posture travels with the session save too (same
+  # treatment as yolo - harness posture, not conversation state), as a plain
+  # boolean so a session saved before the feature simply has no key. The
+  # RESUME side is Harness#apply_resume_state, covered in harness_spec.rb.
+  describe 'streaming posture round trip (issue #28)' do
+    def save_with_stream(dir, on)
+      file_list = FileList.new([], workdir: dir)
+      manager   = described_class.new(harness, file_list)
+      harness.stream = on
+      session.add_user('hello')
+      manager.save_session
+      JSON.parse(File.read(manager.session_file_path(session.session_id)))
+    end
+
+    it 'saves the posture as a plain boolean' do
+      Dir.mktmpdir do |dir|
+        expect(save_with_stream(dir, true)['stream']).to be(true)
+        expect(save_with_stream(dir, false)['stream']).to be(false)
+      end
+    end
+  end
 end
 
 RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
@@ -430,6 +462,9 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       # issue #221: stub mirrors Harness#yolo? / yolo= (save/resume).
       attr_writer :yolo
       def yolo?; @yolo == true; end
+      # issue #28: stub mirrors Harness#stream? / stream= (save/resume).
+      attr_writer :stream
+      def stream?; @stream == true; end
       # issue #303: stub mirrors Harness#output_palette (save_session).
       def output_palette = UI::Palette.fetch(nil)
       def compact_recent_messages; 6; end

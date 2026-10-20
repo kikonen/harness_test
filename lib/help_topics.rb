@@ -112,7 +112,8 @@ module HelpTopics
           "newest saved session in this working directory.",
         "What a resume restores: the conversation and access list, the model " \
           "profile and parameter overrides, the YOLO posture and the output " \
-          "palette."
+          "palette, and the streaming posture (/stream) the session was saved " \
+          "with."
       ],
       see_also: %w[save sessions resume]),
     "rules" => Topic.new(

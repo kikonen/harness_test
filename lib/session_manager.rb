@@ -346,6 +346,9 @@ class SessionManager
   # path #217 added was the longest part of the line and is already in the
   # startup banner and printed by /model. A client with no backend (a stub)
   # gets the model alone.
+  # The suffix is the harness's callable for THIS request: while an answer is
+  # streaming it shows the newest text of that answer, otherwise the live
+  # context estimate (see Harness#request_wait_suffix, issue #28).
   def request_spinner_detail
     who = [@harness.options[:model].to_s.strip, api_type_label].reject(&:empty?)
     Task.emit(
@@ -353,7 +356,7 @@ class SessionManager
       origin: :session_manager,
       content: {
         message: who.empty? ? "Sending" : "Sending (#{who.join(' / ')})",
-        suffix: -> { @harness.context_indicator_live }
+        suffix: @harness.request_wait_suffix
       })
   end
 
@@ -684,6 +687,11 @@ class SessionManager
     # Session#to_h because it is harness consent state, not conversation
     # state - the same treatment as active_model / param_overrides.
     data[:yolo] = @harness.yolo? == true
+
+    # issue #28: the streaming posture travels with the session too. It is a
+    # harness posture, not conversation state (the same treatment as yolo),
+    # and a resumed session must not quietly drop back to buffered.
+    data[:stream] = @harness.stream? == true
 
     # issue #303: the rendered-output palette travels with the session too.
     # A display preference the user chose for THIS session; resuming it must

@@ -203,4 +203,43 @@ RSpec.describe HarnessConfig do
       expect(template).to include('bang_requires_confirmation')
     end
   end
+
+  # issue #28: the streaming posture. Opt-in (default OFF): a server or proxy
+  # that mishandles a streamed response must keep working with no config at
+  # all. A profile's own key is tri-state so it can OVERRIDE the global one in
+  # either direction.
+  describe '#streaming_enabled? / profile streaming key (issue #28)' do
+    it 'defaults to off' do
+      expect(described_class.new({}).streaming_enabled?).to be(false)
+    end
+
+    it 'reads the global streaming key' do
+      expect(described_class.new(streaming: true).streaming_enabled?).to be(true)
+      # Truthy junk does not enable it (same coercion as every other posture).
+      expect(described_class.new(streaming: 'yes').streaming_enabled?).to be(false)
+      expect(described_class.new(streaming: nil).streaming_enabled?).to be(false)
+    end
+
+    it 'reads a profile streaming key' do
+      cfg = described_class.new(models: [{ name: 'a', streaming: true }])
+
+      expect(cfg.models.first[:streaming]).to be(true)
+    end
+
+    # nil means "this profile says nothing", so the global key decides; false
+    # means "this profile opts out", so it overrides a global true.
+    it 'leaves the profile key nil when absent, and false when set false' do
+      cfg = described_class.new(models: [
+        { name: 'silent' },
+        { name: 'off', streaming: false },
+        { name: 'on', streaming: true }
+      ])
+
+      expect(cfg.models.map { |m| m[:streaming] }).to eq([nil, false, true])
+    end
+
+    it 'mentions the key in the default template (commented out)' do
+      expect(template).to include('streaming')
+    end
+  end
 end

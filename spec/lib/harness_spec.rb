@@ -21,21 +21,37 @@ RSpec.describe Harness do
   # connection mid-turn, issue #208). Anything left in the queue at the end
   # defaults to a final 'done' answer.
   class FakeScriptedClient
-    attr_reader :calls
+    # Mirrors LLMClient#chat: the caller decides per request whether the
+    # response streams (issue #28), so the streaming kwargs are accepted.
+    # @calls records the chain; @stream_flags / @on_deltas record what each
+    # request was given, so a spec can assert WHICH posture was used.
+    attr_reader :calls, :stream_flags, :on_deltas
+
+    # Optional hook run after each call, so a spec can change harness state
+    # BETWEEN the requests of one turn (e.g. a mid-turn /stream toggle).
+    attr_accessor :after_call
 
     def initialize(responses = [{ content: 'done', reasoning: nil }])
-      @calls     = []
+      @calls        = []
+      @stream_flags = []
+      @on_deltas    = []
       @responses = responses
     end
 
-    def chat(messages, tools: nil, timeout: nil)
+    def chat(messages, tools: nil, timeout: nil, stream: false, on_delta: nil)
       @calls << messages.map { |m| m.dup }
+      @stream_flags << stream
+      @on_deltas   << on_delta
       response = @responses.shift || { content: 'done' }
       raise LLMError, 'connection lost mid-turn' if response == :fail
 
       message = response.is_a?(Hash) ? response : { content: 'done' }
-      { choices: [{ message: message.merge(reasoning: nil) }],
-        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }
+      result = { choices: [{ message: message.merge(reasoning: nil) }],
+                 usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }
+      # The hook runs AFTER the answer is built, so a spec can flip harness
+      # state between this request and the next one of the same turn.
+      @after_call&.call
+      result
     end
   end
 
@@ -296,7 +312,7 @@ RSpec.describe Harness do
   # Harness built under the settled id, so log, history and session dir all
   # carry that single identity and no rebind exists anywhere.
   describe 'startup resume via resume_data (issue #276)' do
-    def seed_saved_session(id, yolo: true, output_palette: 'basic16')
+    def seed_saved_session(id, yolo: true, output_palette: 'basic16', stream: true)
       FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
       data = {
         session_id:    id,
@@ -308,6 +324,7 @@ RSpec.describe Harness do
                         { role: 'assistant', content: 'reply' }],
         yolo:          yolo,
         output_palette: output_palette,
+        stream:        stream,
         workdir:       workdir
       }
       File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate(data))
@@ -334,6 +351,32 @@ RSpec.describe Harness do
       expect(harness.session_log_path).to include(id)
       # Only the resumed session's directory exists (issues #123 / #135).
       expect(saved_session_ids).to eq([id])
+    end
+
+    # issue #28: the streaming posture the user chose for THIS session must
+    # survive the round trip - a session they set to streamed must not come
+    # back buffered (the same rule as the YOLO posture).
+    it 'restores the streaming posture the session was saved with' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(id, stream: true)
+
+      harness = build_harness(session_id: id, resume_data: saved_data(id))
+
+      expect(harness.stream?).to be(true)
+      expect(harness.stream_mode_label).to eq('STREAM')
+    end
+
+    # A session saved BEFORE streaming existed has no key at all: that is not
+    # an error, it is the buffered default.
+    it 'treats a session with no streaming key as buffered' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(id)
+      data = saved_data(id)
+      data.delete(:stream)
+
+      harness = build_harness(session_id: id, resume_data: data)
+
+      expect(harness.stream?).to be(false)
     end
 
     # issue #303: the palette the session was saved with is restored during
@@ -1140,6 +1183,155 @@ RSpec.describe Harness do
                run_command_calls('ruby -c lib/a.rb', 'ruby -c lib/b.rb',
                                  'bundle exec rspec'))).to be_nil
       expect(client).not_to have_received(:chat)
+    end
+  end
+
+  # issue #28: the streaming posture. It decides whether a request's response
+  # is consumed chunk by chunk, so it is harness state (like YOLO), not
+  # conversation state - and it is read PER REQUEST, so /stream takes effect
+  # on the next request of the same turn.
+  describe '#stream? / mode label / toggle (issue #28)' do
+    it 'defaults to buffered when the option is absent' do
+      harness = build_harness
+
+      expect(harness.stream?).to be(false)
+      expect(harness.stream_mode_label).to be_nil
+    end
+
+    it 'starts streaming when the option is set (config key)' do
+      harness = build_harness(stream: true)
+
+      expect(harness.stream?).to be(true)
+      expect(harness.stream_mode_label).to eq('STREAM')
+    end
+
+    it 'labels only the non-default posture (buffered gets no spinner tag)' do
+      harness = build_harness
+      harness.stream = true
+      expect(harness.stream_mode_label).to eq('STREAM')
+
+      harness.stream = false
+      expect(harness.stream_mode_label).to be_nil
+    end
+
+    it 'toggle_stream flips the posture and returns the new label' do
+      harness = build_harness
+
+      expect(harness.toggle_stream).to eq('STREAM')
+      expect(harness.stream?).to be(true)
+      expect(harness.toggle_stream).to be_nil
+      expect(harness.stream?).to be(false)
+    end
+
+    it 'coerces the setter to a boolean' do
+      harness = build_harness
+      harness.stream = 'yes'
+
+      expect(harness.stream?).to be(false)
+    end
+  end
+
+  describe '#call_llm streaming posture (issue #28)' do
+    def scripted(harness, client)
+      harness.instance_variable_set(:@client, client)
+      harness.session.add_user('go')
+      harness
+    end
+
+    def tool_round(id)
+      { content: nil,
+        tool_calls: [{ id: id,
+                       function: { name: 'test.echo', arguments: '{"text":"x"}' } }] }
+    end
+
+    it 'asks for a buffered response when the posture is off' do
+      client = FakeScriptedClient.new([{ content: 'final' }])
+      h = scripted(build_harness, client)
+
+      h.call_llm
+
+      expect(client.stream_flags).to eq([false])
+      expect(client.on_deltas).to eq([nil])
+    end
+
+    it 'asks for a streamed response and a delta callback when the posture is on' do
+      client = FakeScriptedClient.new([{ content: 'final' }])
+      h = scripted(build_harness(stream: true), client)
+
+      h.call_llm
+
+      expect(client.stream_flags).to eq([true])
+      expect(client.on_deltas.first).to respond_to(:call)
+    end
+
+    # A mid-turn /stream toggle must apply to the NEXT request, not the one
+    # already in flight: the posture is read inside the loop, once per
+    # request. The client flips it after its FIRST call, so the second
+    # request of the same turn must carry the new value.
+    it 'reads the posture per request, so a toggle applies to the next one' do
+      client = FakeScriptedClient.new([tool_round('c1'), { content: 'final' }])
+      h = scripted(build_harness, client)
+      client.after_call = -> { h.toggle_stream }
+
+      h.call_llm
+
+      expect(client.stream_flags).to eq([false, true])
+    end
+
+    # The live tail belongs to ONE request: an answer that already finished
+    # must not leak into the next request's spinner line.
+    it 'clears the live preview once a request ends' do
+      client = FakeScriptedClient.new([{ content: 'final' }])
+      h = scripted(build_harness(stream: true), client)
+
+      h.call_llm
+
+      expect(h.stream_preview_line).to be_nil
+    end
+
+    # The same clearing on the FAILURE path: a request that died mid-stream
+    # would otherwise leave a partial answer's tail set, and the next request
+    # (a /retry, or the next turn) would show text from an answer that never
+    # completed.
+    it 'clears the live preview when the request fails' do
+      client = instance_double('client')
+      # The block signature must accept every keyword the harness passes
+      # (tools: too) - a narrow one raises ArgumentError inside the stub.
+      allow(client).to receive(:chat) do |_messages, **kwargs|
+        kwargs[:on_delta]&.call({ content: 'half an answer' })
+        raise LLMError, "stream lost"
+      end
+      h = scripted(build_harness(stream: true), client)
+
+      expect { h.call_llm }.to raise_error(LLMError, 'stream lost')
+      expect(h.stream_preview_line).to be_nil
+    end
+
+    # The suffix callable the spinner evaluates every frame is the harness's,
+    # so it is asserted DURING the request (the only moment a tail exists):
+    # the client plays a delta, and the suffix the request announced reads it.
+    it 'shows the newest streamed text in the spinner suffix while streaming' do
+      h = build_harness(stream: true)
+      seen = nil
+      client = instance_double('client')
+      allow(client).to receive(:chat) do |_messages, **kwargs|
+        kwargs[:on_delta].call({ content: 'arriving text' })
+        seen = h.request_wait_suffix.call
+        { choices: [{ message: { content: 'arriving text' } }], usage: {} }
+      end
+      h.instance_variable_set(:@client, client)
+      h.session.add_user('go')
+
+      h.call_llm
+
+      expect(seen).to eq('arriving text')
+    end
+
+    it 'falls back to the context estimate when nothing is streaming' do
+      h = build_harness
+      h.session.add_user('a' * 400)
+
+      expect(h.request_wait_suffix.call).to eq(h.context_indicator_live)
     end
   end
 end

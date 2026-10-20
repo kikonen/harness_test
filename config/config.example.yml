@@ -25,6 +25,11 @@ models:
     repeat_penalty: 1.05   # penalty for repeated tokens
     # max_tokens: -1       # max completion tokens (openai endpoint); omit = server default
     # num_predict: -1      # same, native ollama endpoint; omit = server default
+    # streaming: true      # per-profile override of the global 'streaming'
+    #                      # key below: true streams THIS profile, false opts
+    #                      # this profile out of a global true (a server or a
+    #                      # proxy that mishandles a streamed response).
+    #                      # Absent = the global key decides.
 
 # Model used when -m is not given on the command line.
 default_model: local
@@ -54,6 +59,20 @@ auto_save: true
 # Switch it mid-session with /palette <name>; that choice is saved with the
 # session and a resumed session keeps it.
 # output_palette: default
+
+# Streamed LLM responses (issue #28): consume each response chunk by chunk and
+# show each part of the answer as it arrives (the spinner line carries the
+# newest text of the answer instead of only the context estimate). Opt-in:
+# default false, so a server that mishandles a streamed response needs no
+# config at all. During a session it is toggled live with /stream and saved
+# with the session.
+# What streaming does NOT change: the normalized response the tool loop
+# receives is identical either way - tool calls, usage stats and the session
+# chain are the same. What it DOES cost: a streamed request is retried only
+# until the first part arrives; after that a lost stream fails the turn
+# instead of re-sending an answer the user already saw. The advisory calls
+# (the command safety check, the /compact summary) stay buffered.
+# streaming: false
 
 # Automatic retries for transient network errors.
 retry:

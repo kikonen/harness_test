@@ -352,7 +352,9 @@ class Task
                               detail[:suffix], ui: task.ui)
     # A live badge so a mid-turn /yolo or Ctrl+A toggle is visible at once.
     harness = task.harness
-    spinner.badge = -> { mode_badge(harness) } if harness.respond_to?(:command_mode_label)
+    posture_visible = harness.respond_to?(:command_mode_label) ||
+                      harness.respond_to?(:stream_mode_label)
+    spinner.badge = -> { mode_badge(harness) } if posture_visible
     # The turn clock (issue #277): a live callable, so every rebuilt spinner
     # of the same turn keeps counting from the turn's start, not its own.
     spinner.elapsed = -> { task.elapsed_label }
@@ -360,9 +362,16 @@ class Task
     task.spinner = spinner
   end
 
+  # The spinner's posture tags: one bracket per NON-default posture (the command
+  # consent mode, the streaming mode). Re-read every frame, so a mid-turn /yolo,
+  # Ctrl+A or /stream toggle shows at once.
   def self.mode_badge(harness)
-    label = harness.command_mode_label
-    label.nil? ? nil : "[#{label}]"
+    tags = []
+    label = harness.command_mode_label if harness.respond_to?(:command_mode_label)
+    tags << "[#{label}]" if label
+    stream = harness.stream_mode_label if harness.respond_to?(:stream_mode_label)
+    tags << "[#{stream}]" if stream
+    tags.empty? ? nil : tags.join(" ")
   end
 
   # Spinner frame for this tick: visible only while waiting on an EMPTY

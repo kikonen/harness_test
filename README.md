@@ -129,6 +129,11 @@ Up/Down browse history. A line starting with `!` runs a shell command
 locally instead of prompting the model (issue #129). `/yolo` [on|off|status]
 toggles the YOLO posture: every `run.command` call then runs with no dialog
 and no model check (issue #221; the disaster denylist still asks).
+`/stream` [on|off|status] toggles streamed LLM responses (issue #28): each part
+of an answer is then consumed as it arrives and the spinner line shows the newest
+text of it (`[STREAM]` badge). The response the model loop receives is identical
+either way; a streamed request is retried only until the first part arrives.
+Initial posture: config key `streaming` (or a model profile's own key).
 
 ## Regenerating the shell parser
 
@@ -165,6 +170,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/reasoning` | Show the reasoning text of the last response |
 | `/yolo [on|off|status]` | Toggle the YOLO shell-consent posture (saved with the session) |
 | `/palette [name\|status]` | Show or switch the output palette (saved with the session) |
+| `/stream [on|off|status]` | Toggle streamed LLM responses - show each part as it arrives (saved with the session) |
 | `/help` | Show command help |
 | `/exit` | Quit (auto-saves the session) |
 

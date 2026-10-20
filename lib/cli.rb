@@ -193,6 +193,15 @@ class CLI
     opts[:yolo] = config.yolo_enabled?
     opts[:bang_requires_confirmation] = config.bang_requires_confirmation?
 
+    # issue #28: initial streaming posture. A profile's own 'streaming' key
+    # wins over the global one (a server or proxy that mishandles a streamed
+    # response can be opted out of per profile); /stream switches it live.
+    opts[:stream] = if profile && !profile[:streaming].nil?
+                      profile[:streaming]
+                    else
+                      config.streaming_enabled?
+                    end
+
     opts[:compact_recent]   ||= config.compact_recent_messages
     opts[:compact_auto_threshold] = config.compact_auto_threshold
     opts[:compact_max_size] = config.compact_max_size
@@ -274,6 +283,10 @@ class CLI
     # issue #303: same reasoning - which palette this run renders with is a
     # fact about the run, and /palette is the way to change it mid-session.
     ui.puts "Output palette: #{@harness.output_palette.name} (/palette <name> switches it)"
+    # issue #28: same reasoning - whether this run streams responses decides
+    # what the user sees while the model is writing, and /stream switches it.
+    ui.puts "LLM responses: #{@harness.stream? ? 'streamed (/stream off buffers them)' \
+              : 'buffered (/stream on shows each part as it arrives)'}"
     ui.puts "Tip: type a plain message (no /) to send it directly to the model."
     ui.puts "Tip: Enter adds a newline; paste multiline text directly. The " \
          "submit key sends the whole buffer: Ctrl+Enter (Windows console, or " \

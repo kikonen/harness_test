@@ -337,6 +337,63 @@ RSpec.describe Task do
       expect(described_class.mode_badge(mode_harness('YOLO'))).to eq('[YOLO]')
     end
 
+    # issue #28: the streaming posture is a second tag on the SAME badge, so
+    # a mid-turn /stream toggle is visible while the answer is arriving.
+    def posture_harness(command_label, stream_label)
+      Class.new do
+        define_method(:command_mode_label) { command_label }
+        define_method(:stream_mode_label) { stream_label }
+      end.new
+    end
+
+    it 'mode_badge adds the stream tag alongside the consent tag' do
+      harness = posture_harness('MANUAL', 'STREAM')
+
+      expect(described_class.mode_badge(harness)).to eq('[MANUAL] [STREAM]')
+    end
+
+    it 'mode_badge shows only the stream tag when the consent label is nil' do
+      expect(described_class.mode_badge(posture_harness(nil, 'STREAM')))
+        .to eq('[STREAM]')
+    end
+
+    # Buffered is the default posture, so it gets no tag: a badge names what
+    # is NOT the default (the same rule as YOLO / AUTO-APPROVE).
+    it 'mode_badge shows no stream tag when streaming is off' do
+      expect(described_class.mode_badge(posture_harness('MANUAL', nil)))
+        .to eq('[MANUAL]')
+    end
+
+    it 'installs a badge when the harness only exposes the stream label' do
+      task = described_class.new { |_t| }
+      task.ui = UI::Console.new(stdout: StringIO.new)
+      task.harness = Class.new { def stream_mode_label = 'STREAM'; }.new
+
+      described_class.ensure_spinner_running(task)
+
+      expect(task.visible_spinner.badge.call).to eq('[STREAM]')
+    end
+
+    # A live callable: a /stream toggle mid-turn shows on the very next frame.
+    it 're-reads both tags on every frame (a mid-turn toggle shows at once)' do
+      stream = false
+      harness = Class.new do
+        define_method(:command_mode_label) { 'MANUAL' }
+        define_method(:stream_mode_label) { stream ? 'STREAM' : nil }
+      end.new
+      task = described_class.new { |_t| }
+      task.ui = UI::Console.new(stdout: StringIO.new)
+      task.harness = harness
+
+      described_class.ensure_spinner_running(task)
+      before = task.visible_spinner.badge.call
+      stream = true
+      after = task.visible_spinner.badge.call
+
+      expect(before).to eq('[MANUAL]')
+      expect(after).to eq('[MANUAL] [STREAM]')
+    end
+
     it 'does not replace an already running spinner' do
       task = described_class.new { |_t| }
       task.ui = UI::Console.new(stdout: StringIO.new)
