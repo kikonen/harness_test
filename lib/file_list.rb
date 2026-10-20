@@ -41,7 +41,9 @@ require_relative "tool"
 # delete, and a delete grant does not imply read or write. It is granted,
 # persisted, and displayed with the same options as read/write (issue #92).
 #
-# Sensitive files/directories are always blocked, regardless of grants.
+# Sensitive paths (.git, .harness, .env*) are blocked regardless of grants,
+# EXCEPT inside a per-issue scratch zone (tmp/scratch/<n>/, tmp/keep/<n>/),
+# where a nested one is a disposable clone, not this project's state.
 #
 # All paths are resolved relative to the working directory (@workdir).
 # Path containment is decided on canonical paths (File.expand_path),
@@ -51,10 +53,6 @@ class FileList
 
   # Permission modes.
   MODES = %i[r w d rw].freeze
-
-  def self.sensitive?(path)
-    SensitiveFiles.sensitive?(path)
-  end
 
   def self.sha256(path)
     return nil unless File.file?(path)
@@ -96,12 +94,35 @@ class FileList
   def display_path(path)
     path   = resolve(path)
     return "." if path == @workdir
-    prefix = "#{@workdir}/"
-    path.start_with?(prefix) ? path.sub(prefix, "") : path
+
+    relative_path(path) || path
   end
 
+  # Path relative to the working directory, or nil when it lies outside it
+  # (the working directory itself included - it has no relative form).
+  def relative_path(path)
+    path   = resolve(path)
+    return nil if path == @workdir
+    prefix = "#{@workdir}/"
+    path.start_with?(prefix) ? path[prefix.length..] : nil
+  end
+
+  # True when the path lies inside a per-issue scratch zone (tmp/scratch/<n>/
+  # or tmp/keep/<n>/). The zone test needs the RELATIVE path - tmp/ is where
+  # the zones live in a project - and #relative_path has already resolved any
+  # ".." away, so a zone name used as an escape route does not match.
+  def scratch_zone?(path)
+    SensitiveFiles.scratch_zone?(relative_path(path))
+  end
+
+  # The single decision point for "blocked whatever the grants": a sensitive
+  # NAME, unless the path sits inside a per-issue scratch zone - the guard
+  # protects THIS project's git/harness state, not a scratch repo the harness
+  # cloned under tmp/. doc/sensitive_paths_design.md.
   def sensitive?(path)
-    FileList.sensitive?(path)
+    return false if scratch_zone?(path)
+
+    SensitiveFiles.sensitive?(path)
   end
 
   # -- permission checks ----------------------------------------------------

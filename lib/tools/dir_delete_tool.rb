@@ -25,8 +25,10 @@ module Tools
                      "(every file and subdir under it). Paths outside the working " \
                      "directory require explicit user approval; the working directory " \
                      "itself can never be deleted, and a tree containing a sensitive " \
-                     "subdir (.git, .harness, .env*) is refused. Deleting requires a " \
-                     "DELETE access grant (its own mode, independent from read/write). " \
+                     "subdir (.git, .harness, .env*) is refused, except under " \
+                     "tmp/scratch/<n>/ or tmp/keep/<n>/ where it is a disposable " \
+                     "scratch clone. Deleting requires a DELETE access grant " \
+                     "(its own mode, independent from read/write). " \
                      "A path that is itself a symlink is refused - unlink it with " \
                      "file.delete. Every deleted path is recorded in harness.log.",
         parameters: {
