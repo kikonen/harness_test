@@ -31,9 +31,18 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
 - The posture travels with the session (`SessionManager#save_session` /
   `Harness#apply_resume_state`), like the YOLO posture: a session the user set to
   streamed does not quietly come back buffered.
-- Specs: 26 new examples (preview 18, command 8) plus the posture coverage added
-  to the harness / session_manager / task / harness_config specs. Suite 1220
-  examples, 0 failures.
+- CI's rubocop step reported 12 offenses in the new code; all are FIXED rather
+  than baselined, because none of these files is in `.rubocop_todo.yml`:
+  `stream: stream` -> `stream:` (HashSyntax shorthand), the multi-line `||`
+  continuations (MultilineOperationIndentation), the string-continuation indents
+  in `/stream`'s text, `set_stream(on)` -> setting `@harness.stream` in the
+  branch (AccessorMethodName + MethodParameterName), and `StreamingBackend` /
+  `ChunkedServer` moved out of the `RSpec.describe` block to the spec's top level
+  (ConstantDefinitionInBlock - a class written inside a block lands in the
+  enclosing scope anyway, so defining it there only hid where it landed).
+- Specs: 51 new examples - 26 in the new files (preview 18, `/stream` command 8)
+  and 25 added to existing ones (harness 14, harness_config 5, task 5,
+  session_manager 1). Suite 1220 examples, 0 failures (master 1c38426: 1092).
 
 ## Unreleased - streamed LLM responses: the transport path (issue #28, step 1 of 2)
 
@@ -66,10 +75,11 @@ Older history lives in `git log`; this file starts at the 2026-10-10 window.
   without it the OpenAI schema reports no usage at all on a streamed response
   (OpenAI API reference - not measured against our local endpoint), which would
   silently cost the harness its token accounting per streamed turn.
-- Specs: 72 new examples (reader 14, decoder 16, accumulator 25, and 17 in
-  `spec/lib/llm/base_backend_streaming_spec.rb` run against a REAL chunked HTTP
-  server - chunk boundaries, the retry boundary and status handling are transport
-  behavior a stubbed response cannot show).
+- Specs: 77 new examples - 72 in the new files (reader 14, decoder 16,
+  accumulator 25, and 17 in `spec/lib/llm/base_backend_streaming_spec.rb` run
+  against a REAL chunked HTTP server: chunk boundaries, the retry boundary and
+  status handling are transport behavior a stubbed response cannot show) plus 5
+  for the two backends' stream flags (openai 3, ollama 2).
 
 ## Unreleased - a scratch zone's nested .git is deletable (issue #321)
 
