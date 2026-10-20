@@ -75,8 +75,12 @@ Keep this in mind:
   working-dir `.harness/config.yml` > user home. There is no installation-dir
   tier - `$HARNESS_CONFIG` / `-c` covers that case.
 - Sensitive files/dirs (`.env*`, `.git/`, `.harness/`) are blocked from LLM
-  access - do not try to work around this. A nested one inside a scratch zone
-  (`tmp/scratch/<n>/`, `tmp/keep/<n>/`) is exempt: `doc/sensitive_paths_design.md`.
+  access - do not try to work around this. Two measured exemptions: a nested one
+  inside a scratch zone (`tmp/scratch/<n>/`, `tmp/keep/<n>/`) -
+  `doc/sensitive_paths_design.md`; and `.harness/skills/`, grantable because a skill
+  is repo content the owner keeps. A `.env*` name stays blocked everywhere.
+- A skill body is never in the system prompt: names + one-line descriptions only,
+  body on demand (`skills.read`, `/skills <name>`) - `doc/skills_design.md`.
 - Access modes (read / write / delete) are tracked separately: a write grant
   implies read, but neither read nor write implies delete.
 - Destructive operations (file delete, dir delete) require a DELETE grant

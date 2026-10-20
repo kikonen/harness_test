@@ -1,7 +1,8 @@
-# The sensitive-path guard, and the scratch zone that exempts it
+# The sensitive-path guard, and the two zones that exempt it
 
-What the guard is for, where it stops, and why a nested `.git` inside
-`tmp/keep/<issue>/` is deletable. Issue #321.
+What the guard is for and where it stops: why a nested `.git` inside
+`tmp/keep/<issue>/` is deletable (#321), and why `.harness/skills` is grantable
+while the rest of `.harness/` is not (#12, `doc/skills_design.md`).
 
 ---
 
@@ -34,13 +35,20 @@ through it, so the zone rule below applies everywhere at once.
 `@workdir`. `FileList#sensitive?` is therefore
 
 ```ruby
-return false if scratch_zone?(path)
+rel = relative_path(path)
+return false if SensitiveFiles.scratch_zone?(rel)
+return SensitiveFiles.env_named?(path) if SensitiveFiles.skills_zone?(rel)
 SensitiveFiles.sensitive?(path)
 ```
 
 - `relative_path(path)` - canonical path relative to the workdir, or `nil`
-  outside it (`resolve` has already collapsed any `..`);
+  outside it (`resolve` has already collapsed any `..`); both zone tests run on it.
 - `SensitiveFiles.scratch_zone?(rel)` - `tmp/scratch/<n>/` or `tmp/keep/<n>/`.
+- `SensitiveFiles.skills_zone?(rel)` - the project's own `.harness/skills` subtree
+  (issue #12), where only a `.env*` NAME still blocks: `doc/skills_design.md`.
+- `SensitiveFiles.sensitive?` is split into `env_named?` / `state_dir?` so the skills
+  branch can keep the NAME half of the rule while dropping the `.harness` component
+  half.
 
 ## Measured (Windows, Ruby 4.0.7, git 2.56.0)
 
