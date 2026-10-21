@@ -158,6 +158,33 @@ guard blocks it regardless.
 - `spec/lib/commands/help_command_spec.rb` (already on the books) - the new `/skills`
   command and its README row, both directions.
 
+## Gotchas measured when the first skill was installed
+
+Both cost a verification cycle, so they are written down. Neither is visible from the
+code.
+
+- **An unquoted `#` in front matter cuts the value.** YAML starts a comment at a `#`
+  preceded by whitespace, so
+  `description: ... from the merged PR bodies (the #305 procedure)` yields
+  `"... merged PR bodies (the"` - silently, with no error. Quoting the value fixes it.
+  The description of the first installed skill was truncated exactly this way.
+  Pinned by `skills_spec.rb` ("keeps a quoted front-matter value that contains a #").
+  A `description:` naming an issue number MUST be quoted.
+- **`file.list` needs a filename pattern, not `<dir>/**` alone.** `Dir.glob("x/**")`
+  yields `x` itself plus its subdirectories and never a file - measured here: `lib/**`
+  -> 36 entries (all directories), `lib/**/*` -> 100 files, and `.harness/skills/**` ->
+  0 files while `.harness/skills/**/*.md` -> the SKILL.md. So a grant on the zone works
+  and the listing is still empty unless the pattern names the files. This is Ruby glob
+  semantics, not a skills issue, and `file.list` is right to filter on `File.file?` -
+  but it is the first thing that looks like "the exemption does not work".
+
+The exemption itself was confirmed live, in a process started after the change:
+`skills.read` returns the body with no grant asked for, `file.patch` edits the skill
+file (the write side, with its grant), `file.list '.harness/skills/**/*.md'` lists it
+after a read grant on the zone, `file.list '.git/**/*'` is still refused, and
+`git check-ignore` says the skill file is trackable while `.harness/config.yml` and
+`.harness/harness.log` stay ignored.
+
 ## Deliberately not built (issue #12 leaves these open)
 
 - No user-home tier (`~/.config/harness/skills/`) yet - only the per-project
