@@ -120,6 +120,23 @@ RSpec.describe Skills do
       end
     end
 
+    # YAML starts a comment at an unquoted '#', so a description naming an issue
+    # number is silently CUT at the '#'. Quoting fixes it - this is what the
+    # installed changelog skill hit in practice.
+    it 'keeps a quoted front-matter value that contains a # (an issue number)' do
+      Dir.mktmpdir do |dir|
+        write_skill(dir, 'rollup.md', <<~MD)
+          ---
+          description: "Regenerate CHANGELOG.md from merged PR bodies (the #305 procedure)"
+          ---
+          body
+        MD
+
+        expect(skills_in(dir).find('rollup').description)
+          .to eq('Regenerate CHANGELOG.md from merged PR bodies (the #305 procedure)')
+      end
+    end
+
     it 'survives malformed front matter (the body is still the skill)' do
       Dir.mktmpdir do |dir|
         write_skill(dir, 'bad.md', "---\n: : broken [\n---\nusable body\n")
