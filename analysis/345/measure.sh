@@ -10,4 +10,5 @@ grep -rn finish_reason lib/
 
 echo
 echo "== the attr_reader is never called anywhere =="
-grep -rn "\.finish_reason" lib/ spec/ || echo "(no hits: nothing reads StreamAccumulator#finish_reason)"
+grep -rn "\.finish_reason" lib/ spec/ \
+  || echo "(no hits: nothing reads StreamAccumulator#finish_reason)"

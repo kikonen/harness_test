@@ -19,8 +19,9 @@ Dir.mktmpdir do |dir|
   File.write(File.join(sd, id1, "session.json"), "{not json,,}")
   id2 = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
   FileUtils.mkdir_p(File.join(sd, id2))
-  File.binwrite(File.join(sd, id2, "session.json"),
-                %({"session_id":"#{id2}","messages":[{"role":"user","content":"caf}\xe9"}]}))
+  # The content carries an invalid byte (7d e9 = "}\xe9"), which is the point.
+  body = %({"session_id":"#{id2}","messages":[{"role":"user","content":"caf}\xe9"}]})
+  File.binwrite(File.join(sd, id2, "session.json"), body)
   loc = SessionLocator.new(dir)
   puts "list ids -> #{loc.list.map { |e| e[:id] }.inspect}"
   begin
