@@ -274,8 +274,12 @@ lib/command_help.rb + lib/help_topics.rb + lib/help_renderer.rb
 lib/tools/*.rb      # one file per tool
 tmp/scratch/<n>/    # transient model scratch (probes, -a copies, dumps); deleted
                     # when its PR merges
-tmp/keep/<n>/       # measurements an OPEN issue #<n> still quotes; kept until
-                    # that issue closes
+analysis/<n>/       # the COMMITTED evidence of issue #<n>: a repro script that runs
+                    # from a fresh clone (repro.rb) and/or a measurement script
+                    # (measure.sh). Tracked, like doc/.
+tmp/keep/<n>/       # measurements an OPEN issue #<n> still quotes that CANNOT be
+                    # committed (a real repo clone, a large dump); gitignored, local
+                    # to one machine, deleted when that issue closes
 local/              # the owner's own working files (sample data, notes): the
                     # model may read them, never writes or deletes there
 config/system_prompt.txt                  # built-in system prompt

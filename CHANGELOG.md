@@ -7,6 +7,37 @@ so fixed-bug notes and release history belong here (and in the issue/PR).
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 Older history lives in `git log`; this file starts at the 2026-10-10 window.
 
+## Unreleased - committed per-issue evidence in analysis/<n>/ (issue #347)
+
+#347: `tmp/keep/<n>/` is documented as "measurements an OPEN issue #<n> still
+quotes", but `tmp/` is gitignored, so a keep zone can NEVER be committed. Measured
+on `master`: `git ls-files tmp` lists only `tmp/.gitkeep`, `git log --all --
+'tmp/keep/*'` is empty (the zone has never been tracked), and `git add
+tmp/keep/341/probe.rb` is refused. Issues #318 and #334 already quote evidence
+files that a fresh clone cannot have, so those issues were only reproducible on
+the machine that wrote them - exactly what the keep convention was invented to
+prevent.
+
+- The fix is NOT a `.gitignore` negation. Re-admitting `tmp/keep/` would make a
+  scratch zone committable (and `tmp/keep/318` once held a 280K tree with 81 files
+  under nested `.git` dirs - `doc/sensitive_paths_design.md`). Instead the
+  committed evidence moves to a normal tracked directory, `analysis/<n>/`, and
+  `.gitignore` is untouched: `tmp/**` still ignores both scratch zones, and a keep
+  zone stays what it always was - local, disposable, deletable when its issue closes.
+- `analysis/<n>/` holds what runs from a fresh clone with no local state:
+  `repro.rb` (a ruby probe) and/or `measure.sh`. First content: #341-#346, the six
+  issues filed by this analysis; each repro's expected output is written in its header.
+- `README.md` and `harness.md` now name all three per-issue zones and say which one
+  is tracked. `doc/sensitive_paths_design.md` keeps its measurement as the record of
+  why the keep zone is gitignored.
+- Guard: `spec/lib/sensitive_files_spec.rb` gained two describes. The zones-vs-
+  .gitignore one drives REAL git in a tmp repo with this project's own `.gitignore`
+  (a unit spec cannot test an ignore file) and asserts `analysis/<n>/` is trackable
+  while both scratch zones are not, plus that nothing under `analysis/` is left
+  uncommitted. The docs one asserts both docs name all three zones. `git add` is the
+  test, not `git check-ignore -v`: check-ignore prints the matching pattern even when
+  it is a negation, so it cannot tell tracked from ignored.
+
 ## Unreleased - spec files for the mirror-missing classes (issue #306, tier A)
 
 #306 measured 36 `lib/**/*.rb` classes with no `spec/lib/` mirror. Re-measured at

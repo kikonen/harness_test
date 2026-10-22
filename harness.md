@@ -21,9 +21,14 @@ Keep this in mind:
   it (`doc/command_help_design.md`). CLI flag changes stay in sync with `lib/cli.rb`.
 - Scratch files go under `tmp/`, never in the project root - and under their
   OWN subdir named for the issue they belong to: `tmp/scratch/<issue>/`, or
-  `tmp/keep/<issue>/` for analysis an OPEN issue still quotes (kept until that
-  issue closes). Loose files in `tmp/` itself become unattributable clutter.
-  `local/` is the owner's space (never write, never delete); `tmp/.gitkeep` stays.
+  `tmp/keep/<issue>/` for a measurement an OPEN issue still quotes that cannot
+  be committed (a real repo clone, a large dump). `tmp/` is gitignored, so
+  anything kept there is local to one machine and lost to the next session.
+  Evidence an issue must be able to rely on ELSEWHERE goes in the tracked
+  `analysis/<issue>/` instead: a `repro.rb` / `measure.sh` that runs from a
+  fresh clone (no local state, no scratch paths). Loose files in `tmp/` itself
+  become unattributable clutter. `local/` is the owner's space (never write,
+  never delete); `tmp/.gitkeep` stays.
 
 ## Code Style
 
