@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 # Issue #344: SafetyCheck maps verdict lines by POSITION, so one extra model line
 # shifts every verdict onto the wrong command.
 # Run from the repo root: ruby analysis/344/repro.rb
