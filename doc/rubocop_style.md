@@ -35,6 +35,14 @@ example it describes, so a quote-style or brace-layout rule there buys nothing.
 Lint and Naming stay on everywhere: they catch actual mistakes (unused variable,
 duplicated branch, shadowed exception), not taste.
 
+## What the exclusion does NOT cover
+
+`spec/**/*` is the only excluded tree, so anything else that is ruby is held to
+the house rules - including the committed evidence scripts under `analysis/<n>/`
+(issue #347). A `repro.rb` there is ordinary project code: blank line after the
+magic comment, 90 columns, double quotes, the continuation shape below. CI runs
+`rubocop` over it, so a probe written like a scratch file fails the build.
+
 ## Continuation style: configured, not disabled
 
 `harness.md` says continuation lines get 2 spaces from the line that opened the

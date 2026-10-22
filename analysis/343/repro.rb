@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 # Issue #343: a corrupt session.json resumes "successfully" then breaks every save,
 # and a corrupt session vanishes silently from /sessions.
 # Run from the repo root: ruby analysis/343/repro.rb

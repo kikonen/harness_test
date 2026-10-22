@@ -27,6 +27,10 @@ prevent.
 - `analysis/<n>/` holds what runs from a fresh clone with no local state:
   `repro.rb` (a ruby probe) and/or `measure.sh`. First content: #341-#346, the six
   issues filed by this analysis; each repro's expected output is written in its header.
+- `analysis/*.rb` is **linted**: `spec/**/*` is the only tree `.rubocop.yml` excludes
+  from Layout and Style, so a committed probe is ordinary project code (CI caught
+  this on the first push). `doc/rubocop_style.md` gained a "what the exclusion does
+  NOT cover" section saying so.
 - `README.md` and `harness.md` now name all three per-issue zones and say which one
   is tracked. `doc/sensitive_paths_design.md` keeps its measurement as the record of
   why the keep zone is gitignored.

@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 # Issue #346: file.search raises RegexpError for an invalid pattern instead of
 # validating it.
 # Run from the repo root: ruby analysis/346/repro.rb
