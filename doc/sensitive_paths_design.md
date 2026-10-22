@@ -94,11 +94,36 @@ that can be created but never cleaned); forbidding scratch repos under `tmp/`
 (that forbids the measurement itself); hand-cleaning the zone (outside the audit
 trail, and it reproduces on every future git measurement).
 
+## A keep zone is not repo state - and never was committable
+
+The measurement above shows the zone is invisible to git, and that is the RIGHT
+behaviour, not a defect to fix: a keep zone is where a disposable clone lives, and
+re-admitting `tmp/keep/` in `.gitignore` would make a scratch zone committable (the
+`tmp/keep/318` tree alone was 280K with 81 files under nested `.git` dirs).
+
+What WAS wrong is that the docs promised a keep zone holds "measurements an OPEN
+issue still quotes" - evidence that then cannot reach the next session or another
+machine (issue #347: `git ls-files tmp` lists only `tmp/.gitkeep`, and
+`git log --all -- 'tmp/keep/*'` is empty across the whole history). The split is
+now explicit:
+
+- `analysis/<n>/` - TRACKED, like `doc/`: a `repro.rb` / `measure.sh` that runs from
+  a fresh clone with no local state. This is what an issue quotes when the
+  measurement must be reachable elsewhere.
+- `tmp/keep/<n>/` - gitignored, local to one machine, deletable when its issue
+  closes: the heavy measurement a clone needs, which must NOT be committed.
+
 ## Checked by spec
 
 - `spec/lib/sensitive_files_spec.rb` - the name test (basename patterns, any
   component) and the zone pattern, including the `<n>`-required cases and the
   lookalike directories.
+- `spec/lib/sensitive_files_spec.rb` also pins the git half of the rule (issue
+  #347): real git in a tmp repo with this project's own `.gitignore`, asserting
+  both scratch zones stay out of the repo while `analysis/<n>/` is trackable, and
+  that nothing under `analysis/` is left uncommitted. `git add` is the test -
+  `git check-ignore -v` prints the matching pattern even when it is a negation,
+  so it cannot tell tracked from ignored.
 - `spec/lib/file_list_spec.rb` - a zone grant covers a nested `.git`, `.harness`
   and `.env*`; a bare `.git` is still ungrantable (`:blocked`, `grant_access`
   refuses); `..` cannot smuggle a name out of a zone.
