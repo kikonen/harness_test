@@ -62,6 +62,12 @@ scoped to a working directory you choose.
   ## Procedure ...
   ```
 
+  A directory-shaped skill may ship companion files, and the changelog skill does:
+  its step 7 runs `.harness/skills/changelog/verify.rb`, which checks the generated
+  CHANGELOG.md against a merged-PR dataset (shape, append-only history, and the
+  LAG - the newest merged PRs the file cannot bullet yet, tolerated and printed;
+  `--strict` makes them fail). Design and measurements: `doc/changelog_generation.md`.
+
 ## Requirements
 
 - Ruby >= 4.0 (see `.ruby-version`)
@@ -291,7 +297,8 @@ lib/skills.rb       # the skills loader (.harness/skills) - index + body on dema
 harness.rb          # entry point
 bin/harness         # launcher (env, rbenv, bundle)
 bin/rspec           # test runner (same env hygiene as the launcher)
-CHANGELOG.md        # per-issue history (harness.md holds coding rules only)
+CHANGELOG.md        # GENERATED per-issue history, regenerated on request
+                    # (doc/changelog_generation.md; harness.md holds coding rules only)
 lib/cli.rb          # option parsing, REPL loop, input handling
 lib/harness.rb      # tool loop, tool execution, registry
 lib/llm_client.rb   # HTTP, retries, request building
@@ -318,6 +325,7 @@ local/              # the owner's own working files (sample data, notes): the
 config/system_prompt.txt                  # built-in system prompt
 doc/*.md            # design documents (why a subsystem is shaped as it is)
 doc/dev_environment.md  # which Ruby/git runs where (CI vs local), pinned
+doc/changelog_generation.md # how CHANGELOG.md is generated, and its lag rule
 doc/rubocop_style.md    # which style rules the cops enforce, and why the rest
                         # are off (measured against rubocop 1.92)
 doc/sensitive_paths_design.md  # the sensitive-path guard and its scratch-zone

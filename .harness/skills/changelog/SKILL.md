@@ -65,7 +65,8 @@ commit subjects, and the regeneration is its own docs-only PR (or one docs commi
 
    ```
    ruby .harness/skills/changelog/verify.rb \
-     CHANGELOG.md tmp/keep/<n>/merged_prs.tsv <horizon_start> <doc_root>
+     CHANGELOG.md tmp/keep/<n>/merged_prs.tsv <horizon_start> <doc_root> \
+     [--against <previous CHANGELOG.md>] [--strict]
    ```
 
    Exit 0 = PASS. The horizon start is the oldest date the header still covers;
@@ -76,10 +77,16 @@ commit subjects, and the regeneration is its own docs-only PR (or one docs commi
    idempotent. doc_root is the checkout whose `doc/` the file's pointers resolve
    against (use `.` for the repo root).
 
+   The run tolerates LAG (see the check section): the newest horizon PRs the file
+   does not cover yet are PRINTED, not failed. Do not update the file per merge to
+   chase that lag - regeneration happens on request. What the lag line must show is
+   that the only uncovered PRs are the newest ones, newest-first; a hole in the
+   middle of the horizon is still MISSING.
+
 ## What the check asserts (and why each rule is here)
 
 The check takes the generated CHANGELOG, the PR dataset TSV, the horizon start,
-an optional doc_root, and `--against <previous CHANGELOG.md>`. Without
+an optional doc_root, `--against <previous CHANGELOG.md>` and `--strict`. Without
 `--against` only the SHAPE rules run (this is the bootstrap run, where a whole-file
 rewrite is allowed). With `--against` the HISTORY rules run too. Exit 0 = PASS.
 
@@ -89,6 +96,20 @@ Shape rules (measured on the 906-line origin/master `CHANGELOG.md` with
 
 - Sections are `## YYYY-MM-DD` date sections, newest first. There is no
   `## Unreleased` and no `###` subheading: each merged PR is ONE bullet.
+- The header states its OWN horizon count - the literal `N in the horizon` - because
+  that is what makes the lag measurable instead of guessed: the dataset says how many
+  horizon PRs exist NOW, the header says how many the file was written against, and
+  the difference is the newest `horizon.size - N` PRs (newest-first). Those are
+  LAG: printed as `lag: 3 newest horizon PR(s) not covered yet #356 #354 #353` even
+  when they are tolerated, and never anything else. `--strict` turns each one back
+  into `MISSING`. A header with no count FAILS (`HEADER has no horizon count ...:
+  the lag rule needs it`, and then every uncovered PR is MISSING as before); a count
+  bigger than the dataset FAILS as a stale claim. Measured on the 126-PR dataset
+  (merged through 2026-10-23, horizon start 2026-10-10 -> 62 horizon PRs, the file's
+  header declares 59): the file PASSES with `lag: 3`, `--strict` FAILS (3), and
+  deleting the #205 bullet (2026-10-10, mid-horizon) FAILS (1) `MISSING #205` with
+  the same 3-PR lag printed - the tolerance is exactly the newest merges, not a
+  blanket MISSING waiver.
 - Every horizon PR is the PRIMARY number of exactly one bullet: the number right
   after `- `. A horizon PR that never appears as a bullet primary is MISSING; a PR
   primary on two bullets is DUP. The key is the PR number, not the issue number:
@@ -96,7 +117,8 @@ Shape rules (measured on the 906-line origin/master `CHANGELOG.md` with
   (#333 #329 #322 #320 #287 #266 ...), 0 close two or more. Only the PR number is
   always present, so it is the only key the check can demand.
 - A bullet may name a second horizon PR only as a cross-reference, and only when
-  that PR has a bullet of its own (e.g. `- #245 ... (follow-up to PR #243)`).
+  that PR has a bullet of its own or is in the lag (e.g. `- #245 ... (follow-up to
+  PR #243)`).
 - A bullet may wrap onto continuation lines (indented), but no bullet is longer
   than 5 lines and no line is longer than 80 columns. There are no blank lines
   inside a date section, and no stray prose line: only a bullet or its
