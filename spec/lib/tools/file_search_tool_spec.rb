@@ -47,4 +47,56 @@ RSpec.describe Tools::FileSearchTool do
       end
     end
   end
+
+  # issue #346: an INVALID pattern is not the same as an empty one, and the tool
+  # already had a usage line for the empty case. Letting RegexpError escape meant
+  # the model saw Harness#execute_tool_call's generic "error: <message>" -
+  # indistinguishable from a harness failure, so it retried the same pattern.
+  describe 'invalid pattern (issue #346)' do
+    def tool_for(dir)
+      list = FileList.new([], workdir: dir)
+      list.add_dir(dir, :r)
+      described_class.new(list)
+    end
+
+    it 'returns its own error for an unmatched paren instead of raising' do
+      Dir.mktmpdir do |dir|
+        out = tool_for(dir).execute('pattern' => '(')
+
+        expect(out).to start_with('error: invalid pattern "("')
+        # The pattern is named, so the model can see WHICH input was rejected.
+        expect(out).to include('unmatched parenthesis')
+        expect(out).to include('Ruby regex syntax')
+      end
+    end
+
+    it 'returns its own error for a bad character class' do
+      Dir.mktmpdir do |dir|
+        out = tool_for(dir).execute('pattern' => '[z-a]')
+
+        expect(out).to start_with('error: invalid pattern "[z-a]"')
+        expect(out).to include('empty range in char class')
+      end
+    end
+
+    it 'does not reach the file walk when the pattern is invalid' do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, 'sample.txt'), "match me\n")
+        tool = tool_for(dir)
+        # Dir.glob is what the search half does; it must never run for a bad
+        # pattern (the error is a validation answer, not a failed search).
+        expect(Dir).not_to receive(:glob)
+
+        expect(tool.execute('pattern' => '(')).to start_with('error: invalid pattern')
+      end
+    end
+
+    it 'still searches normally for a valid pattern' do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, 'sample.txt'), "match me\n")
+
+        expect(tool_for(dir).execute('pattern' => 'match')).to eq('sample.txt:1: match me')
+      end
+    end
+  end
 end

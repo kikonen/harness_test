@@ -38,8 +38,17 @@ module Tools
       pattern_str = args["pattern"].to_s
       return "error: usage: file.search(pattern)" if pattern_str.empty?
 
+      # A model-authored regex is where unbalanced parens and bad character
+      # classes appear. Letting RegexpError escape meant the model saw only the
+      # generic "error: <message>" from Harness#execute_tool_call's rescue -
+      # indistinguishable from a harness failure, so it retried the SAME pattern.
       regex = Regexp.new(pattern_str)
-      glob  = (args["glob"] || "**/*").to_s.strip
+    rescue RegexpError => e
+      status(:fail, "invalid pattern #{pattern_str.inspect}: #{e.message}")
+      return "error: invalid pattern #{pattern_str.inspect}: #{e.message} " \
+             "(Ruby regex syntax - fix the pattern or search for a literal string)"
+    else
+      glob = (args["glob"] || "**/*").to_s.strip
       context = (args["context"] || 0).to_i
 
       expanded = File.expand_path(glob, @file_list.workdir)
