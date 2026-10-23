@@ -7,11 +7,15 @@
 #
 #   ruby .harness/skills/changelog/verify.rb \
 #     CHANGELOG.md tmp/keep/<n>/merged_prs.tsv <horizon_start> \
-#     [doc_root] [--against <previous CHANGELOG.md>]
+#     [doc_root] [--against <previous CHANGELOG.md>] [--strict]
 #
 # Without --against only the shape rules are checked (the bootstrap run, where a
 # whole-file rewrite is allowed). With --against the history rules are checked
 # too: everything the previous file already said must survive byte-identically.
+#
+# The newest horizon PRs the file does not cover yet are reported as LAG, not
+# FAIL (see lag_of): a regeneration cannot bullet its own PR, so the file is
+# always behind the dataset. --strict turns the lag back into failures.
 #
 # The tsv rows are: number \t mergedAt(date) \t closing-issues \t title - exactly
 # what step 1 of the skill pulls from gh. Exit 0 = PASS, 1 = FAIL.
@@ -90,12 +94,29 @@ def horizon_of(merged, horizon_start)
   merged.select { |pr| pr[:date] >= horizon_start }
 end
 
+# The count the file's own header claims to cover ("59 in the horizon"). It is
+# what makes the lag measurable instead of guessed at: the dataset says how many
+# horizon PRs exist NOW, the header says how many the file was written against.
+def declared_horizon(preamble)
+  m = preamble.join(" ").match(/(\d+)\s+in the horizon/)
+  m && m[1].to_i
+end
+
+# The PRs merged SINCE the file was written, newest first: horizon.size minus
+# what its header declares. Those are the expected lag, and only those - a gap
+# in the middle of history is still a failure.
+def lag_of(horizon, declared)
+  newest = horizon.sort_by { |p| [p[:date], p[:num]] }.reverse
+  newest.first(horizon.size - declared).map { |p| p[:num] }
+end
+
 # Shape rules: date sections, one bullet per PR, wrapped continuation only,
 # every horizon PR named once, no stale entry, no ## Unreleased, 80 columns.
 def shape_fails(parsed, merged, horizon_start, log_path, doc_root)
   fails = []
   lines = all_lines(parsed)
-  hnums = horizon_of(merged, horizon_start).map { |pr| pr[:num] }
+  horizon = horizon_of(merged, horizon_start)
+  hnums = horizon.map { |pr| pr[:num] }
 
   parsed[:sections].each do |s|
     blocks = bullet_blocks(s[:body])
@@ -124,9 +145,22 @@ def shape_fails(parsed, merged, horizon_start, log_path, doc_root)
   end.compact.tally
   named = lines.flat_map { |l| nums(l) }.uniq
 
-  horizon_of(merged, horizon_start).each do |pr|
+  declared = declared_horizon(parsed[:preamble])
+  lag = []
+  if declared.nil?
+    fails << "HEADER has no horizon count ('N in the horizon'): the lag rule needs it"
+  elsif declared > horizon.size
+    fails << "HEADER claims #{declared} horizon PRs, dataset has #{horizon.size} " \
+             "(stale claim)"
+  else
+    lag = lag_of(horizon, declared)
+  end
+
+  horizon.each do |pr|
     count = primary[pr[:num]] || 0
     if count.zero?
+      next if lag.include?(pr[:num])
+
       fails << "MISSING ##{pr[:num]} (#{pr[:date]}) #{pr[:title]}"
     elsif count > 1
       fails << "DUP ##{pr[:num]} has #{count} bullets (one bullet per PR)"
@@ -135,7 +169,8 @@ def shape_fails(parsed, merged, horizon_start, log_path, doc_root)
 
   bullets.each do |l|
     named_prs = nums(l) & hnums
-    next unless named_prs.size > 1 && named_prs.any? { |n| !(primary[n] || 0).positive? }
+    covered = lambda { |n| (primary[n] || 0).positive? || lag.include?(n) }
+    next unless named_prs.size > 1 && named_prs.any? { |n| !covered.call(n) }
 
     fails << "SHARED bullet names a PR with no bullet of its own: #{l[0, 60]}"
   end
@@ -164,7 +199,7 @@ def shape_fails(parsed, merged, horizon_start, log_path, doc_root)
   end
   long = lines.count { |l| l.length > MAX_LINE }
   fails << "#{long} lines over #{MAX_LINE} cols" if long.nonzero?
-  fails
+  [fails, lag, horizon]
 end
 
 # History rules: date sections newest-first and unique; a new section may only be
@@ -210,8 +245,8 @@ def history_fails(current, previous, horizon_start)
   fails
 end
 
-def report(log_path, parsed, merged, horizon_start, fails)
-  horizon = horizon_of(merged, horizon_start)
+def report(log_path, parsed, merged, horizon_start, fails, lag)
+  horizon  = horizon_of(merged, horizon_start)
   sections = parsed[:sections]
   bullets = sections.sum { |s| s[:body].count { |l| l.start_with?("- ") } }
   all = all_lines(parsed)
@@ -223,22 +258,35 @@ def report(log_path, parsed, merged, horizon_start, fails)
   real = sections.flat_map { |s| bullet_blocks(s[:body]).reject { |b| b[0].nil? } }
   puts "style:     max line #{(all.map(&:length).max || 0)} (limit #{MAX_LINE}), " \
        "max bullet #{(real.map(&:size).max || 0)} (limit #{MAX_BULLET_LINES})"
+  # The lag is printed even when it is tolerated: a silent pass would hide that
+  # the file is behind, which is the one thing this rule must keep visible.
+  unless lag.empty?
+    missing = horizon.select { |p| lag.include?(p[:num]) }.map { |p| "##{p[:num]}" }
+    puts "lag:       #{missing.size} newest horizon PR(s) not covered yet " \
+         "#{missing.join(' ')} (expected: a run cannot bullet its own PR or the " \
+         "ones merged after it was written)"
+  end
   fails.each { |f| puts "  FAIL #{f}" }
   puts(fails.empty? ? "RESULT: PASS" : "RESULT: FAIL (#{fails.size})")
 end
 
-def run(log_path, tsv_path, horizon_start, doc_root, previous_path)
+def run(log_path, tsv_path, horizon_start, doc_root, previous_path, strict: false)
   lines  = File.readlines(log_path)
   merged = parse_rows(tsv_path)
   parsed = parse_log(lines)
-  fails  = shape_fails(parsed, merged, horizon_start, log_path, doc_root)
+  fails, lag, horizon = shape_fails(parsed, merged, horizon_start, log_path, doc_root)
+  if strict && !lag.empty?
+    fails = fails +
+            lag.map { |n| "MISSING ##{n} (--strict: the lag counts as a failure)" }
+    lag = []
+  end
   if previous_path
     prev = parse_log(File.readlines(previous_path))
     fails.concat(history_fails(parsed, prev, horizon_start))
   else
     puts "history:   skipped (no --against; a bootstrap rewrite is allowed)"
   end
-  report(log_path, parsed, merged, horizon_start, fails)
+  report(log_path, parsed, merged, horizon_start, fails, lag)
   fails.size
 end
 
@@ -249,11 +297,13 @@ if $PROGRAM_NAME == __FILE__
     previous = args[i + 1]
     args[i, 2] = []
   end
+  strict = args.delete("--strict")
   log, tsv, horizon_start, doc_root = args
   usage = "usage: verify.rb <changelog> <merged_prs.tsv> <horizon> [doc_root] " \
-          "[--against <previous changelog>]"
+          "[--against <previous changelog>] [--strict]"
   abort(usage) if log.nil? || tsv.nil? || horizon_start.nil?
   abort("missing file: #{previous}") if previous && !File.file?(previous)
 
-  exit(run(log, tsv, horizon_start, doc_root || ".", previous).zero? ? 0 : 1)
+  n = run(log, tsv, horizon_start, doc_root || ".", previous, strict: !strict.nil?)
+  exit(n.zero? ? 0 : 1)
 end
