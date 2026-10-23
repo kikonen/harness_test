@@ -34,15 +34,28 @@ child-process output (`CommandRunner#read_child_in_group`, `GitRunner`), the LLM
 model-supplied command text (`CommandAllowlist`, `ShellTokenizer`, `CommandRunner#run`),
 tool results entering the chain (`Harness#execute_tool_call`), skill files
 (`Skills#read_raw`), a written file's source (`FileText.analyze`), and a prompt file -
-`--system-file` (`Harness#read_system_prompt`, issue #342). `harness.md` (the other
-half of the prompt, `Harness#build_system_prompt`) is the ONE remaining prompt-file
-read that is NOT normalized - issue #341, still open as of this writing.
+`--system-file` (`Harness#read_system_prompt`, issue #342) and the rules file
+`harness.md` (`Harness#build_system_prompt`, issue #341 - it raised in `.strip` at
+startup and again on the next prompt through `SessionManager#check_rules_reload`).
+With those two the rule has NO exception left: every text read from a file into the
+LLM-facing chain is normalized.
 
 Why prompt files are on this list at all: the system prompt is the FIRST message of
 every chain the harness sends or saves, so an unnormalized read there is not a display
 problem but a chain-poisoning one - it survives until `JSON.generate`, which is both
-the request body and the session save.
+the request body and the session save. A repair is never silent: `Harness#rules_repair_note`
+names the byte count and the startup banner prints it, because the prompt the model got
+is then NOT byte-for-byte what `harness.md` holds.
 
+## What is NOT on the list, and why that is a separate question
+
+Measured on 2026-10-24 (`grep -rn "File.read\|File.foreach" lib` minus the sites above):
+the allowlist YAML (`CommandAllowlist`), the config YAML (`HarnessConfig`), the history
+file (`HistoryManager#load`, into `Reline::HISTORY`) and a saved session JSON
+(`SessionLocator#read_session`). None of them feeds the LLM-facing chain, so the boundary
+rule above does not cover them - but note a corrupt session.json parses WITHOUT raising
+(`JSON.parse` on invalid bytes yields a lone-byte string happily), which is how issue #343
+got its "resumes successfully then breaks every save" shape.
 ## Return rules
 
 - Already valid UTF-8: returned untouched (no allocation, no frozen-string
