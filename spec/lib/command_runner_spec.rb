@@ -646,6 +646,25 @@ RSpec.describe CommandRunner do
       end
     end
 
+    # issue #349: the denylist refusal line prints the FULL command BEFORE the
+    # dialog, so a denylisted command the user then allowed is in the same case
+    # as an auto-approved one - its outcome line names it by handle.
+    it 'shortens the outcome line for a denylisted command allowed from the dialog' do
+      Dir.mktmpdir do |dir|
+        runner, out = make_main_runner(dir, '1', auto_approve_all: true)
+        result = runner.run('rm -rf one two three four five')
+        expect(result).to start_with('exit code: 0')
+        expect(out.string).to include(
+          'denylisted (auto-approval refused in every posture): ' \
+          'rm -rf one two three four five'
+        )
+        # The outcome line is the only place a shortened name could appear, and
+        # the full command is never repeated there.
+        expect(out.string).to include('[shell] ✓ rm -rf one two ... (exit 0')
+        expect(out.string).not_to include('rm -rf one two three four five (exit 0')
+      end
+    end
+
     it 'marks only a dropped tail: a command that fits the handle is unchanged' do
       Dir.mktmpdir do |dir|
         runner, out = make_main_runner(dir, auto_approve_all: true)
