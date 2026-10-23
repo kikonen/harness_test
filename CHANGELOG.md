@@ -9,16 +9,16 @@ Regeneration is its own docs-only PR.
 
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 
-Horizon (measured 2026-10-23 against master `c831d76`: 120 merged PRs, 56 in
+Horizon (measured 2026-10-23 against master `527d9c7`: 123 merged PRs, 59 in
 the horizon (>= 2026-10-10), 64 older):
 
-- 2026-10-23 .. 2026-10-10 (56 merged PRs): one bullet per merged PR, keyed on
+- 2026-10-23 .. 2026-10-10 (59 merged PRs): one bullet per merged PR, keyed on
   its PR number; a bullet may wrap to at most 5 lines at 80 columns.
 - older than 2026-10-10: nothing here. `git log` and `gh pr list --state merged`
   are the archive; the horizon moves on each regeneration.
 
 A subsystem's rationale is NOT here - it is in `doc/<topic>.md` or the issue.
-Measured at generation: 14 design docs on master, 12 of them pointed at from
+Measured at generation: 14 design docs on master, 13 of them pointed at from
 here (its own procedure doc `doc/changelog_generation.md` among them), so every
 doc pointer in this file resolves.
 
@@ -28,6 +28,21 @@ doc pointer in this file resolves.
   - a skill body NEVER enters the system prompt. A name must be ONE path
   segment; `.env*` stays blocked in the zone. Design: `doc/skills_design.md`.
   Specs: skills_spec, skills_read_tool_spec, skills_command_spec. 1518 -> 1583.
+- #350 appended the #338 bullet the generation rule had left out: that run
+  measured its horizon against its own branch, so the PR that introduced the
+  rule had none in the file it generated. Gotcha: a regeneration cannot bullet
+  its own PR (the number exists only once the PR is opened) - the NEXT run
+  absorbs it. Check: verify.rb with --against, run twice.
+- #351 stopped a denylisted command printing its full text twice (issue #349):
+  the pre-dialog refusal line already names it, so `execute`'s flag
+  `auto_approved:` became `full_shown:` and the denylist branch sets it too. A
+  plain dialog-approved run keeps the full text - for it the outcome line is
+  its only trace. Evidence: analysis/349/repro.rb. 1583 -> 1584.
+- #352 normalized the prompt-file read: `read_system_prompt` returned File.read
+  as-is, so a --system-file with invalid bytes became the FIRST message of every
+  chain and died later in JSON.generate - the request body AND the session save
+  (issue #342). harness.md is the one prompt read still unnormalized (#341).
+  Design: `doc/encoding_design.md`. Suite 1584 -> 1586.
 
 ## 2026-10-22
 - #348 tracked `analysis/<n>/` (`repro.rb`, `measure.sh`) for committed
