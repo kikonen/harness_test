@@ -65,8 +65,9 @@ class CommandRunner
   MAX_TIMEOUT     = 300   # hard cap
   DEFAULT_LIMIT   = 200   # output lines
   MAX_LIMIT       = 5000  # hard cap
-  # Tokens the outcome line keeps as the command's handle once the approval
-  # line has already printed the full command.
+  # Tokens the outcome line keeps as the command's handle once some earlier
+  # line (an auto-approval line, or the denylist refusal line) has already
+  # printed the full command.
   HANDLE_TOKENS   = 4
   # Spawn flag that puts the child in its own (process) group so the
   # timeout kill reaches the whole tree. The spelling is platform- and
@@ -153,12 +154,13 @@ class CommandRunner
     # grant: the "Always allow" options are dropped for it too). Checked
     # FIRST so no later shortcut can skip it.
     disaster = CommandAllowlist.disaster?(command)
+    full_shown = false
 
     unless disaster
       # Auto-approve when the command prefix is in the user's allowlist.
       if @allowlist.allowed?(command)
         status(:ok, "auto-approved (allowlist): #{command}")
-        return execute(command, dir, shown, timeout, limit, auto_approved: true)
+        return execute(command, dir, shown, timeout, limit, full_shown: true)
       end
 
       # YOLO POSTURE (issue #221): the user turned consent off for this
@@ -174,11 +176,14 @@ class CommandRunner
         reason = yolo_active? ? "YOLO" : "bang consent off"
         status(:ok, "auto-approved (#{reason}): #{command}")
         log_auto_approved(command, reason)
-        return execute(command, dir, shown, timeout, limit, auto_approved: true)
+        return execute(command, dir, shown, timeout, limit, full_shown: true)
       end
     else
       status(:warn, "denylisted (auto-approval refused in every posture): #{command}")
       @harness&.logger&.warn("denylisted command needs an explicit Allow: #{command}")
+      # The refusal line above printed the full command BEFORE the dialog, so
+      # this run counts as already named, like an auto-approved one.
+      full_shown = true
     end
 
     # issue #224: consume a pre-batched verdict when the harness ran one
@@ -197,7 +202,7 @@ class CommandRunner
     if !disaster && auto_approve_mode? && verdict
       if auto_approve_safe?(verdict)
         status(:ok, "auto-approved (model verdict: safe): #{command}")
-        return execute(command, dir, shown, timeout, limit, auto_approved: true)
+        return execute(command, dir, shown, timeout, limit, full_shown: true)
       end
       # dangerous -> fall through to the dialog with the verdict note.
     end
@@ -268,7 +273,7 @@ class CommandRunner
       status(:ok, "always-allowed: #{result[:saved].join(', ')} (saved to allowlist)")
     end
 
-    execute(command, dir, shown, timeout, limit)
+    execute(command, dir, shown, timeout, limit, full_shown:)
   end
 
   private
@@ -450,11 +455,12 @@ class CommandRunner
   end
 
   # Runs the command (after any required confirmation) and formats the result.
-  # An auto-approved run printed its FULL command in the approval line that
-  # skipped the dialog, so its outcome line names it by handle; a dialog-approved
-  # command keeps the full text here, because this line is its only trace.
-  def execute(command, dir, shown, timeout, limit, auto_approved: false)
-    name    = auto_approved ? command_handle(command) : command
+  # A run whose full command was already printed by an earlier line (an
+  # auto-approval line, or the denylist refusal line) names it by handle here;
+  # a plain dialog-approved run keeps the full text, because this line is its
+  # only trace.
+  def execute(command, dir, shown, timeout, limit, full_shown: false)
+    name    = full_shown ? command_handle(command) : command
     started = Time.now
     output, shell_status = run_in_shell(command, dir, timeout)
     # Symbol (not Process::Status) signals the timeout path.
