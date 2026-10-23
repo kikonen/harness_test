@@ -9,18 +9,25 @@ Regeneration is its own docs-only PR.
 
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 
-Horizon (measured 2026-10-23 against this branch `4f32630`: 119 merged PRs, 55
-in the horizon (>= 2026-10-10), 64 older):
+Horizon (measured 2026-10-23 against master `c831d76`: 120 merged PRs, 56 in
+the horizon (>= 2026-10-10), 64 older):
 
-- 2026-10-22 .. 2026-10-10 (55 merged PRs): one bullet per merged PR, keyed on
+- 2026-10-23 .. 2026-10-10 (56 merged PRs): one bullet per merged PR, keyed on
   its PR number; a bullet may wrap to at most 5 lines at 80 columns.
 - older than 2026-10-10: nothing here. `git log` and `gh pr list --state merged`
   are the archive; the horizon moves on each regeneration.
 
 A subsystem's rationale is NOT here - it is in `doc/<topic>.md` or the issue.
-Measured at generation: 13 design docs on master; this file points at a subset
-of them plus its own procedure doc `doc/changelog_generation.md`, which the
-regeneration commit carries, so every doc pointer in this file resolves.
+Measured at generation: 14 design docs on master, 12 of them pointed at from
+here (its own procedure doc `doc/changelog_generation.md` among them), so every
+doc pointer in this file resolves.
+
+## 2026-10-23
+- #338 added written-down procedures: `.harness/skills/<name>/SKILL.md`, read
+  only by `lib/skills.rb`, surfaced as `skills.list` / `skills.read` / `/skills`
+  - a skill body NEVER enters the system prompt. A name must be ONE path
+  segment; `.env*` stays blocked in the zone. Design: `doc/skills_design.md`.
+  Specs: skills_spec, skills_read_tool_spec, skills_command_spec. 1518 -> 1583.
 
 ## 2026-10-22
 - #348 tracked `analysis/<n>/` (`repro.rb`, `measure.sh`) for committed
