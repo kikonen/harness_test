@@ -623,11 +623,14 @@ class Harness
     ENV.fetch("HARNESS_STEP_DISPLAY", "") == "off" || options[:step_display] == false
   end
 
+  # A prompt file is the FIRST message of every chain this harness will ever send
+  # or save, so it is a read boundary: an unnormalized one survives until
+  # JSON.generate (the request body AND the session save) raises on its bytes.
   def read_system_prompt
     path = options[:system_file]
-    return File.read(path) if path && File.file?(path)
+    return TextNormalizer.normalize(File.read(path)) if path && File.file?(path)
 
-    File.read(DEFAULT_SYSTEM_PROMPT_FILE)
+    TextNormalizer.normalize(File.read(DEFAULT_SYSTEM_PROMPT_FILE))
   end
 
   # 65536 -> "66K", 160000 -> "160K", 1000 -> "1K". A window size is only

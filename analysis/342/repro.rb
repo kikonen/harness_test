@@ -2,8 +2,9 @@
 
 # Issue #342: the configured system_file is read unnormalized and poisons the chain.
 # Run from the repo root: ruby analysis/342/repro.rb
-# Expected: construction ok; prompt valid_encoding? false
-#           chain JSON: JSON::GeneratorError: source sequence is illegal/malformed
+# Expected before the fix: "construction ok; prompt valid_encoding? false" and
+#   chain JSON: JSON::GeneratorError - the session save dies on the same byte.
+# Expected after the fix:  valid_encoding? true and chain JSON: ok.
 require "tmpdir"
 require "fileutils"
 require "json"
@@ -17,9 +18,12 @@ Dir.mktmpdir do |dir|
   prompt = h.session.system_prompt
   puts "construction ok; prompt valid_encoding? #{prompt.valid_encoding?}"
   h.session.add_user("go")
-  begin
+
+  status = begin
     JSON.generate(h.session.messages)
+    "ok"
   rescue StandardError => e
-    puts "chain JSON: #{e.class}: #{e.message[0, 50]}"
+    "#{e.class}: #{e.message[0, 50]}"
   end
+  puts "chain JSON: #{status}"
 end

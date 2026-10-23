@@ -734,6 +734,31 @@ RSpec.describe Harness do
         .to eq(File.read(Harness::DEFAULT_SYSTEM_PROMPT_FILE))
     end
 
+    # issue #342: a prompt file is the first message of every chain, so it is a
+    # read boundary. The assertion that catches the CLASS is the chain-level one
+    # below it - a prompt-encoding assertion alone would still pass if the bad
+    # string were rebuilt somewhere else.
+    it 'normalizes a configured system_file whose bytes are not valid UTF-8' do
+      path = File.join(workdir, 'sys.txt')
+      File.binwrite(path, "You are a caf\xe9 helper\n")
+      harness = build_harness(system_file: path)
+
+      prompt = harness.send(:read_system_prompt)
+      expect(prompt.valid_encoding?).to be(true)
+      expect(harness.session.system_prompt.valid_encoding?).to be(true)
+    end
+
+    it 'keeps the session chain JSON-serializable after a damaged prompt file' do
+      path = File.join(workdir, 'sys.txt')
+      File.binwrite(path, "You are a caf\xe9 helper\n")
+      harness = build_harness(system_file: path)
+      harness.session.add_user('go')
+
+      # JSON.generate is both the request body and the session save: this is
+      # where the unnormalized read used to raise (JSON::GeneratorError).
+      expect { JSON.generate(harness.session.messages) }.not_to raise_error
+    end
+
     it 'reads the configured system_file when it exists' do
       path = File.join(workdir, 'my_prompt.txt')
       File.write(path, "custom prompt #{path}")
