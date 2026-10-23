@@ -268,6 +268,12 @@ class CLI
     # this session's log is written (.harness/sessions/<id>/harness.log) -
     # and which id a later /save or --resume would refer to.
     ui.puts "Session: #{harness.session.session_id} (log: #{session_log_path_display})"
+    # issue #341: a rules file that is not valid UTF-8 now LOADS (with the bad
+    # bytes replaced) instead of crashing the run, so the repair has to be said
+    # out loud: the prompt the model got is not byte-for-byte what harness.md holds.
+    if harness.rules_repair_note
+      ui.puts "  [harness.md repaired: #{harness.rules_repair_note}]"
+    end
     # issue #276: --resume / --continue now restore the conversation during
     # construction, so the banner is where the user learns WHICH session this
     # run is (the old separate "Resumed session ..." line came from a resume

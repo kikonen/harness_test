@@ -775,6 +775,58 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #341: harness.md is the file the harness is INVITED to edit, so a bad
+  # byte is ordinary work, not an exotic input. Its content is the tail of the
+  # FIRST message of every chain, so this read is a boundary too.
+  describe '#build_system_prompt (issue #341)' do
+    def damaged_rules(dir)
+      File.binwrite(File.join(dir, 'harness.md'), "rule caf\xe9 keep 90 cols\n")
+    end
+
+    it 'builds a valid-UTF-8 prompt from a harness.md carrying an invalid byte' do
+      damaged_rules(workdir)
+      harness = build_harness
+      prompt  = harness.session.system_prompt
+
+      expect(prompt.valid_encoding?).to be(true)
+      expect(prompt).to include('## Project-Specific Rules')
+      # Asserted ON BYTES (the #318 rule): the undecodable one is the replacement.
+      expect(prompt).to include('rule caf? keep 90 cols')
+    end
+
+    it 'names what it replaced, so the repair is not silent' do
+      damaged_rules(workdir)
+      harness = build_harness
+
+      expect(harness.rules_repair_note)
+        .to eq('1 invalid byte replaced - harness.md is not valid UTF-8')
+    end
+
+    it 'reports no repair for a clean harness.md' do
+      File.write(File.join(workdir, 'harness.md'), "rule keep 90 cols\n")
+      harness = build_harness
+
+      expect(harness.rules_repair_note).to be_nil
+      expect(harness.session.system_prompt).to include('rule keep 90 cols')
+    end
+
+    # The mid-session shape the issue calls WORSE: the file goes bad while the run
+    # is live, so the failure surfaced on the NEXT prompt (run_prompt calls
+    # check_rules_reload) or on /reload. utime keeps the mtime change deterministic.
+    it 'survives a harness.md that turned invalid mid-session (reload path)' do
+      File.write(File.join(workdir, 'harness.md'), "rule one\n")
+      harness = build_harness
+      damaged_rules(workdir)
+      past = Time.now - 120
+      File.utime(past, past, File.join(workdir, 'harness.md'))
+
+      expect { harness.session_manager.check_rules_reload }.not_to raise_error
+      expect(harness.session.system_prompt.valid_encoding?).to be(true)
+      expect(harness.session.system_prompt).to include('rule caf? keep 90 cols')
+      expect(harness.rules_repair_note).to include('1 invalid byte')
+    end
+  end
+
   describe '#format_elapsed (issue #226)' do
     it 'returns seconds with 2dp when under 60s' do
       expect(build_harness.format_elapsed(42.37)).to eq('42.37s')

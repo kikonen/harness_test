@@ -65,7 +65,11 @@ class Harness
 
   SESSION_LOG_FILE = SessionLocator::SESSION_LOG_FILE
 
-  attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager, :client, :skills
+  # rules_repair_note: what the LAST rules-file read had to replace (nil when the
+  # file was clean). A repair must not be silent - the prompt the model was given
+  # is then not byte-for-byte what harness.md holds.
+  attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager,
+              :client, :skills, :rules_repair_note
   attr_accessor :history
 
   # Only one note is in flight: a new assignment replaces the note that has
@@ -110,14 +114,22 @@ class Harness
     apply_resume_state(resume_data) if resume_data
   end
 
+  # The rules file read is a read boundary like every other (issue #341): the
+  # result is the FIRST message of every chain, and a raw File.read of a file the
+  # model is invited to edit raised in .strip - at startup, and again on the next
+  # prompt through SessionManager#check_rules_reload.
   def build_system_prompt
     base = read_system_prompt
     project_file = File.join(@file_list.workdir, "harness.md")
-    if File.file?(project_file)
-      content = File.read(project_file).strip
-      return "#{base}\n\n## Project-Specific Rules\n\n#{content}\n" unless content.empty?
-    end
-    base
+    return base unless File.file?(project_file)
+
+    source  = File.read(project_file)
+    content = TextNormalizer.normalize(source).strip
+    @rules_repair_note = byte_repair_note(source)
+    @logger&.info("harness.md read: #{@rules_repair_note}") if @rules_repair_note
+    return base if content.empty?
+
+    "#{base}\n\n## Project-Specific Rules\n\n#{content}\n"
   end
 
   def session_log_path
@@ -631,6 +643,20 @@ class Harness
     return TextNormalizer.normalize(File.read(path)) if path && File.file?(path)
 
     TextNormalizer.normalize(File.read(DEFAULT_SYSTEM_PROMPT_FILE))
+  end
+
+  # Names what a rules-file read had to replace, so the repair is not silent: the
+  # prompt the model got is then NOT byte-for-byte what harness.md holds. Counts
+  # bytes (the assertion is about bytes, the #318 rule); nil when the file read
+  # as UTF-8 cleanly.
+  def byte_repair_note(source)
+    return nil if source.valid_encoding?
+
+    bad = source.each_char.count { |c| !c.valid_encoding? }
+    return nil if bad.zero?
+
+    label = bad == 1 ? "1 invalid byte" : "#{bad} invalid bytes"
+    "#{label} replaced - harness.md is not valid UTF-8"
   end
 
   # 65536 -> "66K", 160000 -> "160K", 1000 -> "1K". A window size is only
