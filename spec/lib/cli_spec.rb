@@ -367,6 +367,22 @@ RSpec.describe CLI do
 
       cli.run
     end
+
+    # issue #341: a rules file that is not valid UTF-8 now LOADS (bad bytes
+    # replaced) instead of crashing the run, so the banner has to say the
+    # repair out loud - the prompt the model got is not byte-for-byte harness.md.
+    it 'reports a repaired harness.md in the banner' do
+      File.binwrite(File.join(workdir, 'harness.md'), "rule caf\xe9 keep 90 cols\n")
+      cli = build_cli
+      allow(cli).to receive(:get_command).and_return(nil)
+
+      expect(ui).to receive(:puts).with(
+        '  [harness.md repaired: 1 invalid byte replaced - harness.md is not valid UTF-8]'
+      ).ordered
+      expect(ui).to receive(:puts).at_least(:once)
+
+      cli.run
+    end
   end
 
   # issue #198 phase 3: the idle prompt keeps an Esc'd buffer as a draft
