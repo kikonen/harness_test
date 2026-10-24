@@ -13,6 +13,7 @@ require_relative "tool"
 require_relative "llm_client"
 require_relative "file_list"
 require_relative "session"
+require_relative "memories"
 require_relative "session_locator"
 require_relative "task"
 require_relative "llm/stream_preview"
@@ -46,6 +47,10 @@ require_relative "skills"
 require_relative "tools/skills_list_tool"
 require_relative "tools/skills_read_tool"
 require_relative "tool_registry"
+require_relative "tools/memory_list_tool"
+require_relative "tools/memory_read_tool"
+require_relative "tools/memory_add_tool"
+require_relative "tools/memory_delete_tool"
 require_relative "session_manager"
 require_relative "state_migrator"
 require_relative "safety_check"
@@ -70,7 +75,7 @@ class Harness
   # file was clean). A repair must not be silent - the prompt the model was given
   # is then not byte-for-byte what harness.md holds.
   attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager,
-              :client, :skills, :rules_repair_note
+              :client, :skills, :memories, :rules_repair_note
   attr_accessor :history
 
   # Only one note is in flight: a new assignment replaces the note that has
@@ -88,6 +93,9 @@ class Harness
     @file_list     = file_list
     @locator       = SessionLocator.new(file_list.workdir)
     @skills        = Skills.new(file_list.workdir)
+    # The project's durable notes (issue #10): one reader for the store, shared by
+    # memory.* and /memory so the two sides cannot drift.
+    @memories      = Memories.new(file_list.workdir)
     @session       = Session.new(build_system_prompt, session_id:)
     if resume_data
       saved_id = resume_data[:session_id]
@@ -186,6 +194,10 @@ class Harness
     registry.register(Tools::ToolsSearchTool.new(registry))
     registry.register(Tools::SkillsListTool.new(@skills))
     registry.register(Tools::SkillsReadTool.new(@skills))
+    registry.register(Tools::MemoryListTool.new(@memories))
+    registry.register(Tools::MemoryReadTool.new(@memories))
+    registry.register(Tools::MemoryAddTool.new(@memories))
+    registry.register(Tools::MemoryDeleteTool.new(@memories))
   end
 
   def compact_recent_messages

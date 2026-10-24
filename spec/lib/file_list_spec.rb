@@ -212,6 +212,12 @@ RSpec.describe FileList do
         list = described_class.new(workdir: dir)
         expect(list.sensitive?('.harness/config.yml')).to be(true)
         expect(list.sensitive?('.harness/sessions/id/session.json')).to be(true)
+        # The memory store (issue #10) is harness state like the rest of
+        # .harness/: memory.* reaches it through its own reader, and the file
+        # tools must not be able to write it as a path.
+        expect(list.sensitive?("#{Memories::DIR}/note.md")).to be(true)
+        expect(list.add_dir(Memories::DIR, :rw)).to eq(:blocked)
+        expect(list.add_file("#{Memories::DIR}/note.md", :w)).to eq(:blocked)
         expect(list.sensitive?('.harness/skills/../sessions/id/session.json')).to be(true)
         expect(list.add_dir('.harness/skills/../sessions', :r)).to eq(:blocked)
         expect(list.sensitive?('.harness/skillsx/a.md')).to be(true)
