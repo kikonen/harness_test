@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "reline"
+require_relative "external_editor"
 
 # -- UI::Editor -------------------------------------------------------------
 #
@@ -43,12 +44,19 @@ module UI
     # Reline's PROMPT for dialog choice lines (the steering note uses
     # DEFAULT_PROMPT).
     DIALOG_PROMPT = "> "
-    EDITOR_RESULT = Struct.new(:text, :status)
+    # note carries the reader's own explanation of a non-standard status
+    # (today: why an external-editor hand-off produced no text to send).
+    EDITOR_RESULT = Struct.new(:text, :status, :note)
 
     # Key bytes (Reline keymap sequences; see doc/reline_cursor_and_
     # enter_handling.md section 7 for why these are the portable choices).
     ESC_KEY_BYTE = 27   # Escape character (bare Esc cancels the read)
     CR_KEY_BYTE  = 13   # Carriage Return (plain Enter inserts a newline)
+    # Ctrl+G (BEL) is the byte this key arrives as - measured: Reline hands a
+    # control key's char to #input_key as the one-character String "\a".
+    # Taken by RelineCtrlGHandoff only when UI::Editor.external_editor is set;
+    # otherwise the key keeps what Reline's own emacs mapping does with it.
+    CTRL_G_BYTE = 7
     # The submit key: ESC then CR. The Windows IOGate maps Ctrl+Enter and
     # Shift+Enter to these bytes; Unix terminals produce them with
     # Alt+Enter (Ctrl/Shift+Enter there are indistinguishable from a plain
@@ -89,6 +97,19 @@ module UI
     # breaks are excluded (RelineEnterPolicy's paste guard) so pasted
     # blank lines cannot submit mid-paste. Only multiline reads are
     # affected; single-line reads and vi mode keep Reline's behaviour.
+
+    # Ctrl+G hands the buffer being edited to an external editor (issue #298).
+    # Process-global because it is a fact about how this run reads input, like
+    # submit_on_enter: the CLI resolves the command once at startup and every
+    # multiline read then honours the key. The setting is read AT KEYPRESS time
+    # (not install time), so nil simply means the key is not taken.
+    def self.external_editor=(value)
+      @external_editor = value.to_s.strip.empty? ? nil : value.to_s.strip
+    end
+
+    def self.external_editor
+      @external_editor
+    end
 
     # Process-global switch for the opt-in Enter policy (default off -
     # plain Enter always inserts a newline). Set once at startup from the
@@ -211,6 +232,55 @@ module UI
           @fired = true
           @label = label
         end
+      end
+    end
+
+    # Ctrl+G hand-off state (issue #298): the key patch snapshots the buffer
+    # being edited and closes the read; the READER performs the editor spawn,
+    # because Reline must have left raw mode before a child process is given
+    # the terminal. text is the buffer as it stood at the keypress.
+    module CtrlGState
+      class << self
+        attr_accessor :fired, :text
+
+        def reset!
+          @fired = false
+          @text  = nil
+        end
+
+        def fire!(text)
+          @fired = true
+          @text  = text
+        end
+      end
+    end
+
+    # Ctrl+G hands the buffer being edited to an external editor (issue #298).
+    # Detected on the KEY BYTE rather than through a key binding, so the same
+    # code path serves the Windows IOGate and the ANSI one. With no editor
+    # resolved the key is not taken at all and Reline's own behaviour stands.
+    module RelineCtrlGHandoff
+      def input_key(key)
+        return super unless ctrl_g?(key.char)
+        # A single-line read has no buffer worth editing, and the whole
+        # feature is opt-in: no editor resolved, no hand-off.
+        return super unless @is_multiline && UI::Editor.external_editor
+
+        # Snapshot BEFORE finishing: finish() is what releases the terminal for
+        # the child editor, and the buffer must survive it.
+        CtrlGState.fire!(whole_buffer)
+        finish
+        false
+      end
+
+      private
+
+      # Reline delivers a control key's char as a one-character String ("\a"
+      # for Ctrl+G); a pasted block arrives as a longer String, whose first
+      # byte must not be mistaken for the key.
+      def ctrl_g?(char)
+        char.is_a?(String) ? (char.size == 1 && char.ord == UI::Editor::CTRL_G_BYTE) \
+                           : char == UI::Editor::CTRL_G_BYTE
       end
     end
 
@@ -427,6 +497,15 @@ module UI
       text = Reline.readmultiline(
         prompt, false, rprompt: prompt
       ) { |_buf| false }  # Enter always inserts a newline; submit is the key
+      # Ctrl+G hand-off (issue #298): Reline is out of raw mode here (readmultiline
+      # closes with_raw_input before returning), so the child editor may have the
+      # terminal. :edited carries whatever the editor produced (nil when the editor
+      # could not run) - the buffer stays the caller's draft either way.
+      if CtrlGState.fired
+        snapshot = CtrlGState.text.to_s
+        CtrlGState.reset!
+        return ctrl_g_result(snapshot)
+      end
       return EDITOR_RESULT.new(nil, :eof) if text.nil?
 
       # The committed buffer may carry a trailing newline (readmultiline's
@@ -437,7 +516,19 @@ module UI
       Reline::HISTORY << text if status == :submitted && !text.empty?
       EDITOR_RESULT.new(text, status)
     ensure
+      # CtrlGState is captured into the hand-off above; clearing it here too
+      # means a read that raised after fire! cannot leak the flag into the next.
+      CtrlGState.reset!
       Reline.pre_input_hook = nil
+    end
+
+    # Run the external editor on the buffer Ctrl+G snapshotted and turn the
+    # outcome into a read result. :edited always - never :submitted: an editor
+    # hand-off is not a submission, so a caller that cannot treat a draft
+    # (a dialog's choice loop) can mistake nothing for an answer.
+    def ctrl_g_result(snapshot)
+      result = ExternalEditor.new(self.class.external_editor).open(snapshot)
+      EDITOR_RESULT.new(result.text, :edited, result.note)
     end
 
     # Install the editor key bindings exactly once per process. This mutates
@@ -465,6 +556,11 @@ module UI
       # any tty read; the reader surfaces the fired state to its caller.
       unless Reline::LineEditor.ancestors.include?(RelineCtrlAToggle)
         Reline::LineEditor.prepend(RelineCtrlAToggle)
+      end
+      # Ctrl+G external-editor hand-off (issue #298): taken only when
+      # `external_editor` is set, so the key stays Reline's own by default.
+      unless Reline::LineEditor.ancestors.include?(RelineCtrlGHandoff)
+        Reline::LineEditor.prepend(RelineCtrlGHandoff)
       end
       cfg = Reline.core.config
       cfg.keyseq_timeout = 100

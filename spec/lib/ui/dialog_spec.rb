@@ -503,9 +503,9 @@ RSpec.describe UI::Dialog do
         eof = UI::Editor::EDITOR_RESULT.new(nil, :eof)
         editor = double('editor')
         allow(editor).to receive(:read)
-          .and_return(*choice_results.map { |t, st| UI::Editor::EDITOR_RESULT.new(t, st) } + [eof])
+          .and_return(*choice_results.map { |t, st, n| UI::Editor::EDITOR_RESULT.new(t, st, n) } + [eof])
         allow(editor).to receive(:read_multiline)
-          .and_return(*details_results.map { |t, st| UI::Editor::EDITOR_RESULT.new(t, st) } + [eof])
+          .and_return(*details_results.map { |t, st, n| UI::Editor::EDITOR_RESULT.new(t, st, n) } + [eof])
         allow(UI::Editor).to receive(:new).and_return(editor)
 
         [d, d.show(ui: tty_console)]
@@ -533,6 +533,18 @@ RSpec.describe UI::Dialog do
           [['3', :submitted]], [[nil, :eof]]
         ).last
         expect(result).to eq(UI::Dialog::CANCEL_VALUE)
+      end
+
+      # issue #298: Ctrl+G hands the buffer to an external editor. The editor's
+      # text is the DRAFT for the next round (prefilled) - submitting it is still
+      # what makes it an answer, so a hand-off alone never closes the dialog.
+      it 'Ctrl+G keeps the edited buffer as the draft and re-asks' do
+        result = free_text_dialog_on_tty(
+          [['3', :submitted]],
+          [['from vim', :edited, 'edited with vim'], ['from vim', :submitted]]
+        ).last
+
+        expect(result).to eq([UI::Dialog::FREE_TEXT, 'from vim'])
       end
     end
     describe 'tty routing guard (UI::Editor.is_real_tty_stdin?, issue #202)' do

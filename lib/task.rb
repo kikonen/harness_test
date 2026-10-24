@@ -411,8 +411,10 @@ class Task
     when :submitted
       task.instance_variable_set(:@note_draft, nil)
       commit_note(task, result.text)
-    when :cancelled
-      # Esc: keep the buffer as a draft; it is prefilled on the next trigger.
+    when :edited, :cancelled
+      # Esc, and the Ctrl+G hand-off (issue #298), are the same round-trip: the
+      # buffer is kept as the draft, prefilled on the next trigger. An editor
+      # round-trip is NOT a note commit - closing an editor is not a submission.
       task.instance_variable_set(:@note_draft, result.text)
     when :empty
       # Bare Enter: the user changed their mind mid-thought - no note.

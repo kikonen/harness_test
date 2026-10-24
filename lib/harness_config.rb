@@ -65,6 +65,10 @@ require_relative "harness_error"
 #   bang_requires_confirmation: true  # the `! cmd` bang syntax also asks for
 #                # confirmation (default, issue #221). Set false and a
 #                # user-typed bang command runs immediately - it is already
+#   editor: nvim -R   # command Ctrl+G hands the buffer being typed to
+#                     # (issue #298). Split into argv words, never run through a
+#                     # shell. Resolution order: --editor, $HARNESS_EDITOR, this
+#                     # key, $EDITOR, $VISUAL. Absent = the key is not taken.
 #                # explicit intent. The disaster denylist still applies.
 #
 class HarnessConfig
@@ -113,6 +117,8 @@ class HarnessConfig
     @yolo = data[:yolo] == true
     @bang_requires_confirmation = data[:bang_requires_confirmation].nil? ?
                                   true : data[:bang_requires_confirmation] == true
+    # issue #298: the editor command (nil = Ctrl+G is not taken at all).
+    @editor = nonblank(data[:editor])
     @compact      = {
       recent_messages: int_or_nil(data.dig(:compact, :recent_messages)),
       auto_threshold:  float_or_nil(data.dig(:compact, :auto_threshold)),
@@ -249,6 +255,12 @@ class HarnessConfig
   # Rendered-output palette name (issue #303), or nil for the default one.
   def output_palette_name
     @output_palette
+  end
+
+  # The external-editor command for Ctrl+G (issue #298), or nil when the config
+  # does not set one - the ENV tiers are applied by UI::ExternalEditor.command.
+  def editor_command
+    @editor
   end
 
   # Number of recent messages retained verbatim after compaction (or nil).

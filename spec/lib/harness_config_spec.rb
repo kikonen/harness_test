@@ -104,6 +104,25 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  describe '#editor_command (issue #298)' do
+    it 'is nil when the key is absent (Ctrl+G stays Reline\'s own key)' do
+      expect(described_class.new({}).editor_command).to be_nil
+    end
+
+    it 'reads the editor key as a command string' do
+      expect(described_class.new(editor: 'nvim -R').editor_command).to eq('nvim -R')
+    end
+
+    it 'treats a blank value as absent' do
+      expect(described_class.new(editor: '   ').editor_command).to be_nil
+    end
+
+    it 'mentions the key in the default template' do
+      expect(template).to include('editor:')
+      expect(template).to include('HARNESS_EDITOR')
+    end
+  end
+
   describe '#system_prompt_file (issue #223)' do
     it 'defaults to nil when the key is absent (built-in default file is used)' do
       expect(described_class.new({}).system_prompt_file).to be_nil
