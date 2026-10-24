@@ -113,3 +113,8 @@ spinner measures the live rate itself, from the deltas (`StreamPreview#live_rate
 from the past: `recent_generation_rate` prefers `completion_tokens_per_second`,
 then `completion_tokens / eval_ms`, and only then the harness's own request clock.
 The server-measured number carries no `~`; the harness's own estimate does.
+
+Two formatters of the same number: `format_rate` for prose (harness.log, the
+stats line, `/session` - a trailing `.0` is dropped) and `format_stable_rate` for
+the spinner's redrawn column. Why the spinner needs its own: `doc/streaming_design.md`
+("A rate column that does not move").

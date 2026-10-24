@@ -226,6 +226,28 @@ starts at the first delta because prefill (processing the prompt, producing no
 text) is not generation - a construction-based clock would divide by the prefill
 too and report a speed far below the truth.
 
+## A rate column that does not move (issue #364)
+
+The rate is the slot redrawn every frame, so its WIDTH is part of its contract.
+`format_rate` (the log / stats-line / `/session` form) drops a trailing `.0`, and
+a number that changes width between frames - `9` then `38.0` then `9` - shifts
+whatever is drawn after it (the `(last)` tag, the posture badges) and reads as
+jumping. The spinner therefore asks for `format_stable_rate`: one decimal ALWAYS
+and a leading space reserving the tens column, so every rate up to 99.9 is
+exactly `STABLE_RATE_WIDTH` characters (`" 9.0"`, `"99.9"`). Above that band the
+number grows naturally (`"292.3"` is 5 characters) - padding a wider number would
+only pretend it is smaller. Only the number is padded: the `~` marker and the
+unit text ride outside the column, so a `~`-marked segment is one character wider
+but still width-stable frame to frame. `pad:` is the spinner's request only; a
+log line names the same rate unpadded, because prose does not have a column.
+
+A padded segment survives only if the spinner keeps it: the suffix resolution
+strips TRAILING blanks (slack) and must keep a LEADING one (content), and every
+frame erases the line before drawing it, because `"\r"` alone returns the cursor
+to column 0 without erasing and any SHORTER frame would leave the previous one's
+tail visible. Both are per-frame, not per-segment: the badge, the elapsed label
+and the rate can each shorten independently.
+
 ## Files
 
 ```

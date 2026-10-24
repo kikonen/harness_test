@@ -258,7 +258,10 @@ context), `test.echo` (test-only)
   rate: the live rate of the answer streaming in, or the rate of the request
   that last completed during the wait before it ("... 🧠 12% (160K) 31 tok/s
   (last) [YOLO]", issue #285). A '~' marks a rate the harness estimated rather
-  than one the server measured.
+  than one the server measured. On the spinner the number keeps its own column
+  (one decimal always, a leading space reserving the tens column: " 9.0",
+  "99.9") so it does not shift the badge after it as the rate changes, and every
+  frame erases the line before drawing it (issue #364).
 - The disaster denylist overrides every posture AND every stored grant: a
   well-known disaster (`rm -rf`, `mkfs`, `dd of=/dev/`, `sudo`, `git push -f`,
   `curl | sh`, a fork bomb, `format C:`, `diskpart`, `del /s /q`,
