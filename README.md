@@ -150,6 +150,9 @@ registry (`doc/command_help_design.md`).
 Multiline input: paste a block; the submit key sends it (Enter adds a newline).
 Keys: `Ctrl+C` cancel/interrupt, `Ctrl+D` quit (empty prompt), `Ctrl+A`
 toggle the command consent mode (MANUAL / AUTO-APPROVE, issue #224),
+`Ctrl+G` write the buffer you are typing out to the external editor and take it
+back as the draft (issue #298; `editor:` in the config, `--editor`, or
+`$HARNESS_EDITOR`/`$EDITOR` - `doc/external_editor.md`),
 Up/Down browse history. A line starting with `!` runs a shell command
 locally instead of prompting the model (issue #129). `/yolo` [on|off|status]
 toggles the YOLO posture: every `run.command` call then runs with no dialog
@@ -330,4 +333,7 @@ doc/rubocop_style.md    # which style rules the cops enforce, and why the rest
                         # are off (measured against rubocop 1.92)
 doc/sensitive_paths_design.md  # the sensitive-path guard and its scratch-zone
                         # exemption
+doc/external_editor.md   # Ctrl+G -> external editor: why a key, how the
+                        # buffer snapshot and the child spawn stay off each
+                        # other's terminal
 ```
