@@ -112,6 +112,11 @@ class Harness
     # the session. Read per request, so a mid-turn toggle applies to the next.
     @stream = options[:stream] == true
     @stream_preview = nil
+    # The rate of the request that last completed, for the spinner's "recent"
+    # segment (issue #285). nil until a request of THIS process has finished;
+    # a resumed session seeds it from its saved per-request performance when
+    # the server measured one.
+    @last_rate = nil
     apply_resume_state(resume_data) if resume_data
   end
 
@@ -286,7 +291,8 @@ class Harness
 
   # The live tail of the answer currently streaming, for the spinner suffix.
   # nil when nothing has arrived yet (prefill) or when not streaming - the
-  # caller then shows the context indicator instead.
+  # caller then shows the waiting line (context + the last request's rate,
+  # see #request_wait_suffix).
   # THREADING: written by the task thread (the on_delta callback) and read by
   # the main thread (the spinner's per-frame suffix call); StreamPreview
   # publishes frozen snapshots so the reader never sees a partial append.
@@ -294,10 +300,44 @@ class Harness
     @stream_preview&.tail_line
   end
 
-  # The spinner suffix for the wait this request owns: the newest text of a
-  # streamed answer once it has started, otherwise the context estimate.
+  # The spinner suffix for the wait this request owns (issue #285):
+  #   while a streamed answer is arriving  "<newest text> ~38 tok/s"
+  #   before that (prefill) or when buffered  "🧠 12% (160K) 31 tok/s (last)"
+  # The live rate is '~' because its tokens are ESTIMATED from the stream's
+  # characters; the "(last)" rate is the previous request's own measurement,
+  # '~' only when the server did not measure it. Neither is ever shown for the
+  # request it describes as if it were that request's number.
   def request_wait_suffix
-    -> { stream_preview_line || context_indicator_live }
+    -> { streaming_wait_line || waiting_line }
+  end
+
+  # The rate shown for the wait BEFORE the answer's text starts (prefill, or a
+  # buffered request): the request that last completed. nil when this process
+  # has not finished one yet - a spinner must not invent a speed.
+  def last_rate_segment
+    return nil if @last_rate.nil?
+
+    LLM::UsageStats.rate_segment(
+      @last_rate[:rate],
+      measured_by_server: @last_rate[:server],
+      tag: "last"
+    )
+  end
+
+  # Called after each completed request with that request's usage and its own
+  # elapsed seconds: the server's number is preferred over the harness's wall
+  # clock. A request that supports no rate at all keeps the previous measurement
+  # rather than blanking the segment (the "(last)" tag is what says the number
+  # is not the request in flight's).
+  def record_last_rate(usage, seconds)
+    rate = LLM::UsageStats.recent_generation_rate(usage, seconds)
+    @last_rate = rate if rate
+  end
+
+  # A model switch changes the server a rate was measured against, so the
+  # previous one no longer describes anything this run will do.
+  def forget_last_rate
+    @last_rate = nil
   end
 
   def toggle_command_mode
@@ -415,6 +455,12 @@ class Harness
         total_usage[:total_tokens]      += data[:usage][:total_tokens]      || 0
         last_prompt_tokens              = data[:usage][:prompt_tokens].to_i
       end
+      # #285: this request's rate is now the RECENT one the spinner can show
+      # during the next request's prefill (or in buffered mode). It is taken
+      # from the request's own clock and its reported counts, never from
+      # stats[:elapsed_seconds] (the TURN's time, tool execution included).
+      record_last_rate(data[:usage], @request_seconds)
+
       # #251: the server-side performance of THIS request only (cache depth,
       # durations, draft counts). The LAST call describes the state the next
       # request will face, so it replaces the earlier ones instead of adding
@@ -611,14 +657,44 @@ class Harness
   # ownership and the retry boundary: doc/streaming_design.md.
   def request_chain(messages, tools)
     streaming = stream?
-    @stream_preview = streaming ? LLM::StreamPreview.new : nil
+    # The estimate ratio is injected, not fixed here: the token estimate the
+    # spinner's rate and the context indicator both need belongs to Session.
+    @stream_preview = streaming ? LLM::StreamPreview.new(
+      chars_per_token: Session::EST_CHARS_PER_TOKEN
+    ) : nil
     on_delta = @stream_preview ? ->(delta) { @stream_preview.record(delta) } : nil
 
+    # The request's OWN clock: stats[:elapsed_seconds] is the TURN's (tool
+    # execution included), so it can never serve as a request's speed.
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     begin
       @client.chat(messages, tools:, stream: streaming, on_delta:)
     ensure
+      @request_seconds = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
       @stream_preview = nil
     end
+  end
+
+  # The streaming segment of the spinner suffix: the tail plus the rate its own
+  # text arrived at, or nil while nothing has arrived so the waiting line applies
+  # instead.
+  def streaming_wait_line
+    tail = stream_preview_line
+    return nil if tail.nil?
+
+    rate = LLM::UsageStats.rate_segment(@stream_preview&.live_rate, measured_by_server: false)
+    rate ? "#{tail} #{rate}" : tail
+  end
+
+  # The wait before an answer's text starts (prefill, or a buffered request): the
+  # live context estimate, plus the last request's rate when this process has one
+  # to show. nil when NEITHER has anything (no conversation yet and no completed
+  # request) - the spinner's contract is "no suffix", not an empty segment.
+  def waiting_line
+    parts = [context_indicator_live, last_rate_segment].compact
+    return nil if parts.empty?
+
+    parts.join(" ")
   end
 
   def print_step_display(iteration, message)
@@ -709,6 +785,12 @@ class Harness
     logger.info("yolo posture restored: #{yolo? ? 'ON' : 'OFF'}")
     self.stream = data[:stream] == true
     logger.info("streaming posture restored: #{stream? ? 'ON' : 'OFF'}")
+    # #285: the saved per-request performance (#251) is a server measurement, so
+    # a resumed session can show a recent rate immediately - a client-timed one
+    # would need seconds it does not have, hence nil there.
+    saved_rate = LLM::UsageStats.recent_generation_rate(data.dig(:last_stats, :performance), nil)
+    @last_rate = saved_rate if saved_rate
+    logger.info("recent generation rate restored: #{last_rate_segment}") if saved_rate
     # issue #303: the palette the session was saved with. Unknown names are
     # NOT fatal here (a session saved by another build may name a palette this
     # one does not have) - HarnessConfig/CLI validate a name the user typed,

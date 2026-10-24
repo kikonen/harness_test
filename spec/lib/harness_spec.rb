@@ -1490,6 +1490,150 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #285: a tok/s rate on the spinner line. While a streamed answer is
+  # arriving it is measured from the deltas themselves; for the waits where no
+  # text has arrived yet (prefill, or a buffered request) it is the rate of the
+  # request that last completed. Nothing is ever invented: with no measurement
+  # the segment simply is not there.
+  describe '#request_wait_suffix live rate (issue #285)' do
+    # A client that answers instantly. The harness's own clock over an instant
+    # call is under its noise floor, so a client-timed rate only appears when
+    # the usage carries no server measurement AND the request took real time
+    # (see the slow client below).
+    def rate_client(usage)
+      client = instance_double('client')
+      allow(client).to receive(:chat)
+        .and_return({ choices: [{ message: { content: 'done', reasoning: nil } }], usage: })
+      client
+    end
+
+    def one_request(h)
+      h.session.add_user('go')
+      h.call_llm
+      h
+    end
+
+    it 'shows no rate before any request has completed' do
+      h = build_harness
+      h.session.add_user('go')
+
+      expect(h.last_rate_segment).to be_nil
+      expect(h.request_wait_suffix.call).to eq(h.context_indicator_live)
+    end
+
+    # No conversation AND no completed request: the suffix resolves to NOTHING,
+    # not an empty segment (the spinner's contract for "no suffix").
+    it 'shows no suffix at all when there is nothing measured' do
+      expect(build_harness.request_wait_suffix.call).to be_nil
+    end
+
+    it 'shows the server-reported rate of the request that just finished' do
+      h = build_harness
+      h.instance_variable_set(:@client, rate_client(
+        { prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050,
+          completion_tokens_per_second: 31.4 }
+      ))
+      one_request(h)
+
+      # Server-measured, so NO '~'; tagged because it describes the PREVIOUS
+      # request, not the one the spinner is currently waiting for.
+      expect(h.last_rate_segment).to eq('31.4 tok/s (last)')
+      expect(h.request_wait_suffix.call).to end_with('31.4 tok/s (last)')
+    end
+
+    it "marks a rate the harness timed itself with '~'" do
+      h = build_harness
+      # No server number at all: the harness's own seconds are the only source,
+      # and they are measured over the whole request (prefill included), so the
+      # number is labeled as not the server's.
+      h.record_last_rate({ prompt_tokens: 500, completion_tokens: 100 }, 4.0)
+
+      expect(h.last_rate_segment).to eq('~25 tok/s (last)')
+    end
+
+    it 'shows the newest text plus its live rate while an answer is streaming' do
+      h = build_harness(stream: true)
+      seen = nil
+      client = instance_double('client')
+      allow(client).to receive(:chat) do |_messages, **kwargs|
+        # Two short deltas with a real gap between them: 25 characters is 7
+        # estimated tokens over ~0.35s, just above the noise floor - and short
+        # enough that the WHOLE answer fits the 60-char tail (no ellipsis).
+        kwargs[:on_delta].call({ content: 'hello there ' })
+        sleep 0.35
+        kwargs[:on_delta].call({ content: 'arriving text' })
+        seen = h.request_wait_suffix.call
+        { choices: [{ message: { content: 'done' } }], usage: {} }
+      end
+      h.instance_variable_set(:@client, client)
+      h.session.add_user('go')
+
+      h.call_llm
+
+      # The tail first, then the rate its own text arrived at ('~' because the
+      # token count is estimated from characters), and no "(last)" tag: this
+      # rate describes the request in flight.
+      expect(seen).to match(/\Ahello there arriving text ~\d+(\.\d+)? tok\/s\z/)
+    end
+
+    it 'shows only the tail while the text is too short to measure yet' do
+      h = build_harness(stream: true)
+      seen = nil
+      client = instance_double('client')
+      allow(client).to receive(:chat) do |_messages, **kwargs|
+        kwargs[:on_delta].call({ content: 'hi' })
+        seen = h.request_wait_suffix.call
+        { choices: [{ message: { content: 'done' } }], usage: {} }
+      end
+      h.instance_variable_set(:@client, client)
+      h.session.add_user('go')
+
+      h.call_llm
+
+      expect(seen).to eq('hi')
+    end
+
+    # A resumed session's saved per-request performance (#251) IS a server
+    # measurement, so the recent rate is available on the FIRST request after
+    # the resume - no request needed in this process first.
+    it 'restores the recent rate from a saved session' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
+      File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate({
+        session_id: id, created_at: Time.now.iso8601, system_prompt: 'saved prompt',
+        messages: [{ role: 'system', content: 'saved prompt' },
+                   { role: 'user', content: 'earlier' }],
+        last_stats: { elapsed_seconds: 5.0, iterations: 1,
+                      usage: { prompt_tokens: 1000, completion_tokens: 50 },
+                      prompt_tokens: 1000,
+                      performance: { completion_tokens_per_second: 27.8,
+                                     completion_tokens: 50 } }
+      }))
+      data = JSON.parse(File.read(session_path(id, SessionLocator::SESSION_FILE)), symbolize_names: true)
+
+      harness = build_harness(session_id: id, resume_data: data)
+
+      expect(harness.last_rate_segment).to eq('27.8 tok/s (last)')
+    end
+
+    # A rate was measured against ONE server. /model points the run at another,
+    # so keeping the number would show a speed that describes nothing this run
+    # is about to do.
+    it 'drops the recent rate when the model is switched' do
+      h = build_harness(model_profiles: [
+        { name: 'one', model: 'qwen', num_ctx: 65_536 },
+        { name: 'two', model: 'llama', num_ctx: 32_768 }
+      ])
+      h.record_last_rate({ completion_tokens: 100, completion_tokens_per_second: 31.4 }, 4.0)
+      expect(h.last_rate_segment).to eq('31.4 tok/s (last)')
+
+      h.session_manager.switch_model('two')
+
+      expect(h.last_rate_segment).to be_nil
+      expect(h.request_wait_suffix.call).to eq(h.context_indicator_live)
+    end
+  end
+
   describe '#skills (issue #12)' do
     # The loader is built from the workdir at construction, so the tools the
     # registry got and /skills read point at the SAME directory the harness owns.

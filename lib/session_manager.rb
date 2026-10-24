@@ -563,6 +563,11 @@ class SessionManager
     name = name.to_s.strip
     raise HarnessError, "usage: /model <name>" if name.empty?
 
+    # The spinner's recent tok/s rate (issue #285) was measured against the
+    # server being switched away from, so it no longer describes anything this
+    # run will do.
+    @harness.forget_last_rate
+
     profiles = model_profiles
     if profiles.empty?
       @harness.options[:model]        = name

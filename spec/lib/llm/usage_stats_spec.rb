@@ -178,4 +178,73 @@ RSpec.describe LLM::UsageStats do
       expect(described_class.format_rate(38.234)).to eq('38.2')
     end
   end
+  # issue #285: the rate the spinner shows for the request that just finished.
+  describe '.recent_generation_rate' do
+    it 'prefers the server-reported rate over the harness clock' do
+      usage = { completion_tokens: 50, completion_tokens_per_second: 31.4, eval_ms: 1600.0 }
+
+      expect(described_class.recent_generation_rate(usage, 30.0)).to eq(
+        rate: 31.4, server: true
+      )
+    end
+
+    it 'derives one from the server-reported count and duration' do
+      usage = { completion_tokens: 100, eval_ms: 2000.0 }
+
+      expect(described_class.recent_generation_rate(usage, 30.0)).to eq(
+        rate: 50.0, server: true
+      )
+    end
+
+    # The harness's own clock is the LAST resort, and it is labeled as such by
+    # the caller (server: false).
+    it 'falls back to the harness clock when the server measured nothing' do
+      usage = { completion_tokens: 100 }
+
+      expect(described_class.recent_generation_rate(usage, 4.0)).to eq(
+        rate: 25.0, server: false
+      )
+    end
+
+    it 'is nil below the noise floor, without a duration, or without counts' do
+      expect(described_class.recent_generation_rate({ completion_tokens: 100 }, 0.1)).to be_nil
+      expect(described_class.recent_generation_rate({ completion_tokens: 2 }, 4.0)).to be_nil
+      expect(described_class.recent_generation_rate({ prompt_tokens: 10 }, 4.0)).to be_nil
+      expect(described_class.recent_generation_rate(nil, 4.0)).to be_nil
+      expect(described_class.recent_generation_rate({}, 4.0)).to be_nil
+    end
+
+    it 'is nil when there are no seconds either (a resumed session)' do
+      # No server number AND no measurement window: nothing to show.
+      expect(described_class.recent_generation_rate({ completion_tokens: 100 }, nil)).to be_nil
+    end
+  end
+
+  describe '.rate_segment' do
+    it 'names the unit and tags the request it describes' do
+      expect(described_class.rate_segment(31.4, measured_by_server: true, tag: 'last'))
+        .to eq('31.4 tok/s (last)')
+    end
+
+    it "marks a rate the server did NOT measure with '~'" do
+      expect(described_class.rate_segment(28.7, measured_by_server: false, tag: 'last'))
+        .to eq('~28.7 tok/s (last)')
+      expect(described_class.rate_segment(38.0, measured_by_server: false)).to eq('~38 tok/s')
+    end
+
+    it 'is nil when there is no rate' do
+      expect(described_class.rate_segment(nil, measured_by_server: true, tag: 'last')).to be_nil
+    end
+  end
+
+  describe '.measured_rate' do
+    it 'is nil below its own noise floor' do
+      expect(described_class.measured_rate(3, 3.0)).to be_nil
+      expect(described_class.measured_rate(40, 0.1)).to be_nil
+    end
+
+    it 'divides tokens by seconds' do
+      expect(described_class.measured_rate(40, 2.0)).to eq(20.0)
+    end
+  end
 end
