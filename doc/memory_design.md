@@ -132,6 +132,7 @@ carries CRLF or an undecodable byte is stored as clean UTF-8 LF.
   naming a shared store; neither was chosen (the owner picked the per-workdir
   store for #10). A project whose worktrees must share notes keeps them in
   `harness.md` or a skill instead - both are repo content and both are shared.
+  The alternatives and what they would take: the "Deferred" section at the end.
 - **Not injected, not searched.** There is no relevance ranking and no keyword
   search: `memory.list` returns every note's index line and the model decides what
   to read. 40 notes is the size at which that is still affordable; if it ever is
@@ -146,3 +147,64 @@ carries CRLF or an undecodable byte is stored as clean UTF-8 LF.
   line.
 - `/memory [name]` - the same listing and the same body text, on the owner's side.
 - harness.log - `tool memory.add → ...` / `tool memory.delete → ...`.
+
+## Deferred: a store that one project shares across its checkouts
+
+Recorded as future work, not implemented for #10 (issue #365 tracks it). The
+store today resolves from the working directory, so notes hold over sessions in
+ONE checkout. Two shapes were considered:
+
+**A. Under the git common dir.** `git rev-parse --git-common-dir` is the one path
+every linked worktree of one repository shares. Measured from a linked worktree of
+this repo:
+
+```
+--show-toplevel  C:/work/own/.../tmp/scratch/10/wt
+--git-common-dir C:/work/own/.../harness_test/.git   (absolute, the main checkout)
+--git-dir        C:/work/own/.../harness_test/.git/worktrees/wt
+root commit      37ec7712...  identical in both checkouts
+```
+
+so it works as a locator. It was not used because it means the harness WRITES ITS
+OWN STATE into `.git/` - a directory the harness otherwise never touches, that git
+may repack or gc, that `git clean`/`git worktree prune` operate on, and that every
+sensitive-path rule in this project treats as off-limits. Storing notes beside
+`refs/` and `objects/` would make the harness' state part of the repository's
+object store, which is a worse contract than the one it replaces.
+
+**B. In the user home config dir.** `HarnessConfig::HOME_CONFIG_DIR` is already
+`~/.config/harness` (issue #260), so a store there is one directory the harness
+already owns. It needs what the issue itself calls "the project, determined some
+how" - a KEY naming which project a note belongs to - and every candidate key has
+a measured failure:
+
+- **`git rev-list --max-parents=0 HEAD`** (the root commit) is stable across linked
+  worktrees (37ec7712... in both, measured). It is NOT stable across clones of the
+  same project, and it changes under a shallow clone: a `--depth 1` clone of this
+  repo reported its "root" as `bb9f1611...`, i.e. the shallow boundary, not the
+  true root. Two checkouts of one project can therefore land in two different
+  memory stores with nothing to tell the owner.
+- **The remote URL** (`git remote get-url origin`) is identical here
+  (`git@github.com:kikonen/harness_test.git`), but it is a property of how a
+  checkout was CLONED: a clone-of-a-clone measured here carries
+  `file://C:/work/own/.../harness_test` while the checkout it came from carries
+  the github URL - so the same project would split into per-remote stores. It is
+  also absent entirely in a repo with no remote.
+- **The common dir's parent path** is exact for the checkouts of one physical
+  repository, but it is a PATH, so it differs for a second clone of the same
+  project on the same machine - which is arguably correct (separate checkouts,
+  separate state) and arguably the bug (the owner thinks of it as one project).
+
+So the design question is not "where do the notes live" but **"what counts as one
+project"**, and that answer has to be picked before the store moves: it decides
+whether two clones of one repository share notes, and a wrong answer is invisible
+until a note turns up in the wrong checkout. A config key naming the store
+(explicit, per project) sidesteps the guessing at the cost of setup, and is the
+shape most likely to be right.
+
+Whatever is chosen needs at least: a per-project store path, `Memories` taking it
+as a parameter rather than deriving it from the workdir alone, a decision on
+whether a note written in one checkout must be visible in another that is NOT a
+worktree of it, and a rule for what happens when the key cannot be computed (no
+remote, no git, shallow clone) - which must fall back to the per-workdir store
+rather than to a shared one the owner did not ask for.
