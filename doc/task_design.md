@@ -54,7 +54,15 @@ not have to clear anything, because whoever starts the next one overwrites it.
 
 Harness code never starts or stops spinners - it just emits `:spinner_detail`
 (or nothing at all) and is done. Tool execution renders output, it does not
-wait, so it never re-points the spinner.
+wait, so its OUTPUT never re-points the spinner. The EXECUTION, though, is a
+wait: a tool that waits (a slow command, a consent dialog, a model safety check)
+leaves the outbox quiet, so the drain loop animates - and what it animates is the
+detail the last wait left behind, i.e. the LLM request that already finished, so
+a long tool run reads as "Sending (model)..." (issue #362). A tool round therefore
+announces itself: `Harness#announce_tool_call` names the TOOL before the call
+runs, and `CommandRunner#announce_run` replaces that with the run's own handle
+while the child process runs. The suffix of a tool wait is the context estimate
+and NO rate segment - no request is in flight, so there is no speed to show.
 
 The LLM-request wait is announced by `SessionManager#request_spinner_detail`,
 which `Harness#call_llm` calls before EACH request of the tool loop (the only

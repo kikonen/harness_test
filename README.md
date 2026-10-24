@@ -265,6 +265,11 @@ context), `test.echo` (test-only)
   (one decimal always, a leading space reserving the tens column: " 9.0",
   "99.9") so it does not shift the badge after it as the rate changes, and every
   frame erases the line before drawing it (issue #364).
+- While a TOOL runs the same line names the tool instead of the model request
+  that produced it ("⠼ 41s run.command: bundle exec rspec spec... 🧠 22% (160K)
+  [YOLO]", issue #362): a tool round has no request in flight, so it shows no
+  rate, and a long run no longer reads as "Sending (model)...". Only the tool
+  name and the command's short handle are shown - never its arguments.
 - The disaster denylist overrides every posture AND every stored grant: a
   well-known disaster (`rm -rf`, `mkfs`, `dd of=/dev/`, `sudo`, `git push -f`,
   `curl | sh`, a fork bomb, `format C:`, `diskpart`, `del /s /q`,
