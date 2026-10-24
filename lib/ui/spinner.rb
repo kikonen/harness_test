@@ -84,12 +84,14 @@ module UI
     # (ui: passed at construction). Called by the main thread on each
     # drain tick (typically every 100ms). No per-call stream argument: the
     # console is fixed for the spinner's lifetime.
-    # No-op when not running (stopped).
+    # No-op when not running. Each frame erases the line before drawing it:
+    # "\r" alone returns the cursor to column 0 WITHOUT erasing, so any frame
+    # SHORTER than the previous one left its tail on screen (issue #364).
     def render!
       return unless running?
 
       text = frame_line
-      ui.print("\r#{text}")
+      ui.print("\r\e[2K#{text}")
       ui.flush
       @frame += 1
     end
@@ -165,9 +167,12 @@ module UI
     # used as-is. Any failure resolves to no suffix - the spinner must never
     # abort because of a transient read error while the task thread mutates
     # the session (issue #40 single-thread I/O rule).
+    # Only TRAILING blanks are dropped: a LEADING one is content, the rate
+    # segment's column pad (issue #364), and stripping it would put the number
+    # back in the jumping position the pad exists to avoid.
     def render_suffix
       value = @suffix.respond_to?(:call) ? @suffix.call : @suffix
-      text  = value.to_s.strip
+      text  = value.to_s.rstrip
       text.empty? ? "" : " #{text}"
     rescue StandardError
       ""

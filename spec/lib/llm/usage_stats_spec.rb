@@ -178,6 +178,24 @@ RSpec.describe LLM::UsageStats do
       expect(described_class.format_rate(38.234)).to eq('38.2')
     end
   end
+  # Issue #364: the spinner redraws its rate every frame, so the number needs
+  # a column of its own - a value that changes WIDTH between frames shifts
+  # whatever is drawn after it and makes the reading jump.
+  describe '.format_stable_rate' do
+    it 'keeps the trailing .0 a plain format_rate drops' do
+      expect(described_class.format_stable_rate(9.0)).to eq(' 9.0')
+      expect(described_class.format_stable_rate(38.0)).to eq('38.0')
+    end
+
+    it 'reserves the tens column so every rate up to 99.9 is the same width' do
+      widths = [0.4, 9.0, 28.7, 99.9, 100.0, 292.3]
+               .map { |r| described_class.format_stable_rate(r).length }
+      expect(widths[0..3]).to eq([4, 4, 4, 4])
+      # Above the band the number grows naturally rather than being faked.
+      expect(widths[4..]).to eq([5, 5])
+    end
+  end
+
   # issue #285: the rate the spinner shows for the request that just finished.
   describe '.recent_generation_rate' do
     it 'prefers the server-reported rate over the harness clock' do
@@ -230,6 +248,18 @@ RSpec.describe LLM::UsageStats do
       expect(described_class.rate_segment(28.7, measured_by_server: false, tag: 'last'))
         .to eq('~28.7 tok/s (last)')
       expect(described_class.rate_segment(38.0, measured_by_server: false)).to eq('~38 tok/s')
+    end
+
+    # pad: applies to the NUMBER only - the '~' marker and the unit text ride
+    # outside the column, so a segment with a marker is one char wider but
+    # still width-stable frame to frame.
+    it 'pads the number for the spinner without padding the marker or unit' do
+      expect(described_class.rate_segment(9.0, measured_by_server: true, tag: 'last', pad: true))
+        .to eq(' 9.0 tok/s (last)')
+      expect(described_class.rate_segment(9.0, measured_by_server: false, pad: true))
+        .to eq('~ 9.0 tok/s')
+      expect(described_class.rate_segment(31.4, measured_by_server: true, pad: true))
+        .to eq('31.4 tok/s')
     end
 
     it 'is nil when there is no rate' do

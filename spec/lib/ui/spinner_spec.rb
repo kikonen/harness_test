@@ -77,13 +77,16 @@ RSpec.describe UI::Spinner do
       expect(out).not_to include('Working... ')
     end
 
-    it 'strips surrounding whitespace from a string suffix' do
+    # Only the TRAILING blank is dropped: a LEADING one is the rate segment's
+    # column pad (issue #364) and content, not slack.
+    it 'strips trailing whitespace and keeps a leading blank' do
       out = capture('Working', '  ctx 1/2 (50%)  ') do |spinner|
         spinner.start
         spinner.render!
         spinner.stop
       end
-      expect(out).to include('Working... ctx 1/2 (50%)')
+      expect(out).to include('Working...   ctx 1/2 (50%)')
+      expect(out).not_to include('ctx 1/2 (50%) ')
     end
 
     it 're-evaluates a callable suffix every frame so it tracks live state (issue #126)' do
@@ -342,6 +345,66 @@ RSpec.describe UI::Spinner do
         spinner.stop
       end
       expect(out).to include("#{UI::Spinner::FRAMES[0]} Working...")
+    end
+  end
+
+  # Issue #364: the tok/s slot is redrawn every frame. Two defects, two fixes:
+  # a frame was written with "\r" alone (cursor to column 0, NO erase) so any
+  # frame SHORTER than the previous one left its tail on the line, and the
+  # suffix resolution stripped the LEADING blank a padded rate number carries,
+  # putting the number back in the position that shifts between frames.
+  describe 'frame stability (issue #364)' do
+    it 'erases the line before drawing every frame' do
+      out = capture('Working') do |spinner|
+        spinner.start
+        2.times { spinner.render! }
+        spinner.stop
+      end
+      expect(out.scan("\r\e[2K").size).to eq(2)
+      expect(out).not_to match(/\r(?!\e\[2K)/)
+    end
+
+    it 'erases before a SHORTER frame, so its predecessor leaves no tail' do
+      # The reported residue: the [STREAM] badge disappeared while a longer
+      # frame was still on the line, and the leftover "]" read as "[MANUAL]REAM]".
+      badge = '[STREAM] [MANUAL]'
+      out = capture('Sending to model') do |spinner|
+        spinner.badge = -> { badge }
+        spinner.start
+        spinner.render!
+        badge = nil
+        spinner.render!
+        spinner.stop
+      end
+      last_frame = out.split("\e[2K").last
+      expect(last_frame).to eq("#{UI::Spinner::FRAMES[1]} Sending to model...")
+      expect(last_frame).not_to include('[')
+    end
+
+    it 'keeps a padded rate suffix in the same column across frames' do
+      rates = [9.0, 99.9, 9.0]
+      tick  = -1
+      rate    = -> do
+        LLM::UsageStats.rate_segment(rates[tick += 1], measured_by_server: false, pad: true)
+      end
+      spinner = described_class.new('Sending to model', rate, ui: quiet_console)
+      spinner.badge = '[STREAM]'
+      lines  = 3.times.map { |i| spinner.line(i) }
+      # Nothing after the number moves: every frame is the same length even
+      # though the rate itself changes width (9.0 vs 99.9).
+      expect(lines.map(&:length).uniq).to eq([lines[0].length])
+      expect(lines[0]).to include('~ 9.0 tok/s [STREAM]')
+      expect(lines[1]).to include('~99.9 tok/s [STREAM]')
+    end
+
+    it 'renders a padded segment without shifting the badge after it' do
+      out = capture('Working', -> { ' 9.0 tok/s' }) do |spinner|
+        spinner.badge = '[STREAM]'
+        spinner.start
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to include("#{UI::Spinner::FRAMES[0]} Working...  9.0 tok/s [STREAM]")
     end
   end
 end
