@@ -155,6 +155,48 @@ RSpec.describe LLM::BaseBackend do
       expect(line).to match(/ in \d+\.\d\ds\z/)
       expect(line).not_to include('tokens')
     end
+
+    # issue #251: what the server measured (cache depth, durations) is logged
+    # beside the counts, so the log alone answers "was the prompt reprocessed"
+    # without the client deriving a rate from its own wall clock.
+    it 'logs the cache depth and derived rates the response reports (OpenAI shape)' do
+      body_json = '{"usage":{"prompt_tokens":1000,"completion_tokens":50,"total_tokens":1050,' \
+                  '"prompt_tokens_details":{"cached_tokens":768}},' \
+                  '"timings":{"prompt_ms":410.5,"predicted_ms":1310.2}}'
+      http_stub.instance_variable_set(:@responses, [StubResponse.new(200, body_json)])
+
+      backend.chat([{ role: 'user', content: 'hi' }])
+      line = logged_lines.last
+
+      expect(line).to include('1000 -> 50 tokens')
+      expect(line).to include('768 cached')
+      expect(line).to include('prompt 565.2 tok/s')
+      expect(line).to include('gen 38.2 tok/s')
+    end
+
+    it 'logs the native durations and cached count too' do
+      native_json = '{"message":{"content":"hi"},"prompt_eval_count":1000,"eval_count":50,' \
+                    '"prompt_eval_cached_count":768,"prompt_eval_duration":410500000,' \
+                    '"eval_duration":1310200000}'
+      http_stub.instance_variable_set(:@responses, [StubResponse.new(200, native_json)])
+
+      backend.chat([{ role: 'user', content: 'hi' }])
+      line = logged_lines.last
+
+      expect(line).to include('768 cached')
+      expect(line).to include('prompt 565.2 tok/s')
+      expect(line).to include('gen 38.2 tok/s')
+    end
+
+    it 'logs the speculative-decoding pair when the server reports it' do
+      json = '{"usage":{"prompt_tokens":10,"completion_tokens":5},"timings":' \
+             '{"draft_n":12,"draft_n_accepted":9}}'
+      http_stub.instance_variable_set(:@responses, [StubResponse.new(200, json)])
+
+      backend.chat([{ role: 'user', content: 'hi' }])
+
+      expect(logged_lines.last).to include('draft 12/9')
+    end
   end
 
   # issue #257: the response body is text that arrived from outside this

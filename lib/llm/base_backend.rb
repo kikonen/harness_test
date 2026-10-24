@@ -11,6 +11,7 @@ require_relative "../text_normalizer"
 require_relative "stream_accumulator"
 require_relative "stream_decoder"
 require_relative "stream_error"
+require_relative "usage_stats"
 
 module LLM
   # Shared request machinery for the per-backend clients (issue #197):
@@ -24,6 +25,8 @@ module LLM
   #   { choices: [{ message: { role:, content:, reasoning:, tool_calls: } }],
   #     usage:   { prompt_tokens:, completion_tokens:, total_tokens: } }
   # (usage is nil when the backend does not report tokens.)
+  # A usage may also carry the optional performance keys of LLM::UsageStats
+  # (doc/llm_stats.md).
   class BaseBackend
     def initialize(options, logger)
       @options = options
@@ -333,13 +336,20 @@ module LLM
     end
 
     # Token counts for the RESP line (issue #231: prompt-processing speed can
-    # be derived from the logged time + tokens). Empty when the backend
-    # reports none.
+    # be derived from the logged time + tokens) plus whatever server-side
+    # performance the response itself reported (issue #251). Empty when it
+    # reported neither.
     def usage_note(usage)
       return "" if usage.nil?
-      return "" if usage[:prompt_tokens].nil? || usage[:completion_tokens].nil?
 
-      " - #{usage[:prompt_tokens]} -> #{usage[:completion_tokens]} tokens"
+      parts = []
+      unless usage[:prompt_tokens].nil? || usage[:completion_tokens].nil?
+        parts << "#{usage[:prompt_tokens]} -> #{usage[:completion_tokens]} tokens"
+      end
+      parts.concat(UsageStats.performance_parts(usage))
+      return "" if parts.empty?
+
+      " - " + parts.join(" | ")
     end
 
     # One line per successful attempt: what was called, how big the answer
@@ -353,8 +363,16 @@ module LLM
     # shape has a `usage` object, the native Ollama shape reports the counts
     # as top-level fields. BaseBackend cannot know which, so check both.
     def usage_for(json)
-      return json[:usage] if json.is_a?(Hash) && json[:usage]
       return nil unless json.is_a?(Hash)
+
+      usage = core_usage_for(json)
+      return nil if usage.nil?
+
+      usage.merge(UsageStats.extended_usage(json))
+    end
+
+    def core_usage_for(json)
+      return json[:usage] if json[:usage]
       return nil unless json.key?(:prompt_eval_count) || json.key?(:eval_count)
 
       prompt     = json[:prompt_eval_count].to_i

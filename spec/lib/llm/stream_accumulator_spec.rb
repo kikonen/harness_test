@@ -144,6 +144,47 @@ RSpec.describe LLM::StreamAccumulator do
 
       expect(acc.to_response).not_to have_key(:usage)
     end
+
+    # issue #251: on the streamed path the performance fields ride the FINAL
+    # chunk (llama.cpp puts timings on the last delta, Ollama reports its
+    # Metrics on the done line), so they must reach the assembled usage.
+    it 'carries the timings of the final OpenAI-shape chunk' do
+      acc.feed({ choices: [{ delta: { content: "hi" } }] })
+      acc.feed({ usage: { prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050,
+                          prompt_tokens_details: { cached_tokens: 768 } },
+                 timings: { prompt_ms: 410.5, predicted_ms: 1310.2 } })
+
+      expect(acc.to_response[:usage]).to include(
+        prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050,
+        cached_tokens: 768, prompt_eval_ms: 410.5, eval_ms: 1310.2
+      )
+    end
+
+    it 'carries the native Metrics of the done line' do
+      acc.feed({ message: { content: "hi" } })
+      acc.feed({ done: true, prompt_eval_count: 1000, eval_count: 50,
+                 prompt_eval_cached_count: 768, prompt_eval_duration: 410_500_000,
+                 eval_duration: 1_310_200_000 })
+
+      expect(acc.to_response[:usage]).to include(
+        cached_tokens: 768, prompt_eval_ms: 410.5, eval_ms: 1310.2
+      )
+    end
+
+    it 'keeps a core-only streamed usage at exactly the core keys' do
+      acc.feed({ usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } })
+
+      expect(acc.to_response[:usage]).to eq(
+        prompt_tokens: 10, completion_tokens: 5, total_tokens: 15
+      )
+    end
+
+    it 'drops performance fields that arrived with no token counts' do
+      acc.feed({ choices: [{ delta: { content: "hi" } }] })
+      acc.feed({ timings: { prompt_ms: 100.0 } })
+
+      expect(acc.to_response).not_to have_key(:usage)
+    end
   end
 
   describe '#started?' do

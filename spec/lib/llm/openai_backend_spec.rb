@@ -169,6 +169,43 @@ RSpec.describe LLM::OpenAIBackend do
       result = parsed({ choices: [{ message: { role: 'assistant', content: 'c' } }] })
       expect(result).not_to have_key(:usage)
     end
+
+    # issue #251: the extended performance fields ride through, and ONLY when
+    # the response sent them (the core keys stay the contract call_llm relies
+    # on; llama.cpp and Ollama's /v1 shim add these to this wire shape).
+    it 'carries the cache depth and timings beside the core counts' do
+      result = parsed({
+        choices: [{ message: { role: 'assistant', content: 'c' } }],
+        usage:   { prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050,
+                   prompt_tokens_details: { cached_tokens: 768 } },
+        timings: { prompt_ms: 410.5, predicted_ms: 1310.2, predicted_per_second: 38.2 }
+      })
+
+      expect(result[:usage]).to include(
+        prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050,
+        cached_tokens: 768, prompt_eval_ms: 410.5, eval_ms: 1310.2,
+        completion_tokens_per_second: 38.2
+      )
+    end
+
+    it 'keeps a plain usage block at exactly the core keys' do
+      result = parsed({
+        choices: [{ message: { role: 'assistant', content: 'c' } }],
+        usage:   { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+      })
+
+      expect(result[:usage]).to eq(prompt_tokens: 10, completion_tokens: 5, total_tokens: 15)
+    end
+
+    it 'adds nothing when the only detail is a cache miss' do
+      result = parsed({
+        choices: [{ message: { role: 'assistant', content: 'c' } }],
+        usage:   { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15,
+                   prompt_tokens_details: { cached_tokens: 0 } }
+      })
+
+      expect(result[:usage]).to eq(prompt_tokens: 10, completion_tokens: 5, total_tokens: 15)
+    end
   end
 
   describe 'base_url normalization' do

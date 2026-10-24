@@ -3,6 +3,7 @@
 require "json"
 
 require_relative "shared"
+require_relative "usage_stats"
 
 module LLM
   # Folds delta chunks into the SAME normalized response the buffered path
@@ -17,6 +18,7 @@ module LLM
       @role         = nil
       @finish_reason = nil
       @usage         = nil
+      @extended      = {}
       # Tool calls keyed by position: OpenAI streams them as fragments with an
       # `index`, Ollama sends complete calls keyed by `id`.
       @tool_calls = {}
@@ -66,7 +68,7 @@ module LLM
         tool_calls: finished_tool_calls
       }
       response = { choices: [{ message: }] }
-      response[:usage] = @usage if @usage
+      response[:usage] = @usage.merge(@extended) if @usage
       response
     end
 
@@ -92,6 +94,16 @@ module LLM
     # the same check): the OpenAI `usage` object, or native top-level fields.
     # The native shape reports them on the final chunk only.
     def note_usage(json)
+      core = core_usage(json)
+      ext  = UsageStats.extended_usage(json)
+
+      @usage = @usage ? @usage.merge(core) : core if core
+      # A timings block may ride a chunk of its own; it describes the whole
+      # answer, so it is kept until the usage is assembled.
+      @extended.merge!(ext) unless ext.empty?
+    end
+
+    def core_usage(json)
       usage = json[:usage]
       if usage.is_a?(Hash) && !usage.empty?
         prompt     = usage[:prompt_tokens].to_i
@@ -100,18 +112,17 @@ module LLM
         # read as "no tokens" in the stats line, so it is derived here.
         reported   = usage[:total_tokens]
         total      = reported ? reported.to_i : prompt + completion
-        @usage = {
+        return {
           prompt_tokens: prompt,
           completion_tokens: completion,
           total_tokens: total
         }
-        return
       end
-      return unless json.key?(:prompt_eval_count) || json.key?(:eval_count)
+      return nil unless json.key?(:prompt_eval_count) || json.key?(:eval_count)
 
       prompt     = json[:prompt_eval_count].to_i
       completion = json[:eval_count].to_i
-      @usage = {
+      {
         prompt_tokens: prompt,
         completion_tokens: completion,
         total_tokens: prompt + completion

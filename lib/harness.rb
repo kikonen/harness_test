@@ -16,6 +16,7 @@ require_relative "session"
 require_relative "session_locator"
 require_relative "task"
 require_relative "llm/stream_preview"
+require_relative "llm/usage_stats"
 require_relative "tools/echo_tool"
 require_relative "tools/notify_tool"
 require_relative "tools/dialog_tool"
@@ -374,6 +375,7 @@ class Harness
     # The LAST call's prompt_tokens is the context size: each call already
     # carries the history, so summing over counts.
     last_prompt_tokens = 0
+    last_performance   = nil
     start_time = Time.now
 
     max_iters = max_tool_iterations
@@ -413,6 +415,11 @@ class Harness
         total_usage[:total_tokens]      += data[:usage][:total_tokens]      || 0
         last_prompt_tokens              = data[:usage][:prompt_tokens].to_i
       end
+      # #251: the server-side performance of THIS request only (cache depth,
+      # durations, draft counts). The LAST call describes the state the next
+      # request will face, so it replaces the earlier ones instead of adding
+      # to them - measurements of different requests cannot be summed.
+      last_performance = LLM::UsageStats.performance_snapshot(data[:usage])
 
       @session.record_prompt_tokens(last_prompt_tokens, messages.size)
 
@@ -481,7 +488,8 @@ class Harness
         elapsed_seconds: elapsed,
         iterations:      iteration,
         usage:           total_usage,
-        prompt_tokens:   last_prompt_tokens
+        prompt_tokens:   last_prompt_tokens,
+        performance:     last_performance
       }
 
       @session.add_assistant(message[:content])
@@ -521,6 +529,9 @@ class Harness
     if usage && usage[:total_tokens] > 0
       parts << "📊 #{usage[:prompt_tokens]}→#{usage[:completion_tokens]} tokens (#{usage[:total_tokens]} total)"
     end
+    perf = LLM::UsageStats.performance_parts(stats[:performance])
+    parts << "⚡ #{perf.join(' | ')}" unless perf.empty?
+
     ctx = context_indicator
     parts << ctx if ctx
 

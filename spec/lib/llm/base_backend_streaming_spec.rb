@@ -205,6 +205,29 @@ RSpec.describe "BaseBackend streaming" do
       end
     end
 
+    # issue #251: llama.cpp attaches timings to the LAST delta and Ollama
+    # reports its Metrics on the done line - both must land in the usage the
+    # accumulator hands back (and therefore in the RESP line).
+    it 'carries the timings the final chunk reports' do
+      server = ChunkedServer.new(parts: [
+        sse('{"choices":[{"delta":{"content":"hi"}}]}'),
+        sse('{"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":50,' \
+            '"prompt_tokens_details":{"cached_tokens":768}},' \
+            '"timings":{"prompt_ms":410.5,"predicted_ms":1310.2}}')
+      ])
+      begin
+        result = backend_for(server.port).chat([{ role: 'user', content: 'hi' }], stream: true)
+
+        expect(result[:usage]).to include(
+          prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050,
+          cached_tokens: 768, prompt_eval_ms: 410.5, eval_ms: 1310.2
+        )
+        expect(logged_lines.grep(/RESP:/).first).to include('768 cached')
+      ensure
+        server.close
+      end
+    end
+
     it 'reassembles fragmented tool-call arguments into one call' do
       server = ChunkedServer.new(parts: [
         sse('{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1",' \

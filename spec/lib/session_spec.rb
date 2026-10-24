@@ -371,4 +371,34 @@ RSpec.describe Session do
       expect(session.pending?).to be(false)
     end
   end
+  # issue #251: /session reports the server-side performance of the last
+  # request when the server measured it, and says nothing when it did not.
+  describe '#summary performance line' do
+    it 'names the cache depth and the rates' do
+      session.add_user('go')
+      session.add_assistant('done')
+      session.record_stats(
+        elapsed_seconds: 4.2, iterations: 2,
+        usage: { prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050 },
+        prompt_tokens: 1000,
+        performance: { cached_tokens: 768, prompt_eval_ms: 1160.0, eval_ms: 1310.2,
+                       prompt_tokens: 1000, completion_tokens: 50 }
+      )
+
+      line = session.summary.lines.grep(/last request/).first
+      expect(line).to include('768 cached')
+      expect(line).to include('prompt 200 tok/s')
+      expect(line).to include('gen 38.2 tok/s')
+    end
+
+    it 'adds no performance part when the server reported none' do
+      session.add_user('go')
+      session.add_assistant('done')
+      session.record_stats(usage: { prompt_tokens: 10, total_tokens: 15 }, prompt_tokens: 10)
+
+      line = session.summary.lines.grep(/last request/).first
+      expect(line).not_to include('tok/s')
+      expect(line).not_to include('cached')
+    end
+  end
 end
