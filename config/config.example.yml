@@ -119,3 +119,13 @@ retry:
 # Set false and a user-typed bang command runs immediately - the human's
 # own typing is already the consent. The disaster denylist still applies.
 # bang_requires_confirmation: true
+
+# External editor for the buffer you are typing (issue #298). Press Ctrl+G at
+# the prompt (or inside a mid-turn note) and the text you have typed is written
+# to a scratch file, opened with this command, and comes back as the DRAFT - the
+# submit key is still what sends it. The command is split into argv words and run
+# directly (never through a shell), so flags are fine and shell metacharacters
+# are literal. Absent = Ctrl+G does what Reline always did with it.
+# Resolution order: --editor <command line> > $HARNESS_EDITOR > this key >
+# $EDITOR > $VISUAL.
+# editor: nvim -R      # or: code -w, notepad, nano, vim, ...

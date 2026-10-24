@@ -367,4 +367,108 @@ RSpec.describe UI::Editor do
       expect(UI::Editor::CtrlAState.label).to be_nil
     end
   end
+
+  # issue #298: Ctrl+G hands the buffer being edited to an external editor.
+  # These run the REAL Reline read path (KeyStroke.expand -> input_key), because
+  # the fact being pinned is what Reline hands to #input_key: a control key's
+  # char is the one-character String "\a", not the Integer 7. A fake Key struct
+  # is exactly what hides that (see the Ctrl+A examples, which fake char as 1).
+  describe 'RelineCtrlGHandoff (Ctrl+G -> external editor, issue #298)' do
+    after { described_class.external_editor = nil }
+
+    it 'is installed on Reline::LineEditor by install_esc!' do
+      described_class.install_esc!
+      expect(Reline::LineEditor.ancestors)
+        .to include(UI::Editor::RelineCtrlGHandoff)
+    end
+
+    it 'external_editor= normalizes a blank command to nil (the key stays Reline\'s)' do
+      described_class.external_editor = '  '
+      expect(described_class.external_editor).to be_nil
+      described_class.external_editor = 'nvim -R'
+      expect(described_class.external_editor).to eq('nvim -R')
+    end
+
+    # Feeds bytes through Reline's own expansion and reports what the patch left
+    # behind: whether it fired, and what the buffer became.
+    def ctrl_g_feed(bytes, multiline: true)
+      described_class.install_esc!
+      cfg = Reline::Config.new
+      ks  = Reline::KeyStroke.new(cfg, Encoding::UTF_8)
+      le  = Reline::LineEditor.new(cfg)
+      le.reset_variables('p> ')
+      if multiline
+        le.multiline_on
+        le.confirm_multiline_termination_proc = ->(_buf) { false }
+      end
+      bytes.each { |b| ks.expand([b]).first.each { |k| le.input_key(k) } }
+      { fired: UI::Editor::CtrlGState.fired, text: UI::Editor::CtrlGState.text,
+        finished: le.finished?, buffer: le.whole_buffer }
+    ensure
+      UI::Editor::CtrlGState.reset!
+    end
+
+    it 'does NOT take the key when no editor is configured (Reline keeps it)' do
+      described_class.external_editor = nil
+      r = ctrl_g_feed([97, 7]) # 'a' then Ctrl+G
+      expect(r[:fired]).to be_falsy
+      expect(r[:finished]).to be(false)
+      expect(r[:buffer]).to eq("a\a") # byte 7 inserted, as Reline did before
+    end
+
+    it 'snapshots the buffer and closes the read when an editor is configured' do
+      described_class.external_editor = 'notepad'
+      r = ctrl_g_feed([97, 10, 98, 7]) # 'a', Enter (a real newline), 'b', Ctrl+G
+      expect(r[:fired]).to be(true)
+      expect(r[:text]).to eq("a\nb")
+      expect(r[:finished]).to be(true)
+    end
+
+    it 'does NOT fire on a single-line read (there is no buffer to edit)' do
+      described_class.external_editor = 'notepad'
+      r = ctrl_g_feed([97, 7], multiline: false)
+      expect(r[:fired]).to be_falsy
+      expect(r[:buffer]).to eq("a\a")
+    end
+
+    # The reader's ctrl_g_result (private) is what a caller actually sees after
+    # Ctrl+G: an :edited result whose text is the editor's output and whose note
+    # names the editor. This is the exact shape CLI#get_command, Task.poll_for_note
+    # and UI::Dialog#collect_details each branch on. Runs a real child editor.
+    describe 'the :edited result a Ctrl+G hand-off hands back' do
+      def fake_editor_script(dir)
+        script = File.join(dir, 'ed.rb')
+        File.write(script, <<~RUBY)
+          path = ARGV.last
+          before = File.binread(path)
+          File.binwrite(path, "from-editor:\\n\#{before}")
+        RUBY
+        script
+      end
+
+      it 'returns :edited with the editor text and a note naming the editor' do
+        Dir.mktmpdir do |dir|
+          script = fake_editor_script(dir)
+          described_class.external_editor = "ruby #{script}"
+          ed = described_class.new(StringIO.new)
+          r  = ed.send(:ctrl_g_result, "draft text")
+
+          expect(r.status).to eq(:edited)
+          expect(r.text).to include('from-editor')
+          expect(r.text).to include('draft text')
+          expect(r.note).to eq("edited with ruby")
+        end
+      end
+
+      it 'on a failed editor returns :edited with the buffer intact + an error note' do
+        described_class.external_editor = 'definitely-not-a-program-xyz'
+        ed = described_class.new(StringIO.new)
+        r  = ed.send(:ctrl_g_result, 'my draft')
+
+        expect(r.status).to eq(:edited)
+        expect(r.text).to eq('my draft')
+        expect(r.note).to include('could not run')
+      end
+    end
+  end
 end

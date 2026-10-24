@@ -1004,4 +1004,75 @@ RSpec.describe Task do
       expect(io.string).to include('[note] got it - yolo')
     end
   end
+
+  # issue #298: Ctrl+G inside the MID-TURN note editor hands the buffer to the
+  # external editor. The note path keeps the hand-off the same way it keeps an
+  # Esc'd buffer - back into @note_draft, prefilled the next time the note
+  # editor opens - and NOT committed as a note: an editor round-trip is not a
+  # submission, and a note that reaches the model just because an editor was
+  # closed would inject text the user never sent.
+  describe 'poll_for_note and the Ctrl+G hand-off (issue #298)' do
+    let(:note_harness) do
+      Class.new do
+        attr_reader :notes
+
+        def initialize
+          @notes = []
+        end
+
+        def user_note_text=(text)
+          @notes << text
+        end
+      end.new
+    end
+
+    # A task with its note editor stubbed: poll_for_note is driven directly, so
+    # no turn and no real terminal are needed.
+    def task_with_note_editor(result)
+      editor = instance_double(UI::Editor)
+      allow(editor).to receive(:read_multiline)
+        .and_return(UI::Editor::EDITOR_RESULT.new(result[:text], result[:status],
+                                                  result[:note]))
+      task = Task.new { }
+      task.ui = UI::Console.new(stdout: StringIO.new, stdin: stubbed_pending_stdin)
+      task.harness = note_harness
+      task.note_editor = editor
+      [task, editor]
+    end
+
+    def stubbed_pending_stdin
+      io = StringIO.new
+      def io.input_pending?
+        true
+      end
+      io
+    end
+
+    it 'keeps the edited text as the note draft instead of committing it' do
+      task, _editor = task_with_note_editor(
+        text: 'draft from vim', status: :edited, note: 'edited with vim'
+      )
+
+      described_class.poll_for_note(task)
+
+      expect(task.instance_variable_get(:@note_draft)).to eq('draft from vim')
+      expect(note_harness.notes).to be_empty
+    end
+
+    it 'prefills the draft on the next note read (the round-trip is not lost)' do
+      task, editor = task_with_note_editor(
+        text: 'draft from vim', status: :edited, note: 'edited with vim'
+      )
+      allow(editor).to receive(:read_multiline).and_return(
+        UI::Editor::EDITOR_RESULT.new('draft from vim', :edited, 'edited with vim'),
+        UI::Editor::EDITOR_RESULT.new('draft from vim', :empty, nil)
+      )
+
+      described_class.poll_for_note(task)
+      described_class.poll_for_note(task)
+
+      expect(editor).to have_received(:read_multiline).with(prefill: 'draft from vim')
+      expect(note_harness.notes).to be_empty
+    end
+  end
 end

@@ -121,6 +121,12 @@ class CLI
            "Render every line in the terminal's own color (palette 'none').") do
         opts[:output_palette] = "none"
       end
+      o.on("--editor CMD",
+           "Command that opens an external editor for the buffer being typed " \
+           "(Ctrl+G at the prompt, issue #298). Overrides the config 'editor' " \
+           "key, $HARNESS_EDITOR and $EDITOR/$VISUAL.") do |v|
+        opts[:editor_cli] = v
+      end
       o.on("-h", "--help") { puts o; exit }
     end
     parser.parse!
@@ -233,6 +239,12 @@ class CLI
     # honour it. Default off - Enter always inserts a newline.
     opts[:double_enter_submit] = config.double_enter_submit_enabled
 
+    # issue #298: the command Ctrl+G hands the buffer being typed to. Resolved
+    # ONCE here so the precedence is stated in one place: CLI flag >
+    # $HARNESS_EDITOR > config 'editor' > $EDITOR > $VISUAL.
+    env_editor = UI::ExternalEditor.command(config.editor_command)
+    opts[:editor] = opts[:editor_cli] || env_editor
+
     unless opts[:model] || opts[:list_sessions]
       raise HarnessError, "-m / --model is required (or set default_model in the config)"
     end
@@ -257,6 +269,11 @@ class CLI
     # issue #198: the double-Enter submit switch is process-global and
     # covers every UI::Editor read (idle prompt, notes, dialogs).
     UI::Editor.submit_on_enter = !!@options[:double_enter_submit]
+
+    # issue #298: same reasoning for the external editor - the command is
+    # resolved once, and every multiline read then honours Ctrl+G. nil (no flag,
+    # no config key, no EDITOR/VISUAL) leaves the key exactly as Reline has it.
+    UI::Editor.external_editor = @options[:editor]
 
     ui.puts "Harness ready. Type /help for commands, /exit to quit."
     # issue #217: show WHERE calls go (API type + endpoint path + base url),
@@ -467,6 +484,13 @@ class CLI
       case result.status
       when :eof
         return nil                     # Ctrl-D on an empty buffer => quit
+      when :edited
+        # Ctrl+G hand-off (issue #298): what the editor wrote (or the untouched
+        # buffer when the editor could not run) comes back as the DRAFT - the
+        # submit key is still what sends it, same as an Esc'd buffer.
+        @idle_draft = result.text.to_s
+        ui.puts "  (#{result.note} - draft kept; press the submit key to send)"
+        next
       when :cancelled
         @idle_draft = result.text.to_s # Esc: keep the buffer, prefill next
         ui.puts "  (cancelled - draft kept; press the submit key to send)"

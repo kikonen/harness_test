@@ -408,7 +408,13 @@ module UI
           res = UI::Editor.new(ui.stdin).read_multiline(prefill: draft)
           return CANCEL_VALUE if res.status == :eof
           # Esc: the buffer is the draft for the next round - it is never
-          # a cancel (issue #155).
+          # a cancel (issue #155). Ctrl+G (issue #298) is the same round-trip:
+          # what the editor wrote stays the draft, and is still not an answer.
+          if res.status == :edited
+            draft = res.text.to_s
+            ui.puts "             (#{res.note} - draft kept; submit key to finish)"
+            next
+          end
           draft = res.status == :cancelled ? res.text.to_s : nil
           next unless res.status == :submitted
 

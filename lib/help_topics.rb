@@ -166,7 +166,10 @@ module HelpTopics
         "* Optional fallback: 'double_enter_submit: true' in the config makes " \
           "Enter on an EMPTY last line submit the buffer (pasted blank lines " \
           "never trigger it; while enabled the buffer cannot end with a " \
-          "trailing blank line)."
+          "trailing blank line).",
+        "* Typing a long block somewhere else is often easier: Ctrl+G writes the " \
+          "buffer out to the external editor and brings it back as the draft " \
+          "(see /help keys; editor: in the config, --editor, or $HARNESS_EDITOR)."
       ],
       see_also: %w[keys notes]),
     "notes" => Topic.new(
@@ -204,6 +207,11 @@ module HelpTopics
         "* Ctrl+D - quit on an empty prompt; inside a note editor it aborts " \
           "the RUNNING turn like Ctrl+C (a note committed before it is still " \
           "delivered).",
+        "* Ctrl+G - write the buffer you are typing out to the external editor " \
+          "and take it back as the DRAFT (the submit key still sends it). Works " \
+          "at the idle prompt, in a note and in a dialog's typed answer; needs an " \
+          "editor to be set (config 'editor', --editor, $HARNESS_EDITOR or " \
+          "$EDITOR) - otherwise the key does nothing special. See /help input.",
         "* Up/Down - browse command history."
       ],
       see_also: %w[input notes consent])

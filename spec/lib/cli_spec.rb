@@ -383,6 +383,30 @@ RSpec.describe CLI do
 
       cli.run
     end
+
+    # issue #298: run installs the resolved editor command on the shared
+    # UI::Editor once, so every multiline read honours Ctrl+G. With nothing set
+    # the global stays nil and Ctrl+G is left exactly as Reline has it.
+    it 'installs the resolved editor command on UI::Editor' do
+      opts = options.merge(editor: 'nvim -R')
+      cli  = described_class.new(opts, ui)
+      allow(ui).to receive(:puts)
+      allow(cli).to receive(:get_command).and_return(nil)
+
+      cli.run
+
+      expect(UI::Editor.external_editor).to eq('nvim -R')
+    end
+
+    it 'leaves UI::Editor.external_editor nil when no editor is configured' do
+      cli = build_cli
+      allow(ui).to receive(:puts)
+      allow(cli).to receive(:get_command).and_return(nil)
+
+      cli.run
+
+      expect(UI::Editor.external_editor).to be_nil
+    end
   end
 
   # issue #198 phase 3: the idle prompt keeps an Esc'd buffer as a draft
@@ -404,8 +428,8 @@ RSpec.describe CLI do
       allow(UI::Editor).to receive(:new).with(stdin_io).and_return(editor)
     end
 
-    def editor_result(text, status)
-      @result_class.new(text, status)
+    def editor_result(text, status, note = nil)
+      @result_class.new(text, status, note)
     end
 
     it 'returns the submitted text and clears the draft' do
@@ -455,6 +479,34 @@ RSpec.describe CLI do
         editor_result('cmd', :submitted))
 
       expect(cli.send(:get_command)).to eq('cmd')
+    end
+
+    # issue #298: Ctrl+G hands the buffer to an external editor. The text the
+    # editor produced (carried as :edited) becomes the DRAFT - the submit key is
+    # still what sends it, exactly like an Esc'd buffer.
+    it 'keeps an edited buffer as the draft and re-prompts' do
+      allow(editor).to receive(:read_multiline).and_return(
+        editor_result('from editor', :edited, 'edited with notepad'),
+        editor_result('from editor sent', :submitted))
+
+      expect(cli.send(:get_command)).to eq('from editor sent')
+      expect(editor).to have_received(:read_multiline)
+                     .with(prompt: '  ', prefill: 'from editor')
+    end
+
+    it 'names the editor on the :edited draft line' do
+      allow(editor).to receive(:read_multiline).and_return(
+        editor_result('kept', :edited, 'edited with vim'),
+        editor_result('go', :submitted))
+
+      printed = []
+      allow(ui).to receive(:puts) { |*args| printed << args.join(' ') }
+
+      cli.send(:get_command)
+
+      expect(printed).to include(
+        '  (edited with vim - draft kept; press the submit key to send)'
+      )
     end
   end
 end
