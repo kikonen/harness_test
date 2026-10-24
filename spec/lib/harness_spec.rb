@@ -540,13 +540,37 @@ RSpec.describe Harness do
       end.new(name: 'ui.notify', description: 'fake', parameters: {})
     end
 
-    it 'does NOT emit :spinner_detail for a tool being executed' do
+    # issue #362: a wait is announced by whoever starts it, and the tool round
+    # IS a wait (a slow command, a consent dialog). Without this re-point the
+    # drain loop replays the LLM request line that already finished, so a
+    # 40-second run.command reads as if the model were still generating.
+    it 're-points the spinner with the tool name before the tool runs' do
       harness.tool_registry.register(fake_tool)
       call  = { id: 'c1', function: { name: 'ui.notify', arguments: '{}' } }
 
       expect(harness.send(:execute_tool_call, call)).to eq('ok')
 
-      expect(drain_outbox(task).map { |m| m[:type] }).not_to include(:spinner_detail)
+      details = drain_outbox(task).select { |m| m[:type] == :spinner_detail }
+      expect(details.size).to eq(1)
+      # The origin is the emitter's symbol (the buffer records who spoke).
+      expect(details.first[:origin]).to eq(:harness)
+      expect(details.first[:content][:message]).to eq('ui.notify')
+      # A tool round has no request in flight, so it carries no rate segment -
+      # the suffix is the live context estimate, not a tok/s number.
+      expect(details.first[:content][:suffix]).to respond_to(:call)
+    end
+
+    # The spinner line is ONE line, and tool arguments are model-supplied text
+    # that must never be echoed onto it.
+    it 'names the tool only - never its arguments' do
+      harness.tool_registry.register(fake_tool)
+      long  = { id: 'c1', function: { name: 'ui.notify',
+                                      arguments: JSON.dump(text: 'x' * 500) } }
+
+      harness.send(:execute_tool_call, long)
+
+      detail = drain_outbox(task).find { |m| m[:type] == :spinner_detail }
+      expect(detail[:content][:message]).to eq('ui.notify')
     end
 
     # issue #257: the tool result goes straight back into the message chain,
@@ -1105,7 +1129,11 @@ RSpec.describe Harness do
 
       h.call_llm
 
-      expect(spinner_details).to eq(['Sending (test-model)'] * 2)
+      # Each request announces itself AND each tool round announces itself
+      # (issue #362) - the two kinds alternate, and a request line always
+      # follows the tool line of the round it produced.
+      expect(spinner_details).to eq(['Sending (test-model)', 'test.echo',
+                                     'Sending (test-model)'])
     end
 
     it 're-announces the send line after an in-loop compaction' do
@@ -1125,9 +1153,11 @@ RSpec.describe Harness do
       compact = details.index { |d| d.include?('Compacting session mid-task') }
       expect(compact).not_to be_nil
       # The turn's LAST spinner line is the new request, not the finished
-      # compaction.
+      # compaction, and every line BEFORE the compaction is a request line or
+      # the tool line of the round that request produced (issue #362).
       expect(details.last).to eq('Sending (test-model)')
-      expect(details[0, compact]).to all(eq('Sending (test-model)'))
+      expect(details[0, compact]).to eq(['Sending (test-model)', 'test.echo',
+                                         'Sending (test-model)', 'test.echo'])
     end
   end
 

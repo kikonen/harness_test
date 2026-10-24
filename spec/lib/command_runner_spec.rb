@@ -845,4 +845,74 @@ RSpec.describe CommandRunner do
       end
     end
   end
+
+  # issue #362: waiting on the child process leaves the task outbox quiet, so the
+  # drain loop animates a spinner - and the detail it replays is the LLM request
+  # line that already finished, so a long run reads as if the model were still
+  # generating. The runner re-points it for the run itself.
+  describe 'spinner re-point while a command runs (issue #362)' do
+    let(:task) { Task.new }
+    around do |example|
+      @old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+      example.run
+    ensure
+      Thread.current[:harness_task] = @old_current
+    end
+
+    def spinner_events
+      events = []
+      loop do
+        m = task.poll(0); break unless m
+        events << m if m[:type] == :spinner_detail
+      end
+      events
+    end
+
+    def suffix_harness
+      double('harness', logger: nil, tool_wait_suffix: -> { 'ctx 12%' })
+    end
+
+    it 'names the run on the spinner while it waits' do
+      Dir.mktmpdir do |dir|
+        seed_allowlist(dir, 'echo')
+        runner = make_tool_runner(dir, {}, harness: suffix_harness)
+        expect(runner.run('echo hi')).to start_with('exit code: 0')
+
+        events = spinner_events
+        expect(events.size).to eq(1)
+        expect(events.first[:origin]).to eq('run.command')
+        expect(events.first[:content][:message]).to eq('run.command: echo hi')
+        expect(events.first[:content][:suffix].call).to eq('ctx 12%')
+      end
+    end
+
+    # The spinner draws ONE line and appends its own "..." to every message, so
+    # the handle arrives without its dropped-tail marker: the line carries one
+    # marker, not two. A full command never reaches the spinner.
+    it 'shortens a long command to its handle and drops the extra marker' do
+      Dir.mktmpdir do |dir|
+        seed_allowlist(dir, 'echo')
+        runner = make_tool_runner(dir, {}, harness: suffix_harness)
+        runner.run('echo one two three four five six')
+
+        message = spinner_events.first[:content][:message]
+        expect(message).to eq('run.command: echo one two three')
+        expect(message).not_to include(' ...')
+        expect(message).not_to include('four five six')
+      end
+    end
+
+    # A runner built without a harness (unit specs, a bare bang call) has no
+    # suffix callable to borrow - the re-point must still work.
+    it 'announces without a suffix when the harness offers none' do
+      Dir.mktmpdir do |dir|
+        seed_allowlist(dir, 'echo')
+        runner = make_tool_runner(dir) # harness: nil
+        runner.run('echo bare')
+
+        expect(spinner_events.first[:content][:suffix]).to be_nil
+      end
+    end
+  end
 end
