@@ -163,6 +163,9 @@ text of it with the rate it is arriving at (`[STREAM]` badge). Before the answer
 starts (and in buffered mode) the spinner shows the rate of the request that last
 completed (issue #285). The response the model loop receives is identical either
 way; a streamed request is retried only until the first part arrives.
+The newest text is a fixed 60-character window: when older text was dropped it
+starts with a single `…`, which REPLACES whatever the cut left at that point
+instead of sitting in front of it (issue #364).
 Initial posture: config key `streaming` (or a model profile's own key).
 
 ## Regenerating the shell parser

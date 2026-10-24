@@ -178,7 +178,7 @@ The task thread never writes to an IO stream (the single-thread I/O rule,
 `doc/task_design.md`). So a delta is not printed - it is published as state:
 
 ```
-task thread (on_delta)  -> StreamPreview#record  -> frozen snapshot + rate slot
+task thread (on_delta)  -> StreamPreview#record  -> one frozen [tail, dropped?, rate]
 main thread (spinner)   -> Harness#request_wait_suffix -> tail_line / live_rate
 ```
 
@@ -195,8 +195,29 @@ and a reference assignment is atomic where an in-place append is not. The reader
 only ever sees a whole snapshot.
 
 The tail is 60 characters of the NEWEST text (`MAX_TAIL`), newlines collapsed to
-spaces (a spinner line is one line), with a leading `...` when it is a tail. The
-oldest part is what gets dropped.
+spaces (a spinner line is one line), with a leading `…` (`TAIL_MARKER`) when it is
+a tail. The oldest part is what gets dropped. `MAX_TAIL` is the width of the whole
+SEGMENT the spinner draws, the marker counted INSIDE it: a truncated tail is
+always exactly 60 characters, so the rate segment and the posture badges drawn
+after it never shift (the same reason the rate number keeps its own column, below).
+
+The marker REPLACES what the cut left at the seam (`CUT_SEAM`) instead of being
+prepended, and it is one character rather than three dots. The 59-character cut
+lands wherever the answer happens to be, and an answer that wrote its own ellipsis
+can leave the tail of it (plus the blanks after it) as the kept text's FIRST
+characters; prepending `...` there read as `"... ... The bottom` / `.... The
+bottom` - dots that look like content and are none. A single `…` that is always
+the segment's first character cannot be mistaken for the answer's text, and it
+cannot collide with the message's own `...` either (the spinner draws
+`message... <suffix>`). Dots FURTHER INSIDE the tail are the answer's own writing
+and are left exactly as it wrote them. The order matters: slice to the text budget,
+THEN replace the seam, then pad back to it - padding before the strip is what left
+a dot glued to the marker, and stripping without padding is what made the segment
+jitter by 1-2 characters.
+
+The truncation decision is made against the source ACTUALLY shown, so text that was
+never dropped is never marked as if it were: an answer whose REASONING overflowed
+but whose own content is short shows its content plain, with no marker.
 
 ## The live rate (issue #285)
 
@@ -274,7 +295,8 @@ to the consent-mode tag, both re-read per frame.
   trail), which is a NEW generation. That is the accepted cost of showing text
   as it arrives.
 - The tail is a display convenience, not a transcript: 60 characters of the
-  newest text, discarded when the request ends. The full answer is logged and
+  newest text (59 of them plus the marker once text was dropped), discarded when
+  the request ends. The full answer is logged and
   stored by the normal path.
 - Streaming is per-request, so a turn that mixes a streamed answer with an
   advisory buffered check shows only the answer live. That is intentional.
