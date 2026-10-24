@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'json'
+require 'tmpdir'
 
 RSpec.describe Session do
   let(:session) { described_class.new('system prompt') }
@@ -371,6 +373,7 @@ RSpec.describe Session do
       expect(session.pending?).to be(false)
     end
   end
+
   # issue #251: /session reports the server-side performance of the last
   # request when the server measured it, and says nothing when it did not.
   describe '#summary performance line' do
@@ -399,6 +402,45 @@ RSpec.describe Session do
       line = session.summary.lines.grep(/last request/).first
       expect(line).not_to include('tok/s')
       expect(line).not_to include('cached')
+    end
+
+    # The performance is session state: it is saved in last_stats, so /session
+    # after a resume still reports the last MEASURED turn (a JSON round trip
+    # keys it back to symbols, which is the form performance_parts reads).
+    it 'survives the save/resume round trip' do
+      session.add_user('go')
+      session.add_assistant('done')
+      session.record_stats(
+        elapsed_seconds: 4.2, iterations: 1,
+        usage: { prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050 },
+        prompt_tokens: 1000,
+        performance: { cached_tokens: 768, eval_ms: 1310.2, completion_tokens: 50 }
+      )
+      workdir = Dir.mktmpdir('session-spec')
+      begin
+        saved = JSON.parse(JSON.generate(session.to_h(FileList.new([], workdir: workdir))),
+                           symbolize_names: true)
+        restored = described_class.new('sys').restore(saved, FileList.new([], workdir: workdir))
+      ensure
+        FileUtils.remove_entry(workdir)
+      end
+
+      line = restored.summary.lines.grep(/last request/).first
+      expect(line).to include('768 cached')
+      expect(line).to include('gen 38.2 tok/s')
+    end
+
+    it 'says nothing for a session saved before this feature (no performance key)' do
+      saved = JSON.parse(JSON.generate(
+        { last_stats: { elapsed_seconds: 1.0, iterations: 1,
+                        usage: { prompt_tokens: 10, total_tokens: 15 },
+                        prompt_tokens: 10 },
+          created_at: Time.now.iso8601,
+          messages:   [{ role: 'system' }, { role: 'user', content: 'go' }] }
+      ), symbolize_names: true)
+      restored = described_class.new('sys').restore(saved, FileList.new([], workdir: Dir.mktmpdir))
+
+      expect(restored.summary.lines.grep(/last request/).first).not_to include('tok/s')
     end
   end
 end
