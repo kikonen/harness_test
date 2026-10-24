@@ -41,7 +41,8 @@ module Commands
       @ui.puts "  [#{label || 'BUFFERED'}]"
       if @harness.stream?
         @ui.puts "  Responses stream in: the spinner shows the answer as it " \
-          "arrives, and the spinner badge reads [STREAM]."
+          "arrives with the rate it is arriving at, and the spinner badge " \
+          "reads [STREAM]."
         @ui.puts "  A streamed request is retried only until the first part " \
           "arrives - after that a lost stream fails the turn instead of " \
           "re-sending."
@@ -49,6 +50,9 @@ module Commands
         @ui.puts "  Responses are buffered: the whole answer arrives before " \
           "it is printed (the full retry policy applies)."
       end
+      @ui.puts "  The spinner also shows a tok/s rate: the live rate while an " \
+        "answer streams, else the rate of the request that last completed " \
+        "(issue #285); '~' marks one the harness estimated, not the server."
       @ui.puts "  Saved with the session (resume keeps it)."
     end
 

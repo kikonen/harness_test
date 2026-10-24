@@ -15,6 +15,12 @@ module LLM
       draft_n_accepted
     ].freeze
 
+    # A client-measured rate needs a measurement window: a speed computed from
+    # the first characters of an answer, or over a sliver of time, is noise,
+    # not a rate.
+    MIN_RATE_TOKENS  = 4
+    MIN_RATE_SECONDS = 0.25
+
     # A native duration is an integer count of nanoseconds per Ollama's API
     # docs; the Go Duration type can also marshal one as a string ("1m2.5s").
     DURATION_UNITS = {
@@ -96,8 +102,7 @@ module LLM
         tokens_per_second(uncached_prompt_tokens(usage), usage[:prompt_eval_ms])
       parts << "prompt #{format_rate(prompt)} tok/s" if prompt
 
-      gen = usage[:completion_tokens_per_second] ||
-        tokens_per_second(usage[:completion_tokens], usage[:eval_ms])
+      gen = generation_rate(usage)
       parts << "gen #{format_rate(gen)} tok/s" if gen
 
       if positive_value?(usage[:draft_n]) && positive_value?(usage[:draft_n_accepted])
@@ -108,6 +113,50 @@ module LLM
 
     def uncached_prompt_tokens(usage)
       [usage[:prompt_tokens].to_i - usage[:cached_tokens].to_i, 0].max
+    end
+
+    # The generation rate a response reported: the server's own number when it
+    # sent one, else its own duration and count.
+    def generation_rate(usage)
+      return nil unless usage.is_a?(Hash)
+
+      rate_or_nil(usage[:completion_tokens_per_second]) ||
+        tokens_per_second(usage[:completion_tokens], usage[:eval_ms])
+    end
+
+    # The generation rate to show as RECENT (issue #285): the best number
+    # available for the request that just finished, preferring the one the
+    # server measured itself. Returns { rate:, server: } or nil when nothing
+    # supports a rate (the client's own seconds are only usable above the noise
+    # floor, and they are measured over the whole request - prefill included -
+    # so a client-timed rate UNDERSTATES generation speed and is labeled as
+    # not the server's).
+    def recent_generation_rate(usage, seconds)
+      return nil unless usage.is_a?(Hash)
+
+      server = rate_or_nil(usage[:completion_tokens_per_second]) ||
+        tokens_per_second(usage[:completion_tokens], usage[:eval_ms])
+      return { rate: server, server: true } if server
+
+      client = measured_rate(usage[:completion_tokens], seconds)
+      client && { rate: client, server: false }
+    end
+
+    # One rate as spinner/log text: unit-explicit, '~'-marked when the number
+    # is NOT the server's own measurement, and tagged (e.g. "last") when it
+    # describes an earlier request rather than the one in flight.
+    def rate_segment(rate, measured_by_server:, tag: nil)
+      return nil if rate.nil?
+
+      text = "#{measured_by_server ? '' : '~'}#{format_rate(rate)} tok/s"
+      tag ? "#{text} (#{tag})" : text
+    end
+
+    # A rate measured HERE, over (tokens, seconds) (nil below the noise floor).
+    def measured_rate(tokens, seconds)
+      return nil if tokens.to_i < MIN_RATE_TOKENS || seconds.to_f < MIN_RATE_SECONDS
+
+      tokens.to_f / seconds
     end
 
     def tokens_per_second(tokens, millis)
