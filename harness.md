@@ -81,6 +81,11 @@ Keep this in mind:
   is repo content the owner keeps. A `.env*` name stays blocked everywhere.
 - A skill body is never in the system prompt: names + one-line descriptions only,
   body on demand (`skills.read`, `/skills <name>`) - `doc/skills_design.md`.
+  The same rule holds for a memory (`memory.read`, `/memory <name>`) -
+  `doc/memory_design.md`.
+- A memory (issue #10) is a short durable note the model saves with `memory.add`:
+  it names a note NAME, never a path, so it needs no grant; `.harness/memories/`
+  itself stays blocked to the file tools. The store holds over sessions.
 - Access modes (read / write / delete) are tracked separately: a write grant
   implies read, but neither read nor write implies delete.
 - Destructive operations (file delete, dir delete) require a DELETE grant
