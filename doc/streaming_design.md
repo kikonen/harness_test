@@ -18,8 +18,9 @@ Claims that come from the API reference rather than from a measurement are marke
 ## What streaming is for, and what it is not
 
 Streaming exists so the user sees the answer while the model writes it: the
-spinner line carries the newest text of the answer instead of only the context
-estimate, and the spinner badge reads `[STREAM]` while the posture is on.
+spinner line carries the newest text of the answer (and the rate it is arriving
+at, issue #285) instead of only the context estimate, and the spinner badge reads
+`[STREAM]` while the posture is on.
 
 It is NOT a second response format. Both paths return the identical normalized
 shape (`{ choices: [{ message: { role:, content:, reasoning:, tool_calls: } }],
@@ -177,15 +178,16 @@ The task thread never writes to an IO stream (the single-thread I/O rule,
 `doc/task_design.md`). So a delta is not printed - it is published as state:
 
 ```
-task thread (on_delta)  -> StreamPreview#record  -> frozen snapshot slot
-main thread (spinner)   -> Harness#request_wait_suffix -> StreamPreview#tail_line
+task thread (on_delta)  -> StreamPreview#record  -> frozen snapshot + rate slot
+main thread (spinner)   -> Harness#request_wait_suffix -> tail_line / live_rate
 ```
 
 `SessionManager#request_spinner_detail` hands the spinner the harness's callable
-(`request_wait_suffix`), which returns the newest streamed text once the answer
-has started and falls back to `context_indicator_live` before that (and always,
-when not streaming). The spinner evaluates it on every drain frame, so the tail
-updates without any extra event on the outbox.
+(`request_wait_suffix`). While text is streaming it returns the newest text plus
+the rate that text arrived at; before that (prefill) and in buffered mode it
+returns `context_indicator_live` plus the rate of the request that last
+completed. The spinner evaluates it on every drain frame, so both update without
+any extra event on the outbox.
 
 `StreamPreview` publishes a FROZEN snapshot into one slot rather than appending
 to a shared String: the writer is the task thread, the reader is the main thread,
@@ -196,6 +198,34 @@ The tail is 60 characters of the NEWEST text (`MAX_TAIL`), newlines collapsed to
 spaces (a spinner line is one line), with a leading `...` when it is a tail. The
 oldest part is what gets dropped.
 
+## The live rate (issue #285)
+
+A tok/s reading on the spinner line cannot wait for the server: a server reports
+its own timings only on the LAST chunk of a stream (`doc/llm_stats.md`), and a
+buffered or unsupported server reports none at all. So while text is arriving the
+rate is measured HERE - `StreamPreview` takes its clock on the FIRST delta and
+divides the estimated token count by the seconds since, publishing the rate in the
+same snapshot update as the tail so the reader never recomputes from counters the
+writer is mutating.
+
+Two labels carry the honesty of the number:
+
+* `~` - the tokens are ESTIMATED from the stream's characters (`chars_per_token`
+  is injected from `Session::EST_CHARS_PER_TOKEN`, the same ratio the context
+  estimate uses, so the two agree instead of each having its own magic number). A
+  server-measured rate gets no `~`.
+* `(last)` - the rate describes the request that ALREADY finished, shown during
+  the next request's prefill or in buffered mode. A rate for the request in flight
+  is never tagged, and a rate of a past request is never shown untagged as if it
+  were the current one.
+
+`UsageStats::MIN_RATE_TOKENS` / `MIN_RATE_SECONDS` keep the reading off the line
+until there is a real window to measure: the first deltas of an answer, or a
+request that finished in a few milliseconds, are noise, not a speed. The clock
+starts at the first delta because prefill (processing the prompt, producing no
+text) is not generation - a construction-based clock would divide by the prefill
+too and report a speed far below the truth.
+
 ## Files
 
 ```
@@ -203,15 +233,17 @@ lib/llm/base_backend.rb        chat / chat_buffered / chat_streamed + retry poli
 lib/llm/stream_reader.rb       chunks -> complete lines (byte-level split)
 lib/llm/stream_decoder.rb      lines -> payloads (SSE + NDJSON)
 lib/llm/stream_accumulator.rb  payloads -> the normalized response
-lib/llm/stream_preview.rb      deltas -> the spinner's live tail (cross-thread)
+lib/llm/stream_preview.rb      deltas -> the spinner's live tail + live rate (cross-thread)
 lib/llm/stream_error.rb        StreamError / StreamStatusError
 lib/commands/stream_command.rb /stream on|off|status (toggle)
 ```
 
 On the harness side: `stream?` / `stream=` / `toggle_stream` /
-`stream_mode_label` / `stream_preview_line` / `request_wait_suffix` and the
-private `request_chain` own the posture and the live tail; `Task.mode_badge`
-renders the `[STREAM]` tag next to the consent-mode tag, both re-read per frame.
+`stream_mode_label` / `stream_preview_line` / `request_wait_suffix` /
+`last_rate_segment` / `record_last_rate` and the private `request_chain` (its own
+per-request clock) / `streaming_wait_line` / `waiting_line` own the posture, the
+live tail and the recent rate; `Task.mode_badge` renders the `[STREAM]` tag next
+to the consent-mode tag, both re-read per frame.
 
 ## Known limits
 
