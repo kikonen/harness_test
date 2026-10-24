@@ -4,6 +4,7 @@ require "time"
 require "securerandom"
 
 require_relative "session_file_cache"
+require_relative "llm/usage_stats"
 
 # -- Session --------------------------------------------------------------
 #
@@ -391,6 +392,9 @@ class Session
       if usage && usage[:total_tokens] > 0
         parts << "#{usage[:prompt_tokens]}→#{usage[:completion_tokens]} tokens (#{usage[:total_tokens]} total)"
       end
+      perf = LLM::UsageStats.performance_parts(@last_stats[:performance])
+      parts << perf.join(", ") unless perf.empty?
+
       lines << parts.join(", ")
     else
       lines << "No successful requests yet."

@@ -62,17 +62,21 @@ module LLM
           }
         }]
       }
-      normalized[:usage] = normalized_usage(json[:usage]) if json[:usage]
+      normalized[:usage] = normalized_usage(json) if json[:usage]
       normalized
     end
 
-    # OpenAI usage block: { prompt_tokens, completion_tokens, total_tokens }.
-    def normalized_usage(usage)
+    # OpenAI usage block: { prompt_tokens, completion_tokens, total_tokens },
+    # plus the performance the response reported beside it (#251: llama.cpp
+    # and Ollama's /v1 shim add prompt_tokens_details.cached_tokens and a
+    # top-level `timings` object to this shape).
+    def normalized_usage(json)
+      usage = json[:usage]
       {
         prompt_tokens: usage[:prompt_tokens].to_i,
         completion_tokens: usage[:completion_tokens].to_i,
         total_tokens: (usage[:total_tokens] || 0).to_i
-      }
+      }.merge(UsageStats.extended_usage(json))
     end
   end
 end

@@ -80,9 +80,12 @@ module LLM
       if json.key?(:prompt_eval_count) || json.key?(:eval_count)
         prompt     = json[:prompt_eval_count].to_i
         completion = json[:eval_count].to_i
-        normalized[:usage] = { prompt_tokens: prompt,
-                               completion_tokens: completion,
-                               total_tokens: prompt + completion }
+        usage = { prompt_tokens: prompt,
+                  completion_tokens: completion,
+                  total_tokens: prompt + completion }
+        # #251: the native Metrics block also reports prompt_eval_cached_count
+        # and the prompt_eval_duration / eval_duration nanoseconds.
+        normalized[:usage] = usage.merge(UsageStats.extended_usage(json))
       end
 
       normalized

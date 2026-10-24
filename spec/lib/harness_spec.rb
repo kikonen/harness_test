@@ -1131,6 +1131,84 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #251: the server-reported performance of a turn. Each request's
+  # cache depth / durations describe only that request, so the turn keeps the
+  # LAST request's measurement instead of summing measurements that were
+  # never taken together.
+  describe '#call_llm performance stats (issue #251)' do
+    # A scripted client whose responses may carry their own usage.
+    class PerformanceClient
+      def initialize(responses)
+        @responses = responses
+      end
+
+      def chat(_messages, tools: nil, timeout: nil, stream: false, on_delta: nil)
+        @responses.shift
+      end
+    end
+
+    def answer(usage)
+      { choices: [{ message: { content: 'done', reasoning: nil } }], usage: }
+    end
+
+    def tool_round(id, usage)
+      { choices: [{ message: { content: nil, reasoning: nil,
+                              tool_calls: [{ id: id, function: { name: 'test.echo',
+                                                                arguments: '{"text":"x"}' } }] } }],
+        usage: }
+    end
+
+    def harness_with(usage)
+      h = build_harness
+      h.instance_variable_set(:@client, PerformanceClient.new([answer(usage)]))
+      h.session.add_user('go')
+      h.call_llm[:stats]
+    end
+
+    it 'reports no performance when the server sent none' do
+      stats = harness_with({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 })
+
+      expect(stats[:performance]).to be_nil
+    end
+
+    it 'keeps the LAST request\'s measurement, not a sum of them' do
+      h = build_harness
+      h.instance_variable_set(:@client, PerformanceClient.new([
+        tool_round('c1', { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15,
+                           cached_tokens: 100, eval_ms: 1000.0 }),
+        answer({ prompt_tokens: 20, completion_tokens: 5, total_tokens: 25,
+                 cached_tokens: 900, eval_ms: 200.0 })
+      ]))
+      h.session.add_user('go')
+
+      stats = h.call_llm[:stats]
+
+      # The core accounting still sums across the turn (it always did).
+      expect(stats[:usage]).to eq(prompt_tokens: 30, completion_tokens: 10, total_tokens: 40)
+      expect(stats[:performance]).to eq(
+        cached_tokens: 900, eval_ms: 200.0, prompt_tokens: 20, completion_tokens: 5
+      )
+    end
+
+    it 'shows the performance on the stats line' do
+      stats = harness_with({ prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050,
+                             cached_tokens: 768, prompt_eval_ms: 1160.0, eval_ms: 1310.2 })
+      task = Task.new { }
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+      begin
+        build_harness.print_stats(stats)
+      ensure
+        Thread.current[:harness_task] = old_current
+      end
+
+      line = drained_lines(task).grep(/tokens \(/).first.to_s
+      expect(line).to include('768 cached')
+      expect(line).to include('prompt 200 tok/s')
+      expect(line).to include('gen 38.2 tok/s')
+    end
+  end
+
   # issue #224: a tool batch with SEVERAL run.command calls is checked with
   # ONE forked LLM call (one verdict line per command) BEFORE the first
   # consent dialog. Advisory only; errors degrade to a verdict-less flow.

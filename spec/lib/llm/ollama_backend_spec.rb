@@ -185,5 +185,35 @@ RSpec.describe LLM::OllamaBackend do
       result = parsed({ message: { role: 'assistant', content: 'c' } })
       expect(result).not_to have_key(:usage)
     end
+
+    # issue #251: the native Metrics block also reports the cache depth and
+    # the durations (integer nanoseconds per Ollama's API docs).
+    it 'carries the cached count and the durations as milliseconds' do
+      result = parsed({
+        message: { role: 'assistant', content: 'c' },
+        prompt_eval_count: 1000, prompt_eval_cached_count: 768,
+        prompt_eval_duration: 410_500_000, eval_count: 50, eval_duration: 1_310_200_000
+      })
+
+      expect(result[:usage]).to include(
+        prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050,
+        cached_tokens: 768, prompt_eval_ms: 410.5, eval_ms: 1310.2
+      )
+    end
+
+    it 'keeps the core usage alone when no Metrics extras are sent' do
+      result = parsed({ message: { content: 'c' }, prompt_eval_count: 10, eval_count: 5 })
+
+      expect(result[:usage]).to eq(prompt_tokens: 10, completion_tokens: 5, total_tokens: 15)
+    end
+
+    it 'carries a cached count even with no duration reported' do
+      result = parsed({
+        message: { content: 'c' }, prompt_eval_count: 1000, eval_count: 50,
+        prompt_eval_cached_count: 768
+      })
+
+      expect(result[:usage]).to include(cached_tokens: 768)
+    end
   end
 end
