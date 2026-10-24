@@ -1657,4 +1657,55 @@ RSpec.describe Harness do
       expect(h.skills.dir).to eq(File.join(workdir, '.harness', 'skills'))
     end
   end
+
+  # Issue #10: the store is one reader (Memories) shared by memory.* and /memory,
+  # and the harness hands that ONE object to every tool, so the two sides cannot
+  # disagree about which notes exist.
+  describe '#memories (issue #10)' do
+    it 'points at .harness/memories under this run\'s workdir' do
+      h = build_harness
+
+      expect(h.memories.dir).to eq(File.join(workdir, '.harness', 'memories'))
+      expect(h.memories.exist?).to be false
+      expect(h.memories.all).to eq([])
+    end
+
+    it 'registers the four memory tools over that same store' do
+      h = build_harness
+      tools = %w[memory.list memory.read memory.add memory.delete].map { |n| h.tool_registry.get(n) }
+
+      expect(tools.compact.size).to eq(4)
+      tools.each do |tool|
+        expect(tool.instance_variable_get(:@memories)).to equal(h.memories)
+      end
+    end
+
+    # The store holds over SESSIONS, so it is NOT session state: it is never
+    # serialized into session.json, and a note saved under one id is readable by
+    # a harness built under a different id in the same workdir.
+    it 'holds notes over a different session id in the same workdir' do
+      first = build_harness
+      first.tool_registry.get('memory.add').execute('name' => 'cross-session', 'text' => 'a fact')
+
+      later = build_harness
+      expect(later.session.session_id).not_to eq(first.session.session_id)
+      expect(later.memories.body('cross-session')).to eq('a fact')
+      expect(later.tool_registry.get('memory.read').execute('name' => 'cross-session')).to eq('a fact')
+    end
+
+    # A memory write is recorded in harness.log by the harness' own tool-call
+    # line - the same record every other tool change gets, nothing extra to keep
+    # in sync.
+    it 'records a memory write in this session\'s harness.log' do
+      h = build_harness
+      h.send(:execute_tool_call, {
+        id: 'c1',
+        function: { name: 'memory.add', arguments: JSON.generate(name: 'logged-note', text: 'a fact') }
+      })
+
+      log = File.read(h.session_log_path)
+      expect(log).to include("tool memory.add → ok: saved memory 'logged-note'")
+      expect(h.memories.body('logged-note')).to eq('a fact')
+    end
+  end
 end
