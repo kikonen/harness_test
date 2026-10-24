@@ -323,6 +323,15 @@ class Harness
     -> { streaming_wait_line || waiting_line }
   end
 
+  # The spinner suffix for a TOOL wait (issue #362): the live context estimate
+  # and NO rate segment - no request is in flight while a tool runs, so there is
+  # no speed to show. CommandRunner's own re-point reads it through this one
+  # place: a :spinner_detail payload with no suffix key would silently drop the
+  # suffix from the runner's remembered detail, so every tool wait carries it.
+  def tool_wait_suffix
+    -> { context_indicator_live }
+  end
+
   # The rate shown for the wait BEFORE the answer's text starts (prefill, or a
   # buffered request): the request that last completed. nil when this process
   # has not finished one yet - a spinner must not invent a speed.
@@ -771,6 +780,17 @@ class Harness
     w < 1000 ? w.to_s : "#{(w / 1000.0).round}K"
   end
 
+  # Re-points the spinner for ONE tool execution (issue #362). A tool that waits
+  # (a slow command, a consent dialog, a model safety check) leaves the outbox
+  # quiet, so the drain loop animates - and the detail it replays is the LLM
+  # request that already finished, so a long run.command reads as if the model
+  # were still generating. The message is the tool NAME only: the spinner appends
+  # its own "..." to every message, so a marker here would double the dots.
+  def announce_tool_call(name)
+    Task.emit(:spinner_detail, origin: :harness,
+              content: { message: name, suffix: tool_wait_suffix })
+  end
+
   def execute_tool_call(tool_call)
     func_name = tool_call[:function][:name]
     args_json = tool_call[:function][:arguments]
@@ -780,6 +800,8 @@ class Harness
     unless tool
       return "error: unknown tool '#{func_name}'"
     end
+
+    announce_tool_call(func_name)
 
     begin
       result = tool.execute(args)

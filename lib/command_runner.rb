@@ -461,6 +461,7 @@ class CommandRunner
   # only trace.
   def execute(command, dir, shown, timeout, limit, full_shown: false)
     name    = full_shown ? command_handle(command) : command
+    announce_run(command)
     started = Time.now
     output, shell_status = run_in_shell(command, dir, timeout)
     # Symbol (not Process::Status) signals the timeout path.
@@ -483,6 +484,23 @@ class CommandRunner
     end
 
     format_result(command, code, elapsed, output, out)
+  end
+
+  # Re-points the spinner for the run itself (issue #362). Waiting on the child
+  # process leaves the outbox quiet, so the drain loop animates - and the detail
+  # it would otherwise replay is the LLM request that already finished, so a
+  # 40-second run reads as if the model were still generating. Only the handle
+  # reaches the line: the spinner draws one line and a full command does not fit
+  # it. The handle's dropped-token marker is dropped HERE because the spinner
+  # appends its own "..." to every message, so the line carries ONE marker.
+  def announce_run(command)
+    task = defined?(Task) ? Task.current : nil
+    return nil unless task
+
+    handle = command_handle(command).sub(/ \.\.\.\z/, "")
+    suffix = @harness.respond_to?(:tool_wait_suffix) ? @harness.tool_wait_suffix : nil
+    task.push_event(type: :spinner_detail, origin: @label,
+                    content: { message: "#{@label}: #{handle}", suffix: })
   end
 
   # The dropped tail is marked " ...", so a handle can never be read as the
