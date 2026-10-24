@@ -88,19 +88,24 @@ RSpec.describe LLM::StreamPreview do
   end
 
   describe 'the tail length' do
+    # MAX_TAIL is the width of the SEGMENT the spinner draws and the truncation
+    # marker counts INSIDE it, so a truncated tail is always exactly MAX_TAIL
+    # wide: a segment that changed width would shift the rate segment and the
+    # posture badges drawn after it (issue #364).
     it 'keeps the newest part when the answer is longer than the tail' do
       subject, = preview(max_tail: 10)
       subject.record({ content: "0123456789abcdefghij" })
 
-      # The LAST max_tail characters: the newest part is what the user wants.
-      expect(subject.tail_line).to eq("...abcdefghij")
+      expect(subject.tail_line).to eq("…bcdefghij")
+      expect(subject.tail_line.length).to eq(10)
     end
 
-    it 'marks a truncated tail with a leading ellipsis' do
+    it 'marks a truncated tail with a leading marker' do
       subject, = preview(max_tail: 5)
       subject.record({ content: "123456789" })
 
-      expect(subject.tail_line).to start_with("...")
+      expect(subject.tail_line).to start_with(LLM::StreamPreview::TAIL_MARKER)
+      expect(subject.tail_line).to eq("…6789")
     end
 
     it 'does not mark a tail that is the whole answer' do
@@ -114,11 +119,32 @@ RSpec.describe LLM::StreamPreview do
       subject, = preview(max_tail: 6)
       subject.record({ reasoning: "reasoning longer than six" })
 
-      expect(subject.tail_line).to eq("...an six")
+      expect(subject.tail_line).to eq("…n six")
+    end
+
+    # The truncation decision is made against the source ACTUALLY shown: the
+    # reasoning overflowed, but the answer has started and its own 4 characters
+    # were never cut, so marking them as a tail would report a drop that did not
+    # happen (the old code checked both sources and displayed only one).
+    it 'does not mark a short answer whose reasoning overflowed' do
+      subject, = preview
+      subject.record({ reasoning: "x" * 200 })
+      subject.record({ content: "done" })
+
+      expect(subject.snapshot).to eq("done")
+      expect(subject.tail_line).to eq("done")
     end
 
     it 'defaults to a 60-char tail' do
       expect(described_class::MAX_TAIL).to eq(60)
+    end
+
+    it 'pads a truncated tail to the full segment width' do
+      subject, = preview(max_tail: 12)
+      subject.record({ content: "padding padding....  tail words" })
+
+      expect(subject.tail_line).to eq("…tail words ")
+      expect(subject.tail_line.length).to eq(12)
     end
 
     it 'collapses newlines so the tail stays one spinner line' do
@@ -126,6 +152,54 @@ RSpec.describe LLM::StreamPreview do
       subject.record({ content: "line one\nline two\n" })
 
       expect(subject.tail_line).not_to include("\n")
+    end
+  end
+
+  # The reported line was "Sending (qwen / openai)... .... The bottom": the cut
+  # landed INSIDE ellipsis the answer itself wrote, and the old three-dot marker
+  # was prepended in front of what the cut left. The marker now REPLACES that run,
+  # so it is always the segment's first character and can never be read as the
+  # answer's own writing - while dots further inside the tail stay untouched.
+  describe 'the tail seam (issue #364 follow-up: no redundant dots)' do
+    def tail_of(content, max_tail: LLM::StreamPreview::MAX_TAIL)
+      subject, = preview(max_tail:)
+      subject.record({ content: })
+      subject.tail_line
+    end
+
+    it 'replaces the dots the cut left instead of stacking onto them' do
+      # Same shape the owner saw: the answer wrote "...." a couple of characters
+      # past the cut, so the kept text BEGAN with ".. The bottom" and a marker in
+      # front of it read as "..... The bottom".
+      content = "I checked the file above the region in question. The fix is small" \
+                ".... The bottom line itself stays exactly as it is, unchanged."
+      tail = tail_of(content)
+
+      expect(tail).to eq("…The bottom line itself stays exactly as it is, unchanged.  ")
+      expect(tail).not_to match(/\A…[.…]/)
+      expect(tail.length).to eq(LLM::StreamPreview::MAX_TAIL)
+    end
+
+    it 'replaces the blanks the answer left after its own dots too' do
+      expect(tail_of("padding padding....  tail words", max_tail: 12)).to eq("…tail words ")
+    end
+
+    it 'replaces a single ellipsis glyph the answer wrote at the seam' do
+      subject, = preview(max_tail: 15)
+      subject.record({ content: "pad pad pad pad pad pad pad… tail words here" })
+
+      expect(subject.tail_line).to eq("…ail words here")
+    end
+
+    it "leaves the dots INSIDE the tail alone (they are the answer's text)" do
+      tail = tail_of("Let me summarize: the bottom of the file ends with a plain comment" \
+                     ".... The bottom line is unchanged.")
+
+      expect(tail).to eq("…ends with a plain comment.... The bottom line is unchanged.")
+    end
+
+    it 'leaves the dots of an answer that was not truncated alone' do
+      expect(tail_of("wait... done")).to eq("wait... done")
     end
   end
 

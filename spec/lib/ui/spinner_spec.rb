@@ -77,16 +77,25 @@ RSpec.describe UI::Spinner do
       expect(out).not_to include('Working... ')
     end
 
-    # Only the TRAILING blank is dropped: a LEADING one is the rate segment's
-    # column pad (issue #364) and content, not slack.
-    it 'strips trailing whitespace and keeps a leading blank' do
+    # The suffix is drawn VERBATIM: a leading blank reserves the rate number's
+    # tens column and a trailing blank pads the tail segment to its fixed width
+    # (issue #364). Only a blank-only suffix resolves to no suffix at all.
+    it 'renders the suffix verbatim, both leading and trailing blanks' do
       out = capture('Working', '  ctx 1/2 (50%)  ') do |spinner|
         spinner.start
         spinner.render!
         spinner.stop
       end
-      expect(out).to include('Working...   ctx 1/2 (50%)')
-      expect(out).not_to include('ctx 1/2 (50%) ')
+      expect(out).to include('Working...   ctx 1/2 (50%)  ')
+    end
+
+    it 'resolves a blank-only suffix to no suffix' do
+      out = capture('Working', '   ') do |spinner|
+        spinner.start
+        spinner.render!
+        spinner.stop
+      end
+      expect(out).to eq("\r\e[2K#{UI::Spinner::FRAMES[0]} Working...")
     end
 
     it 're-evaluates a callable suffix every frame so it tracks live state (issue #126)' do

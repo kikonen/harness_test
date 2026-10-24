@@ -6,12 +6,27 @@ module LLM
   # The live state of a streamed answer, for the spinner: its newest text and
   # the rate that text arrived at (issue #285).
   # Invariant: the writer is the task thread and the reader the main thread, so
-  # #record publishes a FROZEN snapshot into one slot rather than appending to a
-  # shared String. Threading, tail and rate rules: doc/streaming_design.md.
+  # #record publishes ONE frozen group into one slot rather than appending to a
+  # shared String - a reader can never pair a newer truncation decision with an
+  # older tail. Threading, tail and rate rules: doc/streaming_design.md.
   class StreamPreview
-    # How much of the answer the spinner can show. A spinner line is one
-    # line: the tail is the newest part, so the oldest is what gets dropped.
+    # The width of the tail segment the spinner shows: the newest part of the
+    # answer, with the truncation marker counted INSIDE that width. A fixed width
+    # is the point - the tail is redrawn every frame, and a segment that changes
+    # width shifts the rate segment and the posture badges drawn after it.
     MAX_TAIL = 60
+
+    # Prepended when older text was dropped. One character, because a three-dot
+    # marker in front of a kept tail that BEGINS with the dots of an ellipsis the
+    # ANSWER wrote read as ".... The bottom" - dots that look like content and
+    # are none. It is always the segment's first character.
+    TAIL_MARKER = "…"
+
+    # What the cut can leave at the seam: the tail of an ellipsis the answer
+    # itself wrote, and the blanks after it (a collapsed newline counts). The
+    # marker replaces this run; dots FURTHER inside the tail are the answer's own
+    # text and are left exactly as it wrote them.
+    CUT_SEAM = /\A[.…]*\s*/
 
     # The rate converts the stream's CHARACTERS to tokens; the caller injects
     # the ratio it uses everywhere else for estimates (Session#estimate_tokens),
@@ -23,8 +38,7 @@ module LLM
       @clock           = clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
       @full     = +""
       @thinking = +""
-      @snapshot = nil
-      @rate     = nil
+      @tail     = nil # [newest text, older text was dropped?, rate]
       # Taken on the first delta: prefill (processing the prompt) produces no
       # text, so a rate measured from before the answer started is not a
       # generation rate.
@@ -42,18 +56,21 @@ module LLM
       self
     end
 
-    # Main thread: the newest snapshot, or nil when nothing has arrived yet.
+    # Main thread: the newest tail text, or nil when nothing has arrived yet.
     def snapshot
-      @snapshot
+      @tail&.first
     end
 
-    # The spinner segment: the newest text of the answer, with a leading
-    # ellipsis when it is a tail. nil when the stream has said nothing yet.
+    # The spinner segment: the newest text of the answer, with a leading marker
+    # when older text was dropped. A truncated segment is always exactly
+    # MAX_TAIL characters. nil when the stream has said nothing yet.
     def tail_line
-      text = @snapshot
+      text, dropped = @tail
       return nil if text.nil? || text.empty?
 
-      (@full.length > @max_tail || @thinking.length > @max_tail) ? "...#{text}" : text
+      return text unless dropped
+
+      TAIL_MARKER + text.sub(CUT_SEAM, "").ljust(text_budget)
     end
 
     # The live generation rate in tokens/second: the value PUBLISHED with the
@@ -68,7 +85,7 @@ module LLM
     # estimated from characters (see #initialize), which is why the caller
     # labels the number as not the server's.
     def live_rate
-      @rate
+      @tail&.last
     end
 
     # Everything received so far (for the log line, not the console).
@@ -82,6 +99,11 @@ module LLM
 
     private
 
+    # The marker is part of the segment's width, so the text gets the rest of it.
+    def text_budget
+      @max_tail - TAIL_MARKER.length
+    end
+
     def started_at
       @started_at ||= @clock.call
     end
@@ -90,15 +112,18 @@ module LLM
       @clock.call - @started_at
     end
 
-    # Publishes the newest tail and the rate measured over it as one snapshot
-    # update. A spinner line is ONE line, so newlines in the answer collapse to
-    # spaces. NOTE: source[-max..] returns nil when max exceeds the length, so
-    # the whole source is used directly for a short answer.
+    # Publishes the newest tail, whether anything was dropped, and the rate
+    # measured over them as ONE frozen update. The truncation decision is made
+    # against the source ACTUALLY shown: text that was never dropped is never
+    # marked as if it were.
     def publish
       source = @full.empty? ? @thinking : @full
-      text = source.length > @max_tail ? source[-@max_tail..].to_s : source.dup
-      @snapshot = text.gsub("\n", " ").freeze
-      @rate     = UsageStats.measured_rate(received_tokens, elapsed_seconds)
+      dropped = source.length > text_budget
+      text = dropped ? source[-text_budget..].to_s : source.dup
+      @tail = [
+        text.gsub("\n", " ").freeze, dropped,
+        UsageStats.measured_rate(received_tokens, elapsed_seconds)
+      ].freeze
     end
   end
 end
