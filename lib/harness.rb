@@ -307,7 +307,7 @@ class Harness
   # see #request_wait_suffix).
   # THREADING: written by the task thread (the on_delta callback) and read by
   # the main thread (the spinner's per-frame suffix call); StreamPreview
-  # publishes frozen snapshots so the reader never sees a partial append.
+  # publishes one frozen group so the reader never sees a partial append.
   def stream_preview_line
     @stream_preview&.tail_line
   end
