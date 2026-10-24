@@ -159,8 +159,10 @@ toggles the YOLO posture: every `run.command` call then runs with no dialog
 and no model check (issue #221; the disaster denylist still asks).
 `/stream` [on|off|status] toggles streamed LLM responses (issue #28): each part
 of an answer is then consumed as it arrives and the spinner line shows the newest
-text of it (`[STREAM]` badge). The response the model loop receives is identical
-either way; a streamed request is retried only until the first part arrives.
+text of it with the rate it is arriving at (`[STREAM]` badge). Before the answer
+starts (and in buffered mode) the spinner shows the rate of the request that last
+completed (issue #285). The response the model loop receives is identical either
+way; a streamed request is retried only until the first part arrives.
 Initial posture: config key `streaming` (or a model profile's own key).
 
 ## Regenerating the shell parser
@@ -251,7 +253,11 @@ context), `test.echo` (test-only)
   ..."), the prompt line ("[model (effort)] [MANUAL] >") and the
   spinner line, which also carries the turn's elapsed time after the glyph
   and the posture badge at its end ("⠼ 12s Sending (model / api type)...
-  🧠 12% (160K) [YOLO]").
+  🧠 12% (160K) [YOLO]") - and while a request is in flight, a tokens/second
+  rate: the live rate of the answer streaming in, or the rate of the request
+  that last completed during the wait before it ("... 🧠 12% (160K) 31 tok/s
+  (last) [YOLO]", issue #285). A '~' marks a rate the harness estimated rather
+  than one the server measured.
 - The disaster denylist overrides every posture AND every stored grant: a
   well-known disaster (`rm -rf`, `mkfs`, `dd of=/dev/`, `sudo`, `git push -f`,
   `curl | sh`, a fork bomb, `format C:`, `diskpart`, `del /s /q`,

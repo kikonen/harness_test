@@ -103,7 +103,13 @@ resume still reports the last measured turn.
   tok/s | ctx`) - the `⚡` part is absent when nothing was measured.
 - `/session` last-request line, same fragments.
 
-Related: #285 wants a live tok/s in the spinner. That needs a rate DURING the
-request, which only a streamed transport can provide; this issue only fixes
-what is recorded once the response is in, and the normalized keys above are
-the vocabulary such a spinner would read.
+## What #285 (tok/s in the spinner) reads
+
+Issue #285 asks for a live rate on the spinner. A spinner cannot wait for these
+fields: `completion_tokens_per_second` / `eval_ms` describe a generation that has
+ALREADY finished, and on a stream they only arrive on the last chunk. So the
+spinner measures the live rate itself, from the deltas (`StreamPreview#live_rate`,
+`doc/streaming_design.md`), and uses these keys for what it can honestly take
+from the past: `recent_generation_rate` prefers `completion_tokens_per_second`,
+then `completion_tokens / eval_ms`, and only then the harness's own request clock.
+The server-measured number carries no `~`; the harness's own estimate does.
