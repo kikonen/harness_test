@@ -21,6 +21,13 @@ module LLM
     MIN_RATE_TOKENS  = 4
     MIN_RATE_SECONDS = 0.25
 
+    # The spinner's number column (issue #364): the rate is the slot redrawn
+    # every frame, and a value that changes WIDTH between frames shifts the
+    # posture badges after it and makes the reading jump. One decimal always,
+    # and a narrower value reserves the tens column with a leading space, so
+    # every rate up to 99.9 is exactly this many characters.
+    STABLE_RATE_WIDTH = 4
+
     # A native duration is an integer count of nanoseconds per Ollama's API
     # docs; the Go Duration type can also marshal one as a string ("1m2.5s").
     DURATION_UNITS = {
@@ -145,10 +152,13 @@ module LLM
     # One rate as spinner/log text: unit-explicit, '~'-marked when the number
     # is NOT the server's own measurement, and tagged (e.g. "last") when it
     # describes an earlier request rather than the one in flight.
-    def rate_segment(rate, measured_by_server:, tag: nil)
+    # pad: the width-stable number for the SPINNER only (issue #364) - see
+    # format_stable_rate. A log line names the same rate without padding.
+    def rate_segment(rate, measured_by_server:, tag: nil, pad: false)
       return nil if rate.nil?
 
-      text = "#{measured_by_server ? '' : '~'}#{format_rate(rate)} tok/s"
+      number = pad ? format_stable_rate(rate) : format_rate(rate)
+      text = "#{measured_by_server ? '' : '~'}#{number} tok/s"
       tag ? "#{text} (#{tag})" : text
     end
 
@@ -167,6 +177,19 @@ module LLM
 
     def format_rate(rate)
       format("%.1f", rate).sub(/\.0\z/, "")
+    end
+
+    # The spinner's number, in its own column: one decimal ALWAYS (so a rate of
+    # 31.04 does not render as "31" on one frame and "31.4" on the next), and a
+    # value narrower than the column reserves the tens column with a LEADING
+    # space (" 9.0", "99.9") so every rate up to 99.9 is exactly
+    # STABLE_RATE_WIDTH characters. Above that the number grows naturally
+    # ("123.4" - the 292.3 a prompt rate was measured at): padding a number
+    # wider than the band would only pretend it is smaller than it is. Only the
+    # number is padded; the '~' marker and the unit text ride outside the
+    # column.
+    def format_stable_rate(rate)
+      format("%.1f", rate).rjust(STABLE_RATE_WIDTH)
     end
 
     def duration_ms(value)

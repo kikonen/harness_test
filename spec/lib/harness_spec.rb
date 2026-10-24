@@ -1632,6 +1632,30 @@ RSpec.describe Harness do
       expect(h.last_rate_segment).to be_nil
       expect(h.request_wait_suffix.call).to eq(h.context_indicator_live)
     end
+
+    # Issue #364: the number the SPINNER draws is width-stable (see
+    # UsageStats.format_stable_rate), so a rate under 100 keeps its column and
+    # a frame that changes the rate cannot shift the posture badge after it.
+    # Only the spinner asks for it: a log line names the same rate unpadded.
+    it 'pads the rate number on the spinner line, not in the log form' do
+      h = build_harness
+      h.record_last_rate({ completion_tokens: 20, completion_tokens_per_second: 9.0 }, 4.0)
+
+      expect(h.last_rate_segment).to eq('9 tok/s (last)')
+      expect(h.last_rate_segment(pad: true)).to eq(' 9.0 tok/s (last)')
+      expect(h.request_wait_suffix.call).to end_with(' 9.0 tok/s (last)')
+    end
+
+    # A spinner suffix must never be an empty segment: the leading pad belongs
+    # to the number, not to the separator the spinner adds before the suffix.
+    it 'keeps the padded rate behind the context indicator on one line' do
+      h = build_harness
+      h.session.add_user('a' * 400)
+      h.record_last_rate({ completion_tokens: 20, completion_tokens_per_second: 9.0 }, 4.0)
+
+      expect(h.request_wait_suffix.call)
+        .to eq("#{h.context_indicator_live}  9.0 tok/s (last)")
+    end
   end
 
   describe '#skills (issue #12)' do

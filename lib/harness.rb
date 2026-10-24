@@ -326,13 +326,16 @@ class Harness
   # The rate shown for the wait BEFORE the answer's text starts (prefill, or a
   # buffered request): the request that last completed. nil when this process
   # has not finished one yet - a spinner must not invent a speed.
-  def last_rate_segment
+  # pad: the width-stable number for the SPINNER (issue #364). A log line that
+  # names the same rate reads it without padding - prose does not need a column.
+  def last_rate_segment(pad: false)
     return nil if @last_rate.nil?
 
     LLM::UsageStats.rate_segment(
       @last_rate[:rate],
       measured_by_server: @last_rate[:server],
-      tag: "last"
+      tag: "last",
+      pad:
     )
   end
 
@@ -694,7 +697,9 @@ class Harness
     tail = stream_preview_line
     return nil if tail.nil?
 
-    rate = LLM::UsageStats.rate_segment(@stream_preview&.live_rate, measured_by_server: false)
+    rate = LLM::UsageStats.rate_segment(
+      @stream_preview&.live_rate, measured_by_server: false, pad: true
+    )
     rate ? "#{tail} #{rate}" : tail
   end
 
@@ -703,7 +708,7 @@ class Harness
   # to show. nil when NEITHER has anything (no conversation yet and no completed
   # request) - the spinner's contract is "no suffix", not an empty segment.
   def waiting_line
-    parts = [context_indicator_live, last_rate_segment].compact
+    parts = [context_indicator_live, last_rate_segment(pad: true)].compact
     return nil if parts.empty?
 
     parts.join(" ")
