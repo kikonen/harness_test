@@ -1512,6 +1512,53 @@ RSpec.describe Harness do
       expect(seen).to eq('arriving text')
     end
 
+    # issue #368: while a tool call streams, no text is arriving, so a line built
+    # from the (frozen) tail reads as a dead connection. The phase names the tool.
+    it 'names the tool call the model is writing instead of the frozen tail' do
+      h = build_harness(stream: true)
+      seen = nil
+      client = instance_double('client')
+      allow(client).to receive(:chat) do |_messages, **kwargs|
+        kwargs[:on_delta].call({ content: 'I will write the file' })
+        kwargs[:on_delta].call({ tool_call_names: ['file.write'] })
+        # The argument fragment carries no name - the phase must still be known.
+        kwargs[:on_delta].call({ tool_call_names: ['file.write'] })
+        seen = h.request_wait_suffix.call
+        { choices: [{ message: { content: 'I will write the file' } }], usage: {} }
+      end
+      h.instance_variable_set(:@client, client)
+      h.session.add_user('go')
+
+      h.call_llm
+
+      expect(seen).to eq("writing tool call: file.write #{h.context_indicator_live}")
+    end
+
+    # The reason the phase line carries NO rate: no text is arriving to measure,
+    # and a rate computed over that window decays frame by frame - the exact
+    # "the connection is dying" reading the phase exists to replace.
+    it 'shows no tok/s rate during the tool-call phase' do
+      h = build_harness(stream: true)
+      seen = nil
+      client = instance_double('client')
+      allow(client).to receive(:chat) do |_messages, **kwargs|
+        kwargs[:on_delta].call({ content: 'x' * 80 })
+        sleep 0.2
+        kwargs[:on_delta].call({ content: 'y' * 80 })
+        kwargs[:on_delta].call({ tool_call_names: ['file.write'] })
+        sleep 0.5 # a real pause, so a rate WOULD have been measurable if shown
+        seen = h.request_wait_suffix.call
+        { choices: [{ message: { content: 'done' } }], usage: {} }
+      end
+      h.instance_variable_set(:@client, client)
+      h.session.add_user('go')
+
+      h.call_llm
+
+      expect(seen).not_to include('tok/s')
+      expect(seen).to start_with('writing tool call: file.write')
+    end
+
     it 'falls back to the context estimate when nothing is streaming' do
       h = build_harness
       h.session.add_user('a' * 400)

@@ -264,6 +264,52 @@ RSpec.describe LLM::StreamPreview do
     end
   end
 
+  # issue #368: while the model writes a tool call, no TEXT is arriving, so the
+  # tail stops moving and the line reads as a frozen connection. The phase
+  # segment is what replaces it - and it carries no rate, because a rate
+  # measured over a window in which nothing arrives decays frame by frame and
+  # would read as a connection dying.
+  describe '#tool_call_line (issue #368)' do
+    it 'is nil while the answer has produced no tool call' do
+      subject, = preview
+      subject.record({ content: "reading the file" })
+
+      expect(subject.tool_call_line).to be_nil
+    end
+
+    it 'names the tool the model is writing' do
+      subject, = preview
+      subject.record({ tool_call_names: ["file.write"] })
+
+      expect(subject.tool_call_line).to eq("writing tool call: file.write")
+    end
+
+    # A fragment can arrive before its name (or a server can stream the name in
+    # a chunk of its own); the phase is still worth showing.
+    it 'shows the bare phase when no name is known yet' do
+      subject, = preview
+      subject.record({ tool_call_names: [] })
+
+      expect(subject.tool_call_line).to eq("writing tool call")
+    end
+
+    it 'lists every call of a streamed batch' do
+      subject, = preview
+      subject.record({ tool_call_names: %w[file.read file.write] })
+
+      expect(subject.tool_call_line).to eq("writing tool call: file.read, file.write")
+    end
+
+    it 'stays published for the later argument fragments (sticky, not per-chunk)' do
+      subject, = preview
+      subject.record({ tool_call_names: ["file.write"] })
+      subject.record({ content: "" })
+      subject.record({})
+
+      expect(subject.tool_call_line).to eq("writing tool call: file.write")
+    end
+  end
+
   describe 'the snapshot (the cross-thread contract)' do
     it 'publishes an immutable snapshot the reader cannot mutate' do
       subject, = preview

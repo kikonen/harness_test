@@ -28,6 +28,11 @@ module LLM
     # text and are left exactly as it wrote them.
     CUT_SEAM = /\A[.…]*\s*/
 
+    # The segment shown while the model is writing a tool call (issue #368). The
+    # names follow it; a fragment that arrived before the name shows the bare
+    # phase, which is still better than a line that looks frozen.
+    TOOL_PHASE = "writing tool call"
+
     # The rate converts the stream's CHARACTERS to tokens; the caller injects
     # the ratio it uses everywhere else for estimates (Session#estimate_tokens),
     # so the spinner's rate and its context estimate agree instead of each
@@ -43,14 +48,21 @@ module LLM
       # text, so a rate measured from before the answer started is not a
       # generation rate.
       @started_at = nil
+      # Frozen Array of the tool-call names seen so far, or nil while no tool
+      # call has started. One reference assignment, same contract as @tail.
+      @tool_call  = nil
     end
 
-    # Task thread: consume one delta ({ content:, reasoning: }).
+    # Task thread: consume one delta ({ content:, reasoning:, tool_call_names: }).
     def record(delta)
       return self unless delta.is_a?(Hash)
 
       @full     << delta[:content].to_s   if delta.key?(:content)
       @thinking << delta[:reasoning].to_s if delta.key?(:reasoning)
+      # Sticky for the request: a tool call that started arriving stays known
+      # even while its later fragments carry no name, which is the whole point -
+      # the phase is what the spinner must show, not the last fragment.
+      note_tool_calls(delta[:tool_call_names]) if delta.key?(:tool_call_names)
       started_at
       publish
       self
@@ -88,6 +100,19 @@ module LLM
       @tail&.last
     end
 
+    # Main thread: the tool-call phase segment, or nil while the answer has
+    # produced no tool call. NO rate is shown with it: no text is arriving to
+    # measure, and a rate recomputed while nothing arrives DECAYS frame by frame
+    # (9.0 -> 4.5 -> 2.2), which reads as a connection dying (measured in
+    # issue #368's probe).
+    def tool_call_line
+      names = @tool_call
+      return nil if names.nil?
+      return TOOL_PHASE if names.empty?
+
+      "#{TOOL_PHASE}: #{names.join(', ')}"
+    end
+
     # Everything received so far (for the log line, not the console).
     def received_chars
       @full.length + @thinking.length
@@ -102,6 +127,14 @@ module LLM
     # The marker is part of the segment's width, so the text gets the rest of it.
     def text_budget
       @max_tail - TAIL_MARKER.length
+    end
+
+    # The names known so far, frozen as one Array. A fragment may add a name;
+    # fragments that add none keep the names already published.
+    def note_tool_calls(names)
+      return unless names.is_a?(Array)
+
+      @tool_call = (@tool_call.to_a | names).freeze
     end
 
     def started_at

@@ -32,8 +32,9 @@ module LLM
     end
 
     # Consumes one parsed chunk. Returns the deltas it added
-    # ({ content:, reasoning: }, nil for a part with nothing) so the caller
-    # can show them while the answer is still arriving.
+    # ({ content:, reasoning:, tool_call_names: }, {} for a part with nothing)
+    # so the caller can show them while the answer is still arriving.
+    # tool_call_names is present for ANY chunk that carried tool-call fragments.
     def feed(json)
       return {} unless json.is_a?(Hash)
 
@@ -56,6 +57,10 @@ module LLM
       end
       @role ||= delta[:role] if delta[:role]
       add_tool_calls(delta[:tool_calls])
+      # Only the NAMES cross the callback boundary, never the arguments: a
+      # file.write's arguments are a whole file, and the live consumer draws ONE
+      # line (issue #368).
+      out[:tool_call_names] = tool_call_names if delta[:tool_calls].is_a?(Array)
       out
     end
 
@@ -139,6 +144,10 @@ module LLM
     # One tool call, keyed so fragments of the same call land together.
     def call_key(call, position)
       call[:index] || call[:id] || position
+    end
+
+    def tool_call_names
+      @tool_calls.values.filter_map { |call| call[:name] }.freeze
     end
 
     def add_tool_calls(calls)
