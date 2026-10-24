@@ -336,4 +336,8 @@ doc/sensitive_paths_design.md  # the sensitive-path guard and its scratch-zone
 doc/external_editor.md   # Ctrl+G -> external editor: why a key, how the
                         # buffer snapshot and the child spawn stay off each
                         # other's terminal
+doc/llm_stats.md        # the server-reported performance fields a response
+                        # may carry (cache depth, phase durations, draft
+                        # counts), the wire names they come from, and why
+                        # they are never summed across a turn
 ```

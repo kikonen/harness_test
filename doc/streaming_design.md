@@ -138,6 +138,11 @@ already reads both usage shapes: OpenAI nests the answer in
   for every streamed turn - that is why `OpenaiBackend#build_body` sends it. The
   native endpoint reports the eval counts on the final line either way, so
   `OllamaBackend` needs no extra field.
+  The optional performance fields ride the same final chunk (llama.cpp attaches
+  its `timings` to the last delta, the native endpoint reports its Metrics on
+  the done line) - `StreamAccumulator` keeps them until the usage is assembled,
+  so the normalized response is identical to the buffered path's (issue #251,
+  `doc/llm_stats.md`).
 
 ## The retry boundary (the cost of streaming)
 
