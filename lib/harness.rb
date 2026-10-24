@@ -315,6 +315,9 @@ class Harness
   # The spinner suffix for the wait this request owns (issue #285):
   #   while a streamed answer is arriving  "<newest text> ~38 tok/s"
   #   before that (prefill) or when buffered  "🧠 12% (160K) 31 tok/s (last)"
+  #   while a streamed TOOL CALL is being written  "writing tool call: file.write
+  #   🧠 12% (160K)" - no rate, and the (frozen) tail is not shown either
+  #   (issue #368).
   # The live rate is '~' because its tokens are ESTIMATED from the stream's
   # characters; the "(last)" rate is the previous request's own measurement,
   # '~' only when the server did not measure it. Neither is ever shown for the
@@ -699,10 +702,24 @@ class Harness
     end
   end
 
-  # The streaming segment of the spinner suffix: the tail plus the rate its own
-  # text arrived at, or nil while nothing has arrived so the waiting line applies
-  # instead.
+  # The tool-call segment plus the live context estimate, and NO rate: with no
+  # text arriving there is nothing to measure, and a rate computed over an
+  # arriving-nothing window decays frame by frame (9.0 -> 4.5 -> 2.2, measured),
+  # which is the exact "connection is dying" reading this segment exists to
+  # replace. The context estimate is the live part that stays on the line.
+  def tool_phase_line(phase)
+    [phase, context_indicator_live].compact.join(" ")
+  end
+
+  # The streaming segment of the spinner suffix, or nil while nothing has
+  # arrived so the waiting line applies instead. A tool call being written
+  # REPLACES the tail: while the model writes one, no text is arriving, so the
+  # tail has stopped moving and a line built on it reads as a frozen connection
+  # (issue #368).
   def streaming_wait_line
+    phase = @stream_preview&.tool_call_line
+    return tool_phase_line(phase) if phase
+
     tail = stream_preview_line
     return nil if tail.nil?
 

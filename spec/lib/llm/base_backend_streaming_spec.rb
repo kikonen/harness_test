@@ -248,6 +248,30 @@ RSpec.describe "BaseBackend streaming" do
       end
     end
 
+    # issue #368: BaseBackend#forward_delta skips an EMPTY delta, so a chunk that
+    # carried only tool-call fragments used to reach the caller as nothing - the
+    # spinner never learned a tool call was being written. The accumulator now
+    # reports the names, so the delta is not empty and the phase arrives.
+    it 'hands a tool-call-only chunk to on_delta with its names' do
+      server = ChunkedServer.new(parts: [
+        sse('{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1",' \
+            '"function":{"name":"file.write","arguments":""}}]}}]}'),
+        sse('{"choices":[{"delta":{"tool_calls":[{"index":0,' \
+            '"function":{"arguments":"{\"content\":\"body\"}"}}]}}]}')
+      ])
+      begin
+        deltas = []
+        backend_for(server.port).chat([{ role: 'user', content: 'hi' }],
+                                      stream: true,
+                                      on_delta: ->(d) { deltas << d })
+
+        expect(deltas.map { |d| d[:tool_call_names] }).to eq([['file.write'], ['file.write']])
+        expect(deltas).not_to include({})
+      ensure
+        server.close
+      end
+    end
+
     it 'logs one REQ line marked streaming and one RESP line with streamed bytes' do
       server = ChunkedServer.new(parts: [sse('{"choices":[{"delta":{"content":"hi"}}]}')])
       begin

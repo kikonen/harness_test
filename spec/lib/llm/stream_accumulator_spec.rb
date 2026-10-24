@@ -114,6 +114,42 @@ RSpec.describe LLM::StreamAccumulator do
 
       expect(acc.to_response[:choices][0][:message][:tool_calls][0][:function][:arguments]).to eq("{}")
     end
+    # issue #368: the spinner must show WHICH tool the model is writing while it
+    # is still writing it, so the names cross the delta boundary. The arguments
+    # do not: for a file.write they are the whole file, and the live consumer
+    # draws one line.
+    it 'reports the tool names in the delta so the caller can show them live' do
+      expect(acc.feed({ choices: [{ delta: { tool_calls: [
+        { index: 0, id: "c1", function: { name: "file.write", arguments: "" } }
+      ] } }] })).to eq({ tool_call_names: ["file.write"] })
+    end
+
+    it 'reports a name-less argument fragment (the name is already known)' do
+      acc.feed({ choices: [{ delta: { tool_calls: [
+        { index: 0, id: "c1", function: { name: "file.write", arguments: "" } }
+      ] } }] })
+
+      names = acc.feed({ choices: [{ delta: { tool_calls: [
+        { index: 0, function: { arguments: '{"content":' } }
+      ] } }] })[:tool_call_names]
+
+      expect(names).to eq(["file.write"])
+      expect(names).to be_frozen
+    end
+
+    # The names are the ACCUMULATED ones, so a later call's name adds to the
+    # earlier one's instead of replacing it (a batch of tool calls streams one
+    # at a time).
+    it 'reports every call named so far' do
+      acc.feed({ choices: [{ delta: { tool_calls: [
+        { index: 0, id: "a", function: { name: "file.read", arguments: "{}" } },
+        { index: 1, id: "b", function: { name: "file.write", arguments: "{}" } }
+      ] } }] })
+
+      expect(acc.feed({ choices: [{ delta: { tool_calls: [
+        { index: 1, function: { arguments: "more" } }
+      ] } }] })[:tool_call_names]).to eq(%w[file.read file.write])
+    end
   end
 
   describe 'usage' do
