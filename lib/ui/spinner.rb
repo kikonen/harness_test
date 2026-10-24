@@ -167,13 +167,14 @@ module UI
     # used as-is. Any failure resolves to no suffix - the spinner must never
     # abort because of a transient read error while the task thread mutates
     # the session (issue #40 single-thread I/O rule).
-    # Only TRAILING blanks are dropped: a LEADING one is content, the rate
-    # segment's column pad (issue #364), and stripping it would put the number
-    # back in the jumping position the pad exists to avoid.
+    # The text is drawn VERBATIM: every blank in it is the segment's own column -
+    # a leading one reserves the rate number's tens column, a trailing one pads
+    # the tail segment to its fixed width - and stripping either would move what
+    # comes after it (issue #364). The spinner adds only its ONE separator space.
     def render_suffix
       value = @suffix.respond_to?(:call) ? @suffix.call : @suffix
-      text  = value.to_s.rstrip
-      text.empty? ? "" : " #{text}"
+      text  = value.to_s
+      text.strip.empty? ? "" : " #{text}"
     rescue StandardError
       ""
     end

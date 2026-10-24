@@ -1573,7 +1573,10 @@ RSpec.describe Harness do
       # The tail first, then the rate its own text arrived at ('~' because the
       # token count is estimated from characters), and no "(last)" tag: this
       # rate describes the request in flight.
-      expect(seen).to match(/\Ahello there arriving text ~\d+(\.\d+)? tok\/s\z/)
+      # The spinner number is the width-stable form (issue #364): one decimal
+      # always, and a leading space under 100 - so the pattern allows the pad
+      # column rather than assuming the measured rate happens to be wide.
+      expect(seen).to match(/\Ahello there arriving text ~ ?\d+\.\d tok\/s\z/)
     end
 
     it 'shows only the tail while the text is too short to measure yet' do
