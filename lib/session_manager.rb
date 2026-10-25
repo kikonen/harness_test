@@ -24,7 +24,8 @@ class SessionManager
   # issue #108: in-loop compaction instruction - mid-turn, there is no verbatim
   # tail to carry detail, so the summary must be a complete hand-off of the
   # work state (including tool results) for continuing the task in progress.
-  INLOOP_SUMMARY_INSTRUCTION = "Summarize the ENTIRE conversation and tool work above as a " \
+  INLOOP_SUMMARY_INSTRUCTION = "Summarize the ENTIRE conversation and tool work above " \
+    "(the work done, not the system rules you were given) as a " \
     "hand-off for continuing an in-progress task. Include: " \
     "(1) the original goal, (2) every step already completed with its " \
     "concrete results (file paths, SHAs, command outputs when available), " \
@@ -149,12 +150,12 @@ class SessionManager
   end
 
   # issue #108: ask the LLM for a summary of an arbitrary message chain.
-  # conversation is expected WITHOUT the system message. Returns the
-  # stripped summary text. Used by both #compact_session (end-of-turn, with a
-  # retained tail) and Harness#check_inloop_compaction (mid-turn, no tail).
-  def generate_compact_summary(conversation, instruction)
+  # The chain is sent AS IS (system message included) so the call stays a
+  # prefix of the live prompt - why: doc/compaction_cache_design.md. Returns the
+  # stripped summary text. Used by #compact_session and #check_inloop_compaction.
+  def generate_compact_summary(chain, instruction)
     max_words = @harness.compact_max_size || 500
-    messages = conversation + [
+    messages = chain + [
       {
         role: "user",
         content: "#{instruction} " \
@@ -185,8 +186,10 @@ class SessionManager
         "session too small to compact (need at least 4 conversation messages)"
     end
 
-    conversation = @harness.session.messages[1..] # skip the system message
-    end_instruction = "Summarize the entire conversation above in a concise, structured format. " \
+    # The FULL chain, so the summary call is a prefix of the live prompt (#246).
+    chain = @harness.session.messages
+    end_instruction = "Summarize the entire CONVERSATION above (the work done, not the " \
+      "system rules you were given) in a concise, structured format. " \
       "Include: (1) what was being worked on, (2) key decisions made, " \
       "(3) files that were modified or created, (4) any pending tasks or " \
       "unresolved issues, (5) important context needed to continue. "
@@ -202,7 +205,7 @@ class SessionManager
         suffix: -> { @harness.context_indicator_live }
       })
 
-    summary_text = generate_compact_summary(conversation, end_instruction)
+    summary_text = generate_compact_summary(chain, end_instruction)
     @harness.session.compact(summary_text, recent_count: @harness.compact_recent_messages)
     after = @harness.session.messages.size
     retained = [after - 3, 0].max
@@ -263,8 +266,7 @@ class SessionManager
     # Only compact when there is real work to summarize: a single short
     # exchange never reaches the threshold anyway, but guard against an
     # absurdly small window combined with a huge system prompt.
-    conversation = messages.size > 1 ? messages[1..] : []
-    return false if conversation.size < 4
+    return false if messages.size - 1 < 4 # the guard counts conversation messages
 
     # issue #151: report the effective trigger for THIS window (it depends
     # on context size), not just the raw usage percentage.
@@ -284,7 +286,7 @@ class SessionManager
         suffix: -> { @harness.context_indicator_live(messages) }
       })
 
-    summary_text = generate_compact_summary(conversation, INLOOP_SUMMARY_INSTRUCTION)
+    summary_text = generate_compact_summary(messages, INLOOP_SUMMARY_INSTRUCTION)
     new_chain = [
       { role: "system", content: @harness.session.system_prompt },
       {
