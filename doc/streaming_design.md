@@ -189,6 +189,25 @@ returns `context_indicator_live` plus the rate of the request that last
 completed. The spinner evaluates it on every drain frame, so both update without
 any extra event on the outbox.
 
+### A tool call being written is NOT text arriving (issue #368)
+
+While the model streams a tool call, `content` / `reasoning` produce NOTHING: the
+tool call's arguments arrive as `tool_calls` fragments instead. The tail therefore
+stops moving, and the line the user reads is the last reasoning sentence with a rate
+that DECAYS frame by frame (measured: 17.4 -> 8.7 -> 5.8 -> 4.3 tok/s over four
+fragments), because elapsed advances while no text arrives. That renders as a
+connection dying, and it is not one.
+
+So the phase replaces the tail. `StreamAccumulator#feed` reports
+`tool_call_names` for ANY chunk that carried tool-call fragments (the NAMES only,
+never the arguments: for a file.write the arguments are the whole file and the
+consumer draws one line), `StreamPreview` keeps them STICKY for the request (a
+later fragment carries no name - the phase is what matters, not the last chunk),
+and `#tool_call_line` renders "writing tool call: <names>" with the live context
+estimate and **no rate** (the decaying number is the exact reading this segment
+exists to remove). `Harness#streaming_wait_line` puts the phase FIRST: when one is
+published, the tail is not shown at all.
+
 `StreamPreview` publishes a FROZEN snapshot into one slot rather than appending
 to a shared String: the writer is the task thread, the reader is the main thread,
 and a reference assignment is atomic where an in-place append is not. The reader
