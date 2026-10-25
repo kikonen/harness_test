@@ -354,6 +354,38 @@ RSpec.describe CLI do
     end
   end
 
+  # issue #33: web.fetch may not reach a private address unless the USER asked
+  # for it, and the only way to ask is the config key - so the CLI's own option
+  # resolution is what carries it. These run parse_options directly (with -c, so
+  # no user-home config is touched) because the rest of this file injects a
+  # finished options hash and never resolves config keys at all.
+  describe 'option resolution - web.fetch private-address key (issue #33)' do
+    def resolve(argv)
+      original = ARGV.dup
+      ARGV.replace(argv)
+      described_class.allocate.send(:parse_options)
+    ensure
+      ARGV.replace(original)
+    end
+
+    def write_config(body)
+      path = File.join(workdir, 'fetch-config.yml')
+      File.write(path, body)
+      path
+    end
+
+    it 'is off when the config says nothing' do
+      opts = resolve(['-m', 'test-model', '-d', workdir, '-c', write_config("model: test-model\n")])
+      expect(opts[:web_fetch_allow_private]).to be(false)
+    end
+
+    it 'is on when the config asks for it' do
+      path = write_config("model: test-model\nweb_fetch_allow_private: true\n")
+      opts = resolve(['-m', 'test-model', '-d', workdir, '-c', path])
+      expect(opts[:web_fetch_allow_private]).to be(true)
+    end
+  end
+
   describe '#run' do
     it 'prints the session id and its log path in the banner' do
       cli = build_cli

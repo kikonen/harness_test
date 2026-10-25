@@ -101,6 +101,13 @@ Keep this in mind:
   it to harness.log.
 - Consent state is user-side harness state, never conversation state: it is
   never injected into the conversation chain.
+- Two consent systems exist and neither one authorizes the other (issue #33):
+  the SHELL one (postures + `allowed_commands.yml` prefixes, `run.command`) and
+  the NETWORK one (`web.fetch`, `allowed_hosts.yml`, `web_fetch_allow_private`).
+  A grant for a host says only that the host may be ASKED for - it never widens
+  what the fetch may do to the address it resolves to, and no fetch rule
+  (scheme, address guard, redirect re-check, byte cap) is grantable or
+  model-settable. Rationale: `doc/web_fetch_design.md`.
 - Line endings: the harness normalizes to LF for LLM-facing operations
   (read, search, patch matching) but a file's own style is read from its BYTES
   (a text-mode read erases it) and preserved on write: `doc/file_editing_design.md`.

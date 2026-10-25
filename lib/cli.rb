@@ -198,6 +198,9 @@ class CLI
     # to the conservative value (YOLO off, bang confirmation on).
     opts[:yolo] = config.yolo_enabled?
     opts[:bang_requires_confirmation] = config.bang_requires_confirmation?
+    # issue #33: web.fetch private-address opt-in (default off). A user-side
+    # posture only - the model cannot set it and no tool argument can.
+    opts[:web_fetch_allow_private] = config.web_fetch_allow_private?
 
     # issue #28: initial streaming posture. A profile's own 'streaming' key
     # wins over the global one (a server or proxy that mishandles a streamed

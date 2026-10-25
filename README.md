@@ -185,7 +185,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 
 | Command | Description |
 |---|---|
-| `/grant` | Show all current grants (file/dir access + command allowlist) |
+| `/grant` | Show all current grants (file/dir access + both command allowlists + web.fetch hosts) |
 | `/clear` | Remove all grants |
 | `/retry` | Re-send the chain after a failed request; tool work already done is kept, so the turn resumes from there |
 | `/session` | Show a summary of the current session |
@@ -229,6 +229,15 @@ unless the prefix is already allowlisted or the posture you picked accepts it
 (AUTO-APPROVE on a "safe:" verdict, or YOLO for everything); timeout-guarded,
 output truncated)
 
+**Web** - `web.fetch` (fetches one http(s) URL and returns the body as text;
+the full URL is shown before anything is sent, and every host you have not
+granted asks in EVERY posture - the shell postures are about shell commands, so
+YOLO does not cover a URL. A saved grant covers that EXACT host only (never a
+subdomain or a look-alike). Guards the model cannot configure: loopback,
+private, link-local and multicast addresses are refused, redirects are
+re-checked hop by hop, and a body larger than the fetch cap stops the download.
+Design: `doc/web_fetch_design.md`)
+
 **Meta** - `tools.list`, `tools.search`, `time.now`, `ui.notify` (progress
 messages to your console), `ui.dialog` (ask the user a question and wait
 for the picked option), `ui.note` (one-line note in the model's own
@@ -252,6 +261,13 @@ context), `test.echo` (test-only)
   you picked accepts it: AUTO-APPROVE on a "safe:" model verdict (issue #224)
   or YOLO for everything (issue #221). Postures are always the user's choice -
   the model never flips them.
+- A web fetch asks on a SEPARATE axis: an ungranted host reaches the dialog in
+  every posture (a YOLO decision about `git status` says nothing about a URL),
+  the grant is for one EXACT host, and it only decides whether that host may be
+  ASKED for - it never widens what the fetch may do to the address it resolves
+  to. `web_fetch_allow_private: true` is the only way to reach a local or
+  internal endpoint, and it is a config key, so the model cannot set it
+  (`doc/web_fetch_design.md`).
 - The active posture is ALWAYS labeled so you can see what a run will do
   before you type anything: the startup banner ("Command consent: MANUAL -
   ..."), the prompt line ("[model (effort)] [MANUAL] >") and the
@@ -301,6 +317,7 @@ All harness state lives in `.harness/` inside the working directory:
   harness_history   # prompt history
   allowed_commands.yml  # run.command prefix allowlist (separate from...)
   shell_commands.yml    # ...the `!` local shell allowlist (issue #129)
+  allowed_hosts.yml     # web.fetch host grants (exact hosts only, issue #33)
   sessions/         # saved sessions (one directory per session, issue #113)
     <id>/           # all of a session's state lives in here (issue #207)
       session.json  # the saved session (conversation + access list)
