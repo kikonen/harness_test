@@ -62,6 +62,8 @@ module LLM
           }
         }]
       }
+      finish = json.dig(:choices, 0, :finish_reason)
+      normalized[:finish_reason] = finish if finish
       normalized[:usage] = normalized_usage(json) if json[:usage]
       normalized
     end

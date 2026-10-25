@@ -68,6 +68,11 @@ class Harness
   # After this many consecutive tool-call iterations, force-break and return whatever we have
   TOOL_LOOP_HARD_LIMIT = 20
 
+  # The two NORMAL ends of an answer; every other value a server reports
+  # ('length', 'content_filter', one this harness has never seen) gets a line.
+  # What each endpoint reports: doc/truncation_design.md.
+  FINISH_EXPECTED = %w[stop tool_calls].freeze
+
   HARNESS_DIR = ".harness"
 
   SESSION_LOG_FILE = SessionLocator::SESSION_LOG_FILE
@@ -412,8 +417,14 @@ class Harness
     calls.filter_map do |tc|
       next unless tc.dig(:function, :name) == "run.command"
 
-      JSON.parse(tc.dig(:function, :arguments).to_s) rescue {}
-    end.map { |a| a["command"].to_s }.reject(&:empty?)
+      args, parse_error = parse_tool_arguments(tc.dig(:function, :arguments))
+      if parse_error
+        logger.warn("run.command arguments did not parse (#{parse_error}) - " \
+                    "this command is NOT safety pre-checked")
+        next
+      end
+      args["command"].to_s
+    end.reject(&:empty?)
   end
 
   # THE single auto-compact trigger for every consumer (SessionManager, /ctx).
@@ -423,6 +434,47 @@ class Harness
 
     @session.compact_trigger(window, compact_auto_threshold,
                              reserved_tokens: compact_reserved_tokens)
+  end
+
+  # Returns [args, nil] or [{}, error_message]: rescuing straight to {} erased
+  # the difference between "no arguments sent" and "this call lost its shape".
+  def parse_tool_arguments(raw)
+    return [{}, nil] if raw.nil? || raw.to_s.strip.empty?
+
+    [JSON.parse(raw), nil]
+  rescue JSON::ParserError => e
+    [{}, e.message]
+  rescue StandardError => e
+    [{}, "#{e.class}: #{e.message}"]
+  end
+
+  # Returns true only for 'length' - the reason that makes the tool round below
+  # report truncation rather than a malformed call.
+  def report_finish_reason(data, iteration)
+    reason = data[:finish_reason]
+    return false if reason.nil? || FINISH_EXPECTED.include?(reason)
+
+    message =
+      if reason == "length"
+        "response cut off by the token budget (iteration #{iteration}, " \
+          "#{budget_note(data)})"
+      else
+        "finish reason '#{reason}' (iteration #{iteration})"
+      end
+    logger.warn(message)
+    Task.emit(:warn, origin: :harness, content: message)
+    reason == "length"
+  end
+
+  # The OpenAI endpoint reads max_tokens, the native one num_predict; an unset
+  # key means the SERVER's own default is what cut the answer.
+  def budget_note(data)
+    limit = [options[:max_tokens], options[:num_predict]].map(&:to_i).find(&:positive?)
+    parts = []
+    completion = data.dig(:usage, :completion_tokens)
+    parts << "#{completion} completion tokens" if completion
+    parts << (limit ? "limit #{limit}" : "no token limit configured (server default)")
+    parts.join(", ")
   end
 
   # -- LLM call logic -------------------------------------------------------
@@ -479,6 +531,9 @@ class Harness
 
       print_step_display(iteration, message) if message[:tool_calls]
 
+      # AFTER the step line, so the warn lands inside the block it describes.
+      truncated = report_finish_reason(data, iteration)
+
       if data[:usage]
         total_usage[:prompt_tokens]     += data[:usage][:prompt_tokens]     || 0
         total_usage[:completion_tokens] += data[:usage][:completion_tokens] || 0
@@ -529,12 +584,24 @@ class Harness
         # Single run.command calls check themselves inside CommandRunner.
         precheck_batch_safety(message[:tool_calls])
         message[:tool_calls].each do |tc|
-          result = execute_tool_call(tc)
+          result = execute_tool_call(tc, truncated:)
           record_note(tc, result)
           messages << {
             role: "tool",
             tool_call_id: tc[:id],
             content: result
+          }
+        end
+
+        # The model cannot see this harness' token budget, so the cut is named
+        # once per round (issue #332: it retried the same shape forever).
+        if truncated
+          messages << {
+            role: "user",
+            content: "Your previous response was cut off by the token budget " \
+                     "(#{budget_note(data)}). Any tool call in it may be incomplete. " \
+                     "Do NOT re-send the same call: split it into smaller calls or " \
+                     "shorten its content."
           }
         end
 
@@ -587,7 +654,11 @@ class Harness
     return unless tool_call[:function][:name] == "ui.note"
     return unless result.is_a?(String) && result.start_with?("ok: noted")
 
-    args = tool_call[:function][:arguments] ? JSON.parse(tool_call[:function][:arguments]) : {}
+    args, parse_error = parse_tool_arguments(tool_call[:function][:arguments])
+    if parse_error
+      logger.warn("ui.note arguments did not parse (#{parse_error}) - note not buffered")
+      return
+    end
     @session.add_note(args["text"])
   rescue StandardError
     # A malformed note must never break the turn.
@@ -811,10 +882,22 @@ class Harness
               content: { message: name, suffix: tool_wait_suffix })
   end
 
-  def execute_tool_call(tool_call)
+  # truncated: the request that produced this call was cut by the token budget.
+  # A parse failure is then reported as truncation - the honest cause - instead
+  # of a malformed call the model is invited to repeat.
+  def execute_tool_call(tool_call, truncated: false)
     func_name = tool_call[:function][:name]
-    args_json = tool_call[:function][:arguments]
-    args      = args_json ? JSON.parse(args_json) : {}
+    args, parse_error = parse_tool_arguments(tool_call[:function][:arguments])
+    if parse_error
+      logger.warn("tool #{func_name} arguments did not parse (#{parse_error})")
+      if truncated
+        return "error: the response was cut off by the token budget before " \
+               "this call's arguments arrived complete, so the call was NOT " \
+               "executed. Re-send it as a SMALLER call (shorter content / " \
+               "fewer options)."
+      end
+      return "error: tool call arguments are not valid JSON (#{parse_error})"
+    end
 
     tool = tool_registry.get(func_name)
     unless tool

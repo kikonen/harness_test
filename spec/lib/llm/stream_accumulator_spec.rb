@@ -274,5 +274,42 @@ RSpec.describe LLM::StreamAccumulator do
 
       expect(acc.to_response[:choices][0][:message][:role]).to eq("assistant")
     end
+
+    # issue #345: the accumulator READ finish_reason before, and to_response
+    # left it out - the reader was never called by anything.
+    it 'carries the OpenAI finish_reason into the normalized response' do
+      acc.feed({ choices: [{ delta: { content: "hi" } }] })
+      acc.feed({ choices: [{ delta: {}, finish_reason: "tool_calls" }] })
+
+      expect(acc.to_response[:finish_reason]).to eq("tool_calls")
+    end
+
+    # The reason arrives WITH its chunk - it is known while the stream is still
+    # open, which is what a live truncation warning would need.
+    it 'knows the reason the moment its chunk arrives' do
+      acc.feed({ choices: [{ delta: {}, finish_reason: "length" }] })
+
+      expect(acc.finish_reason).to eq("length")
+    end
+
+    it 'carries the native done_reason' do
+      acc.feed({ message: { content: "hi" } })
+      acc.feed({ done: true, done_reason: "length" })
+
+      expect(acc.to_response[:finish_reason]).to eq("length")
+    end
+
+    it 'maps a bare done line to stop' do
+      acc.feed({ message: { content: "hi" } })
+      acc.feed({ done: true })
+
+      expect(acc.to_response[:finish_reason]).to eq("stop")
+    end
+
+    it 'omits finish_reason when the stream never reported one' do
+      acc.feed({ choices: [{ delta: { content: "hi" } }] })
+
+      expect(acc.to_response).not_to have_key(:finish_reason)
+    end
   end
 end

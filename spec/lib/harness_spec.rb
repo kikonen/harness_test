@@ -46,8 +46,12 @@ RSpec.describe Harness do
       raise LLMError, 'connection lost mid-turn' if response == :fail
 
       message = response.is_a?(Hash) ? response : { content: 'done' }
+      # finish_reason is a top-level part of the normalized shape (issue #345),
+      # so a scripted response names it the way the backends return it.
+      finish = message.is_a?(Hash) ? message.delete(:finish_reason) : nil
       result = { choices: [{ message: message.merge(reasoning: nil) }],
                  usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }
+      result[:finish_reason] = finish if finish
       # The hook runs AFTER the answer is built, so a spec can flip harness
       # state between this request and the next one of the same turn.
       @after_call&.call
@@ -643,6 +647,10 @@ RSpec.describe Harness do
 
       expect { harness.record_note(call, 'ok: noted 5 chars') }.not_to raise_error
       expect(harness.session.instance_variable_get(:@notes)).to be_nil
+      # issue #345: the drop is now visible. It used to rescue to nothing, so a
+      # ui.note whose arguments never arrived was silently not buffered.
+      expect(File.read(harness.session_log_path))
+        .to include('ui.note arguments did not parse')
     end
 
     it 'does not buffer anything when the result is not a string' do
@@ -1239,6 +1247,124 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #345: a response cut by the token budget is an EVENT, not a bad model
+  # answer. The plumbing (finish_reason in the normalized shape) belongs to the
+  # spec/lib/llm/ specs; this is what Harness#call_llm does with it.
+  describe '#call_llm finish_reason (issue #345)' do
+    let(:task) { Task.new { } }
+    around do |example|
+      @old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+      example.run
+    ensure
+      Thread.current[:harness_task] = @old_current
+    end
+
+    def event_lines(t)
+      drained_lines(t).grep(/token budget|finish reason/)
+    end
+
+    def truncated_round(id)
+      { content: nil, finish_reason: 'length',
+        tool_calls: [{ id: id,
+                       function: { name: 'test.echo', arguments: '{"text":"x"}' } }] }
+    end
+
+    it 'says on the console and in harness.log that the budget cut the answer' do
+      h = build_harness_with_responses([{ content: 'partial', finish_reason: 'length' }])
+      h.session.add_user('go')
+
+      h.call_llm
+
+      line = event_lines(task).first.to_s
+      expect(line).to include('cut off by the token budget (iteration 1')
+      # The harness' own budget is named next to what the server reported.
+      expect(line).to include('5 completion tokens')
+      expect(line).to include('no token limit configured')
+      expect(File.read(h.session_log_path)).to include('cut off by the token budget')
+    end
+
+    it 'names the configured limit when one is set' do
+      h = build_harness_with_responses([{ content: 'partial', finish_reason: 'length' }])
+      h.options[:max_tokens] = 4096
+      h.session.add_user('go')
+
+      h.call_llm
+
+      expect(event_lines(task).first.to_s).to include('limit 4096')
+    end
+
+    %w[stop tool_calls].each do |reason|
+      it "stays silent for the normal end '#{reason}'" do
+        h = build_harness_with_responses([{ content: 'done', finish_reason: reason }])
+        h.session.add_user('go')
+
+        h.call_llm
+
+        expect(event_lines(task)).to eq([])
+      end
+    end
+
+    it 'warns about an unknown reason without calling it truncation' do
+      h = build_harness_with_responses([{ content: 'done', finish_reason: 'content_filter' }])
+      h.session.add_user('go')
+
+      h.call_llm
+
+      line = event_lines(task).first.to_s
+      expect(line).to include("finish reason 'content_filter' (iteration 1)")
+      expect(line).not_to include('token budget')
+    end
+
+    # A well-formed call from a cut round still runs: truncation is not a
+    # reason to refuse a call that arrived complete. The model is told ONCE.
+    it 'runs a truncated round whose calls arrived complete, and says so to the model' do
+      h = build_harness_with_responses([truncated_round('c1'), { content: 'done' }])
+      h.session.add_user('go')
+
+      h.call_llm
+
+      chain = h.session.messages
+      expect(chain.find { |m| m[:role] == 'tool' }[:content]).to eq('x')
+      told = chain.select do |m|
+        m[:role] == 'user' && m[:content].to_s.include?('cut off by the token budget')
+      end
+      expect(told.size).to eq(1)
+      expect(told.first[:content]).to include('Do NOT re-send the same call')
+    end
+
+    # THE point of the issue: a call whose arguments were cut mid-JSON must not
+    # read as a malformed call (that is what #332's model kept retrying).
+    it 'reports a cut-off call as truncation, not as a malformed call' do
+      cut = truncated_round('c1')
+      cut[:tool_calls][0][:function][:arguments] = '{"text":"x'
+      h = build_harness_with_responses([cut, { content: 'done' }])
+      h.session.add_user('go')
+
+      h.call_llm
+
+      result = h.session.messages.find { |m| m[:role] == 'tool' }[:content]
+      expect(result).to include('cut off by the token budget')
+      expect(result).to include('NOT executed')
+      expect(result).not_to include('not valid JSON')
+      expect(File.read(h.session_log_path)).to include('arguments did not parse')
+    end
+
+    # The same parse failure with NO truncation is still named as what it is.
+    it 'names an un-truncated malformed call a malformed call' do
+      bad = truncated_round('c1')
+      bad.delete(:finish_reason)
+      bad[:tool_calls][0][:function][:arguments] = '{"text":"x'
+      h = build_harness_with_responses([bad, { content: 'done' }])
+      h.session.add_user('go')
+
+      h.call_llm
+
+      expect(h.session.messages.find { |m| m[:role] == 'tool' }[:content])
+        .to include('arguments are not valid JSON')
+    end
+  end
+
   # issue #224: a tool batch with SEVERAL run.command calls is checked with
   # ONE forked LLM call (one verdict line per command) BEFORE the first
   # consent dialog. Advisory only; errors degrade to a verdict-less flow.
@@ -1394,6 +1520,31 @@ RSpec.describe Harness do
                run_command_calls('ruby -c lib/a.rb', 'ruby -c lib/b.rb',
                                  'bundle exec rspec'))).to be_nil
       expect(client).not_to have_received(:chat)
+    end
+
+    # issue #332's candidate: a run.command whose arguments were cut mid-JSON
+    # used to parse to {}, so the command vanished and a batch of two truncated
+    # calls was safety pre-checked as ZERO commands. The skip must be visible.
+    it 'logs a run.command whose arguments did not parse instead of dropping it' do
+      calls = run_command_calls('ruby -c a.rb', 'rm -rf /tmp/x')
+      calls[1][:function][:arguments] = '{"command":"rm -rf /tmp'
+
+      expect(harness.run_command_batch_commands(calls)).to eq(['ruby -c a.rb'])
+      expect(File.read(harness.session_log_path))
+        .to include('run.command arguments did not parse')
+    end
+
+    # The whole point of the fix: a call whose arguments lost their shape must
+    # not read as a malformed call when the request that made it was cut.
+    it 'pre-checks a batch normally when every call parsed' do
+      expect(harness.run_command_batch_commands(run_command_calls('a', 'b'))).to eq(%w[a b])
+    end
+
+    it 'an empty or missing arguments payload is not a parse error' do
+      calls = [run_command_calls('a')[0], { id: 'c2', function: { name: 'run.command' } }]
+
+      expect(harness.run_command_batch_commands(calls)).to eq(['a'])
+      expect(File.read(harness.session_log_path)).not_to include('did not parse')
     end
   end
 

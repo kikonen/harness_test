@@ -76,6 +76,8 @@ module LLM
           }
         }]
       }
+      # The native field is done_reason ("stop" | "length"), not finish_reason.
+      normalized[:finish_reason] = json[:done_reason] if json[:done_reason]
 
       if json.key?(:prompt_eval_count) || json.key?(:eval_count)
         prompt     = json[:prompt_eval_count].to_i
