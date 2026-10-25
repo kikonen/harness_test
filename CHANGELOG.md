@@ -9,20 +9,114 @@ Regeneration is its own docs-only PR.
 
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 
-Horizon (measured 2026-10-23 against master `527d9c7`: 123 merged PRs, 59 in
+Horizon (measured 2026-10-25 against master `ccbd1ac`: 141 merged PRs, 77 in
 the horizon (>= 2026-10-10), 64 older):
 
-- 2026-10-23 .. 2026-10-10 (59 merged PRs): one bullet per merged PR, keyed on
+- 2026-10-25 .. 2026-10-10 (77 merged PRs): one bullet per merged PR, keyed on
   its PR number; a bullet may wrap to at most 5 lines at 80 columns.
 - older than 2026-10-10: nothing here. `git log` and `gh pr list --state merged`
   are the archive; the horizon moves on each regeneration.
 
 A subsystem's rationale is NOT here - it is in `doc/<topic>.md` or the issue.
-Measured at generation: 14 design docs on master, 13 of them pointed at from
+Measured at generation: 20 design docs on master, 19 of them pointed at from
 here (its own procedure doc `doc/changelog_generation.md` among them), so every
 doc pointer in this file resolves.
 
+## 2026-10-25
+- #379 fixed a streamed request's delta callback holding its OWN preview:
+  `request_chain` built `on_delta` from the `@stream_preview` ivar its own
+  `ensure` clears, so a late delta hit `undefined method 'record' for nil`
+  (reproduced single-threaded, analysis/378/repro.rb). The ivar stays the main
+  thread's reader handle; the callback captures this request's preview object.
+- #377 made a task-thread crash diagnosable from the logs (issue #376):
+  `Task#start` pushed only `"#{e.class}: #{e.message}"` as `:error_ctrl`, so no
+  backtrace ever survived and every crash inside a turn was undiagnosable.
+  `Task#record_task_error` logs the exception WITH its backtrace through the
+  harness logger; the event is pushed FIRST so a failing logger cannot hide it.
+- #375 reported a truncated answer as truncation instead of blaming the model
+  (#345): `finish_reason` now rides at the TOP LEVEL beside `usage` (OpenAI
+  `choices[0].finish_reason`, native `done_reason`, bare `done: true` ->
+  "stop"), where each wire shape puts it; anything outside `FINISH_EXPECTED`
+  warns in the log AND the console. Design: `doc/truncation_design.md`.
+- #374 bound a model verdict to its command by NUMBER, never by line position
+  (#344): `SafetyCheck` mapped `lines[idx] -> commands[idx]`, so one preamble
+  line shifted every verdict (measured: `rm -rf /tmp/x` read as SAFE under
+  AUTO-APPROVE). A bad ordinal yields no verdict, and the drop is logged.
+  Design: `doc/safety_check_design.md`.
+- #373 removed the last pending example: the symlink case of
+  `dir_delete_tool_spec` now runs on Windows through a directory junction
+  (`mklink /J`), because `File.symlink` needs developer mode. A junction IS a
+  link to Ruby (`File.symlink? true`) while `File.directory?` is also true - the
+  reason the tool checks the link predicate before `File.directory?`.
+- #372 stopped a nil Session reporting a successful delete/rename as a failure
+  (#335): `@session&.file_cache.clear(path)` guards only the NEXT send, so the
+  file was already gone when the raise reached the model as an error. The cop
+  that prevents it, `Lint/SafeNavigationChain`, had ALREADY found both sites -
+  `.rubocop_todo.yml` excluded those very files, so the entry is now gone.
+- #370 added `web.fetch`, the second network surface, with guards the model
+  cannot widen: a host grant only says the host may be ASKED for, for ONE exact
+  host (`example.com` never covers `evil.example.com`); `WebFetcher` resolves
+  ONCE, connects to the address it checked, refuses loopback and private
+  ranges, stops at the byte cap. Design: `doc/web_fetch_design.md`.
+- #369 stopped the spinner looking FROZEN while a streamed model writes a tool
+  call (#368): the fragments reached the harness and were dropped, so the tail
+  sat on the last reasoning sentence while the rate decayed. `feed` now reports
+  `tool_call_names` for ANY chunk carrying them - names only, never arguments -
+  the preview keeps them sticky and the phase line carries no rate.
+
+## 2026-10-24
+- #367 made the spinner name the tool that is RUNNING: nothing re-pointed the
+  detail for a tool round, so during a 40-second `run.command` the line still
+  read as if the model were generating. `Harness#announce_tool_call` names the
+  tool before `Tool#execute` (arguments are NEVER shown on a one-line spinner);
+  `CommandRunner#announce_run` swaps in the command's handle for the child.
+- #366 fixed four independent defects on the spinner line (issue #364): the rate
+  slot jumped up to 4 characters between frames (`9.0` rendered as `9`), `\r`
+  left the previous frame's tail, the cut marker glued itself onto the answer's
+  own dots, and a truncated tail was 63 wide for a 60-char budget. The rate got
+  a fixed column, every frame erases, and `MAX_TAIL` counts its marker.
+- #363 added memory the model maintains itself (#10): `Memories` is the only
+  reader and writer of `.harness/memories/`, behind `memory.list` / `read` /
+  `add` / `delete` and `/memory`. A memory names a note NAME, never a path, so
+  the store cannot become a general writer inside `.harness/`; nothing it holds
+  is injected into the system prompt. Design: `doc/memory_design.md`.
+- #361 put a tok/s rate ON the spinner line (#285): `StreamPreview#live_rate`
+  measures it where the deltas arrive, its clock taken on the FIRST delta
+  (prefill produces no text, so a rate from before the answer started is not a
+  generation rate). `~` means the HARNESS estimated it, `(last)` means the
+  number describes a FINISHED request; nothing measured, nothing shown.
+- #360 captured the server-reported performance of a response (#251):
+  `cached_tokens`, the llama.cpp `timings` object and Ollama's
+  `prompt_eval_duration` / `eval_duration` were on the wire and thrown away.
+  `LLM::UsageStats` normalizes them; a prompt rate divides the UNCACHED tokens
+  and per-request rates are never summed. Design: `doc/llm_stats.md`.
+- #358 gave Ctrl+G to an external editor for the buffer being typed (#298): a
+  KEYBOARD shortcut, not a slash command - a command runs after the read returns
+  and can only see what was SUBMITTED. `UI::ExternalEditor` spawns argv words,
+  never a shell, and closing the editor leaves the text as the DRAFT. Design:
+  `doc/external_editor.md`.
+
 ## 2026-10-23
+- #357 made `verify.rb` report the changelog's LAG instead of failing on it: a
+  regeneration is always behind the merged-PR list, so PASS had only been
+  reachable with a dataset frozen at the file's own writing time.
+  `declared_horizon` + `lag_of` tolerate exactly the newest `horizon.size - N`
+  PRs, so a hole in the middle (the #205 bullet deleted) still FAILS.
+- #356 made `file.search` validate an INVALID regex instead of raising (#346):
+  the exception escaped the tool and the model read the generic
+  `execute_tool_call` rescue string, indistinguishable from a harness failure,
+  so it retried the SAME pattern. The answer now names the rejected pattern, and
+  the search half sits in the rescue's `else` - it never starts the file walk.
+- #354 normalized the `harness.md` rules read at its boundary (issue #341):
+  `File.read(project_file).strip` raised `Encoding::CompatibilityError` at
+  startup, before any session state existed, and the same read runs again at
+  every prompt. `TextNormalizer` now touches the bytes first, and a repair is
+  NOT silent: the count of replaced bytes is named in the log and the banner.
+- #353 extended the 2026-10-23 section with the bullets the previous runs had
+  left out (#350, #351, #352) and corrected the preamble's doc-pointer count:
+  three CONSECUTIVE runs had each left their own PR's bullet behind, because a
+  number is absent from a dataset of merged PRs at generation time. Docs-only;
+  every older date section stayed byte-identical.
 - #338 added written-down procedures: `.harness/skills/<name>/SKILL.md`, read
   only by `lib/skills.rb`, surfaced as `skills.list` / `skills.read` / `/skills`
   - a skill body NEVER enters the system prompt. A name must be ONE path
