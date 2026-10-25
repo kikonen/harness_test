@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'logger'
 require 'task'
 require 'harness'
 require 'ui/spinner'
@@ -543,6 +544,41 @@ RSpec.describe Task do
 
       expect(error).to include('RuntimeError')
       expect(error).to include('boom')
+    end
+
+    # A task thread owns no console (single-thread I/O rule) and the drain loop
+    # carries ONE line, so without the harness logger the frames die with the
+    # thread: the user saw "[task error] Class: message" and harness.log had
+    # nothing to trace it back to.
+    it 'logs a task-thread exception WITH ITS FRAMES in the harness logger' do
+      log = StringIO.new
+      harness = Class.new do
+        define_method(:logger) { Logger.new(log) }
+      end.new
+
+      error, = described_class.run(harness:,
+                                   ui: UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)) do
+        nil.record
+      end
+
+      expect(error).to eq("NoMethodError: undefined method 'record' for nil")
+      logged = log.string
+      expect(logged).to include('ERROR')
+      expect(logged).to include("task thread raised NoMethodError: undefined method 'record' for nil")
+      # The frames: the raising line and the drain-loop frame that ran the block.
+      expect(logged).to include('task_spec.rb')
+      expect(logged).to include('lib/task.rb')
+    end
+
+    # A harness double with no logger must not turn a task error into a second
+    # error on the error path.
+    it 'still returns the one-line error when the harness answers no logger' do
+      error, = described_class.run(harness: Object.new,
+                                   ui: UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)) do
+        raise 'boom'
+      end
+
+      expect(error).to eq("RuntimeError: boom")
     end
 
     it 'shows a spinner automatically while waiting on the task thread' do

@@ -92,7 +92,10 @@ class Task
       begin
         @block.call(self)
       rescue => e
-        push_event(type: :error_ctrl, content: "#{e.class.name}: #{e.message}")
+        # The event goes FIRST: a logger that cannot write must not swallow the
+        # error the user is owed.
+        push_event(type: :error_ctrl, content: error_line(e))
+        record_task_error(e)
       ensure
         push_event(type: :done)
         # Unblock any pending request so the thread can exit cleanly.
@@ -148,6 +151,22 @@ class Task
   end
 
   # -- Task-thread side (called from inside the block) -----------------------
+
+  # The frames go to the session's harness.log: a task thread owns no console
+  # (single-thread I/O rule) and the outbox carries ONE line, so without this
+  # the trace dies with the thread.
+  def record_task_error(error)
+    logger = @harness.respond_to?(:logger) ? @harness.logger : nil
+    return unless logger
+
+    logger.error("task thread raised #{error_line(error)}\n#{Array(error.backtrace).join("\n")}")
+  end
+
+  # The ONE line the outbox and the console carry: a backtrace there would be
+  # interleaved with the turn's own output.
+  def error_line(error)
+    "#{error.class.name}: #{error.message}"
+  end
 
   # Push a typed event onto the single event queue (the outbox). This is the
   # ONLY way task-thread code communicates output to the main thread.
