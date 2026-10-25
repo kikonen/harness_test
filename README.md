@@ -260,7 +260,9 @@ context), `test.echo` (test-only)
 - Shell commands ask unless the prefix is allowlisted or the consent posture
   you picked accepts it: AUTO-APPROVE on a "safe:" model verdict (issue #224)
   or YOLO for everything (issue #221). Postures are always the user's choice -
-  the model never flips them.
+  the model never flips them. A model verdict is bound to its command by the
+  NUMBER the model wrote, never by line position, and an answer that cannot be
+  placed yields no verdict at all (plain dialog) - `doc/safety_check_design.md`.
 - A web fetch asks on a SEPARATE axis: an ungranted host reaches the dialog in
   every posture (a YOLO decision about `git status` says nothing about a URL),
   the grant is for one EXACT host, and it only decides whether that host may be

@@ -463,14 +463,60 @@ RSpec.describe CommandRunner do
       end
     end
 
-    it 'does NOT auto-approve a malformed verdict that only mentions safe later' do
+    # issue #344: a line that carries no safe:/dangerous: shape is not a verdict
+    # at all, so it cannot reach the auto-approve test - and it is not shown as
+    # a MODEL VERDICT either (the dialog would otherwise present a half-sentence
+    # as the model's opinion about this command).
+    it 'does NOT auto-approve (or even show) an answer that is not a verdict shape' do
       Dir.mktmpdir do |dir|
         client = fake_client('not really safe, just checking')
         runner = make_tool_runner(dir, { command_safety_check: true },
                                   harness: auto_approve_harness(client, chain_mid_tool_loop))
         out = drive_dialog(['4'])
         expect(runner.run('echo hi')).to start_with('error: user denied')
-        expect(out.string).to include('MODEL VERDICT (advisory)')
+        expect(out.string).to include('The model is requesting')
+        expect(out.string).not_to include('MODEL VERDICT (advisory)')
+      end
+    end
+
+    # The consumer-side half of issue #344: the old code mapped an extra model
+    # line onto the first command, so 'rm -rf' was reported "safe: syntax check"
+    # and AUTO-APPROVE would have run it. An answer that cannot be placed must
+    # leave the command verdict-less (the dialog opens), never mislabelled. The
+    # command is deliberately NOT denylisted: a denylisted one always asks, so
+    # the assertion would prove nothing.
+    it 'does NOT auto-approve when the model answer cannot be placed (issue #344)' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('Here are my verdicts:', 'safe: harmless read')
+        runner = make_tool_runner(dir, { command_safety_check: true },
+                                  harness: auto_approve_harness(client, chain_mid_tool_loop))
+        out = drive_dialog(['4']) # Allow(1), two grants, Cancel(4): the dialog
+                                  # MUST open despite the posture and the safe: line
+        expect(runner.run('echo hi')).to start_with('error: user denied')
+        expect(out.string).to include('The model is requesting')
+        expect(out.string).not_to include('auto-approved')
+        expect(out.string).not_to include('MODEL VERDICT (advisory)')
+      end
+    end
+
+    # A dropped verdict is a decision, not a network failure - so it must be
+    # recoverable from harness.log (the runner injects the harness logger).
+    it 'logs the dropped verdict to harness.log' do
+      Dir.mktmpdir do |dir|
+        logged = []
+        logger = double('logger')
+        allow(logger).to receive(:info) { |m| logged << m }
+        allow(logger).to receive(:warn) { |m| logged << m }
+        client = fake_client('Here are my verdicts:', 'safe: harmless read')
+        h = double('harness', client: client, logger: logger,
+                   session: double('session', messages: chain_mid_tool_loop),
+                   command_safety_auto_approve_effective?: true)
+        runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
+        drive_dialog(['2'])
+        runner.run('echo hi')
+
+        expect(logged.any? { |m| m.include?('safety check:') && m.include?('cannot be placed') })
+          .to be true
       end
     end
 

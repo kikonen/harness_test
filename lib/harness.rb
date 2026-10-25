@@ -395,7 +395,7 @@ class Harness
     Task.emit(:spinner_detail, origin: :harness,
               content: { message: "Model safety check (#{unapproved.size} commands)" })
     options[:safety_verdicts] =
-      SafetyCheck.run(client, session.messages, unapproved)
+      SafetyCheck.run(client, session.messages, unapproved, logger:)
   rescue StandardError => e
     logger.info("safety pre-check failed (#{e.class}: #{e.message}) - continuing without verdicts")
     nil

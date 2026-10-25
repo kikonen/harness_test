@@ -396,8 +396,9 @@ class CommandRunner
   end
 
   # A verdict auto-approves when it is a non-empty line starting with
-  # "safe:" (the exact shape SafetyCheck's prompt requests). Anything
-  # else - "dangerous:", blank, or an unexpected shape - is NOT
+  # "safe:" - the exact shape SafetyCheck hands back (its kind is normalized,
+  # and a line that is not a verdict never reaches here as a verdict at all).
+  # Anything else - "dangerous:", blank, or an unexpected shape - is NOT
   # auto-approved and falls back to the consent dialog.
   def auto_approve_safe?(verdict)
     verdict.to_s.strip.match?(/\Asafe:/)
@@ -412,7 +413,8 @@ class CommandRunner
     # the main thread where the dialog is served in place - no spinner).
     Task.emit(:spinner_detail, origin: :command_runner,
               content: { message: "Model safety check (1 command)" }) if Task.current
-    results = SafetyCheck.run(safety_client, session_chain, commands)
+    results  = SafetyCheck.run(safety_client, session_chain, commands,
+                               logger: @harness&.logger)
     verdicts = results.values.compact
     if verdicts.any?
       status(:ok, "model verdict: #{verdicts.join(' | ')}")
