@@ -169,12 +169,21 @@ RSpec.describe Tools::FileRenameTool do
     end
   end
 
-  # The constructor takes session as OPTIONAL, but the cache step is
-  # @session&.file_cache.rename(...): safe navigation guards only the next send, so
-  # the rename lands on nil and raises AFTER the file has already moved. Found by
-  # this spec; kept pending so the broken behaviour is not pinned as expected.
+  # session is OPTIONAL here, and the cache re-keying is a Session's own business,
+  # so no session means nothing to re-key. The one-hop guard @session&.file_cache
+  # called .rename on nil AFTER the file had already moved (&. covers only the NEXT
+  # send), so the model was told a successful rename had failed (issue #335).
   it 'renames fine with no session at all (the cache step is optional)' do
-    skip 'known bug: NoMethodError without a Session, see issue #335'
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'a.txt'), "content\n")
+      list = granted_list(dir)
+
+      out = described_class.new(list).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
+
+      expect(out).to eq('ok: renamed a.txt to b.txt')
+      expect(File.read(File.join(dir, 'b.txt'))).to eq("content\n")
+      expect(File.exist?(File.join(dir, 'a.txt'))).to be false
+    end
   end
 
   it 'never writes to $stdout (issue #40)' do

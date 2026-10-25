@@ -52,7 +52,8 @@ module Tools
       File.delete(path)
       status(:ok, "#{shown} (deleted)")
       # issue #170: the file is gone - drop its cache entry.
-      @session&.file_cache.clear(path, workdir: @file_list.workdir)
+      # &. guards only the next send, so BOTH hops carry one.
+      @session&.file_cache&.clear(path, workdir: @file_list.workdir)
 
       "ok: file '#{shown}' has been deleted"
     end
