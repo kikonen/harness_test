@@ -2,44 +2,32 @@
 
 require_relative "harness_error"
 
-# issue #224: pre-dialog command safety check. Before the confirmation
-# dialog for an unapproved run.command, ask the model - using a FORK of the
-# current conversation - whether the command(s) look safe, and show the
-# verdict as advisory text in the dialog. The verdict NEVER auto-approves,
-# never widens the allowlist and never bypasses the user's Allow.
-#
-# Why this is cheap with local-LLM KV caching:
-#   - The fork is a byte-identical PREFIX of the live chain (truncated at
-#     the last complete round), so the whole prefix is a cache hit; only
-#     the short check question is new prefill.
-#   - The fork is disposable and shared: when a batch contains several
-#     unapproved run.command calls, ONE check call covers all of them
-#     (one verdict line per command), not one call per command.
-#   - The main conversation's cache is NOT evicted: the fork's prefix IS
-#     the main prefix, so the next real turn re-prefills only the one
-#     dropped assistant tool_call message.
-#
-# PURITY CONTRACT (critical): SafetyCheck is a free function over a plain
-# chain array and a client - it NEVER touches Session, Harness state, or
-# the Task. It cannot trigger in-loop compaction, prompt-token anchoring
-# (spinner ctx estimate), auto-save, or any session mutation. Do not route
-# it through Harness#call_llm (that loop owns all of the above).
-#
-# The check runs BEFORE the confirmation dialog opens, so it never
-# competes for the single stdin owner (#198): it is an HTTP call, not a
-# dialog. LLM errors or blank answers simply yield no verdict (plain
-# dialog) - the check must never break the consent flow.
+# The three invariants of the pre-dialog command safety check (issue #224):
+# the verdict is ADVISORY, a check that cannot be trusted yields NO verdict
+# (never a guessed one), and SafetyCheck is a PURE function over a chain +
+# client - an injected logger is the only sink it may write to. Rationale,
+# the KV-cache reasoning and the verdict-binding rule: doc/safety_check_design.md.
 module SafetyCheck
   # Short read timeout: the verdict is advisory; a slow check must not
   # stall the user's consent dialog (the caller degrades to a plain
   # dialog on error).
   DEFAULT_TIMEOUT = 30
 
-  CHECK_PROMPT = 'I am about to run these shell command(s) in this project:\n' \
-                 '%s\n' \
-                 "Reply with EXACTLY one line per command (same order), each line: " \
-                 '"safe: <short reason>" or "dangerous: <short reason>". ' \
-                 "Do NOT call any tools."
+  # The answer must name the command's number back: the ordinal is the only
+  # identity a verdict line carries, so it survives a preamble line or an
+  # out-of-order answer.
+  CHECK_PROMPT = "I am about to run these shell command(s) in this project:\n" \
+    "%s\n" \
+    "Reply with EXACTLY one line per command. Each line must start with that " \
+    "command's number and a colon, then safe: or dangerous: and a short reason " \
+    "(example: 1: safe: only reads project files). Do NOT call any tools."
+
+  # The kind is matched case-insensitively and rebuilt lowercase by the parser:
+  # the AUTO-APPROVE consumer matches the exact "safe:" prefix, so a verdict
+  # that reached it never starts with "Safe:".
+  VERDICT_LINE = /
+    \A (?:(?<ordinal>\d+)[.):]?\s*)? (?<kind>safe|dangerous): \s* (?<reason>.*\S) \s* \z
+  /xi
 
   class << self
     # Fork of chain truncated at the last COMPLETE round: the trailing
@@ -59,10 +47,10 @@ module SafetyCheck
 
     # One check call for ALL commands (one verdict line each). Returns
     # { command => one-line verdict or nil }. nil verdicts (blank answer,
-    # too few lines, degenerate chain) mean "no verdict" for that command.
-    # Raises LLMError etc. - the CALLER must rescue and degrade to a
-    # plain dialog.
-    def run(client, chain, commands, timeout: DEFAULT_TIMEOUT)
+    # an answer whose lines cannot be placed, degenerate chain) mean "no
+    # verdict" for that command. Raises LLMError etc. - the CALLER must
+    # rescue and degrade to a plain dialog.
+    def run(client, chain, commands, timeout: DEFAULT_TIMEOUT, logger: nil)
       commands = Array(commands).map(&:to_s)
       results  = commands.to_h { |c| [c, nil] }
       return results if commands.size == 0
@@ -73,17 +61,61 @@ module SafetyCheck
       # the verdict in) - no verdict, no call.
       return results if base.reject { |m| m[:role] == "system" }.empty?
 
-      question = format(CHECK_PROMPT, commands.each_with_index.map { |c, i| "#{i + 1}. #{c}" }.join("\n"))
-      fork = base + [{ role: "user", content: question }]
+      listed = commands.each_with_index.map { |c, i| "#{i + 1}. #{c}" }.join("\n")
+      question = format(CHECK_PROMPT, listed)
+      fork     = base + [{ role: "user", content: question }]
 
       data = client.chat(fork, tools: nil, timeout:)
       text = data.dig(:choices, 0, :message, :content).to_s
-      lines = text.split("\n").map(&:strip).reject(&:empty?)
-      lines.each_with_index do |line, idx|
-        cmd = commands[idx]
-        results[cmd] = line if cmd
+      verdicts, dropped = parse_verdicts(text, commands)
+      if dropped.any?
+        logger&.info("safety check: #{dropped.join('; ')}")
       end
-      results
+      verdicts
+    end
+
+    # Answer -> commands, as [verdicts, dropped]. Position is consulted ONLY
+    # when no line carries an ordinal and the counts match exactly; anything
+    # ambiguous is dropped rather than guessed, because a wrong "safe:" label
+    # is what skips the consent dialog. Rule and table: doc/safety_check_design.md.
+    def parse_verdicts(text, commands)
+      bound   = {}
+      plain   = []
+      dropped = []
+
+      text.to_s.split("\n").map(&:strip).reject(&:empty?).each do |line|
+        m = VERDICT_LINE.match(line)
+        if m.nil?
+          dropped << "line #{line[0, 40].inspect} carries no safe:/dangerous: shape"
+          next
+        end
+        verdict = "#{m[:kind].downcase}: #{m[:reason]}"
+        ordinal = m[:ordinal]&.to_i
+        if ordinal.nil?
+          plain << verdict
+          next
+        end
+        unless (1..commands.size).include?(ordinal)
+          dropped << "ordinal #{ordinal} names no command (1..#{commands.size})"
+          next
+        end
+        if bound.key?(ordinal)
+          dropped << "command #{ordinal} was answered twice - verdict dropped"
+          bound[ordinal] = nil
+          next
+        end
+        bound[ordinal] = verdict
+      end
+
+      if plain.any?
+        if bound.empty? && dropped.empty? && plain.size == commands.size
+          plain.each_with_index { |verdict, idx| bound[idx + 1] = verdict }
+        else
+          dropped << "#{plain.size} unnumbered verdict line(s) cannot be placed"
+        end
+      end
+
+      [commands.each_with_index.to_h { |c, i| [c, bound[i + 1]] }, dropped]
     end
   end
 end

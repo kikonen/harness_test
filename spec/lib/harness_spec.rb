@@ -1281,6 +1281,32 @@ RSpec.describe Harness do
       expect(harness.options[:safety_verdicts]).to eq(verdicts)
     end
 
+    # issue #344: the batch consumer binds by the number the model wrote, so an
+    # out-of-order answer is still correct - and an answer that cannot be placed
+    # caches NO verdicts (the runner then opens the dialog) instead of a shifted
+    # set. The drop itself goes to harness.log.
+    it 'binds batch verdicts by number, and caches none when the answer cannot be placed' do
+      numbered = instance_double('client')
+      allow(numbered).to receive(:chat).and_return({ choices: [{ message: { content:
+        "2: dangerous: drops the table\n1: safe: syntax check" } }], usage: {} })
+      harness.instance_variable_set(:@client, numbered)
+      harness.session.add_user('go')
+
+      expect(harness.precheck_batch_safety(run_command_calls('ruby -c a.rb', 'DROP TABLE x')))
+        .to eq('ruby -c a.rb' => 'safe: syntax check', 'DROP TABLE x' => 'dangerous: drops the table')
+
+      shifted = instance_double('client')
+      allow(shifted).to receive(:chat).and_return({ choices: [{ message: { content:
+        "Here are my verdicts:\nsafe: syntax check\ndangerous: drops the table" } }], usage: {} })
+      harness.instance_variable_set(:@client, shifted)
+
+      expect(harness.precheck_batch_safety(run_command_calls('ruby -c a.rb', 'DROP TABLE x')))
+        .to eq('ruby -c a.rb' => nil, 'DROP TABLE x' => nil)
+      expect(File.read(harness.session_log_path))
+        .to include('safety check: line "Here are my verdicts:" carries no ' \
+                    'safe:/dangerous: shape; 2 unnumbered verdict line(s) cannot be placed')
+    end
+
     it 'sends one check request without tools, forked from the live chain' do
       client = instance_double('client')
       captured = []
