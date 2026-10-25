@@ -21,10 +21,13 @@ module LLM
   # #parse_response (raw JSON -> the normalized shape).
   #
   # The normalized shape is what Harness#call_llm consumes, so switching
-  # backends never changes the harness logic:
   #   { choices: [{ message: { role:, content:, reasoning:, tool_calls: } }],
-  #     usage:   { prompt_tokens:, completion_tokens:, total_tokens: } }
+  #     usage:   { prompt_tokens:, completion_tokens:, total_tokens: },
+  #     finish_reason: 'length' }
   # (usage is nil when the backend does not report tokens.)
+  # finish_reason is present only when the server reported one - OpenAI's
+  # choices[0].finish_reason or the native done_reason - and what the harness
+  # does with it: doc/truncation_design.md.
   # A usage may also carry the optional performance keys of LLM::UsageStats
   # (doc/llm_stats.md).
   class BaseBackend

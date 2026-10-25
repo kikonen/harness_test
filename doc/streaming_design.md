@@ -144,6 +144,11 @@ already reads both usage shapes: OpenAI nests the answer in
   the done line) - `StreamAccumulator` keeps them until the usage is assembled,
   so the normalized response is identical to the buffered path's (issue #251,
   `doc/llm_stats.md`).
+- Finish reason: `choices[0].finish_reason` (OpenAI SSE) or `done_reason`
+  (native NDJSON), and a bare `done: true` line with no reason maps to
+  `"stop"`. It goes into the normalized response as the top-level
+  `finish_reason`; what the harness does with it is `doc/truncation_design.md`
+  (issue #345), not this doc.
 
 ## The retry boundary (the cost of streaming)
 

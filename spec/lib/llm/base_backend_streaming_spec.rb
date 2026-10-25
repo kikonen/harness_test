@@ -248,6 +248,23 @@ RSpec.describe "BaseBackend streaming" do
       end
     end
 
+    # issue #345: the streamed path had the reason in hand and dropped it, so a
+    # cut-off answer reached the harness looking like a bad one.
+    it 'reports a length finish_reason from the streamed body' do
+      server = ChunkedServer.new(parts: [
+        sse('{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1",' \
+            '"function":{"name":"file.write","arguments":"{\"content\":"}}]}}]}'),
+        sse('{"choices":[{"delta":{},"finish_reason":"length"}]}')
+      ])
+      begin
+        result = backend_for(server.port).chat([{ role: 'user', content: 'hi' }], stream: true)
+
+        expect(result[:finish_reason]).to eq('length')
+      ensure
+        server.close
+      end
+    end
+
     # issue #368: BaseBackend#forward_delta skips an EMPTY delta, so a chunk that
     # carried only tool-call fragments used to reach the caller as nothing - the
     # spinner never learned a tool call was being written. The accumulator now

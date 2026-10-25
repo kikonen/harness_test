@@ -181,6 +181,21 @@ RSpec.describe LLM::OllamaBackend do
       expect(tc[:function][:arguments]).to eq('{"a":1}')
     end
 
+    # issue #345: the native field is done_reason, and nothing on master read
+    # it (grep -rn done_reason lib/ spec/ was empty) - so this path reported no
+    # truncation signal at all.
+    it 'carries the native done_reason at the top level' do
+      result = parsed({ message: { role: 'assistant', content: 'c' }, done_reason: 'length' })
+
+      expect(result[:finish_reason]).to eq('length')
+    end
+
+    it 'omits finish_reason when the done line reported none' do
+      result = parsed({ message: { role: 'assistant', content: 'c' }, prompt_eval_count: 1 })
+
+      expect(result).not_to have_key(:finish_reason)
+    end
+
     it 'omits usage when no token counters are present' do
       result = parsed({ message: { role: 'assistant', content: 'c' } })
       expect(result).not_to have_key(:usage)

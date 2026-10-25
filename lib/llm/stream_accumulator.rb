@@ -73,6 +73,7 @@ module LLM
         tool_calls: finished_tool_calls
       }
       response = { choices: [{ message: }] }
+      response[:finish_reason] = @finish_reason if @finish_reason
       response[:usage] = @usage.merge(@extended) if @usage
       response
     end
@@ -90,7 +91,7 @@ module LLM
     end
 
     def note_finish(json)
-      reason = json.dig(:choices, 0, :finish_reason)
+      reason = json.dig(:choices, 0, :finish_reason) || json[:done_reason]
       @finish_reason = reason if reason
       @finish_reason ||= "stop" if json[:done] == true
     end

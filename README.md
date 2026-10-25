@@ -32,6 +32,13 @@ scoped to a working directory you choose.
   (`.harness/shell_commands.yml`) (issue #129); its own confirmation dialog
   can be turned off with the `bang_requires_confirmation: false` config key
   (issue #221).
+- **Truncation is reported, not blamed on the model** - an answer the token
+  budget cut off used to be indistinguishable from a bad one: the model was told
+  only the tool's own validation text and retried the same shape. The server's
+  finish reason now survives into the harness, which prints
+  `warn:  response cut off by the token budget (iteration 3, 1024 completion
+  tokens, limit 1024)` and tells a tool call that lost its arguments to re-send
+  instead of calling it malformed (`doc/truncation_design.md`, issue #345).
 - **Sessions** - the conversation plus the access list is auto-saved to
   `.harness/sessions/<id>/session.json` (its own directory, issue #207) at
   every prompt boundary (before each send and after each reply) and again on
@@ -384,4 +391,7 @@ doc/llm_stats.md        # the server-reported performance fields a response
                         # may carry (cache depth, phase durations, draft
                         # counts), the wire names they come from, and why
                         # they are never summed across a turn
+doc/truncation_design.md # what a finish reason is for, what each endpoint
+                        # reports, what the harness does with it, and the
+                        # silent argument-parse swallows it replaced
 ```

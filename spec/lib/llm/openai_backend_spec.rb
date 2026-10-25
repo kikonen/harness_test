@@ -165,6 +165,22 @@ RSpec.describe LLM::OpenAIBackend do
       expect(tc[:function][:arguments]).to eq('{"a":1}')
     end
 
+    # issue #345: finish_reason reaches the harness, where a truncation is an
+    # event (doc/truncation_design.md). Present ONLY when the server sent one.
+    it 'carries choices[0].finish_reason at the top level' do
+      result = parsed({
+        choices: [{ message: { role: 'assistant', content: 'c' }, finish_reason: 'length' }]
+      })
+
+      expect(result[:finish_reason]).to eq('length')
+    end
+
+    it 'omits finish_reason when the response reports none' do
+      result = parsed({ choices: [{ message: { role: 'assistant', content: 'c' } }] })
+
+      expect(result).not_to have_key(:finish_reason)
+    end
+
     it 'omits usage when the response has none' do
       result = parsed({ choices: [{ message: { role: 'assistant', content: 'c' } }] })
       expect(result).not_to have_key(:usage)
