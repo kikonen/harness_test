@@ -264,6 +264,28 @@ RSpec.describe SessionManager do
       result = manager.compact_session
       expect(result[:context_line]).to match(/🧠 ctx ~\d+\/65536 \(\d+%\)/)
     end
+
+    # The END-OF-TURN path, pinned the same way the in-loop one is: a
+    # prompt-prefix cache matches from token 0, so the summary call must be the
+    # live chain plus the instruction - not the chain minus its system message
+    # (issue #246; doc/compaction_cache_design.md).
+    it 'sends the FULL chain to the summary call, system message included' do
+      4.times { |i| session.add_user("msg #{i}"); session.add_assistant("reply #{i}") }
+      live_chain = session.messages.map(&:dup)
+
+      captured = nil
+      allow(client).to receive(:chat) do |msgs|
+        captured = msgs
+        { choices: [{ message: { content: 'summary text' } }] }
+      end
+
+      manager.compact_session
+
+      expect(captured.first(live_chain.size)).to eq(live_chain)
+      expect(captured.first[:role]).to eq('system')
+      expect(captured.size).to eq(live_chain.size + 1)
+      expect(captured.last[:role]).to eq('user')
+    end
   end
 
   describe 'auto-save at prompt boundaries (issue #107)' do
