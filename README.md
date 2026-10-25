@@ -270,6 +270,13 @@ context), `test.echo` (test-only)
   [YOLO]", issue #362): a tool round has no request in flight, so it shows no
   rate, and a long run no longer reads as "Sending (model)...". Only the tool
   name and the command's short handle are shown - never its arguments.
+- While a streamed model is WRITING a tool call, the line names that phase too
+  ("⠼ 18s Sending (model / api type)... writing tool call: file.write 🧠 22% (160K)
+  [STREAM]", issue #368). Before this the answer's newest text just sat there with a
+  falling tok/s number for the whole tool call, because a tool call's arguments arrive
+  as fragments and no text arrives during them - a frozen tail plus a decaying rate,
+  which reads as a dead connection. Buffered mode cannot show this (there is no
+  partial state to label) and keeps the plain request line.
 - The disaster denylist overrides every posture AND every stored grant: a
   well-known disaster (`rm -rf`, `mkfs`, `dd of=/dev/`, `sudo`, `git push -f`,
   `curl | sh`, a fork bomb, `format C:`, `diskpart`, `del /s /q`,
