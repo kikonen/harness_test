@@ -394,4 +394,7 @@ doc/llm_stats.md        # the server-reported performance fields a response
 doc/truncation_design.md # what a finish reason is for, what each endpoint
                         # reports, what the harness does with it, and the
                         # silent argument-parse swallows it replaced
+doc/compaction_cache_design.md # why the compact summary call sends the full
+                        # chain (a prefix cache matches from token 0), what the
+                        # tools payload still costs, and what stays unresolved
 ```

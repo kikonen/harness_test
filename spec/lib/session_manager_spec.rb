@@ -610,10 +610,14 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
     result = manager.check_inloop_compaction(messages, 1000)
     expect(result).to be(true)
 
-    # The summarization call must see the ENTIRE working chain (minus
-    # the system message, plus the instruction prompt) - including the
-    # mid-turn tool trail already committed into it as it happened.
-    expect(captured.size).to eq(inloop_messages.size - 1 + 1)
+    # The summarization call sees the ENTIRE working chain AS IS - the system
+    # message included - plus the instruction prompt. A prompt-prefix cache
+    # matches from token 0, so dropping message 0 here would make the call a
+    # different prompt instead of a longer version of the one the server just
+    # read, and it would re-prefill the whole chain cold (issue #246). The
+    # mid-turn tool trail is already committed into the chain as it happened.
+    expect(captured.size).to eq(inloop_messages.size + 1)
+    expect(captured.first).to eq(inloop_messages.first)
     expect(captured.last[:content]).to match(/Keep it under \d+ words/)
     # The working chain is replaced with a compacted form - the tail
     # (last N messages) is deliberately NOT retained, because retaining it
