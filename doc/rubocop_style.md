@@ -232,3 +232,30 @@ the comparison is blind to hash-shorthand edits and an "AST identical" verdict
 there proves nothing. It is meaningful for changes that move or remove nodes
 (indentation, line wrapping, constant ordering - the `session_manager.rb`
 reformat was verified that way, 1697 nodes, only the constant moved).
+
+## A baseline entry is a bug list, not a style debt list
+
+`Lint/SafeNavigationChain` (`a&.b.c()` - the `&.` guards only the NEXT send, so
+`.c` runs on nil when `a` was nil) was baselined for exactly two files:
+`file_delete_tool.rb` and `file_rename_tool.rb`. Both were real bugs, not taste
+problems: the tool had already deleted / moved the file before the raise, and
+`Harness#execute_tool_call` turned the exception into `error: undefined method
+'clear' for nil`, so the model was told a successful change had failed and would
+typically retry it (issue #335). `dir_delete_tool.rb` guards both hops and never
+appeared in the baseline - the sibling that was already right.
+
+Baseline entries should therefore be read as "a known defect lives here": when
+the code is fixed, the entry is REMOVED in the same commit, because leaving it
+means the next occurrence in that file is silently accepted again. The cop is on
+by default (`Lint: Enabled: true`), so removing the exclusion is what makes the
+rule enforce recurrence in CI - no meta-spec is needed to hold it.
+
+The `&.` fix is the whole repair; the alternative the issue floated (make
+`session` a required constructor argument) was measured and rejected: five other
+tools take it as optional too (`file.read`, `file.write`, `file.patch`,
+`git.apply`, `dir.delete`) and each guards the cache step its own way - an
+`if @session` block, a `return unless @session` guard clause, or a both-hops
+`@session&.file_cache&.clear`. And a spec that constructs a tool without a
+session is the normal way to test a tool in isolation (17 of the 18 tool
+constructions in the `dir.delete` specs pass no session at all), so the
+no-session mode is real, not a mistake to legislate away.

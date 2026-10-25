@@ -478,15 +478,6 @@ Lint/RedundantStringCoercion:
   Exclude:
     - 'lib/session_manager.rb'
 
-# Offense count: 2
-# This cop supports unsafe autocorrection (--autocorrect-all).
-# Configuration parameters: AllowedMethods.
-# AllowedMethods: present?, blank?, presence, try, try!, in?
-Lint/SafeNavigationChain:
-  Exclude:
-    - 'lib/tools/file_delete_tool.rb'
-    - 'lib/tools/file_rename_tool.rb'
-
 # Offense count: 1
 Lint/ShadowedException:
   Exclude:

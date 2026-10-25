@@ -136,13 +136,22 @@ RSpec.describe Tools::FileDeleteTool do
     end
   end
 
-  # The constructor advertises session as OPTIONAL, but the cache step is
-  # @session&.file_cache.clear(...): safe navigation guards only the next send, so
-  # the clear lands on nil and raises AFTER the file is already deleted. Pinpointed
-  # by this spec; the fix is tracked in the issue below, so it stays pending rather
-  # than pinning the broken behaviour as expected.
+  # session is OPTIONAL here, and dropping a cache entry is a Session's own
+  # business, so no session means nothing to drop. The one-hop guard
+  # @session&.file_cache called .clear on nil AFTER the file was already deleted
+  # (&. covers only the NEXT send), so the model was told a successful delete had
+  # failed (issue #335).
   it 'deletes fine with no session at all (the cache step is optional)' do
-    skip 'known bug: NoMethodError without a Session, see issue #335'
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'a.txt'), "x\n")
+      list = file_list(dir)
+      list.add_file('a.txt', :d)
+
+      out = described_class.new(list).execute('path' => 'a.txt')
+
+      expect(out).to eq("ok: file 'a.txt' has been deleted")
+      expect(File.exist?(File.join(dir, 'a.txt'))).to be false
+    end
   end
 
   it 'never writes to $stdout (issue #40)' do
