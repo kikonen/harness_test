@@ -40,6 +40,20 @@ RSpec.describe Tools::DirDeleteTool do
     File.join(dir, 'tree')
   end
 
+  # Whichever link this box can build: a real symlink, or - Windows without
+  # developer mode, where File.symlink raises EACCES - an NTFS junction
+  # (mklink /J, no privilege). Ruby reports a junction as a link
+  # (File.symlink? true) while File.directory? still follows it, which is the
+  # exact shape the guard is about. false when neither can be built.
+  def make_dir_link(link, target)
+    File.symlink(target, link)
+    true
+  rescue SystemCallError
+    junction = system('cmd', '/c', 'mklink', '/J', link.tr('/', '\\'), target.tr('/', '\\'),
+                      out: File::NULL, err: File::NULL)
+    junction && File.symlink?(link)
+  end
+
   def build(list, session: nil, harness: nil)
     described_class.new(list, session: session, harness: harness)
   end
@@ -76,13 +90,12 @@ RSpec.describe Tools::DirDeleteTool do
     end
 
     it 'refuses to delete a symlink: file.delete is the unlink path' do
-      skip 'symlinks need developer mode on Windows' if Gem.win_platform?
       Dir.mktmpdir do |dir|
         target = File.join(dir, 'keep')
         FileUtils.mkdir_p(target)
         File.write(File.join(target, 'inside.txt'), 'keep me')
         link = File.join(dir, 'link')
-        File.symlink(target, link)
+        skip 'no link fixture buildable on this box' unless make_dir_link(link, target)
 
         list = FileList.new(workdir: dir)
         list.add_dir('link', :d)
@@ -91,6 +104,30 @@ RSpec.describe Tools::DirDeleteTool do
 
         expect(out).to include('is a symlink - delete it with file.delete')
         expect(File.symlink?(link)).to be(true)
+        expect(File.exist?(File.join(target, 'inside.txt'))).to be(true)
+      end
+    end
+
+    # The other half of the rule: a link INSIDE a tree is a leaf. Descending
+    # into it would delete a tree the grant never covers (issue #290).
+    it 'unlinks a symlink inside a tree as a leaf and never walks into it' do
+      Dir.mktmpdir do |dir|
+        target = File.join(dir, 'keep')
+        FileUtils.mkdir_p(target)
+        File.write(File.join(target, 'inside.txt'), 'keep me')
+        tree = File.join(dir, 'tree')
+        FileUtils.mkdir_p(File.join(tree, 'sub'))
+        File.write(File.join(tree, 'a.txt'), 'a')
+        link = File.join(tree, 'sub', 'inner')
+        skip 'no link fixture buildable on this box' unless make_dir_link(link, target)
+        list = FileList.new(workdir: dir)
+        list.add_dir('tree', :d)
+
+        out = build(list).execute('path' => 'tree')
+
+        expect(out).to include('2 file(s), 1 dir(s)')
+        expect(File.exist?(tree)).to be(false)
+        expect(File.directory?(target)).to be(true)
         expect(File.exist?(File.join(target, 'inside.txt'))).to be(true)
       end
     end
