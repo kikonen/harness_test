@@ -760,10 +760,14 @@ class Harness
     streaming = stream?
     # The estimate ratio is injected, not fixed here: the token estimate the
     # spinner's rate and the context indicator both need belongs to Session.
-    @stream_preview = streaming ? LLM::StreamPreview.new(
+    preview = streaming ? LLM::StreamPreview.new(
       chars_per_token: Session::EST_CHARS_PER_TOKEN
     ) : nil
-    on_delta = @stream_preview ? ->(delta) { @stream_preview.record(delta) } : nil
+    @stream_preview = preview
+    # The callback holds THIS request's object, not the ivar: the ivar is the
+    # main thread's reader handle and the ensure below clears it, so a delta
+    # that arrives after a clear would call record on nil (issue #378).
+    on_delta = preview ? ->(delta) { preview.record(delta) } : nil
 
     # The request's OWN clock: stats[:elapsed_seconds] is the TURN's (tool
     # execution included), so it can never serve as a request's speed.

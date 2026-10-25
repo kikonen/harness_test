@@ -1651,6 +1651,29 @@ RSpec.describe Harness do
       expect(h.stream_preview_line).to be_nil
     end
 
+    # The delta callback is held by the TRANSPORT, which can still have a delta
+    # to deliver after this request's ensure cleared the ivar. Capturing the
+    # ivar meant such a delta called record on nil (issue #378 - the crash #376
+    # could not trace): the callback must hold THIS request's preview object.
+    it 'a delta delivered after the request ended cannot raise, and shows no tail' do
+      client = instance_double('client')
+      captured = nil
+      allow(client).to receive(:chat) do |_messages, **kwargs|
+        captured = kwargs[:on_delta]
+        { choices: [{ message: { content: 'answer', reasoning: nil } }] }
+      end
+      h = scripted(build_harness(stream: true), client)
+
+      h.call_llm
+      expect(h.stream_preview_line).to be_nil
+      expect(captured).to respond_to(:call)
+
+      expect { captured.call({ content: 'late delta' }) }.not_to raise_error
+      # The late delta published into ITS OWN preview object: the reader sees
+      # nothing, so a finished request's tail cannot come back.
+      expect(h.stream_preview_line).to be_nil
+    end
+
     # The same clearing on the FAILURE path: a request that died mid-stream
     # would otherwise leave a partial answer's tail set, and the next request
     # (a /retry, or the next turn) would show text from an answer that never
