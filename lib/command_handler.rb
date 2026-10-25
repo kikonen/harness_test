@@ -82,7 +82,7 @@ class CommandHandler
     @file_list = file_list
     @options   = options
     @exiting   = false
-    @ui      = ui
+    @ui        = ui
     @on_resume = on_resume
     # One renderer for the whole run: it reads the registry this class owns,
     # so /help can never list a different set than /dispatch accepts.

@@ -109,7 +109,7 @@ class CommandAllowlist
   WHOLE_COMMAND_PATTERNS = [
     /\bcurl\b[^|]*\|\s*(sh|bash|zsh|perl|python)\b/,        # download -> shell
     /\bwget\b[^|]*\|\s*(sh|bash|zsh|perl|python)\b/,        # download -> shell
-    /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;?/          # fork bomb
+    /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;?/           # fork bomb
   ].freeze
 
   # cmd.exe recursive-force delete (del /s /q, rd /q /s, erase /s /q):
@@ -154,7 +154,7 @@ class CommandAllowlist
     /\bmountvol\b.*\/[dD]\b/i,                    # remove volume mount points
     # takeown is typed WITHOUT the .exe in practice (`takeown /f C:\x /r`),
     # so the suffix must be optional - the .exe-only form never matched.
-    /\btakeown(\.exe)?\b/i,                       # seize ownership of a tree
+    /\btakeown(\.exe)?\b/i, # seize ownership of a tree
     # blanket ACL grant ("give everyone full control")
     # (icacls, not *ir*cacls - the old spelling matched nothing real).
     /\bicacls?\b.*\/(grant|reset)\b.*\beveryone\b/i,

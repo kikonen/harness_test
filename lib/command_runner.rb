@@ -120,7 +120,7 @@ class CommandRunner
     @ui        = ui
     @list      = list.to_sym
     @safety_client = nil
-    @harness   = harness
+    @harness = harness
     @auto_approve_all = auto_approve_all
     @allowlist = CommandAllowlist.new(file_list.workdir,
                                       file: LISTS.fetch(list.to_sym))
@@ -462,7 +462,7 @@ class CommandRunner
   # a plain dialog-approved run keeps the full text, because this line is its
   # only trace.
   def execute(command, dir, shown, timeout, limit, full_shown: false)
-    name    = full_shown ? command_handle(command) : command
+    name = full_shown ? command_handle(command) : command
     announce_run(command)
     started = Time.now
     output, shell_status = run_in_shell(command, dir, timeout)
@@ -477,7 +477,7 @@ class CommandRunner
     elapsed = (Time.now - started).round(2)
     code    = shell_status.exitstatus
 
-    out            = truncate(output, limit)[0]
+    out = truncate(output, limit)[0]
 
     if code.zero?
       status(:ok, "#{name} (exit 0, #{elapsed}s)")
@@ -595,7 +595,7 @@ class CommandRunner
     timed_out = false
     until waiter.join(0.1)
       if Time.now >= deadline
-        timed_out   = true
+        timed_out = true
         kill_process_tree(pid)
         waiter.join(KILL_GRACE_SECONDS) # the tree is gone, or nearly
         break

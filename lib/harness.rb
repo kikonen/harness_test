@@ -647,7 +647,7 @@ class Harness
       tokens  = @session.anchored_estimate(messages)
       label   = "~"
     else
-      used    = @session.context_used
+      used = @session.context_used
       return nil if used.nil?
       tokens  = used[:tokens]
       label   = used[:estimated] ? "~" : ""
@@ -752,7 +752,7 @@ class Harness
     reason  = first_line.call(:reasoning)
     content = first_line.call(:content)
 
-    tools  = message[:tool_calls].map { |tc| tc[:function][:name] }
+    tools = message[:tool_calls].map { |tc| tc[:function][:name] }
     # One ROLE per event (issue #146): the old single :step type carried the
     # label, the reasoning digest, the interstitial and the tool list, with the
     # pattern baked into each string - a renderer could not tell them apart

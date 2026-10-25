@@ -50,7 +50,7 @@ require_relative "../file_text"
 module Tools
 
   class FilePatchTool < Tool
-    SEARCH_WINDOW = 50  # lines to search above/below the declared position
+    SEARCH_WINDOW = 50 # lines to search above/below the declared position
 
     def initialize(file_list, session = nil)
       @file_list = file_list
@@ -241,7 +241,7 @@ module Tools
               # Blank line: treat as a context line with empty content.
               hunk_lines << [" ", ""]
             else
-              break  # not part of the hunk
+              break # not part of the hunk
             end
             i += 1
           end
@@ -310,7 +310,7 @@ module Tools
       new_side = hunk[:lines].select { |t, _| t == " " || t == "+" }.map { |_, text| text }
       return nil if old_side.empty? && new_side.empty?
 
-      expected = hunk[:old_start] - 1  # 0-based
+      expected = hunk[:old_start] - 1 # 0-based
 
       # Pure insertion hunk (no old-side lines at all): insert at the
       # declared position, anchoring on a new-side context line if one exists

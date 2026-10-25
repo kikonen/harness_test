@@ -54,7 +54,7 @@ class Task
     # The drain loop rebuilds the spinner whenever the outbox empties;
     # this replay keeps its message from resetting mid-turn.
     @spinner_detail = nil
-    @ui      = nil                 # set by Task.run before start
+    @ui = nil # set by Task.run before start
     @dialog_open = false           # true while perform_direct is on stdin
     @note_editor  = nil
     @note_draft   = nil            # draft kept by a cancelled Esc
@@ -312,7 +312,7 @@ class Task
             store_and_render(task, msg)
           end
 
-          msg = task.poll(0)  # non-blocking: grab next if available
+          msg = task.poll(0) # non-blocking: grab next if available
           break unless msg
         end
 

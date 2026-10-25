@@ -99,7 +99,7 @@ class HarnessConfig
     @models       = normalize_models(Array(data[:models]))
     @default_model = nonblank(data[:default_model])
     @system_prompt_file = nonblank(data[:system_prompt_file])
-    @auto_save    = data[:auto_save].nil? ? true : data[:auto_save]
+    @auto_save = data[:auto_save].nil? ? true : data[:auto_save]
     @command_safety_check = data[:command_safety_check] == true
     @command_safety_auto_approve = data[:command_safety_auto_approve] == true
     @double_enter_submit = data[:double_enter_submit] == true
@@ -124,13 +124,13 @@ class HarnessConfig
     @web_fetch_allow_private = data[:web_fetch_allow_private] == true
     # issue #298: the editor command (nil = Ctrl+G is not taken at all).
     @editor = nonblank(data[:editor])
-    @compact      = {
+    @compact = {
       recent_messages: int_or_nil(data.dig(:compact, :recent_messages)),
       auto_threshold:  float_or_nil(data.dig(:compact, :auto_threshold)),
       max_size:        int_or_nil(data.dig(:compact, :max_size)),
       reserved_tokens: int_or_nil(data.dig(:compact, :reserved_tokens))
     }
-    @retry        = {
+    @retry = {
       count: int_or_nil(data.dig(:retry, :count)),
       delay: float_or_nil(data.dig(:retry, :delay))
     }

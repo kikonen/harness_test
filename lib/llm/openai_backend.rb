@@ -41,7 +41,7 @@ module LLM
       body[:min_p]              = cfg(:min_p)       if cfg(:min_p)
       body[:presence_penalty]   = cfg(:presence_penalty) if cfg(:presence_penalty)
       body[:repeat_penalty]     = cfg(:repeat_penalty)   if cfg(:repeat_penalty)
-      body[:max_tokens]         = cfg(:max_tokens)    if cfg(:max_tokens)
+      body[:max_tokens]         = cfg(:max_tokens) if cfg(:max_tokens)
       # issue #215: the OpenAI endpoint reads reasoning_effort at TOP LEVEL
       # (openai.go ReasoningEffort -> Think); it is NOT an options key.
       body[:reasoning_effort]   = cfg(:reasoning_effort) if cfg(:reasoning_effort)
@@ -51,7 +51,7 @@ module LLM
     end
 
     def parse_response(json)
-      message  = json.dig(:choices, 0, :message) || {}
+      message = json.dig(:choices, 0, :message) || {}
       normalized = {
         choices: [{
           message: {

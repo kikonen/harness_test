@@ -120,7 +120,7 @@ module UI
     # One spinner frame as a plain string (no \r, no write). Public so tests
     # can assert the exact frame text without capturing stdout.
     def line(i)
-      glyph  = FRAMES[i % FRAMES.size]
+      glyph = FRAMES[i % FRAMES.size]
       "#{glyph}#{render_elapsed} #{@message}..." \
         "#{render_suffix}#{render_badge}"
     end

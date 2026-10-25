@@ -64,7 +64,7 @@ module LLM
   def self.backend_type(value)
     case value.to_s.strip
     when "ollama" then OLLAMA
-    else               OPENAI   # default and fallback: OpenAI-compatible
+    else               OPENAI # default and fallback: OpenAI-compatible
     end
   end
 end

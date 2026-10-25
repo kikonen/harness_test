@@ -57,7 +57,7 @@ module Tools
       if args["path"] && !args["path"].to_s.strip.empty?
         shown = @file_list.display_path(args["path"])
         rel   = relative_to_workdir(args["path"])
-        cmd   += %w[--] + [rel]  # "--" protects paths starting with "-"
+        cmd   += %w[--] + [rel] # "--" protects paths starting with "-"
       end
 
       result = run_git(*cmd)

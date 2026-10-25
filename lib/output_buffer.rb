@@ -61,7 +61,7 @@ class OutputBuffer
   def drain
     return [] if @read_index >= @entries.size
 
-    batch      = @entries[@read_index...@entries.size]
+    batch = @entries[@read_index...@entries.size]
     @read_index += batch.size
     trim_prefix
     batch

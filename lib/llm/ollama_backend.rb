@@ -65,7 +65,7 @@ module LLM
     #     prompt_eval_count: <int>, eval_count: <int> }
     # There is no `usage` object; token counts are top-level fields.
     def parse_response(json)
-      message  = json[:message] || {}
+      message = json[:message] || {}
       normalized = {
         choices: [{
           message: {

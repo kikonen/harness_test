@@ -195,7 +195,7 @@ class Session
     @token_anchor = nil # issue #216: a fresh conversation has no anchor
     # issue #170: a fresh conversation has read nothing - the cache is stale.
     @file_cache.clear_all
-    @created_at   = Time.now
+    @created_at = Time.now
     self
   end
 

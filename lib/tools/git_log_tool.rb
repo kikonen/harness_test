@@ -52,7 +52,7 @@ module Tools
       if args["path"] && !args["path"].to_s.strip.empty?
         shown = @file_list.display_path(args["path"])
         rel   = relative_to_workdir(args["path"])
-        cmd   += %w[--] + [rel]  # "--" protects paths starting with "-"
+        cmd   += %w[--] + [rel] # "--" protects paths starting with "-"
         result = run_git(*cmd)
         if result[:status] != 0
           return git_error("log #{shown}", result, "check the path and that it exists in the repository history")

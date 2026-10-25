@@ -31,7 +31,7 @@ class GitRunner < Tool
     apply:  100
   }.freeze
 
-  MAX_LIMIT = 5000  # hard cap for the `limit` parameter
+  MAX_LIMIT = 5000 # hard cap for the `limit` parameter
 
   def execute(args)
     raise NotImplementedError, "#{self.class}#execute not implemented"

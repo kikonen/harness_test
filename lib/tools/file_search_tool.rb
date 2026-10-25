@@ -86,7 +86,7 @@ module Tools
         rescue StandardError
           next
         end
-        next if content.include?("\x00")  # skip binary files
+        next if content.include?("\x00") # skip binary files
 
         # issue #257: normalize at the read boundary. Without this the gsub
         # (and split / regex match) raise on a file whose bytes are not valid

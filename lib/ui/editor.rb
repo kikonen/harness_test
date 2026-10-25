@@ -496,7 +496,7 @@ module UI
       end
       text = Reline.readmultiline(
         prompt, false, rprompt: prompt
-      ) { |_buf| false }  # Enter always inserts a newline; submit is the key
+      ) { |_buf| false } # Enter always inserts a newline; submit is the key
       # Ctrl+G hand-off (issue #298): Reline is out of raw mode here (readmultiline
       # closes with_raw_input before returning), so the child editor may have the
       # terminal. :edited carries whatever the editor produced (nil when the editor

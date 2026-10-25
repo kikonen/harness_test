@@ -308,7 +308,7 @@ module UI
         noted = cancel_with_reason?(answer)
         return reprompt_invalid(answer, ui) if noted.nil?
 
-        return noted                       # "<cancel n> <reason>"
+        return noted # "<cancel n> <reason>"
       end
 
       numbers, bad = tokens.map(&:to_i).partition { |n| n >= 1 && n <= @options.size }
@@ -359,7 +359,7 @@ module UI
     def finalize(chosen, ui)
       if chosen.is_a?(Array) && chosen.size == 2 &&
          chosen[0] == CANCEL_VALUE && chosen[1].is_a?(String)
-        return chosen                     # "<cancel> <one-line reason>"
+        return chosen # "<cancel> <one-line reason>"
       end
 
       values = chosen[:values]

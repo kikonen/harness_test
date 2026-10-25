@@ -78,7 +78,7 @@ class CLI
     opts = {}
 
     parser = OptionParser.new do |o|
-      o.banner  = "Usage: harness.rb [options]"
+      o.banner = "Usage: harness.rb [options]"
       o.separator ""
       o.on("-c FILE", "--config FILE",
            "Path to the YAML config file. Lookup order: -c, $HARNESS_CONFIG, " \
@@ -151,7 +151,7 @@ class CLI
 
     if profile
       opts[:base_url]         = profile[:url] || DEFAULT_BASE_URL
-      opts[:model]           ||= profile[:model]
+      opts[:model]            ||= profile[:model]
       opts[:api]              = profile[:api]
       opts[:token]            = profile[:token]
       opts[:num_ctx]          = profile[:num_ctx]
@@ -175,7 +175,7 @@ class CLI
     explicit_model = !opts[:model].nil? && !opts[:model].to_s.strip.empty?
     default_key    = config.default_model
     using_default  = profile && !explicit_model && (default_key.nil? || (profile[:name] == default_key || profile[:model] == default_key))
-    opts[:active_model]   = using_default ? nil : (profile ? (profile[:name] || profile[:model]) : opts[:model])
+    opts[:active_model] = using_default ? nil : (profile ? (profile[:name] || profile[:model]) : opts[:model])
 
     # System prompt file: --system-file > config system_prompt_file >
     # built-in default (config/system_prompt.txt). issue #223: the config
@@ -211,7 +211,7 @@ class CLI
                       config.streaming_enabled?
                     end
 
-    opts[:compact_recent]   ||= config.compact_recent_messages
+    opts[:compact_recent] ||= config.compact_recent_messages
     opts[:compact_auto_threshold] = config.compact_auto_threshold
     opts[:compact_max_size] = config.compact_max_size
     opts[:compact_reserved] = config.compact_reserved_tokens
@@ -486,7 +486,7 @@ class CLI
 
       case result.status
       when :eof
-        return nil                     # Ctrl-D on an empty buffer => quit
+        return nil # Ctrl-D on an empty buffer => quit
       when :edited
         # Ctrl+G hand-off (issue #298): what the editor wrote (or the untouched
         # buffer when the editor could not run) comes back as the DRAFT - the

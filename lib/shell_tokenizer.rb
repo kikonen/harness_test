@@ -264,7 +264,7 @@ class ShellTokenizer
     if @scanner.check(buf.last) && buf.last == ">"
       buf << @scanner.getch # >>
     end
-    buf << scan_target  # include the target (e.g. "file") in the label
+    buf << scan_target # include the target (e.g. "file") in the label
     buf.join
   end
 
@@ -275,7 +275,7 @@ class ShellTokenizer
   def scan_target
     return "" unless @scanner.check(/\s*[^\s|;&<>$`()\n]/)
 
-    @scanner.scan(/\s*/)  # eat any separating whitespace (discarded)
+    @scanner.scan(/\s*/) # eat any separating whitespace (discarded)
     target = @scanner.scan(/[^\s|;&<>$`()\n]+/)
     " #{target}" if target
   end
@@ -294,7 +294,7 @@ class ShellTokenizer
         @scanner.getch
       end
     end
-    buf << scan_target  # include the target in the label (e.g. " log")
+    buf << scan_target # include the target in the label (e.g. " log")
     buf.join
   end
 

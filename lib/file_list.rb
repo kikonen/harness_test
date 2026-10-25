@@ -368,7 +368,7 @@ class FileList
     unless inside
       warn_line = "WARNING: this path is OUTSIDE the working directory - " \
                   "granting access may be a sandbox escape."
-      note  = [note, warn_line].compact.join("\n")
+      note = [note, warn_line].compact.join("\n")
     end
 
     choice = UI::Dialog.new(
