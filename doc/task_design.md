@@ -31,6 +31,25 @@ Main thread -> Task thread: task.respond(value)                  [inbox]
 Main thread (drain loop):   poll outbox, dispatch by type
 ```
 
+## A task error: one line out, the frames into harness.log
+
+A task thread owns no console (single-thread I/O rule), so an exception raised
+inside the turn block cannot be printed where it happened. It travels as one
+`:error_ctrl` event carrying `"Class: message"`; `Task.run` returns that string
+and `TaskRunner#run_on_task` prints it as `[task error] Class: message`.
+
+That line is the whole story on the CONSOLE by design: a multi-line backtrace
+there would be interleaved with the turn's own output. It is NOT the whole
+story anywhere else, which was the bug - the frames died with the thread, so a
+crash reported as `[task error] NoMethodError: undefined method 'record' for
+nil` left nothing to trace it back from. `Task#record_task_error` logs the
+exception WITH ITS BACKTRACE via the harness logger (the session's
+`harness.log`) from inside the rescue, so the trace exists where the failure
+occurred. The event is pushed FIRST: a logger that cannot write must not swallow
+the error line the user is owed. A harness with no logger (a spec double, a Task
+run with `harness: nil`) still yields the one-line error - logging is additive,
+never load-bearing on the error path.
+
 ## Structured log
 
 The Task instance owns one OutputBuffer, filled by the drain loop and never
