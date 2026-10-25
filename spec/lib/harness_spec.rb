@@ -1812,4 +1812,50 @@ RSpec.describe Harness do
       expect(h.memories.body('logged-note')).to eq('a fact')
     end
   end
+
+  # Issue #33: web.fetch is the harness' only outbound network call outside the
+  # LLM client, so its wiring is worth asserting: the tool must see THIS run's
+  # options (the private-address key is a user posture) and THIS run's workdir
+  # (that is where the host grants are saved).
+  describe 'web.fetch (issue #33)' do
+    it 'is registered in every run' do
+      h = build_harness
+
+      expect(h.tool_registry.get('web.fetch')).to be_a(Tools::WebFetchTool)
+      expect(h.tool_registry.names).to include('web.fetch')
+    end
+
+    it 'reads this run\'s options and its FileList, not copies' do
+      h = build_harness
+      tool = h.tool_registry.get('web.fetch')
+
+      expect(tool.instance_variable_get(:@options)).to equal(h.options)
+      expect(tool.instance_variable_get(:@workdir)).to eq(workdir)
+      expect(tool.instance_variable_get(:@harness)).to equal(h)
+    end
+
+    it 'refuses a private address with no config, whatever the model asks' do
+      h = build_harness
+      tool = h.tool_registry.get('web.fetch')
+
+      # A literal IP: the guard decides it without DNS, so it is refused before
+      # any consent (a dialog would raise here - no Task - and none is needed).
+      out = tool.execute('url' => 'http://127.0.0.1:9/x')
+
+      expect(out).to include('127.0.0.1 is a blocked address')
+    end
+
+    # The refusal is visible in this session's harness.log, like every other
+    # tool verdict: a network call that never happened still leaves a trace.
+    it 'records a refused fetch in this session\'s harness.log' do
+      h = build_harness
+      h.send(:execute_tool_call, {
+        id: 'c1',
+        function: { name: 'web.fetch', arguments: JSON.generate(url: 'http://127.0.0.1:9/x') }
+      })
+
+      log = File.read(h.session_log_path)
+      expect(log).to include("tool web.fetch → error: 127.0.0.1 is a blocked address")
+    end
+  end
 end

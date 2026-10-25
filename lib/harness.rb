@@ -41,6 +41,7 @@ require_relative "tools/git_log_tool"
 require_relative "tools/git_grep_tool"
 require_relative "tools/git_apply_tool"
 require_relative "tools/run_command_tool"
+require_relative "tools/web_fetch_tool"
 require_relative "tools/tools_list_tool"
 require_relative "tools/tools_search_tool"
 require_relative "skills"
@@ -190,6 +191,8 @@ class Harness
     registry.register(Tools::GitApplyTool.new(@file_list, @session))
     registry.register(Tools::RunCommandTool.new(@file_list, @options,
                                                 harness: self))
+    registry.register(Tools::WebFetchTool.new(@file_list, @options,
+                                              harness: self))
     registry.register(Tools::ToolsListTool.new(registry))
     registry.register(Tools::ToolsSearchTool.new(registry))
     registry.register(Tools::SkillsListTool.new(@skills))

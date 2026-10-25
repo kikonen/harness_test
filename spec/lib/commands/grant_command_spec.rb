@@ -78,4 +78,28 @@ RSpec.describe Commands::GrantCommand do
     expect(out).to include('- git log')
     expect(out).not_to include('Commands for shell (!):')
   end
+
+  # issue #33: a web.fetch host grant is security state like the command
+  # allowlists, so /grant must show it - a user reviewing "what is allowed"
+  # should not have to know that a second grant system exists.
+  it 'lists the web.fetch host grants' do
+    WebHostAllowlist.new(workdir).add('api.example.com')
+    WebHostAllowlist.new(workdir).add('docs.example.org')
+
+    out = run_command
+
+    expect(out).to include('Hosts for web.fetch (exact hosts only):')
+    expect(out).to include('- api.example.com')
+    expect(out).to include('- docs.example.org')
+  end
+
+  it 'says nothing about hosts when none are granted, and keeps the command placeholder' do
+    CommandAllowlist.new(workdir).add('git log')
+
+    out = run_command
+
+    expect(out).not_to include('Hosts for web.fetch')
+    # The placeholder means "no commands", so a host grant must not swallow it.
+    expect(out).not_to include('Commands: (none allowed)')
+  end
 end

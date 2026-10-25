@@ -117,6 +117,11 @@ class HarnessConfig
     @yolo = data[:yolo] == true
     @bang_requires_confirmation = data[:bang_requires_confirmation].nil? ?
                                   true : data[:bang_requires_confirmation] == true
+    # issue #33: web.fetch private-address opt-in. Default OFF: fetching a
+    # loopback / private / link-local address is the SSRF-shaped case, so it is
+    # never allowed unless the user asked for it. Like yolo, a USER-side
+    # posture: the model cannot set it.
+    @web_fetch_allow_private = data[:web_fetch_allow_private] == true
     # issue #298: the editor command (nil = Ctrl+G is not taken at all).
     @editor = nonblank(data[:editor])
     @compact      = {
@@ -239,6 +244,13 @@ class HarnessConfig
   # still gates it.
   def bang_requires_confirmation?
     @bang_requires_confirmation != false
+  end
+
+  # issue #33: may web.fetch connect to a private / loopback / CGNAT address?
+  # Default OFF. It lifts the PRIVATE tier of AddressGuard only - link-local
+  # (the cloud metadata range) and multicast stay refused whatever this says.
+  def web_fetch_allow_private?
+    @web_fetch_allow_private == true
   end
 
   # Max tool-loop iterations for one turn (or nil; the built-in default then applies).

@@ -261,4 +261,29 @@ RSpec.describe HarnessConfig do
       expect(template).to include('streaming')
     end
   end
+
+  # issue #33: web.fetch may not connect to a private / loopback / link-local
+  # address unless the USER asked for it. It is a user-side posture like yolo:
+  # no tool argument reaches it.
+  describe '#web_fetch_allow_private? (issue #33)' do
+    it 'defaults to off' do
+      expect(described_class.new({}).web_fetch_allow_private?).to be(false)
+    end
+
+    it 'reads the key' do
+      expect(described_class.new(web_fetch_allow_private: true).web_fetch_allow_private?).to be(true)
+      expect(described_class.new(web_fetch_allow_private: false).web_fetch_allow_private?).to be(false)
+      # Truthy junk does not enable it (same coercion as every other posture).
+      expect(described_class.new(web_fetch_allow_private: 'yes').web_fetch_allow_private?).to be(false)
+      expect(described_class.new(web_fetch_allow_private: nil).web_fetch_allow_private?).to be(false)
+    end
+
+    it 'mentions the key in the default template (commented out)' do
+      expect(template).to include('web_fetch_allow_private')
+      # The template must say what it does NOT lift, or it reads as a general
+      # "allow local network" switch.
+      expect(template).to include('link-local')
+      expect(template).to include('Opt-in')
+    end
+  end
 end

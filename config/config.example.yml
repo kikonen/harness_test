@@ -120,6 +120,15 @@ retry:
 # own typing is already the consent. The disaster denylist still applies.
 # bang_requires_confirmation: true
 
+# web.fetch private addresses (issue #33). web.fetch refuses a host that resolves
+# to loopback, RFC1918, CGNAT, IPv6 unique-local, link-local or multicast: that is
+# the shape of an SSRF (a fetched page pointing the harness at localhost or at the
+# cloud metadata endpoint 169.254.169.254). Set true to allow a LOCAL or internal
+# endpoint (a dev server on 127.0.0.1, an intranet wiki). It lifts the private
+# ranges ONLY - link-local and multicast stay refused, and a host grant never
+# substitutes for this key. Opt-in: default false.
+# web_fetch_allow_private: false
+
 # External editor for the buffer you are typing (issue #298). Press Ctrl+G at
 # the prompt (or inside a mid-turn note) and the text you have typed is written
 # to a scratch file, opened with this command, and comes back as the DRAFT - the
