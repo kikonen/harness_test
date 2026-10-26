@@ -136,8 +136,17 @@ shape; 2 unnumbered verdict line(s) cannot be placed`. Both consumers pass their
 harness logger in. The purity contract (above) forbids SafetyCheck from touching
 Session, Harness or the Task - an injected logger is the only sink it may write
 to, and it is inert without one. Without this line, "AUTO-APPROVE silently
-stopped approving" would be the symptom and harness.log would have nothing to say
-about it.
+stopped approving" would be the symptom and harness.log would have nothing to
+say about it.
+
+The same reasoning covers the answer's SHAPE, not only a dropped line. Because
+the fork carries the live tool payload (issue #246, above), the model can answer
+with a tool call instead of verdict lines; the prompt says "Do NOT call any
+tools" but that is a request, not a guarantee. When no text comes back, `run`
+logs `safety check: no verdict lines (answer was a tool call: run.command)`
+(or `(answer was blank)`), because that no-verdict state is a model behaviour
+that will otherwise look like a broken check. The calls in such an answer are
+never parsed and never executed - the fork has no tool loop.
 
 ## Not changed by #344
 

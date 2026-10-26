@@ -235,6 +235,29 @@ RSpec.describe SafetyCheck do
       expect(question).to include('safe: or dangerous:')
     end
 
+    # Sending the live tool payload means an answer CAN come back as a tool call
+    # instead of verdict lines. That is a no-verdict state produced by the MODEL's
+    # shape, not by a dropped line, so it must be recoverable from harness.log too
+    # - and it must never be read as a verdict (nothing in a fork is executed).
+    it 'logs that no verdict lines arrived when the answer was a tool call' do
+      client = double('client')
+      allow(client).to receive(:chat).and_return({
+        choices: [{ message: { content: nil,
+                              tool_calls: [{ id: 'z1',
+                                            function: { name: 'run.command' } }] } }]
+      })
+      logged = []
+      logger = double('logger')
+      allow(logger).to receive(:info) { |m| logged << m }
+
+      result = described_class.run(client, mid_loop_chain, [command],
+                                   tools: [{ type: 'function' }], logger:)
+
+      expect(result).to eq(command => nil)
+      expect(logged).to include('safety check: no verdict lines (answer was ' \
+                               'a tool call: run.command)')
+    end
+
     # 'No verdict' is now produced by a decision (a dropped line), not only by a
     # network error - so the reason must land in harness.log, or an AUTO-APPROVE
     # that silently stopped approving has nothing to explain it.
