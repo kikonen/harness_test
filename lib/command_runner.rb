@@ -414,7 +414,7 @@ class CommandRunner
     Task.emit(:spinner_detail, origin: :command_runner,
               content: { message: "Model safety check (1 command)" }) if Task.current
     results  = SafetyCheck.run(safety_client, session_chain, commands,
-                               logger: @harness&.logger)
+                               tools: harness_tools, logger: @harness&.logger)
     verdicts = results.values.compact
     if verdicts.any?
       status(:ok, "model verdict: #{verdicts.join(' | ')}")
@@ -430,6 +430,13 @@ class CommandRunner
   # of its own). nil without a harness - no check possible then.
   def safety_client
     @safety_client ||= @harness&.client
+  end
+
+  # nil when the harness cannot report one - a bang runner built without a
+  # harness has no tool definitions to mirror, and a missing payload is a
+  # cache miss, never a wrong verdict.
+  def harness_tools
+    @harness.respond_to?(:tools_payload) ? @harness.tools_payload : nil
   end
 
   # The live conversation chain to fork from (issue #208: the session IS

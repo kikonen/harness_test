@@ -25,7 +25,7 @@ RSpec.describe Harness do
     # response streams (issue #28), so the streaming kwargs are accepted.
     # @calls records the chain; @stream_flags / @on_deltas record what each
     # request was given, so a spec can assert WHICH posture was used.
-    attr_reader :calls, :stream_flags, :on_deltas
+    attr_reader :calls, :stream_flags, :on_deltas, :tool_payloads
 
     # Optional hook run after each call, so a spec can change harness state
     # BETWEEN the requests of one turn (e.g. a mid-turn /stream toggle).
@@ -35,6 +35,7 @@ RSpec.describe Harness do
       @calls        = []
       @stream_flags = []
       @on_deltas    = []
+      @tool_payloads = []
       @responses = responses
     end
 
@@ -42,6 +43,7 @@ RSpec.describe Harness do
       @calls << messages.map { |m| m.dup }
       @stream_flags << stream
       @on_deltas   << on_delta
+      @tool_payloads << tools
       response = @responses.shift || { content: 'done' }
       raise LLMError, 'connection lost mid-turn' if response == :fail
 
@@ -1093,6 +1095,50 @@ RSpec.describe Harness do
     end
   end
 
+  # Issue #246: a prompt-prefix cache matches the rendered prompt from token 0,
+  # and a chat template renders the tool definitions into it. So EVERY request
+  # of a session - the live turn and each advisory fork - must carry the same
+  # tool payload, or the fork is a DIFFERENT prompt and re-prefills cold.
+  describe 'every request carries the same tools payload (issue #246)' do
+    def scripted(harness, responses)
+      client = FakeScriptedClient.new(responses)
+      harness.instance_variable_set(:@client, client)
+      client
+    end
+
+    it 'sends tool_registry.to_openai on the live turn' do
+      h = build_harness
+      client = scripted(h, [{ content: 'done' }])
+      h.session.add_user('go')
+
+      h.call_llm
+
+      expect(client.tool_payloads).to eq([h.tools_payload])
+      expect(h.tools_payload.map { |t| t[:function][:name] })
+        .to eq(h.tool_registry.names)
+    end
+
+    # num_ctx 10 with no reserved headroom: the turn trips in-loop compaction,
+    # so the scripted queue's 3rd answer is the SUMMARY call's (the guard needs
+    # 4 conversation messages, hence two tool rounds first) and that request
+    # carries the SAME tools as the turn's own.
+    it 'sends it on the in-loop summary call too' do
+      h = build_harness(model: 'test-model', num_ctx: 10, compact_reserved: 0)
+      echo = lambda do |id|
+        { content: nil,
+          tool_calls: [{ id: id, function: { name: 'test.echo', arguments: '{"text":"x"}' } }] }
+      end
+      client = scripted(h, [echo.call('c1'), echo.call('c2'),
+                            { content: 'HANDOFF SUMMARY' }, { content: 'final' }])
+      h.session.add_user('do the thing')
+
+      h.call_llm
+
+      expect(client.tool_payloads.uniq.size).to eq(1)
+      expect(client.tool_payloads.first).to eq(h.tools_payload)
+    end
+  end
+
   # Issue #283: call_llm emits the request line before every request, so a
   # re-point made by an earlier wait (an in-loop compaction) cannot stick for
   # the rest of the turn.
@@ -1433,7 +1479,7 @@ RSpec.describe Harness do
                     'safe:/dangerous: shape; 2 unnumbered verdict line(s) cannot be placed')
     end
 
-    it 'sends one check request without tools, forked from the live chain' do
+    it 'sends one check request with the live tool payload, forked from the chain' do
       client = instance_double('client')
       captured = []
       allow(client).to receive(:chat) do |chain, tools: nil, timeout: nil|
@@ -1447,7 +1493,12 @@ RSpec.describe Harness do
         run_command_calls('ruby -c lib/a.rb', 'bundle exec rspec'))
 
       expect(captured.size).to eq(1)
-      expect(captured[0][:tools]).to be_nil
+      # #246: the fork carries the SAME tool definitions the live turn sends
+      # (Harness#tools_payload -> the live turn's own payload), because a chat
+      # template renders them into the prompt - omitting them makes the fork a
+      # different prompt, not a longer one. doc/compaction_cache_design.md.
+      expect(captured[0][:tools]).to eq(harness.tools_payload)
+      expect(captured[0][:tools]).not_to be_empty
       expect(captured[0][:timeout]).to eq(SafetyCheck::DEFAULT_TIMEOUT)
       forked = captured[0][:chain]
       expect(forked.map { |m| m[:role] }).to eq(%w[system user user])

@@ -131,8 +131,11 @@ that was missing, not the rescue.
 - **Only `call_llm` consumes the reason.** `SessionManager#generate_compact_summary`
   and `SafetyCheck.run` call `client.chat` directly, so a truncated summary or a
   truncated verdict answer is still reported by their own checks (an empty summary
-  raises; an unplaceable verdict yields no verdict). Both are advisory calls that
-  keep the buffered posture, and neither one has a tool round to blame - which is
-  exactly why they were left alone rather than given a warn line of their own.
+  raises - naming a tool-call answer if that is what came back; an unplaceable
+  verdict yields no verdict). Both are advisory calls that keep the buffered
+  posture, and neither one has a tool round to blame - which is exactly why they
+  were left alone rather than given a warn line of their own. Both send the live
+  tool payload (#246), so a tool-call answer IS possible; nothing in a fork is
+  executed, only its text is used.
 - `content_filter` and unknown reasons get the same warn line as `length` but do
   NOT change the tool round: only a budget cut is reported as truncation.
