@@ -163,7 +163,10 @@ back as the draft (issue #298; `editor:` in the config, `--editor`, or
 Up/Down browse history. A line starting with `!` runs a shell command
 locally instead of prompting the model (issue #129). `/yolo` [on|off|status]
 toggles the YOLO posture: every `run.command` call then runs with no dialog
-and no model check (issue #221; the disaster denylist still asks).
+and no model check (issue #221). The one exception is a denylisted command: it
+still asks, and its dialog does carry the model verdict when `command_safety_check`
+is on (issue #382) - the check runs there so the verdict can be judged against a
+command the denylist already refuses.
 `/stream` [on|off|status] toggles streamed LLM responses (issue #28): each part
 of an answer is then consumed as it arrives and the spinner line shows the newest
 text of it with the rate it is arriving at (`[STREAM]` badge). Before the answer

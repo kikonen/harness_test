@@ -394,6 +394,13 @@ class Harness
   # never touches Session, so it cannot trigger in-loop compaction.
   def precheck_batch_safety(message_calls)
     return nil unless command_safety_check
+    # YOLO's auto-approval branch in CommandRunner#run returns before
+    # safety_verdict_for is reached, so a batch check here would pay for a
+    # forked round trip whose verdicts can only be thrown away (#238's cost).
+    if yolo?
+      logger.info("safety pre-check skipped (YOLO consumes no verdicts)")
+      return nil
+    end
 
     commands = run_command_batch_commands(message_calls)
     return nil if commands.size < 2

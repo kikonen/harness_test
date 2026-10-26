@@ -37,8 +37,11 @@ require_relative "ui/renderer"
 #   AUTO-APPROVE  - issue #224: commands the model verdicts "safe:" skip it.
 #   YOLO          - /yolo: EVERY run.command call skips the dialog, no model
 #                   check at all (issue #238: the check costs an extra LLM
-#                   round trip and trashes the local KV cache). Every such
-#                   run is status-lined and logged, so nothing is invisible.
+#                   round trip and trashes the local KV cache). Every such run is
+#                   status-lined and logged, so nothing is invisible. The one
+#                   command YOLO does NOT auto-approve is a denylisted one: its
+#                   dialog is where the check runs under YOLO, verdict shown,
+#                   never acted on (issue #382).
 # In ALL postures - and even for a stored allowlist grant - a command
 # matching CommandAllowlist::DISASTER_PATTERNS (the well-known disasters:
 # rm -rf, format C:, sudo, forced push, curl|sh, ...) is refused

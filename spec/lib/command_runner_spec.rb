@@ -356,6 +356,24 @@ RSpec.describe CommandRunner do
       end
     end
 
+    # The trial contract of issue #382: a DENYLISTED command must still show the
+    # model's verdict, so the verdict can be judged against a command the
+    # denylist already refuses. The floor is untouched - the command still asks
+    # and is not auto-approved; only the note is added.
+    it 'shows the verdict on a denylisted command too (MANUAL, issue #382)' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('1: safe: removes only a scratch dir')
+        runner = make_tool_runner(dir, { command_safety_check: true },
+                                  harness: harness_with(client, chain_mid_tool_loop))
+        out = drive_dialog(['2']) # Allow(1), Cancel(2): no grants offered
+        result = runner.run('rm -rf tmp/scratch/x')
+        expect(result).to start_with('error: user denied')
+        expect(out.string).not_to include('auto-approved')
+        expect(out.string).to include('MODEL VERDICT (advisory): safe: removes only a scratch dir')
+        expect(out.string).to include('DENYLISTED: recursive-force delete')
+      end
+    end
+
     it 'is skipped when the option is not enabled (default off)' do
       Dir.mktmpdir do |dir|
         client = fake_client('safe')
@@ -798,10 +816,11 @@ RSpec.describe CommandRunner do
   end
 
   # issue #221: the YOLO posture (Harness#yolo? / /yolo). Every run.command
-  # skips the consent dialog - including UNSAFE-construct commands the
-  # allowlist could never grant - and NO model safety check runs (issue
-  # #238). The disaster denylist is the floor: a denylisted command still
-  # gets the dialog even with a stored grant AND YOLO on.
+  # skips the consent dialog - including UNSAFE-construct commands the allowlist
+  # could never grant - and no model safety check runs for them (issue #238). The
+  # disaster denylist is the floor: a denylisted command still gets the dialog even
+  # with a stored grant AND YOLO on, and that dialog is the one YOLO case where the
+  # check does run and the verdict is shown (issue #382).
   context 'YOLO posture (issue #221)' do
     # A harness stand-in with the YOLO posture ON and a recording logger
     # (the audit trail: every auto-approved run must be logged).
@@ -849,6 +868,26 @@ RSpec.describe CommandRunner do
         drive_dialog([])
         expect(runner.run('echo hi')).to start_with('exit code: 0')
         expect(client.instance_variable_get(:@calls)).to be_empty
+      end
+    end
+
+    # YOLO auto-approves everything EXCEPT a denylisted command, and the one
+    # command that does ask must still carry the verdict (issue #382). This is
+    # the only YOLO case where the check runs at all - Harness#precheck_batch_safety
+    # skips YOLO, and a non-denylisted command never reaches the check.
+    it 'runs the model check for a denylisted command, on its dialog' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('1: dangerous: recursive force delete')
+        h = double('harness', yolo?: true, logger: nil, client: client,
+                   session: double('session', messages: chain_mid_tool_loop))
+        runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
+        out = drive_dialog(['2']) # Allow(1), Cancel(2): no grants offered
+        result = runner.run('rm -rf /somewhere')
+        expect(result).to start_with('error: user denied')
+        expect(client.instance_variable_get(:@calls).size).to eq(1)
+        expect(out.string).to include('DENYLISTED: recursive-force delete')
+        expect(out.string)
+          .to include('MODEL VERDICT (advisory): dangerous: recursive force delete')
       end
     end
 
@@ -906,6 +945,26 @@ RSpec.describe CommandRunner do
         expect(out.string).to include('DENYLISTED: sudo')
       end
     end
+    # Same command and posture as above, the other half of it (issue #382): the
+    # verdict the posture could not act on is still shown, so it can be judged
+    # against a disaster-shaped command.
+    it 'shows the AUTO-APPROVE verdict on the denylist dialog it cannot clear' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('1: dangerous: escalates privileges')
+        h = double('harness', yolo?: false, logger: nil, client: client,
+                   session: double('session', messages: chain_mid_tool_loop),
+                   command_safety_auto_approve_effective?: true)
+        runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
+        out = drive_dialog(['2']) # Cancel (Allow=1, Cancel=2: no grants offered)
+        result = runner.run('sudo rm something')
+        expect(result).to start_with('error: user denied')
+        expect(out.string).not_to include('auto-approved')
+        expect(out.string).to include('DENYLISTED: sudo')
+        expect(out.string)
+          .to include('MODEL VERDICT (advisory): dangerous: escalates privileges')
+      end
+    end
+
   end
 
   # issue #221: bang confirmation OFF (config bang_requires_confirmation:

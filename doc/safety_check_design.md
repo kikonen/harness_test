@@ -1,7 +1,8 @@
 # SafetyCheck: the pre-dialog command safety check, and how a verdict is bound
 
-Verified against `lib/safety_check.rb` on master-branch commits of 2026-10-25
-(ruby 4.0.7, RuboCop 1.92). Issue #224 built the check; issue #344 fixed the
+Verified against `lib/safety_check.rb`, `lib/command_runner.rb` and
+`lib/harness.rb` on master-branch commits of 2026-10-26 (ruby 4.0.7, RuboCop
+1.92). Issue #224 built the check; issue #344 fixed the
 binding. Repro: `analysis/344/repro.rb`.
 
 ## What the check is, and what it is for
@@ -147,6 +148,29 @@ logs `safety check: no verdict lines (answer was a tool call: run.command)`
 (or `(answer was blank)`), because that no-verdict state is a model behaviour
 that will otherwise look like a broken check. The calls in such an answer are
 never parsed and never executed - the fork has no tool loop.
+
+## When the check actually runs, per posture (issue #382)
+
+Which of the two call sites runs is a posture question, and the two sites are not
+interchangeable:
+
+| posture | a batch of >= 2 unapproved `run.command` | a single call | a DENYLISTED command |
+|---|---|---|---|
+| MANUAL | batch pre-check | check in `CommandRunner#run` | check in `CommandRunner#run` |
+| AUTO-APPROVE | batch pre-check | check in `CommandRunner#run` | check in `CommandRunner#run`, verdict shown, never acted on |
+| YOLO | **skipped** | skipped | check in `CommandRunner#run`, verdict shown, never acted on |
+
+`Harness#precheck_batch_safety` skips YOLO because YOLO's auto-approval branch
+returns before `safety_verdict_for` is reached: batch verdicts written there
+could only be thrown away, so the batch would pay a forked round trip (and print
+"checking N commands before the consent dialog...") for a dialog that never
+opens. The skip is logged (`safety pre-check skipped (YOLO consumes no verdicts)`).
+
+The denylist path is the one YOLO case that does check, and that is deliberate:
+the verdict is the first note line on a dialog the model cannot clear, so the
+verdict can be judged against a command the denylist already refuses. Showing it
+changes nothing about who may run what - the floor and `auto_approve_safe?` are
+untouched - and it is pinned for all three postures in `spec/lib/command_runner_spec.rb`.
 
 ## Not changed by #344
 
