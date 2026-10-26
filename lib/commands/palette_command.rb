@@ -3,6 +3,7 @@
 require_relative "../command"
 require_relative "../ui/palette"
 require_relative "../ui/renderer"
+require_relative "../ui/dialog"
 
 module Commands
   # /palette [name|status] - show or switch the rendered-output palette for this
@@ -35,6 +36,7 @@ module Commands
       ["turn roles", UI::Renderer::LABELS.keys],
       ["status roles", UI::Renderer::STATUS_TYPES],
       ["marker roles", %i[marker rule]],
+      ["dialog roles", UI::Dialog::NOTE_ROLES.values],
       ["note roles", %i[system stats compact]]
     ].freeze
 
@@ -88,6 +90,7 @@ module Commands
         @ui.puts "  #{heading}: #{shown}"
       end
       @ui.puts "  plain roles: model answer, tool notes, command output"
+      @ui.puts "  dialog kind context: the terminal's own color (content, not chrome)"
     end
 
     # Rendered through the SAME UI::Renderer the drain loop uses, so the

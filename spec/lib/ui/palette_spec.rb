@@ -61,6 +61,21 @@ RSpec.describe UI::Palette do
       expect(palette.paint(:text, '  [file.write] ok')).to eq('  [file.write] ok')
     end
 
+    # issue #388: the dialog note kinds. CONTEXT is unpainted in EVERY palette:
+    # a note is content the user must read (a model-asked dialog's whole
+    # question is a note), not chrome - only a kind that IS a highlight gets a
+    # hue, and the alert/safe pair is the same red/green the status verdicts use.
+    it 'maps the dialog note kinds to the verdict hues, context to none' do
+      expect(palette.color_for(:dialog_note)).to be_nil
+      expect(palette.color_for(:dialog_warn)).to eq('38;5;130')
+      expect(palette.color_for(:dialog_alert)).to eq('31')
+      expect(palette.color_for(:dialog_safe)).to eq('32')
+      basic = described_class.new('basic16')
+      expect(basic.color_for(:dialog_note)).to be_nil
+      expect(basic.color_for(:dialog_alert)).to eq('31')
+      expect(basic.color_for(:dialog_safe)).to eq('32')
+    end
+
     it 'paints only roles the palette names - an unknown type is left plain' do
       expect(palette.paint(:brand_new_kind, 'text')).to eq('text')
     end

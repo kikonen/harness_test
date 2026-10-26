@@ -13,8 +13,9 @@ look safe (`command_safety_check`, an opt-in config key). The verdict is advisor
 text in the dialog; it never widens the allowlist and never bypasses the user's
 Allow. It has exactly two consumers:
 
-- `CommandRunner#prepend_safety_verdict` shows it as `MODEL VERDICT (advisory):`
-  in the consent dialog;
+- `CommandRunner#verdict_note` shows it as `MODEL VERDICT (advisory):` in the
+  consent dialog, colored by the verdict's own kind (`verdict_kind`, issue #388,
+  `doc/dialog_colors_design.md`);
 - `CommandRunner#auto_approve_safe?` decides whether a `safe:` verdict skips the
   dialog entirely in the AUTO-APPROVE posture.
 

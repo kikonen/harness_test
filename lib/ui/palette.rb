@@ -40,6 +40,16 @@ module UI
         status_warn: BROWN,
         status_note: BROWN,
         status_same: GRAY,
+        # Dialog note kinds (issue #388): the emitter states the KIND
+        # (UI::Dialog::Note), the hue is decided here. CONTEXT stays the
+        # terminal's own color on purpose: a note is CONTENT the user must read
+        # (a model-asked dialog's whole question is one note), not chrome -
+        # recessive would make the thing to read look like decoration. Only the
+        # kinds that ARE a highlight get a hue.
+        dialog_note: nil,
+        dialog_warn: BROWN,
+        dialog_alert: "31",
+        dialog_safe: "32",
         status_info: nil
       },
       # No 256-color or truecolor dependency: recessive roles fall back to the
@@ -64,6 +74,14 @@ module UI
         status_warn: "33",
         status_note: "33",
         status_same: nil,
+        # The same dialog kinds inside the 16-color band (red for the hard floor
+        # / a dangerous verdict, dark yellow for a softer refusal, green for a
+        # reassuring one). CONTEXT is unpainted in every palette - a note is
+        # content to read, not chrome (see the default palette's note).
+        dialog_note: nil,
+        dialog_warn: "33",
+        dialog_alert: "31",
+        dialog_safe: "32",
         status_info: nil
       },
       # Every role uncolored: what --no-color selects.

@@ -379,4 +379,50 @@ RSpec.describe FileList do
     end
   end
 
+  # issue #388: the grant dialog states each note line's KIND, so a colored
+  # console can tell the purpose line (context, terminal color) from the line
+  # the user must weigh before granting (the outside-workdir WARNING).
+  describe 'grant dialog note kinds (issue #388)' do
+    # grant_access passes ui: nil (task-thread contract); the stub serves the
+    # dialog on a console WITH a palette, so the paint is observable.
+    def drive_colored_grant(list, answer, purpose: nil)
+      stdout = StringIO.new
+      allow_any_instance_of(UI::Dialog).to receive(:show) do |dialog|
+        dialog.perform_direct(
+          ui: UI::Console.new(stdout:, stdin: StringIO.new(answer),
+                              palette: UI::Palette.new('default'))
+        )
+      end
+      list.grant_access(*@grant_args, purpose:)
+      stdout.string
+    end
+
+    it 'colors the outside-workdir WARNING and leaves the purpose plain' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        @grant_args = ['../outside.txt', :r]
+        out = drive_colored_grant(list, "2\n", purpose: 'to read the config')
+
+        expect(out).to include(
+          "\e[38;5;130mWARNING: this path is OUTSIDE the working directory" \
+          " - granting access may be a sandbox escape.\e[0m"
+        )
+        # CONTEXT is content to read, not chrome: no escape bytes around it.
+        expect(out).to include("\n                to read the config\n")
+      end
+    end
+
+    it 'an inside-workdir grant has no warn line to color' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        @grant_args = ['secret.txt', :r]
+        out = drive_colored_grant(list, "4\n", purpose: 'to patch it')
+
+        expect(out).not_to include("OUTSIDE the working directory")
+        expect(out).not_to include("\e[38;5;130m")
+        expect(out).to include("\n                to patch it\n")
+      end
+    end
+  end
+
 end
