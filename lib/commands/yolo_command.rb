@@ -8,12 +8,14 @@ module Commands
   #
   # What it flips (Harness#yolo?): with YOLO ON the run.command tool runs
   # EVERY command without the consent dialog and without a model safety
-  # check (issue #238) - the direct answer to "tired of being an ENTER
-  # presser" (#221 / #254). What it does NOT change:
+  # check (issue #238) - the direct answer to "tired of being an ENTER presser"
+  # (#221 / #254). What it does NOT change:
   #   * the disaster denylist: a well-known disaster command (rm -rf,
   #     format C:, sudo, git push -f, curl | sh, ...) still gets the dialog
   #     in every posture - it is the floor under YOLO, see
-  #     CommandAllowlist::DISASTER_PATTERNS;
+  #     CommandAllowlist::DISASTER_PATTERNS. That dialog is the ONE case where
+  #     the model check does run under YOLO, and it shows the verdict without
+  #     being able to act on it (issue #382, doc/safety_check_design.md);
   #   * file/dir/git tool grants: YOLO is a SHELL posture only and never
   #     grants file access;
   #   * bang syntax (!): user-typed commands are governed by the separate

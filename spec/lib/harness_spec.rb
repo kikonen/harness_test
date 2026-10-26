@@ -1460,6 +1460,26 @@ RSpec.describe Harness do
 
     let(:harness) { build_harness(command_safety_check: true) }
 
+    # YOLO's auto-approval branch in CommandRunner#run returns before
+    # safety_verdict_for is reached, so batch verdicts produced here can only be
+    # thrown away - a forked LLM round trip paid for nothing, on the prefix the
+    # batch's own request just filled (#238). The skip must be logged, or a
+    # session that stopped pre-checking has nothing to explain it.
+    it 'is skipped in the YOLO posture, with the reason logged' do
+      on = build_harness(command_safety_check: true, yolo: true)
+      client = instance_double('client')
+      allow(client).to receive(:chat)
+      on.instance_variable_set(:@client, client)
+      on.session.add_user('go')
+
+      expect(on.precheck_batch_safety(run_command_calls('echo a', 'echo b')))
+        .to be_nil
+      expect(on.options[:safety_verdicts]).to be_nil
+      expect(client).not_to have_received(:chat)
+      expect(File.read(on.session_log_path))
+        .to include('safety pre-check skipped (YOLO consumes no verdicts)')
+    end
+
     it 'is a no-op when the option is disabled' do
       off = build_harness(command_safety_check: false)
       expect(off.precheck_batch_safety(run_command_calls('a', 'b')))
