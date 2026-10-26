@@ -282,10 +282,15 @@ RSpec.describe CLI do
       # Grants restored onto a FileList of its own.
       expect(cli.file_list).not_to equal(old_fl)
       expect(cli.harness.file_list).to equal(cli.file_list)
-      expect(cli.file_list.readable?('lib/foo.rb')).to be true
-      expect(cli.file_list.writable?('lib/foo.rb')).to be true
-      expect(cli.file_list.readable?('spec/lib/cli.rb')).to be true
-      expect(cli.file_list.writable?('spec/lib/cli.rb')).to be false
+      stored = cli.file_list.accessible_paths
+      expect(stored[:both][:files]).to eq([File.expand_path('lib/foo.rb', workdir)])
+      expect(stored[:read][:dirs]).to eq([File.expand_path('spec/lib', workdir)])
+      # The resumed session was saved with YOLO ON, and since #274 the same
+      # posture covers file access too - so coverage must not be confused with
+      # the restored grants above: local/ is outside it even here.
+      expect(cli.harness.yolo?).to be(true)
+      expect(cli.file_list.writable?('lib/other.rb')).to be true
+      expect(cli.file_list.writable?('local/notes.md')).to be false
     end
 
     it 'closes the replaced run\'s logger and gives the fresh one its own client' do

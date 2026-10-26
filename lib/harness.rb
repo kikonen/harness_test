@@ -124,6 +124,12 @@ class Harness
     # for the whole run (no live toggle); the getter exists so the banner can name
     # a relaxed floor. Rationale: doc/denylist_safe_approve_design.md.
     @denylist_safe_approve = options[:command_safety_denylist_safe_approve] == true
+    # The same posture the shell consent reads live (issue #274): a lambda, so a
+    # /yolo at the idle prompt or a mid-turn flip applies to the very next tool
+    # call and switching it off removes the coverage at once. FileList never
+    # stores a grant from it, so a resume cannot turn it into a standing grant.
+    @file_list.posture      = -> { yolo? }
+    @file_list.audit_logger = @logger
     self.output_palette = options[:output_palette]
     # Streaming posture (issue #28): the initial value comes from the config
     # (global key or a profile's own key); /stream switches it for the rest of

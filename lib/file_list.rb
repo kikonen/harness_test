@@ -41,6 +41,14 @@ require_relative "tool"
 # delete, and a delete grant does not imply read or write. It is granted,
 # persisted, and displayed with the same options as read/write (issue #92).
 #
+# POSTURE COVERAGE (issue #274): when the user has the YOLO posture on, a path
+# INSIDE the working directory is covered for read, write and delete without a
+# dialog. This is a coverage rule consulted live on every check, NOT a stored
+# grant - turning the posture off stops the coverage at once, and /grant shows it
+# as a posture line rather than as a grant. It never reaches a sensitive path,
+# never reaches the owner's own space (local/), and never reaches a path outside
+# the working directory.
+#
 # Sensitive paths (.git, .harness, .env*) are blocked regardless of grants,
 # EXCEPT inside a per-issue scratch zone (tmp/scratch/<n>/, tmp/keep/<n>/),
 # where a nested one is a disposable clone, not this project's state.
@@ -53,6 +61,22 @@ class FileList
 
   # Permission modes.
   MODES = %i[r w d rw].freeze
+
+  # The YOLO posture reader (Harness#yolo?), wired by Harness#initialize the way
+  # the command runner reads the same posture live. Read on EVERY check: a /yolo
+  # typed at the idle prompt, or flipped mid-turn, applies to the very next tool
+  # call, and switching it off removes the coverage at once. nil = no posture.
+  attr_accessor :posture
+
+  # The session logger the posture coverage reports itself to (issue #274: an
+  # auto-approval must leave a trace, the same rule YOLO's shell runs follow).
+  # Set by Harness#initialize after its own logger exists.
+  attr_accessor :audit_logger
+
+  # One audit line per MODE per session, not per access: file.list and
+  # file.search call readable? on every candidate file, and a covered workdir
+  # would print hundreds of identical lines.
+  attr_reader :posture_announced
 
   def self.sha256(path)
     return nil unless File.file?(path)
@@ -70,6 +94,8 @@ class FileList
     @grants = { r: { files: [], dirs: [], flat_dirs: [] },
                 w: { files: [], dirs: [], flat_dirs: [] },
                 d: { files: [], dirs: [], flat_dirs: [] } }
+    @posture = nil
+    @posture_announced = { r: false, w: false, d: false }
     initial.each { |f| add_file(f, :rw) }
   end
 
@@ -139,6 +165,8 @@ class FileList
   def readable?(path)
     path = resolve(path)
     return false if sensitive?(path)
+    return true  if posture_covers?(path, :r)
+
     return true  if @grants[:r][:files].include?(path) ||
                     @grants[:w][:files].include?(path)
     return true  if @grants[:r][:flat_dirs].include?(path) ||
@@ -161,6 +189,8 @@ class FileList
   def writable?(path)
     path = resolve(path)
     return false if sensitive?(path)
+    return true  if posture_covers?(path, :w)
+
     return true  if @grants[:w][:files].include?(path)
     return true  if @grants[:w][:flat_dirs].include?(path)
     return true  if flat_dir_covers?(@grants[:w][:flat_dirs], path)
@@ -175,6 +205,8 @@ class FileList
   def deletable?(path)
     path = resolve(path)
     return false if sensitive?(path)
+    return true  if posture_covers?(path, :d)
+
     return true  if @grants[:d][:files].include?(path)
     return true  if @grants[:d][:flat_dirs].include?(path)
     return true  if flat_dir_covers?(@grants[:d][:flat_dirs], path)
@@ -518,7 +550,60 @@ class FileList
     flat_dirs.any? { |d| d == parent }
   end
 
+  # True when the YOLO posture is ON (issue #274). Public because /grant shows the
+  # coverage as a POSTURE line - it is never a stored grant, so it must not reach
+  # #accessible_paths (that list is what a session saves and restores, and consent
+  # posture is user-side state, never conversation state).
+  def posture_active?
+    !@posture.nil? && !!@posture.call
+  end
+
+  # The workdir display form of the scope the posture currently covers, for /grant.
+  def posture_scope
+    display_path(@workdir)
+  end
+
   private
+
+  # The YOLO coverage (issue #274): a path INSIDE the working directory is covered
+  # for this mode without a dialog. Three things it never reaches: a sensitive path
+  # (the caller already rejected it), the owner's own space, and anything outside the
+  # working directory - a posture loosens consent INSIDE the sandbox, never an escape
+  # from it. The workdir itself has no relative form, so a nil rel is what makes the
+  # whole tree covered (that is the point of the posture).
+  def posture_covers?(path, mode)
+    unless posture_active?
+      # A flip back ON must announce again - the flag is per posture, not per session.
+      @posture_announced[mode] = false
+      return false
+    end
+    return false unless within_workdir?(path)
+
+    rel = relative_path(path)
+    return false if rel && SensitiveFiles.owner_space?(rel)
+
+    announce_posture(mode)
+    true
+  end
+
+  # An auto-approval must leave a trace, the rule YOLO's shell runs follow (issue
+  # #221): a status line AND a harness.log line, so every access that ran without
+  # asking is recoverable from the session log - including the posture that allowed
+  # it. Once per mode per session: file.list and file.search call readable? on every
+  # candidate and dir.delete on every entry of a tree, so a per-access line buries
+  # the log in repeats.
+  def announce_posture(mode)
+    return if @posture_announced[mode]
+
+    @posture_announced[mode] = true
+    label = mode_label(mode)
+    Tool.push_status(
+      label: "access",
+      verdict: :ok,
+      message: "auto-granted (YOLO): #{label} in the working directory"
+    )
+    @audit_logger&.info("auto-granted (YOLO): #{label} access in #{@workdir}")
+  end
 
   # True if the path itself (when it is a granted directory) or any of its
   # ancestor directories is present in the given list of granted directories.

@@ -16,8 +16,10 @@ module Commands
   #     CommandAllowlist::DISASTER_PATTERNS. That dialog is the ONE case where
   #     the model check does run under YOLO, and it shows the verdict without
   #     being able to act on it (issue #382, doc/safety_check_design.md);
-  #   * file/dir/git tool grants: YOLO is a SHELL posture only and never
-  #     grants file access;
+  #   * the three things file coverage (issue #274) never reaches: a sensitive
+  #     path, the owner's own space (local/), a path outside the working
+  #     directory. Everywhere else in the workdir, read, write and delete are
+  #     covered without a dialog - as a posture, never as a stored grant;
   #   * bang syntax (!): user-typed commands are governed by the separate
   #     'bang_requires_confirmation' config key instead;
   #   * the audit trail: every auto-approved run prints a status line and
@@ -28,8 +30,9 @@ module Commands
   class YoloCommand < Command
     HELP = CommandHelp.new(
       usage: "yolo [on|off|status]",
-      summary: "Toggle the YOLO shell-consent posture for run.command (saved " \
-               "with the session). The disaster denylist keeps asking",
+      summary: "Toggle the YOLO consent posture: run.command without asking and " \
+               "file access in the workdir (saved with the session). The disaster " \
+               "denylist, sensitive paths and local/ keep asking",
       group: :access,
       forms: ["yolo", "yolo on", "yolo off", "yolo status"],
       see_also: %w[consent shell grant])
@@ -66,6 +69,10 @@ module Commands
       @ui.puts on ? "  Shell consent for run.command is OFF - commands run " \
                   "without asking." \
                  : "  Shell consent is ON - unapproved commands ask as before."
+      if on
+        @ui.puts "  File access in the working directory is covered too " \
+                 "(never sensitive paths, local/ or paths outside it)."
+      end
       print_denylist_note
       @ui.puts "  The posture is saved with the session (resume keeps it)."
     end

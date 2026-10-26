@@ -2,7 +2,9 @@
 
 What the guard is for and where it stops: why a nested `.git` inside
 `tmp/keep/<issue>/` is deletable (#321), and why `.harness/skills` is grantable
-while the rest of `.harness/` is not (#12, `doc/skills_design.md`).
+while the rest of `.harness/` is not (#12, `doc/skills_design.md`), and why the
+owner's own space `local/` is a THIRD kind of region - grantable, but never
+covered by a posture (#274).
 
 ---
 
@@ -102,6 +104,56 @@ that can be created but never cleaned); forbidding scratch repos under `tmp/`
 (that forbids the measurement itself); hand-cleaning the zone (outside the audit
 trail, and it reproduces on every future git measurement).
 
+## The owner's space: `local/` (issue #274)
+
+`local/` is a THIRD kind of region, and it is NOT a sensitive path. A human grant
+on it is legal - the harness.md rule "local/ is the owner's space (never write,
+never delete)" was a rule for the model, and today the human's own dialog is what
+enforces it. `SensitiveFiles::OWNER_DIR` names it for ONE purpose: the YOLO posture
+covers read, write and delete inside the working directory without asking (#274),
+and an auto-approval must not quietly remove the veto the user kept there. So the
+posture leaves `local/` asking, exactly as a MANUAL run does.
+
+The three regions a posture never covers, and what each one protects:
+
+| region | a human grant may cover it | the posture covers it | why |
+|---|---|---|---|
+| a sensitive path (`.git`, `.harness`, `.env*`) | no | no | the harness's own footing |
+| `local/` | yes | no | the owner's space: the dialog IS the protection |
+| outside the workdir | yes, after an explicit "OUTSIDE the working directory - granting access may be a sandbox escape" warning | no | a posture loosens consent INSIDE the sandbox; an escape route stays a decision the user makes by name |
+
+`SensitiveFiles.owner_space?(rel)` uses the same exact-prefix shape as the two zone
+tests, so `local/../analysis` (which `relative_path` has already resolved away) is
+not the owner's space, and `analysis/local/` is not either - only top-level `local/`
+and its subtree are.
+
+## What the YOLO posture covers (issue #274)
+
+The owner's complaint was consent fatigue of a specific shape: "constantly stopped
+to grant access to analysis/NNN dirs, without any way to grant recursive access to
+analysis itself". `FileList` had no notion of a posture at all - YOLO was read only
+by `CommandRunner`, so a run that never asked about a `git log` still asked once per
+file for `file.read`, `file.search` and `dir.create` (the file tools call `readable?`
+on every candidate).
+
+`FileList#posture_covers?` (lib/file_list.rb) is the answer, and its shape is the
+contract:
+
+- it is consulted AFTER the sensitive check, so the guard is never loosened;
+- it requires `within_workdir?`, so the workdir is the outer bound of the coverage
+  (the workdir itself has no relative form, and a `nil` rel is what makes the whole
+  tree covered - that is the point of the posture);
+- it rejects `owner_space?`, so `local/` keeps its dialog;
+- it is read LIVE through a lambda (`Harness#initialize` wires `-> { yolo? }`), so a
+  `/yolo` at the idle prompt or a mid-turn flip applies to the very next tool call,
+  and switching it off removes the coverage at once;
+- it stores NOTHING in `@grants` and never reaches `#accessible_paths`, because
+  consent posture is user-side state and a session saves grants - a resumed session
+  must not inherit a standing file grant from a posture;
+- it announces once per MODE per session (a status line plus a harness.log line):
+  an auto-approval must leave a trace, the same rule YOLO's shell runs follow, but a
+  per-access line would bury the log in one line per candidate file.
+
 ## A keep zone is not repo state - and never was committable
 
 The measurement above shows the zone is invisible to git, and that is the RIGHT
@@ -126,6 +178,9 @@ now explicit:
 - `spec/lib/sensitive_files_spec.rb` - the name test (basename patterns, any
   component) and the zone pattern, including the `<n>`-required cases and the
   lookalike directories.
+- `spec/lib/sensitive_files_spec.rb` also pins `owner_space?`: top-level `local/`
+  and its subtree match, `analysis/local/` does not, and a resolved path that
+  escaped it (`local/../analysis`) does not either.
 - `spec/lib/sensitive_files_spec.rb` also pins the git half of the rule (issue
   #347): real git in a tmp repo with this project's own `.gitignore`, asserting
   both scratch zones stay out of the repo while `analysis/<n>/` is trackable, and
