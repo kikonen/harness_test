@@ -175,7 +175,10 @@ untouched - and it is pinned for all three postures in `spec/lib/command_runner_
 ## Not changed by #344
 
 - The denylist floor: a disaster command reaches the dialog in every posture,
-  whatever the model says (`README.md`, access model).
+  whatever the model says (`README.md`, access model). #389 later made that
+  floor relaxable for a real `safe:` verdict, config-only and logged -
+  `doc/denylist_safe_approve_design.md`. Neither change touches `disaster?`
+  detection.
 - The fork/truncation contract and the KV-cache reasoning (the two sections
   above; `lib/safety_check.rb` now carries the invariants only).
 - `auto_approve_safe?` itself: the matching rule stays `\Asafe:`. #344 made the

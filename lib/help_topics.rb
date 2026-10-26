@@ -73,7 +73,15 @@ module HelpTopics
           "stored allowlist grant: rm -rf, mkfs, dd of=/dev/, shutdown, sudo, " \
           "git push -f, curl <url> | sh, a fork bomb, format C:, diskpart, " \
           "del /s /q, Remove-Item -Recurse -Force ... always reach the dialog " \
-          "with no \"Always allow\" option - a one-off Allow only."
+          "with no \"Always allow\" option - a one-off Allow only.",
+        "The floor's only exception is the denylist-safe override (issue #389): " \
+          "with the safety check on, a real model \"safe:\" verdict may auto-approve " \
+          "a denylist match on the run.command path, so a disaster word sitting " \
+          "inert inside a quoted string stops costing a dialog. A config-only opt-in " \
+          "('command_safety_auto_approve: denylist' or 'safe_denylist', or the " \
+          "separate 'command_safety_denylist_safe_approve: true') - no live toggle, " \
+          "not a Ctrl+A posture, fires only on a real \"safe:\" verdict, and every " \
+          "override is logged naming the verdict."
       ],
       see_also: %w[yolo grant palette]),
     # Named "conversation", not "session": a topic name must not collide with a

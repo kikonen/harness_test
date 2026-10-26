@@ -95,13 +95,31 @@ retry:
 # never auto-approves, never widens the allowlist, never bypasses "Allow".
 # command_safety_check: true
 
-# With command_safety_check on, the INITIAL command consent posture: when
-# true, commands the model verdicts "safe:" skip the consent dialog
-# ("dangerous:" verdicts and missing verdicts still ask). Manual consent
-# (false) is the default. During a session the posture is toggled live
-# with Ctrl+A (note editor or idle prompt); the spinner always shows the
-# current mode as a [MODE] badge at the end of its line (issue #224 follow-up).
-# command_safety_auto_approve: false
+# With command_safety_check on, the command consent posture as ONE enum key
+# (issue #389 folded the two relaxations into it). An unrecognised value is a
+# config error. A legacy true/false still works: true = safe, false/absent =
+# manual. Default manual.
+#   manual        every unapproved command asks.
+#   safe          a "safe:" model verdict skips the dialog ("dangerous:" and a
+#                 missing verdict still ask). Toggled LIVE with Ctrl+A (note
+#                 editor or idle prompt); the spinner always shows the current
+#                 mode as a [MODE] badge at the end of its line (issue #224
+#                 follow-up).
+#   denylist      FLOOR RELAXATION (issue #389): the disaster denylist normally
+#                 refuses auto-approval in every posture, so a disaster word that
+#                 sits INERT inside a quoted string (e.g. "mkfs.ext4" inside a
+#                 quoted array literal) still costs a one-off Allow dialog. With
+#                 this mode a real "safe:" verdict may auto-approve such a match -
+#                 on the model-driven run.command path only, never the ! bang
+#                 path. CONFIG-ONLY: no live toggle, not saved with the session,
+#                 not a Ctrl+A posture. A "dangerous:" or missing verdict keeps
+#                 the command fully denylisted, and every override is status-lined
+#                 AND written to harness.log naming the verdict that allowed it.
+#   safe_denylist both halves.
+# command_safety_auto_approve: manual
+# command_safety_denylist_safe_approve: false  # the denylist half on its own, if
+#                                               # you prefer two boolean keys (ORed
+#                                               # into the enum above)
 
 # Shell consent postures (issue #221, the consent-fatigue fix). Three
 # levels: MANUAL (every unapproved command asks) < AUTO-APPROVE (model-
@@ -113,6 +131,8 @@ retry:
 # (rm -rf, format C:, sudo, git push -f, curl | sh, ...) keeps the dialog
 # in EVERY posture, file-access grants are untouched, and every auto-
 # approved run is status-lined and written to harness.log.
+# (The floor's only exception is the denylist mode of command_safety_auto_approve
+# above - not part of any posture.)
 # yolo: false
 
 # The `! cmd` bang syntax keeps its confirmation dialog (default true).

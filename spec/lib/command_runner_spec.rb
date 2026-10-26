@@ -990,6 +990,107 @@ RSpec.describe CommandRunner do
     end
   end
 
+  # issue #389: command_safety_denylist_safe_approve - the owner's config-only
+  # opt-in to let a model "safe:" verdict decide even a DENYLISTED command, so a
+  # disaster word inert inside a quoted string stops costing a one-off Allow. The
+  # floor stays absolute with the option off; the override fires ONLY on the tool
+  # path, ONLY on a real "safe:" verdict, and is logged with the verdict that
+  # allowed it. Rationale + the quote-hole measurement: doc/denylist_safe_approve_design.md.
+  context 'denylist safe-override (issue #389)' do
+    # Denylisted (sudo) but wholly inert: safe to execute under an override.
+    let(:inert_denied) { 'echo "sudo rm /data"' }
+
+    # A harness stand-in with a recording logger (the audit trail is the whole
+    # point of an override: a denylist match ran with no dialog).
+    def override_harness
+      logged = []
+      logger = double('logger')
+      allow(logger).to receive(:info) { |m| logged << m }
+      allow(logger).to receive(:warn) { |m| logged << m }
+      [logged, double('harness', yolo?: false, logger: logger)]
+    end
+
+    # The verdict is INJECTED as a batch pre-check result (options[:safety_verdicts])
+    # so no client and no LLM call is involved - this spec is about the firing
+    # conditions, not about SafetyCheck.
+    def override_options(verdict)
+      {
+        command_safety_check: true,
+        command_safety_denylist_safe_approve: true,
+        safety_verdicts: { inert_denied => verdict }
+      }
+    end
+
+    it 'auto-approves a denylist match on a "safe:" verdict, tool path' do
+      Dir.mktmpdir do |dir|
+        logged, h = override_harness
+        runner = make_tool_runner(dir, override_options('safe: inert quoted data'), harness: h)
+        out = drive_dialog([]) # the dialog must NEVER open
+        result = runner.run(inert_denied)
+
+        expect(result).to start_with('exit code: 0')
+        expect(out.string).not_to include('The model is requesting')
+        expect(logged.any? { |m| m.include?('denylist safe-override') }).to be true
+        expect(logged.any? { |m| m.include?('command_safety_denylist_safe_approve') }).to be true
+        # The log names the verdict that allowed it - the whole audit answer.
+        expect(logged.any? { |m| m.include?('safe: inert quoted data') }).to be true
+      end
+    end
+
+    it 'keeps the floor for a "dangerous:" verdict' do
+      Dir.mktmpdir do |dir|
+        _, h = override_harness
+        runner = make_tool_runner(dir, override_options('dangerous: executes the payload'), harness: h)
+        out = drive_dialog(['2']) # Cancel (Allow=1, Cancel=2: no grants offered)
+        result = runner.run(inert_denied)
+        expect(result).to start_with('error: user denied')
+        expect(out.string).to include('DENYLISTED: sudo')
+      end
+    end
+
+    it 'keeps the floor when there is no verdict' do
+      Dir.mktmpdir do |dir|
+        logged, h = override_harness
+        # A pre-check that produced no verdict for this command: the cached
+        # entry is nil, so no client is consulted and the floor stays.
+        runner = make_tool_runner(dir, override_options(nil), harness: h)
+        out = drive_dialog(['2'])
+        result = runner.run(inert_denied)
+        expect(result).to start_with('error: user denied')
+        expect(out.string).to include('DENYLISTED')
+        expect(logged.any? { |m| m.include?('denylist safe-override') }).to be false
+      end
+    end
+
+    it 'is OFF by default: a safe verdict does not relax the floor' do
+      Dir.mktmpdir do |dir|
+        _, h = override_harness
+        opts = { command_safety_check: true, safety_verdicts: { inert_denied => 'safe: fine' } }
+        runner = make_tool_runner(dir, opts, harness: h)
+        out = drive_dialog(['2']) # Cancel: no Always-allow offered for a denylist match
+        result = runner.run(inert_denied)
+        expect(result).to start_with('error: user denied')
+        expect(out.string).to include('DENYLISTED: sudo')
+      end
+    end
+
+    it 'never covers the bang path (list: :shell), even option ON + safe' do
+      Dir.mktmpdir do |dir|
+        stdin  = StringIO.new('2')
+        stdout = StringIO.new
+        runner = described_class.new(FileList.new([], workdir: dir),
+                                     override_options('safe: fine'),
+                                     label: 'shell',
+                                     list: :shell,
+                                     ui: UI::Console.new(stdout: stdout, stdin: stdin))
+        result = runner.run(inert_denied)
+        expect(result).to start_with('error: user denied')
+        expect(stdout.string).to include('DENYLISTED')
+        expect(stdout.string).not_to include('denylist safe-override')
+      end
+    end
+  end
+
   # issue #362: waiting on the child process leaves the task outbox quiet, so the
   # drain loop animates a spinner - and the detail it replays is the LLM request
   # line that already finished, so a long run reads as if the model were still

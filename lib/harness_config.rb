@@ -54,9 +54,17 @@ require_relative "harness_error"
 #                                       # overrides the built-in config/system_prompt.txt
 #   command_safety_check: true  # model self-check for unapproved shell commands
 #                                       # (advisory note in the consent dialog, issue #224)
-#   command_safety_auto_approve: true  # with the check on: commands the model
-#                                       # calls "safe:" skip the consent dialog
-#                                       # (toggled live with Ctrl+A, issue #224 follow-up)
+#   command_safety_auto_approve: safe  # with the check on, the consent posture as
+#                                       # an enum: manual | safe | denylist |
+#                                       # safe_denylist (a legacy true/false reads
+#                                       # as safe/manual). safe: a "safe:" verdict
+#                                       # skips the dialog (toggled live with Ctrl+A,
+#                                       # issue #224 follow-up). denylist: a "safe:"
+#                                       # verdict may also auto-approve a DENYLISTED
+#                                       # command - config-only, never Ctrl+A
+#                                       # (issue #389).
+#   command_safety_denylist_safe_approve: true  # that same half on its own, if you
+#                                       # prefer two boolean keys (ORed into the enum)
 #   yolo: false  # shell consent OFF for the run.command tool: every command
 #                # runs without a dialog and with no model safety check
 #                # (issue #221). Toggled live with /yolo and persisted with the
@@ -91,6 +99,18 @@ class HarnessConfig
   # example and what a first run writes to the user home config (issue #260).
   TEMPLATE_FILE = File.expand_path("../config/config.example.yml", __dir__)
 
+  # command_safety_auto_approve as an enum (issue #389): ONE key for both
+  # relaxations of the consent flow. They stay orthogonal - 'denylist' fires only
+  # on a real "safe:" verdict, so it is a legal mode with AUTO-APPROVE off. A
+  # legacy boolean maps to safe/manual. Rationale:
+  # doc/denylist_safe_approve_design.md.
+  SAFETY_MODES = {
+    "manual"        => { approve: false, denylist: false },
+    "safe"          => { approve: true,  denylist: false },
+    "denylist"      => { approve: false, denylist: true },
+    "safe_denylist" => { approve: true,  denylist: true }
+  }.freeze
+
   attr_reader :models, :default_model, :system_prompt_file
 
   def initialize(data = {})
@@ -101,7 +121,13 @@ class HarnessConfig
     @system_prompt_file = nonblank(data[:system_prompt_file])
     @auto_save = data[:auto_save].nil? ? true : data[:auto_save]
     @command_safety_check = data[:command_safety_check] == true
-    @command_safety_auto_approve = data[:command_safety_auto_approve] == true
+    # issue #389: the two safety relaxations fold into ONE enum key; the separate
+    # denylist boolean ORs in when both keys are given. Rationale:
+    # doc/denylist_safe_approve_design.md.
+    mode = command_safety_mode(data[:command_safety_auto_approve])
+    @command_safety_auto_approve = mode[:approve]
+    @command_safety_denylist_safe_approve =
+      mode[:denylist] || data[:command_safety_denylist_safe_approve] == true
     @double_enter_submit = data[:double_enter_submit] == true
     @max_tool_iterations = int_or_nil(data[:max_tool_iterations])
     # Opt-in streamed LLM responses (default off: a profile or global key
@@ -229,6 +255,13 @@ class HarnessConfig
   # a session). Only meaningful with command_safety_check on.
   def command_safety_auto_approve_enabled
     @command_safety_auto_approve == true
+  end
+
+  # issue #389: the denylist half of command_safety_auto_approve (the 'denylist' /
+  # 'safe_denylist' modes). Config-derived for the whole run: no live toggle.
+  # Meaningless unless command_safety_check is on (no check, no verdict).
+  def command_safety_denylist_safe_approve_enabled
+    @command_safety_denylist_safe_approve == true
   end
 
   # issue #221: initial YOLO posture for shell consent (issue #221). Off by
@@ -382,5 +415,21 @@ class HarnessConfig
     return nil if val.nil?
 
     val == true
+  end
+
+  # command_safety_auto_approve accepts the enum or a legacy boolean. An
+  # unrecognised value is a config error rather than a silent fallback: a
+  # posture that quietly became manual would read as "my relaxation is on", and
+  # the reverse would quietly relax the disaster floor.
+  def command_safety_mode(val)
+    return SAFETY_MODES["manual"] if val.nil? || val == false
+    return SAFETY_MODES["safe"] if val == true
+
+    mode = SAFETY_MODES[val.to_s.strip.downcase]
+    return mode if mode
+
+    raise HarnessError,
+      "command_safety_auto_approve must be one of " \
+        "#{SAFETY_MODES.keys.join(', ')} (or true/false), got: #{val.inspect}"
   end
 end

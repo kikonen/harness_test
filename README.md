@@ -26,7 +26,11 @@ scoped to a working directory you choose.
   verdict, `Ctrl+A`) or YOLO (no consent at all, `/yolo`, issue #221). In
   EVERY posture a well-known disaster command (`rm -rf`, `sudo`,
   `git push -f`, `curl | sh`, `format C:`, ...) is refused auto-approval and
-  always asks - the denylist is the floor under all three postures.
+  always asks - the denylist is the floor under all three postures. The one
+  exception is the owner's own config-only opt-in
+  (`command_safety_auto_approve: denylist`, issue #389): a real "safe:" verdict
+  may auto-approve such a match on the `run.command` path -
+  `doc/denylist_safe_approve_design.md`.
 - **Local shell mode** - a line starting with `!` runs a shell command
   directly, bypassing the model, with its own allowlist
   (`.harness/shell_commands.yml`) (issue #129); its own confirmation dialog
@@ -309,7 +313,13 @@ context), `test.echo` (test-only)
   well-known disaster (`rm -rf`, `mkfs`, `dd of=/dev/`, `sudo`, `git push -f`,
   `curl | sh`, a fork bomb, `format C:`, `diskpart`, `del /s /q`,
   `Remove-Item -Recurse -Force`, ...) always reaches the dialog as a one-off
-  Allow, with no "Always allow" option offered (issue #221).
+  Allow, with no "Always allow" option offered (issue #221). Its detection is
+  raw-text, so a disaster word sitting inert inside a quoted string is flagged
+  too; `command_safety_auto_approve: denylist` is the only way to let a real
+  "safe:" verdict auto-approve such a match (config-only, `run.command` path
+  only, every override logged with the verdict that allowed it - issue #389,
+  `doc/denylist_safe_approve_design.md`). With that key off the floor is
+  absolute.
 - Sensitive files/dirs (`.env*`, `.git/`, `.harness/`) can never be granted -
   the guard protects the working tree's own git and harness state. A nested one
   inside a scratch zone (`tmp/scratch/<n>/`, `tmp/keep/<n>/`) is exempt, because

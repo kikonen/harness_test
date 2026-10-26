@@ -386,6 +386,42 @@ RSpec.describe CLI do
     end
   end
 
+  # issue #389: command_safety_auto_approve as one enum key; the CLI resolves it
+  # into the two option halves CommandRunner consults. Off unless the config asks.
+  describe 'option resolution - command_safety_auto_approve enum (issue #389)' do
+    def resolve_config(body)
+      path = File.join(workdir, 'dl-config.yml')
+      File.write(path, body)
+      original = ARGV.dup
+      ARGV.replace(['-m', 'test-model', '-d', workdir, '-c', path])
+      described_class.allocate.send(:parse_options)
+    ensure
+      ARGV.replace(original)
+    end
+
+    it 'is off when the config says nothing' do
+      opts = resolve_config("model: test-model\n")
+      expect(opts[:command_safety_denylist_safe_approve]).to be(false)
+    end
+
+    it 'is on when the config asks for it' do
+      opts = resolve_config("model: test-model\ncommand_safety_denylist_safe_approve: true\n")
+      expect(opts[:command_safety_denylist_safe_approve]).to be(true)
+    end
+
+    it "maps the enum mode 'denylist' onto the two halves" do
+      opts = resolve_config("model: test-model\ncommand_safety_auto_approve: denylist\n")
+      expect(opts[:command_safety_auto_approve]).to be(false)
+      expect(opts[:command_safety_denylist_safe_approve]).to be(true)
+    end
+
+    it "maps 'safe_denylist' onto both halves" do
+      opts = resolve_config("model: test-model\ncommand_safety_auto_approve: safe_denylist\n")
+      expect(opts[:command_safety_auto_approve]).to be(true)
+      expect(opts[:command_safety_denylist_safe_approve]).to be(true)
+    end
+  end
+
   describe '#run' do
     it 'prints the session id and its log path in the banner' do
       cli = build_cli
