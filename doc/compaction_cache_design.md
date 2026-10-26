@@ -122,11 +122,22 @@ tools sent, with tools omitted, and with message 0 dropped, comparing
 
 ## Not proven by this change
 
-Whether the owner's server actually speeds up. `prompt_tokens` is the server's
-count for its OWN rendered prompt; only the cached-count fields say what was
-reused, and there is no model server in a checkout (`127.0.0.1:11434` / `:8080`
-are refused). The harness-side precondition is now satisfied on both axes and
-pinned by specs; the speed claim belongs to `measure.sh` on a live server.
+What was NOT proven in the checkout was the speed-up itself: `prompt_tokens` is
+the server's count for its OWN rendered prompt, only the cached-count fields say
+what was reused, and there is no model server in a checkout (`127.0.0.1:11434` /
+`:8080` are refused). The owner tested it on the real server and confirmed the
+tools half on 2026-10-26: after `c5d8619`, the compact summary call hit the cache
+and "prompt reading time (30 sec in that case) was saved, compact took only
+thinking time". The chain half alone (`983995d`) had NOT helped - which is the
+measurement that matters here: **the tools payload is the operative half**, the
+chain is necessary but not sufficient. `prompt_tokens` alone never shows either;
+read `cache_n` / `cached_tokens` on the `RESP:` line.
+
+The remaining harness-side difference between the two request paths is still
+untested: `BaseBackend#chat_buffered` builds a fresh `KeepAliveHTTP` per call
+while `chat_streamed` reuses one. It is listed as a known difference, not as a
+cause - the owner's compact call is buffered and it hit the cache anyway, so the
+connection is not what was breaking the prefix.
 
 `doc/safety_check_design.md` and `doc/truncation_design.md` describe the fork
 contract these changes touch.

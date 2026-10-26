@@ -1137,6 +1137,41 @@ RSpec.describe Harness do
       expect(client.tool_payloads.uniq.size).to eq(1)
       expect(client.tool_payloads.first).to eq(h.tools_payload)
     end
+    # Carrying the live tool payload means the model CAN answer the summary
+    # request with a tool call. A fork has no tool loop - #execute_tool_call is
+    # reached only from call_llm's own tool round - so such a call must fail the
+    # compaction and NEVER be run.
+    it 'never executes a tool call the summary fork answered with' do
+      h = build_harness(model: 'test-model', num_ctx: 10, compact_reserved: 0)
+      echo = lambda do |id|
+        { content: nil,
+          tool_calls: [{ id: id, function: { name: 'test.echo', arguments: '{"text":"x"}' } }] }
+      end
+      # The 3rd scripted answer is the summary fork's; its tool call is one the
+      # user never asked for, and PWNED is what running it would produce.
+      pwned = { content: nil,
+                tool_calls: [{ id: 'S1', function: { name: 'test.echo',
+                                                     arguments: '{"text":"PWNED"}' } }] }
+      client = scripted(h, [echo.call('c1'), echo.call('c2'), pwned, { content: 'final' }])
+      h.session.add_user('do the thing')
+
+      task = Task.new { }
+      old = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+      events = []
+      begin
+        expect(h.call_llm[:content]).to eq('final')
+        loop { e = task.poll(0); break unless e; events << e[:content].to_s }
+      ensure
+        Thread.current[:harness_task] = old
+      end
+
+      expect(events.join("\n"))
+        .to include('in-loop compaction failed: LLM answered the summary request ' \
+                    'with a tool call (test.echo)')
+      expect(File.read(h.session_log_path)).not_to include('PWNED')
+      expect(client.calls.size).to eq(4) # turn, turn, summary fork, post-compact turn
+    end
   end
 
   # Issue #283: call_llm emits the request line before every request, so a
