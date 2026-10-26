@@ -250,6 +250,10 @@ class CommandRunner
       )
     end
 
+    # The deterministic note (what the harness itself knows about the command),
+    # stated with its KIND so the console can color it - DENYLISTED is the hard
+    # floor, UNSAFE is a refusal that is not a disaster match (issue #388).
+    deterministic = nil
     # UNSAFETY_NOTE only when the command itself contains unsafe
     # constructs (all_candidates empty). If candidates existed but were
     # all filtered out because a stored grant already covers them, the
@@ -257,27 +261,33 @@ class CommandRunner
     # construct instead of a generic list (issue #102).
     if all_candidates.empty?
       label = CommandAllowlist.classify_unsafe(command)
-      note  = label ? "UNSAFE: #{label} cannot be auto-approved" : UNSAFETY_NOTE
+      text = label ? "UNSAFE: #{label} cannot be auto-approved" : UNSAFETY_NOTE
+      deterministic = UI::Dialog::Note.new(text, kind: "warn")
     end
 
     # DENYLIST note (issue #221) wins over the UNSAFETY line: the reason
     # this one asks even in YOLO / AUTO-APPROVE / with a stored grant is the
     # command itself, so name the matched construct.
     if disaster
-      note = "DENYLISTED: #{CommandAllowlist.disaster_label(command)} - " \
-             "well-known disaster, auto-approval refused in every posture; " \
-             "this Allow is one-off"
+      deterministic = UI::Dialog::Note.new(
+        "DENYLISTED: #{CommandAllowlist.disaster_label(command)} - " \
+        "well-known disaster, auto-approval refused in every posture; " \
+        "this Allow is one-off",
+        kind: "alert"
+      )
     end
 
     # issue #224: the model's own safety verdict (advisory) leads the note
-    # so it is seen first; the deterministic UNSAFETY line (when present)
-    # is kept after it. No verdict -> note unchanged.
-    note = verdict ? prepend_safety_verdict(note, verdict) : note
+    # so it is seen first; the deterministic UNSAFETY / DENYLISTED line (when
+    # present) is kept after it. No verdict -> no verdict line. The verdict is
+    # colored by KIND (issue #388): a reassuring "safe:" line and a
+    # "dangerous:" one must not read the same.
+    notes = [verdict_note(verdict), deterministic].compact
 
     dialog = UI::Dialog.new(
       title: format(@title_fmt, command, shown, timeout),
       options:,
-      note:,
+      note: notes,
       # Multi-select lets the user save several prefixes in one line
       # (e.g. "2 4") - issue #102. Only meaningful when there is at
       # least one grantable prefix.
@@ -492,10 +502,20 @@ class CommandRunner
   end
 
   # The model's own verdict as the FIRST note line (advisory label keeps
-  # it distinct from the deterministic UNSAFETY line, which stays second).
-  def prepend_safety_verdict(note, verdict)
-    line = "MODEL VERDICT (advisory): #{verdict}"
-    note ? "#{line}\n#{note}" : line
+  # it distinct from the deterministic UNSAFETY line, which stays second),
+  # colored by the verdict's own kind (issue #388). nil verdict -> no line.
+  def verdict_note(verdict)
+    return nil if verdict.nil?
+
+    UI::Dialog::Note.new("MODEL VERDICT (advisory): #{verdict}",
+                         kind: verdict_kind(verdict))
+  end
+
+  # "safe:" and "dangerous:" must not read as the same line. The kind comes
+  # from SafetyCheck's own parser (it rebuilds it lowercase), so a plain
+  # prefix test is enough - and the AUTO-APPROVE rule uses the same shape.
+  def verdict_kind(verdict)
+    auto_approve_safe?(verdict) ? "safe" : "alert"
   end
 
   def denial(message, note: nil)

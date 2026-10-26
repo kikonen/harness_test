@@ -58,6 +58,17 @@ RSpec.describe Commands::PaletteCommand do
       expect(out).to include('model answer, tool notes, command output')
     end
 
+    # issue #388: the dialog note kinds are palette roles too, so the four hues
+    # a consent dialog can print are listed (context is deliberately absent -
+    # it is named on the plain-roles line instead).
+    it 'lists the dialog note roles the palette colors' do
+      out = run_command('', build_harness('default'))
+
+      expect(out).to include('dialog roles: dialog_warn=38;5;130')
+      expect(out).to include('dialog_alert=31 dialog_safe=32')
+      expect(out).to include('dialog kind context')
+    end
+
     it 'shows a sample line so the change is visible without a new turn' do
       out = run_command('', build_harness('default'))
 

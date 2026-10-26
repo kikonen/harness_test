@@ -562,5 +562,87 @@ RSpec.describe UI::Dialog do
         end
       end
     end
+
+    # issue #388: the dialog states WHAT each line IS (Dialog::Note#kind) and
+    # colors it through the console it was handed - never through a renderer or
+    # palette a caller passes. A console without a palette paints nothing, so
+    # every pre-#388 stream (StringIO specs, --no-color) is byte-identical.
+    describe 'note kinds and the console palette (issue #388)' do
+      def painted_console(answer = '1')
+        out = StringIO.new
+        console = UI::Console.new(stdout: out, stdin: StringIO.new("#{answer}\n"),
+                                  palette: UI::Palette.new('default'))
+        [console, out]
+      end
+
+      def kinds_dialog(note)
+        described_class.new(title: 't', options: options, note: note)
+      end
+
+      it 'accepts a Note, a String and an Array of either' do
+        mixed = kinds_dialog([
+          'plain line',
+          described_class::Note.new('a refusal', kind: 'warn')
+        ])
+
+        expect(mixed.notes.map(&:kind)).to eq(%w[context warn])
+      end
+
+      it 'rejects an unknown kind instead of guessing one' do
+        expect { described_class::Note.new('x', kind: 'scary') }
+          .to raise_error(ArgumentError, /unknown dialog note kind "scary"/)
+      end
+
+      it 'splits a multi-line Note into one Note per line, keeping the kind' do
+        note = described_class::Note.new("line one\nline two", kind: 'alert')
+        dialog = kinds_dialog(note)
+
+        expect(dialog.notes.map { |n| [n.text, n.kind] })
+          .to eq([['line one', 'alert'], ['line two', 'alert']])
+      end
+
+      it 'drops blank note lines (a computed note may carry a nil part)' do
+        expect(kinds_dialog(["", nil, "real"]).notes.map(&:text)).to eq(['real'])
+      end
+
+      it 'paints each kind with its palette role on a colored console' do
+        console, out = painted_console
+        kinds_dialog([
+          described_class::Note.new('MODEL VERDICT (advisory): safe: inert', kind: 'safe'),
+          described_class::Note.new('DENYLISTED: sudo', kind: 'alert'),
+          described_class::Note.new('UNSAFE: pipe', kind: 'warn'),
+          'context line'
+        ]).perform_direct(ui: console)
+
+        expect(out.string).to include("\e[32mMODEL VERDICT (advisory): safe: inert\e[0m")
+        expect(out.string).to include("\e[31mDENYLISTED: sudo\e[0m")
+        expect(out.string).to include("\e[38;5;130mUNSAFE: pipe\e[0m")
+        # CONTEXT is content to read, not chrome: no escape bytes around it.
+        expect(out.string).to include("\n                context line\n")
+      end
+
+      it 'colors the bracket and the option NUMBERS as chrome, not the text' do
+        console, out = painted_console
+        kinds_dialog(nil).perform_direct(ui: console)
+
+        expect(out.string).to include("\e[38;5;240m  [dialog] ⚠  \e[0mt")
+        expect(out.string).to include("\e[38;5;240m1)\e[0m Allow")
+        expect(out.string).to include("\e[38;5;240m3)\e[0m Cancel")
+      end
+
+      it 'a console with no palette writes the dialog byte-for-byte plain' do
+        # The pre-#388 stream contract every other spec in this file asserts:
+        # no escape bytes anywhere, identical indents.
+        out = StringIO.new
+        stdin = StringIO.new("1\n")
+        kinds_dialog('a note').perform_direct(
+          ui: UI::Console.new(stdout: out, stdin: stdin)
+        )
+
+        expect(out.string).not_to include("\e[")
+        expect(out.string).to include("  [dialog] ⚠  t\n")
+        expect(out.string).to include("                a note\n")
+      end
+    end
   end
 end

@@ -146,6 +146,12 @@ saved with the session, so a resumed session keeps it.
 Rendered output is typed (issue #303 / #146): the step boundary, the reasoning
 line, the tool plan and every tool status verdict (`✓` / `✗` / `⚠` / `!` / `=`)
 get their own color, and a multi-line command block gets a `  |` gutter.
+Consent and grant dialogs are typed the same way (issue #388): a note line
+states its KIND (`context` / `warn` / `alert` / `safe`) and the palette decides
+the hue - a `MODEL VERDICT ... safe:` line green, a `dangerous:` one red, a
+`DENYLISTED:` one red, an `UNSAFE:` one brown, a plain note the terminal's own
+color - while the `[dialog]` marker and the option numbers stay recessive chrome
+(`doc/dialog_colors_design.md`).
 The two block boundaries - the start of an iteration and the start of the final
 answer - are framed by the same 80-column gray rule that names the role
 (`------- step 8 -------`, `------- model -------`), and the answer itself is

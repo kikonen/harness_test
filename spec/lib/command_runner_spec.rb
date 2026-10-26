@@ -17,11 +17,13 @@ RSpec.describe CommandRunner do
   # Tool-path mode (no ui:): the dialog is routed via show(ui: nil), which
   # needs a Task - intercept it and serve perform_direct on StringIOS, like
   # run_command_tool_spec does. Returns the captured console output.
-  def drive_dialog(lines)
+  # palette: the console's palette (nil = paint nothing, issue #388).
+  def drive_dialog(lines, palette: nil)
     stdin  = StringIO.new(lines.join("\n"))
     stdout = StringIO.new
     allow_any_instance_of(UI::Dialog).to receive(:show) do |dialog|
-      dialog.perform_direct(ui: UI::Console.new(stdout: stdout, stdin: stdin))
+      dialog.perform_direct(ui: UI::Console.new(stdout: stdout, stdin: stdin,
+                                               palette:))
     end
     stdout
   end
@@ -1087,6 +1089,60 @@ RSpec.describe CommandRunner do
         expect(result).to start_with('error: user denied')
         expect(stdout.string).to include('DENYLISTED')
         expect(stdout.string).not_to include('denylist safe-override')
+      end
+    end
+  end
+
+  # issue #388: the dialog note kinds reach the palette. The runner states WHAT
+  # each line IS (a Note kind), never a color; the console it serves the dialog
+  # on decides the hue. The plain-console contract every other example in this
+  # file asserts (no escape bytes) stays untouched - these use a colored drive.
+  describe 'dialog note colors (issue #388)' do
+    def verdict(kind)
+      fake_client("#{kind}: probe verdict")
+    end
+
+    it 'paints a dangerous verdict and the DENYLISTED line as alerts' do
+      Dir.mktmpdir do |dir|
+        runner = make_tool_runner(dir, { command_safety_check: true },
+                                  harness: harness_with(verdict('dangerous'), chain_mid_tool_loop))
+        out = drive_dialog(['2'], palette: UI::Palette.new('default'))
+        expect(runner.run('sudo rm something')).to start_with('error: user denied')
+
+        # MODEL VERDICT first, DENYLISTED second - both red, as separate runs.
+        expect(out.string)
+          .to include("\e[31mMODEL VERDICT (advisory): dangerous: probe verdict\e[0m")
+        expect(out.string).to include("\e[31mDENYLISTED: sudo - well-known disaster")
+      end
+    end
+
+    it 'paints a safe verdict green while the deterministic line stays brown' do
+      Dir.mktmpdir do |dir|
+        runner = make_tool_runner(dir, { command_safety_check: true },
+                                  harness: harness_with(verdict('safe'), chain_mid_tool_loop))
+        out = drive_dialog(['2'], palette: UI::Palette.new('default'))
+        expect(runner.run('echo hi > tmpfile')).to start_with('error: user denied')
+
+        expect(out.string)
+          .to include("\e[32mMODEL VERDICT (advisory): safe: probe verdict\e[0m")
+        # UNSAFE is a refusal, not the hard floor: brown (dialog_warn).
+        expect(out.string).to include(
+          "\e[38;5;130mUNSAFE: redirect to file (\"> tmpfile\") cannot be auto-approved\e[0m"
+        )
+      end
+    end
+
+    # The bytes must be the SAME dialog with the palette off: the kind decides a
+    # color, so it must not be able to change the text (every other example in
+    # this file asserts this plain output).
+    it 'a colored drive and a plain drive print the identical text' do
+      Dir.mktmpdir do |dir|
+        colored = drive_dialog(['2'], palette: UI::Palette.new('default'))
+        make_tool_runner(dir).run('sudo rm something')
+        plain = drive_dialog(['2'])
+        make_tool_runner(dir).run('sudo rm something')
+
+        expect(plain.string).to eq(colored.string.gsub(/\e\[[0-9;]*m/, ""))
       end
     end
   end

@@ -29,7 +29,13 @@ class CLI
   # pre-parsed options and a stubbed UI instead.
   def initialize(options = nil, ui = nil)
     @options   = options || parse_options
-    @ui        = ui || UI::Console.new(stdout: $stdout, stdin: $stdin)
+    # This console is the single sink every dialog and status line reaches (a
+    # Task's drain loop renders to it, and Task.handle_request serves a dialog
+    # on it). It is built BEFORE the Harness that resolves the palette, and
+    # /palette + a mid-run Harness rebuild can change it, so the palette is
+    # declared as a live reader (issue #388).
+    @ui        = ui || UI::Console.new(stdout: $stdout, stdin: $stdin,
+                                       palette: -> { @harness&.output_palette })
     @file_list = build_file_list
     @locator = SessionLocator.new(@options[:workdir])
     list_sessions_and_exit if @options[:list_sessions]

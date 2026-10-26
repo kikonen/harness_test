@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'stringio'
 require 'ui/console'
+require 'ui/palette'
 
 RSpec.describe UI::Console do
   def console(stdout: StringIO.new, stdin: nil)
@@ -60,6 +61,43 @@ RSpec.describe UI::Console do
       described_class.new(stdout: sink).print('routed')
 
       expect(sink.seen).to eq('routed')
+    end
+  end
+
+  # issue #388: the sink carries the PRESENTATION, so a dialog or a status
+  # writer asks the console it was already given instead of being handed a
+  # renderer / palette of its own.
+  describe '#palette / #paint (issue #388)' do
+    it 'has no palette by default and paints nothing' do
+      subject = described_class.new(stdout: StringIO.new)
+
+      expect(subject.palette).to be_nil
+      expect(subject.paint(:dialog_alert, 'DENYLISTED: sudo')).to eq('DENYLISTED: sudo')
+    end
+
+    it 'paints a role when it was given a palette' do
+      subject = described_class.new(stdout: StringIO.new, palette: UI::Palette.new('default'))
+
+      expect(subject.paint(:dialog_alert, 'DENYLISTED: sudo'))
+        .to eq("\e[31mDENYLISTED: sudo\e[0m")
+    end
+
+    # The callable form: how the CLI wires it, because the console exists
+    # before the Harness that resolves the palette, and /palette can change it.
+    it 'resolves a callable palette per line (a live reader, not a snapshot)' do
+      current = UI::Palette.new('default')
+      subject = described_class.new(stdout: StringIO.new, palette: -> { current })
+
+      expect(subject.paint(:dialog_safe, 'safe: inert')).to eq("\e[32msafe: inert\e[0m")
+
+      current = UI::Palette.new('none')
+      expect(subject.paint(:dialog_safe, 'safe: inert')).to eq('safe: inert')
+    end
+
+    it 'a palette callable answering nil paints nothing' do
+      subject = described_class.new(stdout: StringIO.new, palette: -> { nil })
+
+      expect(subject.paint(:dialog_alert, 'x')).to eq('x')
     end
   end
 

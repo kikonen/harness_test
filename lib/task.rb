@@ -500,10 +500,12 @@ class Task
       task.instance_variable_set(:@dialog_open, true)
       begin
         # No reader thread during the turn, so the dialog can read stdin with
-        # nothing to race for the keyboard; the Console wraps the task's streams
-        # so output keeps its single-thread order.
-        ui = UI::Console.new(stdout: task.ui.stdout, stdin: task.ui.stdin)
-        answer = dialog.perform_direct(ui:)
+        # nothing to race for the keyboard. The task's OWN console serves the
+        # dialog: it is the same stdout/stdin pair the drain loop renders to
+        # (single-thread order) and it already carries the run's presentation,
+        # so nothing here has to know how a dialog renders or which palette a
+        # turn chose (issue #388).
+        answer = dialog.perform_direct(ui: task.ui)
         task.respond(answer)
       ensure
         task.instance_variable_set(:@dialog_open, false)

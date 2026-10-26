@@ -98,6 +98,48 @@ module UI
     # to free_text dialogs.
     FREE_TEXT_OPTION = "Additional details"
 
+    # WHAT a dialog note line IS (issue #388; roles and hues:
+    # doc/dialog_colors_design.md). The emitter states the kind - never a color,
+    # a palette or a renderer - and Console#paint turns the
+    # kind into a palette role. A console with no palette paints nothing.
+    #   context  - neutral background (a purpose line, an explanation).
+    #   warn     - a refusal that is not a disaster match (UNSAFE: a construct
+    #              that can never be auto-approved; a path outside the workdir).
+    #   alert    - the hard floor or a dangerous model verdict (DENYLISTED:).
+    #   safe     - a reassuring model verdict line (MODEL VERDICT ... safe:).
+    NOTE_KINDS = %w[context warn alert safe].freeze
+
+    NOTE_ROLES = {
+      "context" => :dialog_note,
+      "warn" => :dialog_warn,
+      "alert" => :dialog_alert,
+      "safe" => :dialog_safe
+    }.freeze
+
+    # Line shape of a dialog: the head carries 2 spaces, the title body, the
+    # options and the choice prompt 13, a note 16 (a note reads as belonging
+    # to the title line above it).
+    HEAD_INDENT  = "  "
+    TITLE_INDENT = "             "
+    NOTE_INDENT  = "                "
+
+    # One note line + its kind. A plain String note is kind context, so every
+    # existing caller (ui.dialog's free-form note, web.fetch) is unchanged.
+    Note = Struct.new(:text, :kind) do
+      def initialize(text, kind: "context")
+        raise ArgumentError,
+          "unknown dialog note kind #{kind.inspect} (available: #{NOTE_KINDS.join(', ')})" \
+          unless NOTE_KINDS.include?(kind.to_s)
+
+        super(text.to_s, kind.to_s)
+      end
+
+      # The palette role this kind maps to (issue #388).
+      def role
+        NOTE_ROLES.fetch(kind)
+      end
+    end
+
     # A single selectable item in a dialog.
     class Option
       attr_reader :title, :description, :value
@@ -113,14 +155,18 @@ module UI
       end
     end
 
-    attr_reader :title, :options
+    attr_reader :title, :options, :notes
 
     # title:   what the dialog is about (required, non-empty).
     # options: non-empty array of Option; the standard cancel option is
     #          appended automatically (and before it, when free_text is
     #          enabled, the explicit "Additional details" option).
-    # note:    optional context line(s) shown under the title (e.g. a
-    #          warning, or an explanation of why the dialog was asked).
+    # note:    line(s) shown under the title (e.g. a warning, or an
+    #          explanation of why the dialog was asked). ONE String (rendered as
+    #          kind context), ONE Dialog::Note, or an Array of either - the
+    #          emitter states WHAT each line is via Note#kind (issue #388) and
+    #          never a color: the console's palette decides whether anything is
+    #          colored at all.
     # free_text: let the user type their own answer by selecting the
     #            explicit "Additional details" option; the typed text is
     #            returned as [FREE_TEXT, text], alone or appended to the
@@ -146,7 +192,7 @@ module UI
       end
 
       @title   = title.to_s.strip
-      @note    = note&.to_s
+      @notes   = normalize_notes(note)
       @free_text = free_text ? true : false
       @free_text_prompt = free_text_prompt.to_s.strip.sub(/\Aor\s+/, "")
       options = options.dup
@@ -207,17 +253,18 @@ module UI
     def perform_direct(ui:)
       title_lines = @title.split("\n")
       ui.puts
-      ui.puts "  [dialog] ⚠  #{title_lines.first}"
-      title_lines[1..].each { |line| ui.puts "             #{line}" }
+      # The head is chrome, the title is what the user must read (terminal's
+      # own color), and each note line carries the KIND its emitter stated
+      # (issue #388) - no caller names a color for any of them.
+      ui.puts dialog_head(ui, title_lines.first)
+      title_lines[1..].each { |line| ui.puts "#{TITLE_INDENT}#{line}" }
 
-      if @note && !@note.strip.empty?
-        @note.split("\n").each { |line| ui.puts "                #{line}" }
-      end
+      @notes.each { |note| ui.puts paint_note(ui, note) }
 
       @options.each_with_index do |opt, i|
-        ui.puts "             #{i + 1}) #{opt.title}"
+        ui.puts option_line(ui, i, opt)
         if opt.description && !opt.description.strip.empty?
-          ui.puts "                #{opt.description}"
+          ui.puts "#{NOTE_INDENT}#{opt.description}"
         end
       end
 
@@ -262,6 +309,53 @@ module UI
     end
 
     private
+
+    # A note is ONE line (a String = kind context), ONE Note, or an Array of
+    # either. Blank lines are dropped so a caller can pass a computed note with
+    # a nil part without the dialog printing empty indented lines. Array() is
+    # NOT used: a Struct answers #to_a, so it would splat a Note into its
+    # fields ("text", "kind").
+    def normalize_notes(note)
+      return [] if note.nil?
+
+      parts = note.is_a?(Array) ? note : [note]
+      parts.flat_map do |part|
+        next [] if part.nil?
+
+        part = Note.new(part) if part.is_a?(String)
+        part.text.to_s.split("\n").filter_map do |line|
+          next nil if line.strip.empty?
+
+          Note.new(line, kind: part.kind)
+        end
+      end
+    end
+
+    # The dialog's first line: bracket + glyph as recessive chrome, the title
+    # text in the terminal's own color (issue #388).
+    def dialog_head(ui, title_line)
+      # The marker part keeps the exact pre-#388 bytes (two spaces after the
+      # glyph): a plain console must still produce the dialog it always did.
+      "#{paint(ui, :marker, "#{HEAD_INDENT}[dialog] ⚠  ")}#{title_line}"
+    end
+
+    def paint_note(ui, note)
+      "#{NOTE_INDENT}#{paint(ui, note.role, note.text)}"
+    end
+
+    # The NUMBER is chrome, the option's own words are what must be read.
+    def option_line(ui, index, opt)
+      "#{TITLE_INDENT}#{paint(ui, :marker, "#{index + 1})")} #{opt.title}"
+    end
+
+    # A console answers #paint when it has a palette to paint with (issue #388);
+    # a duck-typed sink that only answers puts/print gets the plain text, so no
+    # dialog has to know which kind of console it was handed.
+    def paint(ui, role, text)
+      return text unless ui.respond_to?(:paint)
+
+      ui.paint(role, text)
+    end
 
     # issue #198 phase 2: read one choice line. tty -> UI::Editor (Reline:
     # Enter submits, bare Enter is :empty, Esc is :cancelled with the

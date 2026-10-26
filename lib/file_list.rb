@@ -396,17 +396,21 @@ class FileList
       ]
     end
 
-    note = purpose
+    # Each note line states its KIND (issue #388): the purpose is context, the
+    # outside-the-workdir warning is the line the user must weigh before
+    # granting - so the console can tell them apart without a regex.
+    notes = [purpose].compact
     unless inside
-      warn_line = "WARNING: this path is OUTSIDE the working directory - " \
-                  "granting access may be a sandbox escape."
-      note = [note, warn_line].compact.join("\n")
+      notes << UI::Dialog::Note.new(
+        "WARNING: this path is OUTSIDE the working directory - " \
+        "granting access may be a sandbox escape.",
+        kind: "warn")
     end
 
     choice = UI::Dialog.new(
       title: "Access requested (#{verb}): #{shown}",
       options:,
-      note:,
+      note: notes,
     ).show(ui: nil)
 
     # The user may attach a one-line reason to the CANCEL choice
