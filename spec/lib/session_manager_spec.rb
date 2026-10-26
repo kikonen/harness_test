@@ -72,6 +72,12 @@ RSpec.describe SessionManager do
         nil
       end
 
+      # Mirrors Harness#tools_payload: the summary call sends the SAME tool
+      # definitions the live turn sends (#246; doc/compaction_cache_design.md).
+      def tools_payload
+        [{ type: 'function', function: { name: 'test.echo' } }]
+      end
+
       # Delegates to the (stubbed) client so the spec can record call order.
       def call_llm
         data = @client.chat(@session.messages)
@@ -265,10 +271,16 @@ RSpec.describe SessionManager do
       expect(result[:context_line]).to match(/🧠 ctx ~\d+\/65536 \(\d+%\)/)
     end
 
-    # The END-OF-TURN path, pinned the same way the in-loop one is: a
-    # prompt-prefix cache matches from token 0, so the summary call must be the
-    # live chain plus the instruction - not the chain minus its system message
-    # (issue #246; doc/compaction_cache_design.md).
+  end
+
+  # Both compact paths ask for the summary through #generate_compact_summary. A
+  # prefix cache matches the RENDERED prompt from token 0 and a chat template
+  # renders the tool definitions into it, so the request must be the live chain
+  # plus its instruction AND the live turn's own tool payload: dropping either
+  # half makes it a different prompt, not a longer one (issue #246; both axes are
+  # measured by analysis/246/repro.rb, the reasoning is
+  # doc/compaction_cache_design.md).
+  describe '#generate_compact_summary (the call both compact paths make)' do
     it 'sends the FULL chain to the summary call, system message included' do
       4.times { |i| session.add_user("msg #{i}"); session.add_assistant("reply #{i}") }
       live_chain = session.messages.map(&:dup)
@@ -285,6 +297,58 @@ RSpec.describe SessionManager do
       expect(captured.first[:role]).to eq('system')
       expect(captured.size).to eq(live_chain.size + 1)
       expect(captured.last[:role]).to eq('user')
+    end
+    it 'sends the live tools payload on the summary call' do
+      4.times { |i| session.add_user("msg #{i}"); session.add_assistant("reply #{i}") }
+      captured_tools = nil
+      allow(client).to receive(:chat) do |_msgs, tools: nil|
+        captured_tools = tools
+        { choices: [{ message: { content: 'summary text' } }] }
+      end
+
+      manager.compact_session
+
+      expect(captured_tools).to eq(harness.tools_payload)
+    end
+
+    # The fork now sends the live tool payload, so the model CAN answer a
+    # summary request with a tool call. Nothing in a fork is executed (there is
+    # no tool loop here), so the shape must be reported, not swallowed as an
+    # "empty summary" - and never mistaken for a summary.
+    it 'raises naming the tool call when the summary call answers with one' do
+      4.times { |i| session.add_user("msg #{i}"); session.add_assistant("reply #{i}") }
+      allow(client).to receive(:chat).and_return({
+        choices: [{ message: { content: '',
+                              tool_calls: [{ id: 'x1',
+                                            function: { name: 'file.write', arguments: '{}' } }] } }]
+      })
+
+      expect { manager.compact_session }
+        .to raise_error(HarnessError, /tool call \(file.write\) instead of a summary/)
+      expect(session.messages.size).to eq(9) # nothing was compacted
+    end
+
+    it 'keeps a text answer that also carries tool calls, and logs the calls' do
+      log_io = StringIO.new
+      harness.instance_variable_set(:@logger, Logger.new(log_io))
+      4.times { |i| session.add_user("msg #{i}"); session.add_assistant("reply #{i}") }
+      allow(client).to receive(:chat).and_return({
+        choices: [{ message: { content: 'REAL SUMMARY',
+                              tool_calls: [{ id: 'x1',
+                                            function: { name: 'ui.note', arguments: '{}' } }] } }]
+      })
+
+      result = manager.compact_session
+
+      expect(result[:summary]).to eq('REAL SUMMARY')
+      expect(log_io.string).to include('summary call returned tool calls (ui.note) - ignored')
+    end
+
+    it 'still reports the plain empty-summary error when no tool call came back' do
+      4.times { |i| session.add_user("msg #{i}"); session.add_assistant("reply #{i}") }
+      allow(client).to receive(:chat).and_return({ choices: [{ message: { content: '   ' } }] })
+
+      expect { manager.compact_session }.to raise_error(HarnessError, /empty summary/)
     end
   end
 
@@ -574,6 +638,10 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
         nil
       end
 
+      def tools_payload
+        [{ type: 'function', function: { name: 'test.echo' } }]
+      end
+
       # issue #126: the spinner calls this every frame (with the local chain).
       def context_indicator_live(_messages = nil)
         '🧠 ~0% (1K)'
@@ -683,6 +751,37 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
     expect(captured.map { |m| m[:content].to_s })
       .to include('User note (mid-turn): fix the naming first')
   end
+  # The tools half of the same prefix, mid-turn: the summary request must carry
+  # the payload the turn itself carried (analysis/246/repro.rb measures it as
+  # "tools == the live turn's payload?").
+  it 'sends the live tools payload on the in-loop summary call' do
+    captured_tools = nil
+    allow(client).to receive(:chat) do |_msgs, tools: nil|
+      captured_tools = tools
+      { choices: [{ message: { content: 'HANDOFF' } }] }
+    end
+
+    expect(manager.check_inloop_compaction(inloop_messages, 1000)).to be(true)
+    expect(captured_tools).to eq(harness.tools_payload)
+  end
+
+  # A summary request that answers with a tool call instead of text is a FAILED
+  # compaction, and a failed in-loop compaction must leave a healthy turn alone
+  # (the chain keeps its full work trail; the next request simply runs).
+  it 'returns false and keeps the chain when the summary call answers with a tool call' do
+    messages = inloop_messages
+    allow(client).to receive(:chat).and_return({
+      choices: [{ message: { content: nil,
+                            tool_calls: [{ id: 'x1',
+                                          function: { name: 'file.read', arguments: '{}' } }] } }]
+    })
+
+    expect(manager.check_inloop_compaction(messages, 1000)).to be(false)
+    expect(messages.map { |m| m[:role] }).to eq(%w[system user assistant tool assistant tool])
+    expect(messages.first).to eq(inloop_messages.first)
+    expect(session.messages.size).to eq(1) # untouched: nothing was compacted
+  end
+
   # issue #116: in-loop compaction runs from INSIDE Harness#call_llm, so the
   # send_session wait is still animating. The runner owns the spinner and
   # always keeps one visible while it waits; SessionManager's only protocol
@@ -781,6 +880,7 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
     let(:harness) do
       double('harness', session: session, client: client, logger: logger,
              compact_recent_messages: 2, compact_max_size: nil,
+             tools_payload: nil,
              context_indicator: 'ctx 1/65536 (0%)')
     end
     let(:manager) { described_class.new(harness, FileList.new([], workdir: Dir.pwd)) }
@@ -807,7 +907,8 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
     let(:options) { { num_ctx: 1000 } }
     let(:harness) do
       double('harness', session: session, client: client, logger: logger,
-             options: options, compact_trigger_tokens: 1, compact_max_size: nil)
+             options: options, compact_trigger_tokens: 1, compact_max_size: nil,
+             tools_payload: nil)
     end
     let(:manager) { described_class.new(harness, FileList.new([], workdir: Dir.pwd)) }
 

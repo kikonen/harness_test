@@ -46,6 +46,12 @@ as it would have without the check.
   point, mid tool loop) because backends reject tool_calls without their results.
   The whole prefix is therefore a cache hit, and only the short check question is
   new prefill. The caller's array is never mutated.
+- "Prefix" is about the RENDERED prompt, and a chat template renders the tool
+  definitions into it too, so the chain alone is not enough: `run` takes a
+  `tools:` payload and both callers pass `Harness#tools_payload` - the same
+  definitions the live turn sent. A fork that omits them is a different prompt,
+  not a longer one, and re-prefills cold (issue #246, measured there:
+  `doc/compaction_cache_design.md`; this was issue #238's cache reset).
 - The fork is disposable and SHARED: a batch of several unapproved `run.command`
   calls is covered by ONE check call, one verdict line per command
   (`Harness#precheck_batch_safety`), not one call per command.

@@ -271,7 +271,9 @@ RSpec.describe CommandRunner do
   end
 
   def harness_with(client, chain)
-    double('harness', client: client, logger: nil, session: double('session', messages: chain))
+    double('harness', client: client, logger: nil,
+           session: double('session', messages: chain),
+           tools_payload: [{ type: 'function', function: { name: 'test.echo' } }])
   end
 
   # A chain ending on an unresolved assistant tool_calls - the shape the
@@ -314,6 +316,43 @@ RSpec.describe CommandRunner do
         expect(out.string).to include('MODEL VERDICT (advisory): safe: just writes to tmp/')
         expect(out.string).to include('UNSAFE: redirect to file ("> tmpfile") cannot be auto-approved')
         expect(result).to start_with('error: user denied')
+      end
+    end
+
+    # The fork must carry the SAME tool definitions the live turn sent, or its
+    # rendered prompt is a different prompt and re-prefills cold (#246;
+    # doc/compaction_cache_design.md). The runner owns the hand-off: it reads
+    # Harness#tools_payload and passes it to SafetyCheck.run.
+    it 'passes the harness tool payload to the safety check' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('safe: harmless read')
+        h = harness_with(client, chain_mid_tool_loop)
+        runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
+        out = drive_dialog(['1'])
+        expect(runner.run('echo hi')).to start_with('exit code: 0')
+
+        expect(client.instance_variable_get(:@calls).first[:tools])
+          .to eq(h.tools_payload)
+        # The payload is carried, and the verdict still reaches the dialog:
+        # carrying tools must not cost the check its answer.
+        expect(out.string).to include('MODEL VERDICT (advisory): safe: harmless read')
+      end
+    end
+
+    # The degraded shape: a harness that cannot report tool definitions (a bang
+    # runner built without one). nil is a cache miss, never a wrong verdict -
+    # the check still runs and the verdict still reaches the dialog.
+    it 'sends no tools and still verdicts when the harness reports none' do
+      Dir.mktmpdir do |dir|
+        client = fake_client('safe: harmless read')
+        h = double('harness', client: client, logger: nil,
+                   session: double('session', messages: chain_mid_tool_loop))
+        runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
+        out = drive_dialog(['1'])
+        expect(runner.run('echo hi')).to start_with('exit code: 0')
+
+        expect(client.instance_variable_get(:@calls).first[:tools]).to be_nil
+        expect(out.string).to include('MODEL VERDICT (advisory): safe: harmless read')
       end
     end
 

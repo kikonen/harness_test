@@ -5,8 +5,10 @@ require 'safety_check'
 
 # issue #224: the check request is a fork of the live chain truncated at the
 # last complete round. These specs lock the truncation contract (what the
-# fork may and may not end on) and the one-shot call contract (no tools,
-# one line per command, no mutation of the caller's chain, errors propagate).
+# fork may and may not end on) and the one-shot call contract (tools as given,
+# one line per command, no mutation of the caller's chain, errors propagate),
+# plus the tools payload the caller hands in (#246: the fork must render the
+# same prompt prefix the live turn rendered - doc/compaction_cache_design.md).
 #
 # issue #344: a verdict binds to its command by the NUMBER the model wrote,
 # never by line position - position is consulted only when the whole answer is
@@ -83,7 +85,7 @@ RSpec.describe SafetyCheck do
   describe '.run' do
     let(:command) { 'ruby -c lib/foo.rb' }
 
-    it 'sends the truncated chain plus a check question, with no tools' do
+    it 'sends the truncated chain plus a check question (no tools by default)' do
       client = FakeClient.new
       described_class.run(client, mid_loop_chain, [command])
 
@@ -92,6 +94,19 @@ RSpec.describe SafetyCheck do
       expect(req[:messages].map { |m| m[:role] })
         .to eq(%w[system user assistant tool user])
       expect(req[:messages].last[:content]).to include(command)
+    end
+
+    # A chat template renders the tool definitions into the prompt, so a fork
+    # that omits them is a DIFFERENT prompt, not a longer version of the live
+    # turn's - which is what made the prefix reuse fail (#246). The payload is
+    # the caller's to supply (SafetyCheck holds no registry of its own) and
+    # must reach chat untouched.
+    it 'forwards the caller tools payload to chat unchanged' do
+      client = FakeClient.new
+      tools  = [{ type: 'function', function: { name: 'file.read' } }]
+      described_class.run(client, mid_loop_chain, [command], tools:)
+
+      expect(client.calls.first[:tools]).to eq(tools)
     end
 
     it 'does not mutate the session chain' do

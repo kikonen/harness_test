@@ -208,6 +208,14 @@ class Harness
     registry.register(Tools::MemoryDeleteTool.new(@memories))
   end
 
+  # EVERY request - the live turn and both advisory forks - must send THIS same
+  # payload: a chat template renders the tools into the prompt, so a fork that
+  # omits them is a different prompt, not a longer one (#246,
+  # doc/compaction_cache_design.md).
+  def tools_payload
+    tool_registry.empty? ? nil : tool_registry.to_openai
+  end
+
   def compact_recent_messages
     options[:compact_recent] || Session::COMPACT_RECENT_MESSAGES
   end
@@ -400,7 +408,8 @@ class Harness
     Task.emit(:spinner_detail, origin: :harness,
               content: { message: "Model safety check (#{unapproved.size} commands)" })
     options[:safety_verdicts] =
-      SafetyCheck.run(client, session.messages, unapproved, logger:)
+      SafetyCheck.run(client, session.messages, unapproved,
+                      tools: tools_payload, logger:)
   rescue StandardError => e
     logger.info("safety pre-check failed (#{e.class}: #{e.message}) - continuing without verdicts")
     nil
@@ -486,7 +495,7 @@ class Harness
     messages = @session.messages
 
     @user_notes = []
-    tools = tool_registry.empty? ? nil : tool_registry.to_openai
+    tools = tools_payload
 
     iteration = 0
     consecutive_tool_calls = 0

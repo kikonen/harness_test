@@ -49,8 +49,9 @@ module SafetyCheck
     # { command => one-line verdict or nil }. nil verdicts (blank answer,
     # an answer whose lines cannot be placed, degenerate chain) mean "no
     # verdict" for that command. Raises LLMError etc. - the CALLER must
-    # rescue and degrade to a plain dialog.
-    def run(client, chain, commands, timeout: DEFAULT_TIMEOUT, logger: nil)
+    # rescue and degrade to a plain dialog. tools: is the live turn's own tool
+    # payload - see doc/compaction_cache_design.md for why the fork must carry it.
+    def run(client, chain, commands, tools: nil, timeout: DEFAULT_TIMEOUT, logger: nil)
       commands = Array(commands).map(&:to_s)
       results  = commands.to_h { |c| [c, nil] }
       return results if commands.size == 0
@@ -65,7 +66,7 @@ module SafetyCheck
       question = format(CHECK_PROMPT, listed)
       fork     = base + [{ role: "user", content: question }]
 
-      data = client.chat(fork, tools: nil, timeout:)
+      data = client.chat(fork, tools:, timeout:)
       text = data.dig(:choices, 0, :message, :content).to_s
       verdicts, dropped = parse_verdicts(text, commands)
       if dropped.any?

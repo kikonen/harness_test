@@ -30,7 +30,8 @@ class SessionManager
     "(1) the original goal, (2) every step already completed with its " \
     "concrete results (file paths, SHAs, command outputs when available), " \
     "(3) key decisions made, (4) files modified or created and their " \
-    "current state, (5) the exact next step to take. "
+    "current state, (5) the exact next step to take. " \
+    "Do NOT call any tools - answer with text only. "
 
   def initialize(harness, file_list)
     @harness     = harness
@@ -149,10 +150,9 @@ class SessionManager
     end
   end
 
-  # issue #108: ask the LLM for a summary of an arbitrary message chain.
-  # The chain is sent AS IS (system message included) so the call stays a
-  # prefix of the live prompt - why: doc/compaction_cache_design.md. Returns the
-  # stripped summary text. Used by #compact_session and #check_inloop_compaction.
+  # Ask the LLM for a summary of an arbitrary message chain. The chain rides AS
+  # IS (system message included) with the live turn's own tools payload, so the
+  # request stays a prefix of the live prompt - doc/compaction_cache_design.md.
   def generate_compact_summary(chain, instruction)
     max_words = @harness.compact_max_size || 500
     messages = chain + [
@@ -164,9 +164,19 @@ class SessionManager
       }
     ]
 
-    data = @harness.client.chat(messages)
-    text = data[:choices][0][:message][:content]
-    raise HarnessError, "LLM returned empty summary" if text.nil? || text.strip.empty?
+    data    = @harness.client.chat(messages, tools: @harness.tools_payload)
+    message = data[:choices][0][:message]
+    calls   = Array(message[:tool_calls]).filter_map { |tc| tc.dig(:function, :name) }
+    text    = message[:content]
+    if text.nil? || text.strip.empty?
+      named = calls.join(", ")
+      raise HarnessError,
+        calls.empty? ? "LLM returned empty summary" :
+          "LLM answered the summary request with a tool call (#{named}) instead of a summary"
+    end
+    if calls.any?
+      @harness.logger.info("summary call returned tool calls (#{calls.join(', ')}) - ignored")
+    end
 
     text.strip
   end
@@ -192,7 +202,8 @@ class SessionManager
       "system rules you were given) in a concise, structured format. " \
       "Include: (1) what was being worked on, (2) key decisions made, " \
       "(3) files that were modified or created, (4) any pending tasks or " \
-      "unresolved issues, (5) important context needed to continue. "
+      "unresolved issues, (5) important context needed to continue. " \
+      "Do NOT call any tools - answer with text only. "
 
     # issue #115 / #126: show the LIVE context usage next to the spinner -
     # a callable suffix is re-evaluated every frame from the CURRENT chain,
