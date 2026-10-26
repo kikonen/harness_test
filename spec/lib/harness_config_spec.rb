@@ -169,6 +169,67 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  # issue #389: command_safety_auto_approve as ONE enum key for both relaxations
+  # (manual | safe | denylist | safe_denylist), with a legacy true/false still
+  # read as safe/manual and the separate denylist boolean ORed in. An
+  # unrecognised value is a config error - a posture must never fall back
+  # silently in either direction.
+  describe '#command_safety_auto_approve enum (issue #389)' do
+    it 'defaults to manual when the key is absent (floor stays absolute)' do
+      cfg = described_class.new({})
+      expect(cfg.command_safety_auto_approve_enabled).to be(false)
+      expect(cfg.command_safety_denylist_safe_approve_enabled).to be(false)
+    end
+
+    it 'reads each mode into its two halves' do
+      {
+        'manual'        => [false, false],
+        'safe'          => [true,  false],
+        'denylist'      => [false, true],
+        'safe_denylist' => [true,  true]
+      }.each do |mode, (approve, denylist)|
+        cfg = described_class.new(command_safety_auto_approve: mode)
+        expect(cfg.command_safety_auto_approve_enabled).to be(approve), mode
+        expect(cfg.command_safety_denylist_safe_approve_enabled).to be(denylist), mode
+      end
+    end
+
+    it 'reads a legacy boolean: true = safe, false = manual' do
+      legacy = described_class.new(command_safety_auto_approve: true)
+      expect(legacy.command_safety_auto_approve_enabled).to be(true)
+      expect(legacy.command_safety_denylist_safe_approve_enabled).to be(false)
+      manual = described_class.new(command_safety_auto_approve: false)
+      expect(manual.command_safety_auto_approve_enabled).to be(false)
+    end
+
+    it 'accepts the mode name case- and whitespace-insensitively' do
+      cfg = described_class.new(command_safety_auto_approve: ' Safe_Denylist ')
+      expect(cfg.command_safety_auto_approve_enabled).to be(true)
+      expect(cfg.command_safety_denylist_safe_approve_enabled).to be(true)
+    end
+
+    it 'raises on an unrecognised mode rather than falling back silently' do
+      expect { described_class.new(command_safety_auto_approve: 'yes') }
+        .to raise_error(HarnessError, /command_safety_auto_approve must be one of/)
+    end
+
+    it 'ORs the separate denylist boolean into the enum (two-key style works)' do
+      cfg = described_class.new(command_safety_auto_approve: 'safe',
+                                command_safety_denylist_safe_approve: true)
+      expect(cfg.command_safety_auto_approve_enabled).to be(true)
+      expect(cfg.command_safety_denylist_safe_approve_enabled).to be(true)
+    end
+
+    it 'keeps the denylist half off when the separate key is not a literal true' do
+      cfg = described_class.new(command_safety_denylist_safe_approve: 'yes')
+      expect(cfg.command_safety_denylist_safe_approve_enabled).to be(false)
+    end
+
+    it 'mentions the key in the default template (commented out)' do
+      expect(template).to include('command_safety_denylist_safe_approve')
+    end
+  end
+
   describe 'model profile api key (issue #197)' do
     it 'reads the api key from a model profile' do
       cfg = described_class.new(models: [

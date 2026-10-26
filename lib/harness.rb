@@ -120,6 +120,10 @@ class Harness
     @session_manager = SessionManager.new(self, file_list)
     @command_safety_auto_approve = options[:command_safety_auto_approve] == true
     @yolo = options[:yolo] == true
+    # issue #389: the denylist half of command_safety_auto_approve. Config-derived
+    # for the whole run (no live toggle); the getter exists so the banner can name
+    # a relaxed floor. Rationale: doc/denylist_safe_approve_design.md.
+    @denylist_safe_approve = options[:command_safety_denylist_safe_approve] == true
     self.output_palette = options[:output_palette]
     # Streaming posture (issue #28): the initial value comes from the config
     # (global key or a profile's own key); /stream switches it for the rest of
@@ -293,6 +297,15 @@ class Harness
 
   def yolo_mode_label
     @yolo ? "YOLO ON" : "YOLO OFF"
+  end
+
+  # issue #389: the denylist-safe override (config-only, never Ctrl+A). It is NOT
+  # part of command_mode_label: it is not a third posture, it changes what a
+  # "safe:" verdict may decide for a DENYLISTED command, and it is only
+  # meaningful while the safety check is on. Rationale:
+  # doc/denylist_safe_approve_design.md.
+  def denylist_safe_approve?
+    @denylist_safe_approve
   end
 
   # -- Streaming posture (issue #28) -----------------------------------------

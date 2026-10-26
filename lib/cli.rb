@@ -193,6 +193,11 @@ class CLI
     # Only effective with command_safety_check on.
     opts[:command_safety_auto_approve] = config.command_safety_auto_approve_enabled
 
+    # issue #389: the denylist half of command_safety_auto_approve. Config-only:
+    # no live toggle and no session persistence (unlike the yolo posture).
+    opts[:command_safety_denylist_safe_approve] =
+      config.command_safety_denylist_safe_approve_enabled
+
     # issue #221: initial YOLO posture (shell consent OFF for run.command)
     # and whether the `!` bang syntax keeps its confirmation. Both default
     # to the conservative value (YOLO off, bang confirmation on).
@@ -400,12 +405,22 @@ class CLI
   def consent_posture_display
     label = @harness.command_mode_label
     return "n/a" if label.nil?
-    return "YOLO - unapproved commands run without asking; disaster " \
-           "commands still ask" if @harness.yolo?
 
-    label == "AUTO-APPROVE" \
-      ? 'AUTO-APPROVE - a "safe:" model verdict runs without asking' \
-      : "MANUAL - unapproved commands ask (/yolo status shows the postures)"
+    base =
+      if @harness.yolo?
+        "YOLO - unapproved commands run without asking; disaster " \
+          "commands still ask"
+      elsif label == "AUTO-APPROVE"
+        'AUTO-APPROVE - a "safe:" model verdict runs without asking'
+      else
+        "MANUAL - unapproved commands ask (/yolo status shows the postures)"
+      end
+    # issue #389: a relaxed floor is named in the banner for the same reason YOLO
+    # names it - never mistake a relaxed run for a normal one.
+    return base unless @harness.denylist_safe_approve?
+
+    "#{base}; denylist + \"safe:\" also runs without asking " \
+      "(command_safety_auto_approve: denylist)"
   end
 
   # Auto-save the session on exit (best-effort). Returns the session id,

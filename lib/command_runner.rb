@@ -45,6 +45,12 @@ require_relative "ui/renderer"
 # auto-approval and always reaches the dialog for a one-off explicit Allow.
 # The denylist is the floor under every posture.
 #
+# The ONE exception is the owner's own denylist-safe override (issue #389), armed
+# by the config key command_safety_auto_approve: denylist: a real model "safe:"
+# verdict may auto-approve a DENYLISTED match on the tool path. It fires only on
+# a "safe:" verdict and every override is logged. Design + the quote-hole
+# measurement: doc/denylist_safe_approve_design.md.
+#
 # SAFETY MODEL:
 #   - The FULL command string is displayed to the user before anything runs;
 #     explicit "Allow" required unless the prefix is in the list.
@@ -155,41 +161,55 @@ class CommandRunner
     # FIRST so no later shortcut can skip it.
     disaster = CommandAllowlist.disaster?(command)
     full_shown = false
+    # safety_verdict_for is ONE-SHOT for a batch verdict (it deletes the cache
+    # entry on first read), so a verdict the override attempt below consumed must
+    # not be fetched again: the advisory note would be lost AND a single-command
+    # check would pay for a second forked LLM call.
+    verdict = nil
+    verdict_computed = false
 
-    unless disaster
-      # Auto-approve when the command prefix is in the user's allowlist.
-      if @allowlist.allowed?(command)
-        status(:ok, "auto-approved (allowlist): #{command}")
-        return execute(command, dir, shown, timeout, limit, full_shown: true)
+    if disaster
+      # DENYLIST-SAFE OVERRIDE (issue #389): a model "safe:" verdict may decide
+      # even a denylist match - but ONLY on the tool path (the bang path is
+      # consented by the human's typing) and ONLY on a real "safe:" verdict, so a
+      # "dangerous:"/missing verdict keeps the floor and disaster? DETECTION is
+      # never weakened. Design + the quote-hole measurement:
+      # doc/denylist_safe_approve_design.md.
+      if denylist_safe_override? && @list == :tool
+        verdict = safety_verdict_for(command)
+        verdict_computed = true
+        if auto_approve_safe?(verdict)
+          status(:warn, "auto-approved (denylist safe-override, model verdict: " \
+                        "#{verdict}): #{command}")
+          log_denylist_override(command, verdict)
+          return execute(command, dir, shown, timeout, limit, full_shown: true)
+        end
       end
-
-      # YOLO POSTURE (issue #221): the user turned consent off for this
-      # caller, so the command runs with no dialog and deliberately NO
-      # model safety check (issue #238). Two routes reach this branch:
-      #   * the model-driven tool path while Harness#yolo? is on (/yolo),
-      #     read LIVE so a mid-session or mid-turn toggle takes effect
-      #     immediately for the next command of the same tool loop;
-      #   * the `!` bang path with bang confirmation disabled
-      #     (@auto_approve_all, from options[:bang_requires_confirmation]).
-      # The status line + harness.log entry are what keep it auditable.
-      if auto_approve_all?
-        reason = yolo_active? ? "YOLO" : "bang consent off"
-        status(:ok, "auto-approved (#{reason}): #{command}")
-        log_auto_approved(command, reason)
-        return execute(command, dir, shown, timeout, limit, full_shown: true)
-      end
-    else
       status(:warn, "denylisted (auto-approval refused in every posture): #{command}")
       @harness&.logger&.warn("denylisted command needs an explicit Allow: #{command}")
       # The refusal line above printed the full command BEFORE the dialog, so
       # this run counts as already named, like an auto-approved one.
       full_shown = true
+    elsif @allowlist.allowed?(command)
+      # Auto-approve when the command prefix is in the user's allowlist.
+      status(:ok, "auto-approved (allowlist): #{command}")
+      return execute(command, dir, shown, timeout, limit, full_shown: true)
+    elsif auto_approve_all?
+      # YOLO POSTURE (issue #221) / bang consent off (@auto_approve_all): the
+      # command runs with no dialog and deliberately NO model safety check
+      # (issue #238). The status line + harness.log entry keep it auditable.
+      reason = yolo_active? ? "YOLO" : "bang consent off"
+      status(:ok, "auto-approved (#{reason}): #{command}")
+      log_auto_approved(command, reason)
+      return execute(command, dir, shown, timeout, limit, full_shown: true)
     end
 
     # issue #224: consume a pre-batched verdict when the harness ran one
     # for this command, otherwise (single run.command call) run the check
-    # here. Advisory text only - consent proceeds exactly as before.
-    verdict = safety_verdict_for(command)
+    # here. Advisory text only - consent proceeds exactly as before. A disaster
+    # command whose verdict the override already consumed is skipped so the note
+    # reuses it instead of refetching (verdict_computed).
+    verdict = safety_verdict_for(command) unless verdict_computed
 
     # issue #224 follow-up: AUTO-APPROVE MODE. When the mode is on (and
     # the safety check produced a verdict), a command the model calls
@@ -393,6 +413,28 @@ class CommandRunner
     return unless logger
 
     logger.info("auto-approved (#{reason}): #{command}")
+  end
+
+  # Issue #389: is the denylist-safe override armed? Unlike the YOLO posture it is
+  # NOT read live - the key is a config value that never changes mid-run, so a
+  # relaxed floor cannot appear or disappear inside one tool loop. Rationale:
+  # doc/denylist_safe_approve_design.md.
+  def denylist_safe_override?
+    @options.is_a?(Hash) && @options[:command_safety_denylist_safe_approve] == true
+  end
+
+  # An override approval is the most auditable event the runner can produce: a
+  # denylist match ran WITHOUT a dialog. The status line names the verdict that
+  # allowed it; this line makes the same fact recoverable from harness.log, with
+  # the option that armed it, so a session log can always answer "why did a
+  # denylisted command run?".
+  def log_denylist_override(command, verdict)
+    logger = @harness&.logger
+    return unless logger
+
+    logger.warn("denylist safe-override auto-approved " \
+                "(command_safety_denylist_safe_approve, verdict: #{verdict}): " \
+                "#{command}")
   end
 
   # A verdict auto-approves when it is a non-empty line starting with
