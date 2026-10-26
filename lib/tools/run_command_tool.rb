@@ -18,8 +18,10 @@ require_relative "../command_runner"
 #     tool needs (MANUAL / AUTO-APPROVE / YOLO, see CommandRunner). The
 #     posture is invisible to the model and is never the model's decision -
 #     the tool description stays conservative either way. The disaster
-#     denylist (CommandAllowlist.disaster?) always forces the dialog, in
-#     every posture, even for a stored prefix grant.
+#     denylist (CommandAllowlist.disaster?) forces the dialog in every
+#     posture, even for a stored prefix grant; the only exception is the
+#     owner's config-only denylist-safe override in CommandRunner (issue #389,
+#     doc/denylist_safe_approve_design.md) - never a model-side option.
 #   - Commands run under a timeout (default 60 s, cap 300 s); output is
 #     truncated to a line limit (default 200, max 5000) because it goes
 #     into the LLM context window.
