@@ -102,4 +102,33 @@ RSpec.describe Commands::GrantCommand do
     # The placeholder means "no commands", so a host grant must not swallow it.
     expect(out).not_to include('Commands: (none allowed)')
   end
+
+  # issue #274: YOLO auto-covers file access inside the working directory, and a
+  # posture that approves without asking must be visible exactly where a user
+  # reviews what a run may touch. It is a POSTURE line, never a grant entry -
+  # a session saves grants, so a posture must not land in them.
+  context 'with the YOLO posture on' do
+    before do
+      file_list.posture = -> { true }
+    end
+
+    it 'shows the posture coverage line' do
+      out = run_command
+
+      expect(out).to include('Posture (YOLO):')
+      expect(out).to include('not a stored grant')
+      expect(out).not_to include('Read only:')
+    end
+
+    it 'keeps the posture line separate from the stored grants' do
+      file_list.add_dir('spec', :rw)
+
+      out = run_command
+
+      expect(out).to include('Read + write:')
+      expect(out).to include('spec/ (recursive)')
+      expect(out.lines.index { |l| l.include?('Read + write:') })
+        .to be < out.lines.index { |l| l.include?('Posture (YOLO):') }
+    end
+  end
 end

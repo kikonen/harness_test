@@ -127,10 +127,13 @@ retry:
 # with no dialog and no model safety check at all). YOLO is the INITIAL
 # posture only - during a session it is toggled live with /yolo and is
 # saved with the session (resume keeps it). Opt-in: default false.
-# What YOLO does NOT change: the disaster denylist - a well-known disaster
-# (rm -rf, format C:, sudo, git push -f, curl | sh, ...) keeps the dialog
-# in EVERY posture, file-access grants are untouched, and every auto-
-# approved run is status-lined and written to harness.log.
+# YOLO covers FILE access too (issue #274): read, write and delete inside the
+# working directory run without a dialog - a coverage the posture reads live, never
+# a stored grant. What it does NOT change: the disaster denylist - a well-known
+# disaster (rm -rf, format C:, sudo, git push -f, curl | sh, ...) keeps the dialog
+# in EVERY posture - and file coverage never reaches a sensitive path, the owner's
+# own space (local/), or a path outside the working directory. web.fetch hosts are
+# a separate axis (issue #33). Every auto-approval is status-lined and logged.
 # (The floor's only exception is the denylist mode of command_safety_auto_approve
 # above - not part of any posture.)
 # yolo: false

@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
-# The paths a grant can NEVER cover, and the shape of the regions where a
-# sensitive NAME does not count. Rationale and measurements:
+# The paths a grant can NEVER cover, the shape of the regions where a sensitive
+# NAME does not count, and the owner's own space - a path a human grant CAN cover
+# but a posture never may (an auto-grant must not quietly remove the veto the user
+# kept there). Rationale and measurements:
 # doc/sensitive_paths_design.md and doc/skills_design.md.
 module SensitiveFiles
   # Basename patterns: config/.env.production is blocked too, not just a bare .env.
@@ -23,6 +25,12 @@ module SensitiveFiles
   # is repo content the owner chose to keep, so this subtree of .harness/ is
   # grantable - the exemption lifts the .harness component only, never a .env* name.
   SKILLS_DIR = ".harness/skills"
+
+  # The owner's space, workdir-relative: top-level local/ and everything under it.
+  # NOT a sensitive dir - a human grant on it is legal, and today it is the human's
+  # dialog that protects it. The list exists so a posture that auto-grants the rest
+  # of the working directory leaves local/ asking (issue #274).
+  OWNER_DIR = "local"
 
   def self.sensitive?(path)
     env_named?(path) || state_dir?(path)
@@ -52,5 +60,12 @@ module SensitiveFiles
   # relative_path has already resolved .harness/skills/../sessions out of the zone.
   def self.skills_zone?(rel_path)
     !rel_path.nil? && (rel_path == SKILLS_DIR || rel_path.start_with?("#{SKILLS_DIR}/"))
+  end
+
+  # True when a workdir-relative path IS the owner's space or lies inside it. Same
+  # exact-prefix shape as the zones above, so a resolved path that escaped local/
+  # (local/../analysis) does not match.
+  def self.owner_space?(rel_path)
+    !rel_path.nil? && (rel_path == OWNER_DIR || rel_path.start_with?("#{OWNER_DIR}/"))
   end
 end

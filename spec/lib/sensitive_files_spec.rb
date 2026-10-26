@@ -105,6 +105,25 @@ RSpec.describe SensitiveFiles do
     end
   end
 
+  # The owner's own space (issue #274). NOT a sensitive dir: a human grant on it is
+  # legal and today the human's dialog is what protects it. The list exists so a
+  # posture that auto-covers the rest of the working directory leaves local/ asking.
+  describe '.owner_space? (the posture exemption)' do
+    it 'recognises local/ itself and anything under it' do
+      expect(described_class.owner_space?('local')).to be(true)
+      expect(described_class.owner_space?('local/handover_28.md')).to be(true)
+      expect(described_class.owner_space?('local/a/b/c.md')).to be(true)
+    end
+
+    it 'is one directory - a lookalike or a nested name is not the space' do
+      expect(described_class.owner_space?('localz')).to be(false)
+      expect(described_class.owner_space?('local-backup/x')).to be(false)
+      expect(described_class.owner_space?('lib/local/x')).to be(false)
+      expect(described_class.owner_space?('tmp/keep/1/local/x')).to be(false)
+      expect(described_class.owner_space?(nil)).to be(false)
+    end
+  end
+
   describe '.env_named? and .state_dir? (the two halves of the name test)' do
     it 'separates the secret-name rule from the state-directory rule' do
       # The skills-zone exemption needs the NAME half WITHOUT the .harness component

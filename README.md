@@ -170,7 +170,10 @@ toggles the YOLO posture: every `run.command` call then runs with no dialog
 and no model check (issue #221). The one exception is a denylisted command: it
 still asks, and its dialog does carry the model verdict when `command_safety_check`
 is on (issue #382) - the check runs there so the verdict can be judged against a
-command the denylist already refuses.
+command the denylist already refuses. The same posture covers FILE access
+(read, write and delete) for paths inside the working directory - never a
+sensitive path, never `local/`, never a path outside the workdir - and the
+coverage is shown by `/grant` as a posture line (issue #274).
 `/stream` [on|off|status] toggles streamed LLM responses (issue #28): each part
 of an answer is then consumed as it arrives and the spinner line shows the newest
 text of it with the rate it is arriving at (`[STREAM]` badge). Before the answer
@@ -217,7 +220,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/reasoning` | Show the reasoning text of the last response |
 | `/skills [name]` | List the project's skills (`.harness/skills/`), or print one skill's body |
 | `/memory [name]` | List the project's memories (`.harness/memories/`), or print one note's body |
-| `/yolo [on|off|status]` | Toggle the YOLO shell-consent posture (saved with the session) |
+| `/yolo [on|off|status]` | Toggle the YOLO consent posture: shell commands and file access in the workdir (saved with the session) |
 | `/palette [name\|status]` | Show or switch the output palette (saved with the session) |
 | `/stream [on|off|status]` | Toggle streamed LLM responses - show each part as it arrives (saved with the session) |
 | `/help` | Show command help |
@@ -269,8 +272,15 @@ context), `test.echo` (test-only)
 - Directory grants come in two tiers: *dir only* (direct children) and
   *recursive* (whole tree).
 - When the model touches a path you have not granted, you are prompted
-  with numbered choices including the intended purpose - no auto-grants.
+  with numbered choices including the intended purpose - no stored grant is ever
+  made without you.
 - File and directory deletes need their own DELETE grant.
+- The YOLO posture covers file access too (issue #274): with it on, read, write
+  and delete INSIDE the working directory run without a dialog. That coverage is
+  a posture, never a stored grant (a resumed session cannot inherit it), it is
+  shown by `/grant` as a posture line, and it never reaches a sensitive path,
+  `local/` or a path outside the workdir. Every covered access is status-lined
+  and written to harness.log.
 - Shell commands ask unless the prefix is allowlisted or the consent posture
   you picked accepts it: AUTO-APPROVE on a "safe:" model verdict (issue #224)
   or YOLO for everything (issue #221). Postures are always the user's choice -

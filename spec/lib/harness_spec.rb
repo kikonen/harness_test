@@ -1040,6 +1040,48 @@ RSpec.describe Harness do
       harness.yolo = true
       expect(harness.yolo?).to be(true)
     end
+
+    # issue #274: the same posture gates FILE access, so Harness wires its
+    # reader into the FileList it was handed. A lambda, not a boolean copy.
+    it 'wires the YOLO posture live into the file list' do
+      harness = build_harness
+
+      expect(harness.file_list.posture).to be_a Proc
+      expect(harness.file_list.readable?('lib/a.rb')).to be(false)
+
+      harness.toggle_yolo
+      expect(harness.file_list.readable?('lib/a.rb')).to be(true)
+      expect(harness.file_list.writable?('lib/a.rb')).to be(true)
+      expect(harness.file_list.deletable?('lib/a.rb')).to be(true)
+
+      harness.toggle_yolo
+      expect(harness.file_list.readable?('lib/a.rb')).to be(false)
+    end
+
+    it 'leaves the owner space and sensitive paths outside the coverage' do
+      harness = build_harness(yolo: true)
+      list = harness.file_list
+
+      expect(list.readable?('local/notes.md')).to be(false)
+      expect(list.readable?('.git/config')).to be(false)
+      expect(list.readable?('.harness/session.json')).to be(false)
+      expect(list.readable?('analysis/274/repro.rb')).to be(true)
+    end
+
+    it 'wires the session logger as the posture audit logger' do
+      harness = build_harness(yolo: true)
+
+      expect(harness.file_list.audit_logger).to equal(harness.logger)
+    end
+
+    it 'never stores a grant from the posture (a resume cannot inherit it)' do
+      harness = build_harness(yolo: true)
+      harness.file_list.readable?('lib/a.rb')
+
+      expect(harness.file_list.accessible_paths[:read]).to eq(
+        { files: [], dirs: [], flat_dirs: [] }
+      )
+    end
   end
 
   # issue #208: the session is the working chain. When a turn dies mid-loop

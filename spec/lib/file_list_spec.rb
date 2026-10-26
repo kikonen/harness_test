@@ -241,4 +241,142 @@ RSpec.describe FileList do
     end
   end
 
+  # YOLO for file access (issue #274): when the user turns the posture on, a path
+  # INSIDE the working directory is covered for read/write/delete without a dialog.
+  # Three boundaries the posture must never cross: a sensitive path, the owner's own
+  # space (local/), and anything outside the working directory. The posture is a
+  # live coverage rule (a lambda), NOT a stored grant - so it never persists, never
+  # shows up in the access lists a session saves, and stops the instant it is off.
+  describe 'YOLO posture coverage (issue #274)' do
+    # The posture is read live through a lambda, exactly as Harness wires it.
+    def list_with_posture(dir, active)
+      list    = described_class.new(workdir: dir)
+      state   = { on: active }
+      list.posture = -> { state[:on] }
+      [list, state]
+    end
+
+    it 'is off when no posture is wired (the default, unchanged behaviour)' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        expect(list.posture_active?).to be(false)
+        expect(list.readable?('lib/foo.rb')).to be(false)
+      end
+    end
+
+    it 'covers a workdir file for read, write and delete when the posture is on' do
+      Dir.mktmpdir do |dir|
+        list, = list_with_posture(dir, true)
+        expect(list.posture_active?).to be(true)
+        expect(list.readable?('lib/foo.rb')).to be(true)
+        expect(list.writable?('lib/foo.rb')).to be(true)
+        expect(list.deletable?('lib/foo.rb')).to be(true)
+        # Deep paths are covered too - the coverage is the whole workdir tree,
+        # which is the whole point (the analysis/<NNN>/ repetition of issue #274).
+        expect(list.readable?('analysis/246/repro.rb')).to be(true)
+      end
+    end
+
+    it 'never covers the owner space - local/ keeps asking in every posture' do
+      Dir.mktmpdir do |dir|
+        list, = list_with_posture(dir, true)
+        expect(list.readable?('local/handover.md')).to be(false)
+        expect(list.writable?('local/handover.md')).to be(false)
+        expect(list.deletable?('local/sub/deep.md')).to be(false)
+        # A lookalike is normal workdir and IS covered.
+        expect(list.readable?('localback/x.md')).to be(true)
+      end
+    end
+
+    it 'never covers a sensitive path, whatever the posture' do
+      Dir.mktmpdir do |dir|
+        list, = list_with_posture(dir, true)
+        expect(list.readable?('.env')).to be(false)
+        expect(list.writable?('.git/config')).to be(false)
+        expect(list.deletable?('.harness/sessions/x/session.json')).to be(false)
+      end
+    end
+
+    it 'still covers the skills subtree it already covered as a grant (exemption intact)' do
+      Dir.mktmpdir do |dir|
+        list, = list_with_posture(dir, true)
+        expect(list.readable?('.harness/skills/changelog/SKILL.md')).to be(true)
+        # ...but a secret name inside it stays blocked.
+        expect(list.readable?('.harness/skills/.env')).to be(false)
+      end
+    end
+
+    it 'never covers a path outside the working directory (a posture is not an escape)' do
+      Dir.mktmpdir do |dir|
+        list, = list_with_posture(dir, true)
+        expect(list.readable?('../outside.rb')).to be(false)
+        expect(list.writable?('../outside.rb')).to be(false)
+      end
+    end
+
+    it 'stops coverage the instant the posture flips off (read live, not cached)' do
+      Dir.mktmpdir do |dir|
+        list, state = list_with_posture(dir, true)
+        expect(list.readable?('lib/foo.rb')).to be(true)
+        state[:on] = false
+        expect(list.posture_active?).to be(false)
+        expect(list.readable?('lib/foo.rb')).to be(false)
+      end
+    end
+
+    it 'coverage is NOT a stored grant - nothing is added to the access lists' do
+      Dir.mktmpdir do |dir|
+        list, = list_with_posture(dir, true)
+        list.readable?('lib/foo.rb')
+        list.writable?('lib/foo.rb')
+        list.deletable?('lib/foo.rb')
+        expect(list.access_grant_count).to eq(0)
+        expect(list.empty?).to be(true)
+        expect(list.accessible_paths[:both][:files]).to be_empty
+      end
+    end
+
+    # An auto-approval must leave a trace, the rule YOLO's shell runs follow (#221):
+    # a harness.log line naming the posture that let the access through. Once per
+    # mode - file.list/file.search call readable? on every candidate and dir.delete on
+    # every entry, so a per-access line would bury the log.
+    it 'logs the coverage to harness.log, once per mode' do
+      Dir.mktmpdir do |dir|
+        list, = list_with_posture(dir, true)
+        logged = []
+        logger = double('logger')
+        allow(logger).to receive(:info) { |m| logged << m }
+        list.audit_logger = logger
+
+        5.times { list.readable?('lib/a.rb') }
+        list.writable?('lib/b.rb')
+        list.deletable?('lib/c.rb')
+
+        read_lines = logged.select { |m| m.include?('read access') }
+        expect(read_lines.size).to eq(1)
+        expect(read_lines.first).to include('auto-granted (YOLO)')
+        expect(logged.select { |m| m.include?('write access') }.size).to eq(1)
+        expect(logged.select { |m| m.include?('delete access') }.size).to eq(1)
+      end
+    end
+
+    it 're-announces after the posture is flipped back on' do
+      Dir.mktmpdir do |dir|
+        list, state = list_with_posture(dir, true)
+        logged = []
+        logger = double('logger')
+        allow(logger).to receive(:info) { |m| logged << m }
+        list.audit_logger = logger
+
+        list.readable?('lib/a.rb')
+        state[:on] = false
+        list.readable?('lib/a.rb') # off: resets the per-mode flag
+        state[:on] = true
+        list.readable?('lib/a.rb') # back on: must announce again
+
+        expect(logged.count { |m| m.include?('read access') }).to eq(2)
+      end
+    end
+  end
+
 end

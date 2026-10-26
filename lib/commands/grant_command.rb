@@ -49,6 +49,17 @@ module Commands
         end
       end
 
+      # YOLO's file coverage is a POSTURE, not a stored grant (issue #274): it is
+      # shown here because /grant is where a user checks what a run is allowed to
+      # touch, and a posture that auto-approves silently must never be invisible.
+      # It is not part of the access lists above because a session saves and
+      # restores those - a posture must never persist into a resumed grant.
+      if @file_list.respond_to?(:posture_active?) && @file_list.posture_active?
+        scope = @file_list.posture_scope
+        @ui.puts "Posture (YOLO): read, write and delete cover #{scope}/ "
+        @ui.puts "  (except local/ and sensitive paths) - not a stored grant"
+      end
+
       tool_list = CommandAllowlist.new(@file_list.workdir).prefixes
       shell_list = CommandAllowlist.new(@file_list.workdir,
                                         file: CommandAllowlist::SHELL_FILENAME)
