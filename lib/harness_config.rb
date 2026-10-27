@@ -51,6 +51,9 @@ require_relative "harness_error"
 #                               # A model profile's own key overrides this one.
 #   markdown: false             # render the assistant's answer as markdown with
 #                               # ANSI styling (issue #106, default off).
+#   markdown_max_width: 120     # column basis for markdown tables (issue #106).
+#                               # Omit = 80% of the detected terminal width. An
+#                               # explicit count is clamped to the terminal width.
 #   double_enter_submit: false # Enter on an empty last line submits the multiline buffer (issue #198)
 #   system_prompt_file: prompts/my.txt  # file with the full system prompt (issue #223)
 #                                       # overrides the built-in config/system_prompt.txt
@@ -137,6 +140,9 @@ class HarnessConfig
     @streaming = data[:streaming] == true
     # Opt-in markdown rendering of the assistant answer (issue #106, default off).
     @markdown = data[:markdown] == true
+    # Table-width basis for markdown rendering (issue #106). nil = the renderer's
+    # default (80% of the detected terminal); an explicit integer is used as-is.
+    @markdown_max_width = int_or_nil(data[:markdown_max_width])
     # issue #303: rendered-output palette name (nil = the default palette).
     # Validated by UI::Palette.validate! in the CLI, not here: this class does
     # not know the palette list and must not start requiring the UI layer.
@@ -304,6 +310,12 @@ class HarnessConfig
   # Opt-in markdown rendering of the assistant answer (issue #106). Default false.
   def markdown_enabled?
     @markdown == true
+  end
+
+  # Table-width basis for markdown rendering (issue #106), or nil for the
+  # renderer's default (80% of the detected terminal).
+  def markdown_max_width
+    @markdown_max_width
   end
 
   # Rendered-output palette name (issue #303), or nil for the default one.

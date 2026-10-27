@@ -1850,6 +1850,19 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #106: the table-width basis. Config-derived for the whole run (read
+  # when a Task builds its renderer, like the palette) - NOT a live toggle like
+  # the markdown on/off posture. nil = the renderer's default (80% of terminal).
+  describe '#markdown_max_width (issue #106)' do
+    it 'is nil when the option is absent (the renderer picks 80% of the terminal)' do
+      expect(build_harness.markdown_max_width).to be_nil
+    end
+
+    it 'reads an explicit column count from options' do
+      expect(build_harness(markdown_max_width: 120).markdown_max_width).to eq(120)
+    end
+  end
+
   describe '#call_llm streaming posture (issue #28)' do
     def scripted(harness, client)
       harness.instance_variable_set(:@client, client)

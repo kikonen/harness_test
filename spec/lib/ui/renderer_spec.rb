@@ -6,6 +6,11 @@ require 'ui/renderer'
 RSpec.describe UI::Renderer do
   subject(:renderer) { described_class.new }
 
+  # Display width of a rendered line, ignoring the ANSI runs the palette adds.
+  def strip_ansi(line)
+    line.gsub(/\e\[[0-9;]*m/, '')
+  end
+
   describe '#line (labeled roles)' do
     it 'labels a role with its pattern' do
       expect(renderer.line(type: :plan, content: 'read the tool first')).to eq(
@@ -126,6 +131,18 @@ RSpec.describe UI::Renderer do
 
       expect(out).to include("**bold**")
       expect(out).not_to include("\e[1mbold")
+    end
+  end
+
+  # The table-width basis (issue #106) is a CONTENT knob: the boundary chrome
+  # stays the fixed RULE_WIDTH whatever it says.
+  describe 'markdown_max_width does not move the boundary chrome (issue #106)' do
+    it 'keeps the model rule exactly RULE_WIDTH with a wide table basis set' do
+      md = described_class.new(palette: UI::Palette.fetch('default'),
+                               markdown: true, markdown_max_width: 160)
+      rule = md.line(type: :response, content: "a | b\n| - | -\n| 1 | 2").lines.first.chomp
+
+      expect(strip_ansi(rule).length).to eq(described_class::RULE_WIDTH)
     end
   end
 

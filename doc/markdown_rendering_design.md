@@ -101,23 +101,34 @@ renderer. A markdown-off run never reaches this branch at all.
 ## The table-width cap
 
 kramdown-ansi sizes a table from `Tins::Terminal.columns` (90% of it, plus border
-overhead). On a wide terminal that is wider than the harness' FIXED 80-column
-chrome (`RULE_WIDTH`), so a table overflows the boundary rules around it - the
-owner measured a rendered table clearly wider than the terminal.
+overhead). Uncapped on a wide terminal that overflowed the harness' FIXED 80-column
+chrome (`RULE_WIDTH`) - the owner measured a rendered table clearly wider than the
+terminal.
 
-The fix caps the width the gem sees during OUR render: `MarkdownRenderer`
-temporarily overrides `Tins::Terminal.columns` to `min(detected, RULE_WIDTH)`
-around the `Kramdown::ANSI.parse` call and restores the original method in an
-`ensure`, so the cap is scoped to our render and never global - no other
-`Tins::Terminal` caller (the spinner, a future probe) sees it, and the restore
-holds even when the parse raises. The cap is passed in from the renderer
-(`width: RULE_WIDTH`), so the 80 stays the renderer's constant, not a second
-number.
+`MarkdownRenderer` feeds the gem a BASIS for the width it sizes from, by
+temporarily overriding `Tins::Terminal.columns` around the `Kramdown::ANSI.parse`
+call and restoring the original method in an `ensure` - scoped to our render, never
+global (no other `Tins::Terminal` caller sees it; the restore holds even when the
+parse raises). The basis is:
 
-The cap is a CAP, not a guarantee that a table is exactly 80 wide: the gem adds
-border overhead, so a capped table lands a few columns under the chrome. What it
-guarantees is that a table never exceeds the fixed boundary width the way an
-uncapped one did.
+- an explicit `max_width` (from `--markdown-width N` or the config
+  `markdown_max_width:` key), clamped to the detected terminal width, or
+- by default, `AUTO_WIDTH_PERCENT` (80%) of the detected terminal columns.
+
+So on a 160-column terminal the default basis is ~128 and a table can use the
+extra width instead of the old fixed 80; an explicit count pins it. The basis is
+config-derived for the whole run (read when a Task builds its renderer, like the
+palette) - NOT a live toggle like the markdown on/off posture itself.
+
+The basis is not a guarantee that a table is exactly that wide: the gem sizes a
+table at 90% of the basis plus border overhead, so a table lands a little under
+it. What the basis guarantees is that a table stays within the terminal width.
+
+The BOUNDARY chrome (the `---- model ----` rule) stays the fixed `RULE_WIDTH` (80)
+whatever the basis says - a boundary that depends on a terminal setting is one
+that moves (see `output_rendering_design.md`). On a wide terminal a table can
+therefore extend past the rule line; that is the intended tradeoff for using the
+extra width.
 
 ## Parse failure never aborts an answer
 

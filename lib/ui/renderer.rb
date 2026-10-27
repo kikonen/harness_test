@@ -64,11 +64,13 @@ module UI
     # harness: specs, a bare console).
     # markdown: render an assistant :response as markdown (issue #106). Default
     # false keeps every existing line byte-for-byte; only an opted-in run renders
-    # :response and the MARKDOWN_ROLES prose lines. The render is capped to
-    # RULE_WIDTH so a table never exceeds the chrome.
-    def initialize(palette: nil, markdown: false)
+    # :response and the MARKDOWN_ROLES prose lines. markdown_max_width is the
+    # table-width basis (nil = 80% of the terminal); the boundary chrome stays at
+    # the fixed RULE_WIDTH whatever this says.
+    def initialize(palette: nil, markdown: false, markdown_max_width: nil)
       @palette  = palette
-      @markdown = markdown ? MarkdownRenderer.new(palette:, width: RULE_WIDTH) : nil
+      @markdown = markdown ?
+        MarkdownRenderer.new(palette:, max_width: markdown_max_width) : nil
     end
 
     # origin: for a status type, the bracket label ("file.read", "access",

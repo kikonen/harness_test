@@ -44,10 +44,17 @@ module UI
       code: :plan          # blue (plan)
     }.freeze
 
-    # width: the column cap for the render (nil = the gem's own detected width).
-    def initialize(palette: nil, width: nil)
-      @palette = palette
-      @width   = width
+    # The default table-width basis when no explicit max_width is configured:
+    # 80% of the detected terminal columns. The gem then sizes a table at 90% of
+    # the basis it is fed, so a table lands a little under the terminal width
+    # instead of the old fixed 80 (which wasted the width of a wide terminal).
+    AUTO_WIDTH_PERCENT = 80
+
+    # max_width: the column basis for the render (nil = AUTO_WIDTH_PERCENT of the
+    # detected terminal). An explicit value is clamped to the terminal width.
+    def initialize(palette: nil, max_width: nil)
+      @palette   = palette
+      @max_width = max_width
     end
 
     # The markdown -> ANSI render. A parse failure never aborts an answer: the
@@ -71,14 +78,19 @@ module UI
     end
 
     # kramdown-ansi sizes tables and wraps paragraphs from Tins::Terminal.columns
-    # (90% of it), so on a wide terminal a table is wider than the harness' fixed
-    # 80-column chrome. The override wraps only OUR parse and ensure restores it
-    # even when the parse raises, so no other Tins::Terminal caller sees the cap.
+    # (90% of it). We feed it a BASIS: an explicit max_width (clamped to the
+    # terminal) or, by default, 80% of the detected columns. The override wraps
+    # only OUR parse and the ensure restores the original method even when the
+    # parse raises, so no other Tins::Terminal caller sees it.
     def with_capped_width
-      return yield if @width.nil?
-
       detected = Tins::Terminal.method(:columns)
-      cap      = [detected.call, @width].min
+      columns  = detected.call
+      cap      =
+        if @max_width
+          [columns, @max_width].min
+        else
+          (columns * AUTO_WIDTH_PERCENT / 100.0).floor
+        end
       Tins::Terminal.define_singleton_method(:columns) { cap }
       yield
     ensure

@@ -341,6 +341,31 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  # issue #106: the table-width basis for markdown rendering. nil = the renderer's
+  # default (80% of the terminal); an explicit integer is used as-is.
+  describe '#markdown_max_width (issue #106)' do
+    it 'is nil when the config says nothing (the renderer picks 80% of the terminal)' do
+      expect(described_class.new({}).markdown_max_width).to be_nil
+    end
+
+    it 'reads an explicit integer column count' do
+      expect(described_class.new(markdown_max_width: 120).markdown_max_width).to eq(120)
+    end
+
+    it 'accepts a numeric string (int_or_nil coercion)' do
+      expect(described_class.new(markdown_max_width: '100').markdown_max_width).to eq(100)
+    end
+
+    it 'raises on a non-numeric value (a width is a count, not prose)' do
+      expect { described_class.new(markdown_max_width: 'wide') }
+        .to raise_error(HarnessError, /expected an integer/)
+    end
+
+    it 'mentions the key in the default template (commented out)' do
+      expect(template).to include('markdown_max_width')
+    end
+  end
+
   # issue #33: web.fetch may not connect to a private / loopback / link-local
   # address unless the USER asked for it. It is a user-side posture like yolo:
   # no tool argument reaches it.
