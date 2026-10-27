@@ -150,7 +150,8 @@ Consent and grant dialogs are typed the same way (issue #388): a note line
 states its KIND (`context` / `warn` / `alert` / `safe`) and the palette decides
 the hue - a `MODEL VERDICT ... safe:` line green, a `dangerous:` one red, a
 `DENYLISTED:` one red, an `UNSAFE:` one brown, a plain note the terminal's own
-color - while the `[dialog]` marker and the option numbers stay recessive chrome
+color - the option NUMBERS you pick from get cyan (gray was measured invisible
+in a list), and the `[dialog]` marker stays recessive chrome
 (`doc/dialog_colors_design.md`).
 The two block boundaries - the start of an iteration and the start of the final
 answer - are framed by the same 80-column gray rule that names the role

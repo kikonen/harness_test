@@ -27,6 +27,7 @@ require_relative "../../lib/ui/dialog"
 require_relative "../../lib/ui/palette"
 
 GRAY   = "\e[38;5;240m"
+CYAN   = "\e[36m"
 BROWN  = "\e[38;5;130m"
 RED    = "\e[31m"
 GREEN  = "\e[32m"
@@ -191,13 +192,13 @@ Dir.mktmpdir do |dir|
   expect_line(
     failures,
     out,
-    "#{OPTION_AT}#{GRAY}1)#{RESET} Allow",
-    "option number = chrome")
+    "#{OPTION_AT}#{CYAN}1)#{RESET} Allow",
+    "option number = visible hue")
   expect_line(
     failures,
     out,
-    "#{OPTION_AT}#{GRAY}2)#{RESET} Cancel",
-    "cancel number = chrome")
+    "#{OPTION_AT}#{CYAN}2)#{RESET} Cancel",
+    "cancel number = visible hue")
   expect_line(failures, out, "#{OPTION_AT}$ #{command}", "command text = plain")
 end
 
@@ -313,7 +314,9 @@ puts "== 7. Palettes: context unpainted everywhere, basic16 inside the 16-color 
     unless palette.color_for(:dialog_note).nil?
   next if name == "none" # none paints nothing, in every role
 
-  %w[dialog_warn dialog_alert dialog_safe].each do |role|
+  # The option number must be a BAND code: gray 38;5;240 was measured invisible
+  # in a list the eye scans for a number, so a hue is the whole point here.
+  %w[dialog_option dialog_warn dialog_alert dialog_safe].each do |role|
     code = palette.color_for(role.to_sym)
     record_failure(failures, "#{name} has no #{role}") if code.nil?
     next unless name == "basic16"

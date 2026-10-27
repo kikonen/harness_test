@@ -65,12 +65,16 @@ RSpec.describe UI::Palette do
     # a note is content the user must read (a model-asked dialog's whole
     # question is a note), not chrome - only a kind that IS a highlight gets a
     # hue, and the alert/safe pair is the same red/green the status verdicts use.
-    it 'maps the dialog note kinds to the verdict hues, context to none' do
+    # dialog_option is not a note kind: it is the option NUMBER a choice line
+    # names, and a gray there was measured invisible, so it is a band hue.
+    it 'maps the dialog roles to visible hues, context to none' do
+      expect(palette.color_for(:dialog_option)).to eq('36')
       expect(palette.color_for(:dialog_note)).to be_nil
       expect(palette.color_for(:dialog_warn)).to eq('38;5;130')
       expect(palette.color_for(:dialog_alert)).to eq('31')
       expect(palette.color_for(:dialog_safe)).to eq('32')
       basic = described_class.new('basic16')
+      expect(basic.color_for(:dialog_option)).to eq('36')
       expect(basic.color_for(:dialog_note)).to be_nil
       expect(basic.color_for(:dialog_alert)).to eq('31')
       expect(basic.color_for(:dialog_safe)).to eq('32')

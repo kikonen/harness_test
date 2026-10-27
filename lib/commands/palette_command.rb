@@ -36,7 +36,7 @@ module Commands
       ["turn roles", UI::Renderer::LABELS.keys],
       ["status roles", UI::Renderer::STATUS_TYPES],
       ["marker roles", %i[marker rule]],
-      ["dialog roles", UI::Dialog::NOTE_ROLES.values],
+      ["dialog roles", [:dialog_option] + UI::Dialog::NOTE_ROLES.values],
       ["note roles", %i[system stats compact]]
     ].freeze
 

@@ -64,7 +64,8 @@ RSpec.describe Commands::PaletteCommand do
     it 'lists the dialog note roles the palette colors' do
       out = run_command('', build_harness('default'))
 
-      expect(out).to include('dialog roles: dialog_warn=38;5;130')
+      expect(out).to include('dialog roles: dialog_option=36')
+      expect(out).to include('dialog_warn=38;5;130')
       expect(out).to include('dialog_alert=31 dialog_safe=32')
       expect(out).to include('dialog kind context')
     end

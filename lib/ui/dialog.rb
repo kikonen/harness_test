@@ -343,9 +343,11 @@ module UI
       "#{NOTE_INDENT}#{paint(ui, note.role, note.text)}"
     end
 
-    # The NUMBER is chrome, the option's own words are what must be read.
+    # The NUMBER is the anchor the choice line names, so it gets a visible hue of
+    # its own (not the marker gray: invisible in a list the eye scans for a
+    # number); the option's own words are content the user must read.
     def option_line(ui, index, opt)
-      "#{TITLE_INDENT}#{paint(ui, :marker, "#{index + 1})")} #{opt.title}"
+      "#{TITLE_INDENT}#{paint(ui, :dialog_option, "#{index + 1})")} #{opt.title}"
     end
 
     # A console answers #paint when it has a palette to paint with (issue #388);
