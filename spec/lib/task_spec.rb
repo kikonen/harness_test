@@ -340,10 +340,11 @@ RSpec.describe Task do
 
     # issue #28: the streaming posture is a second tag on the SAME badge, so
     # a mid-turn /stream toggle is visible while the answer is arriving.
-    def posture_harness(command_label, stream_label)
+    def posture_harness(command_label, stream_label, plan_label = nil)
       Class.new do
         define_method(:command_mode_label) { command_label }
         define_method(:stream_mode_label) { stream_label }
+        define_method(:plan_mode_label) { plan_label }
       end.new
     end
 
@@ -363,6 +364,29 @@ RSpec.describe Task do
     it 'mode_badge shows no stream tag when streaming is off' do
       expect(described_class.mode_badge(posture_harness('MANUAL', nil)))
         .to eq('[MANUAL]')
+    end
+
+    # issue #359: the planning posture is a third tag on the SAME badge.
+    it 'mode_badge adds the plan tag alongside the consent and stream tags' do
+      harness = posture_harness('MANUAL', 'STREAM', 'PLAN')
+
+      expect(described_class.mode_badge(harness)).to eq('[MANUAL] [STREAM] [PLAN]')
+    end
+
+    # Off is the default posture, so it gets no tag (the same rule as STREAM).
+    it 'mode_badge shows no plan tag when planning is off' do
+      expect(described_class.mode_badge(posture_harness('MANUAL', nil, nil)))
+        .to eq('[MANUAL]')
+    end
+
+    it 'installs a badge when the harness only exposes the plan label' do
+      task = described_class.new { |_t| }
+      task.ui = UI::Console.new(stdout: StringIO.new)
+      task.harness = Class.new { def plan_mode_label = 'PLAN'; }.new
+
+      described_class.ensure_spinner_running(task)
+
+      expect(task.visible_spinner.badge.call).to eq('[PLAN]')
     end
 
     it 'installs a badge when the harness only exposes the stream label' do

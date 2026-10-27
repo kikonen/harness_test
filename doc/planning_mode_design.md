@@ -120,6 +120,12 @@ palette), but the *plans themselves* are durable store state. Those are two
 different things and the design keeps them separate: **the mode is per-session;
 the plans are per-workdir.**
 
+**Phase 2 as built (advisory, mode only).** The owner chose ADVISORY enforcement
+and a deliberately small Phase 2: the mode is on/off only. It is NOT persisted
+with the session (no `data[:plan]` in `save_session`, no resume restore) - a
+resumed run starts planning-off. The active-plan pointer and the approve/iterate
+loop below are NOT built; they stay deferred.
+
 ## Active plan: one per agent, pointing into the durable store
 
 (Owner note: "one active plan in session"; and "active per agent", because a plan
