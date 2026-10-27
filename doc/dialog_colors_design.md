@@ -8,21 +8,19 @@ Repro: `analysis/388/repro.rb`. Rendering rules in general:
 
 ## The complaint
 
-Every dialog printed in one color. The owner pasted three consent dialogs
-(`run.command` with a model verdict, `run.command` on the denylist, a grant
-dialog) where the `MODEL VERDICT (advisory):` line, the `DENYLISTED:` line and
-the option numbers all looked exactly like the command text - the two lines the
-decision hinges on carried no more weight than the chrome around them.
+Issue #388, in the owner's own words: "Dialogs could use also color schema to
+highlight important parts", followed by three pasted dialogs (two `run.command`
+consent dialogs and a grant dialog) where every line - the model verdict, the
+DENYLISTED line, the command, the option list - printed in one color.
 
-The issue said "highlight important parts". WHICH parts are important is the
-owner's call, not the implementer's, and the first cut of this fix answered it by
-default: it painted the option NUMBERS in the recessive `marker` gray and called
-them chrome. Measured on the owner's terminal that gray is not a highlight at all
-("not seeing gray, might be that it's so close to normal text that it is not
-visible"), and a DE-EMPHASIZING color can never make something the eye has to
-LOCATE in a list stand out. A recessive role is the right treatment for
-decoration (the `[dialog]` bracket, a status bracket, a rule) and the wrong one
-for an anchor.
+The issue names a QUALITY, not a target: WHICH parts are important is the
+owner's call. The first cut of this fix made that call silently - it painted the
+option NUMBERS in the recessive `marker` gray and labeled them chrome - and that
+choice was then measured on the owner's terminal and found to be no highlight at
+all ("not seeing gray, might be that it's so close to normal text that it is not
+visible"). A DE-EMPHASIZING color cannot make something the eye has to LOCATE in
+a list stand out: a recessive role is right for decoration (the `[dialog]`
+bracket, a status bracket, a rule) and wrong for an anchor.
 
 ## The rule: the emitter states WHAT a line is, the console decides how it looks
 
