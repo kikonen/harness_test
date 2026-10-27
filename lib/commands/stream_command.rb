@@ -41,8 +41,9 @@ module Commands
       @ui.puts "  [#{label || 'BUFFERED'}]"
       if @harness.stream?
         @ui.puts "  Responses stream in: the spinner shows the answer as it " \
-          "arrives with the rate it is arriving at, and the spinner badge " \
-          "reads [STREAM]."
+          "arrives with the rate it is arriving at, and [STREAM] is tagged " \
+          "wherever the postures are shown: the spinner badge AND the idle " \
+          "prompt line (issue #387)."
         @ui.puts "  A streamed request is retried only until the first part " \
           "arrives - after that a lost stream fails the turn instead of " \
           "re-sending."
