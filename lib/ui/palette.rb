@@ -94,6 +94,7 @@ module UI
     }.freeze
 
     DEFAULT_NAME = "default"
+    NONE_NAME    = "none"
 
     attr_reader :name
 

@@ -74,6 +74,13 @@ auto_save: true
 # (the command safety check, the /compact summary) stay buffered.
 # streaming: false
 
+# Markdown rendering of the assistant's answer (issue #106): render the model's
+# answer with ANSI styling - headings, bold/italic, inline code and tables -
+# instead of dumping raw markdown. Opt-in: default false, so the answer stays
+# verbatim unless asked. The colors are seeded from the output palette, so a
+# 'none' palette (--no-color) renders plain text with no ANSI.
+# markdown: false
+
 # Automatic retries for transient network errors.
 retry:
   count: 3                 # total attempts (1 initial + N-1 retries)

@@ -323,6 +323,24 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  # issue #106: markdown rendering of the assistant answer. Opt-in (default OFF):
+  # a run with no config keeps the plain verbatim :response.
+  describe '#markdown_enabled? (issue #106)' do
+    it 'defaults to off' do
+      expect(described_class.new({}).markdown_enabled?).to be(false)
+    end
+
+    it 'reads the global markdown key' do
+      expect(described_class.new(markdown: true).markdown_enabled?).to be(true)
+      expect(described_class.new(markdown: 'yes').markdown_enabled?).to be(false)
+      expect(described_class.new(markdown: nil).markdown_enabled?).to be(false)
+    end
+
+    it 'mentions the key in the default template (commented out)' do
+      expect(template).to include('markdown')
+    end
+  end
+
   # issue #33: web.fetch may not connect to a private / loopback / link-local
   # address unless the USER asked for it. It is a user-side posture like yolo:
   # no tool argument reaches it.

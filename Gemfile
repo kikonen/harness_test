@@ -20,6 +20,12 @@ gem 'amazing_print'
 # and, later, the dialogs.
 gem 'ratatui_ruby'
 
+# Markdown -> ANSI RENDERER for assistant answers (issue #106), by kramdown's own
+# author. Preserves inline emphasis (bold/italic/code) - the point of rendering
+# markdown. Its ansi_styles are seeded from UI::Palette so colors match the
+# harness' own roles; a 'none' palette strips the ANSI (see UI::MarkdownRenderer).
+gem 'kramdown-ansi', '~> 0.7'
+
 group :development do
   gem 'rspec'
 

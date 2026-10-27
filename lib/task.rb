@@ -277,7 +277,12 @@ class Task
     # may not answer #output_palette, and a Task without a harness colors
     # nothing, so the constructor's plain renderer stays unless one is given.
     palette = harness.respond_to?(:output_palette) ? harness.output_palette : nil
-    task.renderer = UI::Renderer.new(palette:)
+    # Markdown rendering of the assistant answer is opt-in (issue #106): the
+    # posture is read here (a Task builds its renderer once per turn), so a
+    # mid-run /markdown toggle lands on the next turn (the same as /palette).
+    # A harness double in a spec may not answer #markdown?, so default off.
+    markdown = harness.respond_to?(:markdown?) ? harness.markdown? : false
+    task.renderer = UI::Renderer.new(palette:, markdown:)
     task.note_editor = UI::Editor.new(ui.stdin) if ui.stdin && harness
     error_msg   = nil
     old_trap    = trap("INT") { raise Interrupt }

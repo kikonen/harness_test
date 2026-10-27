@@ -127,6 +127,11 @@ class CLI
            "Render every line in the terminal's own color (palette 'none').") do
         opts[:output_palette] = "none"
       end
+      o.on("--markdown",
+           "Render the assistant's answer as markdown (issue #106): headings, " \
+           "bold/italic, inline code and tables get ANSI styling. Off by default.") do
+        opts[:markdown] = true
+      end
       o.on("--editor CMD",
            "Command that opens an external editor for the buffer being typed " \
            "(Ctrl+G at the prompt, issue #298). Overrides the config 'editor' " \
@@ -221,6 +226,10 @@ class CLI
                     else
                       config.streaming_enabled?
                     end
+
+    # issue #106: markdown rendering of the assistant answer. The --markdown flag
+    # already set it true; otherwise the config 'markdown' key decides (default off).
+    opts[:markdown] = config.markdown_enabled? if opts[:markdown].nil?
 
     opts[:compact_recent] ||= config.compact_recent_messages
     opts[:compact_auto_threshold] = config.compact_auto_threshold

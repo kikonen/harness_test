@@ -49,6 +49,8 @@ require_relative "harness_error"
 #   streaming: false            # consume the LLM response chunk by chunk and
 #                               # show each part as it arrives (default off).
 #                               # A model profile's own key overrides this one.
+#   markdown: false             # render the assistant's answer as markdown with
+#                               # ANSI styling (issue #106, default off).
 #   double_enter_submit: false # Enter on an empty last line submits the multiline buffer (issue #198)
 #   system_prompt_file: prompts/my.txt  # file with the full system prompt (issue #223)
 #                                       # overrides the built-in config/system_prompt.txt
@@ -133,6 +135,8 @@ class HarnessConfig
     # Opt-in streamed LLM responses (default off: a profile or global key
     # that does not ask for it gets the buffered request unchanged).
     @streaming = data[:streaming] == true
+    # Opt-in markdown rendering of the assistant answer (issue #106, default off).
+    @markdown = data[:markdown] == true
     # issue #303: rendered-output palette name (nil = the default palette).
     # Validated by UI::Palette.validate! in the CLI, not here: this class does
     # not know the palette list and must not start requiring the UI layer.
@@ -295,6 +299,11 @@ class HarnessConfig
   # profile's own 'streaming' key overrides it for that profile.
   def streaming_enabled?
     @streaming == true
+  end
+
+  # Opt-in markdown rendering of the assistant answer (issue #106). Default false.
+  def markdown_enabled?
+    @markdown == true
   end
 
   # Rendered-output palette name (issue #303), or nil for the default one.
