@@ -534,6 +534,31 @@ RSpec.describe CLI do
       cli.send(:get_command)
     end
 
+    # issue #387: the spinner badge carries the STREAM tag but the idle prompt
+    # did not - the same posture read differently in the two places. The prompt
+    # and the spinner now share ONE builder (Task.mode_badge), so a stream-on
+    # prompt must show [STREAM] exactly as the spinner does.
+    it 'shows [STREAM] in the prompt modeline when streaming is on' do
+      allow(editor).to receive(:read_multiline).and_return(
+        editor_result('x', :submitted))
+      cli.harness.stream = true
+
+      expect(ui).to receive(:puts).with(/\[MANUAL\] \[STREAM\] > /)
+
+      cli.send(:get_command)
+    end
+
+    # Buffered is the default posture, so the tag stays absent (a tag names a
+    # non-default). The consent tag is still there.
+    it 'shows no [STREAM] tag when streaming is off (the default)' do
+      allow(editor).to receive(:read_multiline).and_return(
+        editor_result('x', :submitted))
+
+      expect(ui).to receive(:puts).with(/\[MANUAL\] > /)
+
+      cli.send(:get_command)
+    end
+
     it 'keeps a cancelled buffer as the draft and re-prompts' do
       allow(editor).to receive(:read_multiline).and_return(
         editor_result('partial', :cancelled),

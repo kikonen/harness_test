@@ -183,10 +183,12 @@ sensitive path, never `local/`, never a path outside the workdir - and the
 coverage is shown by `/grant` as a posture line (issue #274).
 `/stream` [on|off|status] toggles streamed LLM responses (issue #28): each part
 of an answer is then consumed as it arrives and the spinner line shows the newest
-text of it with the rate it is arriving at (`[STREAM]` badge). Before the answer
-starts (and in buffered mode) the spinner shows the rate of the request that last
-completed (issue #285). The response the model loop receives is identical either
-way; a streamed request is retried only until the first part arrives.
+text of it with the rate it is arriving at, and `[STREAM]` is tagged wherever the
+postures are shown - the spinner badge AND the idle prompt line (issue #387).
+Before the answer starts (and in buffered mode) the spinner shows the rate of
+the request that last completed (issue #285). The response the model loop
+receives is identical either way; a streamed request is retried only until the
+first part arrives.
 The newest text is a fixed 60-character window: when older text was dropped it
 starts with a single `…`, which REPLACES whatever the cut left at that point
 instead of sitting in front of it (issue #364).
@@ -301,11 +303,14 @@ context), `test.echo` (test-only)
   to. `web_fetch_allow_private: true` is the only way to reach a local or
   internal endpoint, and it is a config key, so the model cannot set it
   (`doc/web_fetch_design.md`).
-- The active posture is ALWAYS labeled so you can see what a run will do
+- Every NON-default posture is labeled so you can see what a run will do
   before you type anything: the startup banner ("Command consent: MANUAL -
-  ..."), the prompt line ("[model (effort)] [MANUAL] >") and the
-  spinner line, which also carries the turn's elapsed time after the glyph
-  and the posture badge at its end ("⠼ 12s Sending (model / api type)...
+  ..."), the prompt line ("[model (effort)] [MANUAL] [STREAM] >") and the
+  spinner line. The prompt and the spinner build those tags from ONE builder
+  (`Task.mode_badge`), so a posture cannot read differently in the two places
+  (issue #387). The spinner line also carries the turn's elapsed time after
+  the glyph and the posture badge at its end
+  ("⠼ 12s Sending (model / api type)...
   🧠 12% (160K) [YOLO]") - and while a request is in flight, a tokens/second
   rate: the live rate of the answer streaming in, or the rate of the request
   that last completed during the wait before it ("... 🧠 12% (160K) 31 tok/s

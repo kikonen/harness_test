@@ -475,17 +475,15 @@ class CLI
       # issue #219: the effective reasoning effort is visible in the modeline
       # so a /param tweak (or the profile default) is visible at a glance.
       effort = @harness.session_manager.param_overrides.reasoning_effort_display
-      # issue #221 review (bug 2): the shell consent posture lives in the
-      # prompt line too, so it is visible on EVERY turn (the spinner only
-      # appears while the model works, and slash commands answer instantly -
-      # neither shows the posture while the user is idle at the prompt).
-      mode = @harness.command_mode_label
-      # Bracketed model name keeps the prompt visually distinct from replies.
-      # issue #221 review (bug 2): the posture bracket follows the model
-      # bracket, e.g. "[qwen (medium)] [YOLO] >" - the bare label is the
-      # tag, a "cmd:" prefix would only be noise inside the brackets.
+      # The posture tags come from the SAME builder the spinner badge uses
+      # (Task.mode_badge), so the consent AND streaming tags cannot read
+      # differently in the two places. They live in the prompt too because the
+      # spinner only exists while the model works, not while the user is idle.
+      # Bracketed model name keeps the prompt distinct from replies; posture
+      # brackets follow it, e.g. "[qwen (medium)] [YOLO] [STREAM] >".
       tags   = ["[#{model ? "#{model} (#{effort})" : effort}]"]
-      tags  << "[#{mode}]" if mode
+      badge  = Task.mode_badge(@harness)
+      tags  << badge if badge
       prefix = "#{tags.join(' ')} > "
       ctx = @harness.context_indicator
       ui.puts ctx ? "#{ctx} #{prefix}" : prefix

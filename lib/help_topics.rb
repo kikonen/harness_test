@@ -65,10 +65,11 @@ module HelpTopics
           "model first (\"does this look safe?\") and the verdict appears as an " \
           "advisory note in the consent dialog. Allowlisted commands skip the " \
           "check: it runs on exactly what the runner would otherwise ask about.",
-        "The posture is ALWAYS labeled - in the startup banner (\"Command " \
-          "consent: ...\"), in the prompt line (\"[model (effort)] [MANUAL] >\") " \
-          "and as a badge at the END of the spinner line - so a run's behavior " \
-          "is visible before you type anything.",
+        "Every NON-default posture is labeled - in the startup banner (\"Command " \
+          "consent: ...\"), in the prompt line (\"[model (effort)] [MANUAL] " \
+          "[STREAM] >\") and as a badge at the END of the spinner line - so a " \
+          "run's behavior is visible before you type anything, and the SAME tags " \
+          "read the same way in the prompt and the spinner.",
         "The disaster denylist is the floor under EVERY posture and every " \
           "stored allowlist grant: rm -rf, mkfs, dd of=/dev/, shutdown, sudo, " \
           "git push -f, curl <url> | sh, a fork bomb, format C:, diskpart, " \

@@ -310,7 +310,10 @@ On the harness side: `stream?` / `stream=` / `toggle_stream` /
 `last_rate_segment` / `record_last_rate` and the private `request_chain` (its own
 per-request clock) / `streaming_wait_line` / `waiting_line` own the posture, the
 live tail and the recent rate; `Task.mode_badge` renders the `[STREAM]` tag next
-to the consent-mode tag, both re-read per frame.
+to the consent-mode tag, both re-read per frame. It is also the builder the IDLE
+prompt line uses (`CLI#get_command`), so the two places a posture is shown cannot
+read differently: the prompt once hand-built only the consent tag and never showed
+`[STREAM]` at all (issue #387).
 
 ## Known limits
 

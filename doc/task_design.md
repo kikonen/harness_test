@@ -87,11 +87,14 @@ The LLM-request wait is announced by `SessionManager#request_spinner_detail`,
 which `Harness#call_llm` calls before EACH request of the tool loop (the only
 caller of it) - see issue #283.
 
-The spinner's own segments (elapsed turn time, consent-mode badge) come from
+The spinner's own segments (elapsed turn time, posture badge) come from
 the runner too, always as callables: the drain loop rebuilds the spinner
 whenever the outbox empties again, so anything the spinner computed itself
 would restart on every rebuild. Only the runner knows how long the turn has
-been running (issue #277).
+been running (issue #277). The badge is `Task.mode_badge` - one bracket per
+NON-default posture - and it is the SAME builder the idle prompt line uses
+(`CLI#get_command`), so a posture cannot read differently in the spinner and
+the prompt (issue #387).
 
 ## Console injection
 
