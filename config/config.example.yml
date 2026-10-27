@@ -81,6 +81,14 @@ auto_save: true
 # 'none' palette (--no-color) renders plain text with no ANSI.
 # markdown: false
 
+# Column basis for markdown tables (issue #106): a rendered table is sized to fit
+# this many columns (clamped to the terminal width, so it never overflows). Omit
+# the key and the basis is 80% of the detected terminal width - on a 160-column
+# terminal that is ~128, so a table can use the extra width instead of the old
+# fixed 80. The boundary rules (the "---- model ----" line) stay a fixed 80
+# whatever this says. The flag --markdown-width N overrides it.
+# markdown_max_width: 120
+
 # Automatic retries for transient network errors.
 retry:
   count: 3                 # total attempts (1 initial + N-1 retries)

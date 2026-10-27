@@ -132,6 +132,15 @@ class CLI
            "bold/italic, inline code and tables get ANSI styling. Off by default.") do
         opts[:markdown] = true
       end
+      o.on("--markdown-width N",
+           "Column basis for markdown tables (issue #106): a table is sized to " \
+           "fit N columns (clamped to the terminal width). Without it the basis " \
+           "is 80% of the detected terminal width. Only meaningful with " \
+           "--markdown / 'markdown:' in the config.") do |v|
+        opts[:markdown_max_width] = Integer(v)
+      rescue ArgumentError, TypeError
+        raise HarnessError, "--markdown-width needs an integer column count, got: #{v}"
+      end
       o.on("--editor CMD",
            "Command that opens an external editor for the buffer being typed " \
            "(Ctrl+G at the prompt, issue #298). Overrides the config 'editor' " \
@@ -230,6 +239,9 @@ class CLI
     # issue #106: markdown rendering of the assistant answer. The --markdown flag
     # already set it true; otherwise the config 'markdown' key decides (default off).
     opts[:markdown] = config.markdown_enabled? if opts[:markdown].nil?
+    # The table-width basis: --markdown-width N > config 'markdown_max_width' >
+    # nil (the renderer's default, 80% of the detected terminal).
+    opts[:markdown_max_width] = config.markdown_max_width if opts[:markdown_max_width].nil?
 
     opts[:compact_recent] ||= config.compact_recent_messages
     opts[:compact_auto_threshold] = config.compact_auto_threshold

@@ -282,7 +282,10 @@ class Task
     # mid-run /markdown toggle lands on the next turn (the same as /palette).
     # A harness double in a spec may not answer #markdown?, so default off.
     markdown = harness.respond_to?(:markdown?) ? harness.markdown? : false
-    task.renderer = UI::Renderer.new(palette:, markdown:)
+    # The table-width basis (issue #106): config-derived, read once per turn
+    # like the palette. nil = the renderer's default (80% of the terminal).
+    max_width = harness.respond_to?(:markdown_max_width) ? harness.markdown_max_width : nil
+    task.renderer = UI::Renderer.new(palette:, markdown:, markdown_max_width: max_width)
     task.note_editor = UI::Editor.new(ui.stdin) if ui.stdin && harness
     error_msg   = nil
     old_trap    = trap("INT") { raise Interrupt }

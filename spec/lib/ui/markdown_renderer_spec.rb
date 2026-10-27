@@ -47,33 +47,54 @@ RSpec.describe UI::MarkdownRenderer do
     end
   end
 
-  # The gem sizes tables from Tins::Terminal.columns (90% of it); on a wide
-  # terminal that is wider than the harness' fixed chrome, so the render caps
-  # the width the gem sees. The cap must restore the real width afterwards.
-  describe 'width cap' do
+  # The gem sizes tables from Tins::Terminal.columns (90% of it). We feed it a
+  # BASIS: an explicit max_width (clamped to the terminal) or, by default, 80% of
+  # the detected columns. The override must restore the real width afterwards.
+  describe 'table width basis' do
     def widest(line)
       line.lines.map { |l| l.gsub(/\e\[[0-9;]*m/, "").rstrip.length }.max
     end
 
+    # Cells long enough that a basis of 80 forces wrapping but a wider basis does
+    # not, so the basis is observable in the rendered width.
     let(:table) do
-      "| alpha beta gamma delta epsilon | zeta eta theta iota kappa | lambda mu nu xi omicron |\n" \
-        "| --- | --- | --- |\n" \
-        "| one two three four five six | seven eight nine ten | eleven twelve thirteen |\n"
+      "| alpha beta gamma delta epsilon zeta eta | theta iota kappa lambda mu nu xi omicron | " \
+        "pi rho sigma tau upsilon phi chi |\n| --- | --- | --- |\n" \
+        "| one two three four five six seven eight | nine ten eleven twelve thirteen fourteen | " \
+        "fifteen sixteen seventeen eighteen |\n"
     end
 
-    it 'caps a wide table to the given width' do
-      renderer = described_class.new(palette: UI::Palette.fetch('default'), width: 80)
+    before { allow(Tins::Terminal).to receive(:columns).and_return(176) }
 
-      expect(widest(renderer.render(table))).to be <= 80
+    it 'sizes a table to an explicit max_width (and stays within it)' do
+      renderer = described_class.new(palette: UI::Palette.fetch('default'), max_width: 120)
+      width = widest(renderer.render(table))
+
+      expect(width).to be <= 120
+      expect(width).to be > 80 # the extra width is actually used
     end
 
-    it 'restores the detected width after the render (the cap is not global)' do
-      allow(Tins::Terminal).to receive(:columns).and_return(176)
-      renderer = described_class.new(palette: UI::Palette.fetch('default'), width: 80)
-      renderer.render(table)
+    it 'defaults to 80% of the terminal when no max_width is given' do
+      # 80% of 176 = 140 basis -> a wider table than the old fixed 80, but never
+      # past the terminal itself.
+      width = widest(described_class.new(palette: UI::Palette.fetch('default')).render(table))
 
-      uncapped = described_class.new(palette: UI::Palette.fetch('default'))
-      expect(widest(uncapped.render(table))).to be > 80
+      expect(width).to be > 80
+      expect(width).to be <= 176
+    end
+
+    it 'clamps an explicit max_width to the terminal width' do
+      renderer = described_class.new(palette: UI::Palette.fetch('default'), max_width: 200)
+
+      expect(widest(renderer.render(table))).to be <= 176
+    end
+
+    it 'restores the detected width after the render (the basis is not global)' do
+      described_class.new(palette: UI::Palette.fetch('default'), max_width: 120).render(table)
+
+      # The next render sees the real 176 again (auto basis 140), not 120.
+      expect(widest(described_class.new(palette: UI::Palette.fetch('default')).render(table)))
+        .to be > 120
     end
   end
 

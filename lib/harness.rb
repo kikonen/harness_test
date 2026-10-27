@@ -381,6 +381,15 @@ class Harness
     markdown? ? "MARKDOWN ON" : "MARKDOWN OFF"
   end
 
+  # The table-width basis for markdown rendering (issue #106): an explicit column
+  # count from --markdown-width / the config 'markdown_max_width' key, or nil for
+  # the renderer's default (80% of the detected terminal). Config-derived for the
+  # whole run - NOT a live toggle like markdown? itself - so it is read when a
+  # Task builds its renderer, the same as the palette.
+  def markdown_max_width
+    options[:markdown_max_width]
+  end
+
   # -- Planning posture (issue #359) -----------------------------------------
   #
   # Advisory by the owner's decision: the mode gates NO tool. What it does is

@@ -427,6 +427,48 @@ RSpec.describe CLI do
     end
   end
 
+  # issue #106: the markdown table-width basis. --markdown-width N > config
+  # 'markdown_max_width' > nil (the renderer's default, 80% of the terminal).
+  describe 'option resolution - markdown_max_width (issue #106)' do
+    def resolve(argv)
+      original = ARGV.dup
+      ARGV.replace(argv)
+      described_class.allocate.send(:parse_options)
+    ensure
+      ARGV.replace(original)
+    end
+
+    def write_config(body)
+      path = File.join(workdir, 'md-config.yml')
+      File.write(path, body)
+      path
+    end
+
+    it 'is nil when neither the flag nor the config gives one' do
+      opts = resolve(['-m', 'test-model', '-d', workdir, '-c', write_config("model: test-model\n")])
+      expect(opts[:markdown_max_width]).to be_nil
+    end
+
+    it 'reads the config key' do
+      path = write_config("model: test-model\nmarkdown_max_width: 120\n")
+      opts = resolve(['-m', 'test-model', '-d', workdir, '-c', path])
+      expect(opts[:markdown_max_width]).to eq(120)
+    end
+
+    it 'the flag overrides the config key' do
+      path = write_config("model: test-model\nmarkdown_max_width: 120\n")
+      opts = resolve(['-m', 'test-model', '-d', workdir, '-c', path, '--markdown-width', '90'])
+      expect(opts[:markdown_max_width]).to eq(90)
+    end
+
+    it 'a non-integer --markdown-width is a CLI error, not a silent nil' do
+      expect {
+        resolve(['-m', 'test-model', '-d', workdir, '-c', write_config("model: test-model\n"),
+                 '--markdown-width', 'wide'])
+      }.to raise_error(HarnessError, /--markdown-width needs an integer/)
+    end
+  end
+
   describe '#run' do
     it 'prints the session id and its log path in the banner' do
       cli = build_cli
