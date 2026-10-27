@@ -126,6 +126,15 @@ with the session (no `data[:plan]` in `save_session`, no resume restore) - a
 resumed run starts planning-off. The active-plan pointer and the approve/iterate
 loop below are NOT built; they stay deferred.
 
+The mode reaches the MODEL through `SessionManager#build_user_prompt`: while the
+mode is on, every turn's instruction carries a short "Planning mode (advisory)"
+section telling the model to draft and iterate a plan with `plan.add` before
+editing. This is the mode's whole value - the user already knows they are
+planning; the point is that the model knows too and holds back. It lives in the
+per-turn prompt (rebuilt every turn) rather than the system prompt, so it
+survives both compaction paths and a `/reload`, disappears when the mode is off,
+and `config/system_prompt.txt` is never touched by a posture.
+
 ## Active plan: one per agent, pointing into the durable store
 
 (Owner note: "one active plan in session"; and "active per agent", because a plan
