@@ -39,6 +39,9 @@ RSpec.describe SessionManager do
       def stream?; @stream == true; end
       # issue #303: stub mirrors Harness#output_palette (save_session).
       def output_palette = UI::Palette.fetch(nil)
+      # issue #106: save/resume persists the markdown rendering posture too.
+      attr_writer :markdown
+      def markdown?; @markdown == true; end
       # issue #359: build_user_prompt states the planning expectation when the
       # mode is on, so the stub mirrors Harness#plan? / plan=.
       attr_writer :plan
@@ -520,6 +523,27 @@ RSpec.describe SessionManager do
       end
     end
   end
+  # issue #106: the markdown rendering posture travels with the session save too
+  # (a harness posture, like stream), as a plain boolean so a session saved
+  # before the feature simply has no key. RESUME side: Harness#apply_resume_state.
+  describe 'markdown posture round trip (issue #106)' do
+    def save_with_markdown(dir, on)
+      file_list = FileList.new([], workdir: dir)
+      manager   = described_class.new(harness, file_list)
+      harness.markdown = on
+      session.add_user('hello')
+      manager.save_session
+      JSON.parse(File.read(manager.session_file_path(session.session_id)))
+    end
+
+    it 'saves the posture as a plain boolean' do
+      Dir.mktmpdir do |dir|
+        expect(save_with_markdown(dir, true)['markdown']).to be(true)
+        expect(save_with_markdown(dir, false)['markdown']).to be(false)
+      end
+    end
+  end
+
   # issue #359: the planning mode's whole value is that the MODEL knows the mode
   # is on and holds back from editing. build_user_prompt states the expectation
   # every turn while the mode is on, and says nothing when it is off.
@@ -579,6 +603,9 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       def stream?; @stream == true; end
       # issue #303: stub mirrors Harness#output_palette (save_session).
       def output_palette = UI::Palette.fetch(nil)
+      # issue #106: stub mirrors Harness#markdown? (save_session).
+      attr_writer :markdown
+      def markdown?; @markdown == true; end
       def compact_recent_messages; 6; end
       def compact_auto_threshold; 88; end
       def compact_reserved_tokens; 8192; end

@@ -725,6 +725,11 @@ class SessionManager
     # and a resumed session must not quietly drop back to buffered.
     data[:stream] = @harness.stream? == true
 
+    # issue #106: the markdown rendering posture travels with the session too
+    # (a harness posture, not conversation state). A session the user set to
+    # markdown-rendered must not drop back to raw markdown on resume.
+    data[:markdown] = @harness.markdown? == true
+
     # issue #303: the rendered-output palette travels with the session too.
     # A display preference the user chose for THIS session; resuming it must
     # not drop back to the startup default. Stored as the palette NAME so the

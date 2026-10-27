@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "palette"
+require_relative "markdown_renderer"
 
 # Renders one output entry to a console line: the PATTERN (label, status
 # bracket and glyph, gutter, color) belongs here, never in the emitted string.
@@ -46,6 +47,11 @@ module UI
     # warn / error stay plain labels: they are lines INSIDE a block.
     BOUNDARY_ROLES = %i[step_label response].freeze
 
+    # The labeled roles whose content is MODEL PROSE that may carry markdown
+    # (issue #106): the plan line and the say line. :tool_plan is a comma-joined
+    # tool list (not prose) and warn / error are harness messages - both stay plain.
+    MARKDOWN_ROLES = %i[plan interstitial].freeze
+
     # The word a boundary rule fuses: the role's label without its ":  " padding
     # ("model") - a rule reads like a short word, not like a label.
     def self.boundary_label(type)
@@ -56,8 +62,13 @@ module UI
 
     # palette: a UI::Palette, or nil to render without color (a Task with no
     # harness: specs, a bare console).
-    def initialize(palette: nil)
-      @palette = palette
+    # markdown: render an assistant :response as markdown (issue #106). Default
+    # false keeps every existing line byte-for-byte; only an opted-in run renders
+    # :response and the MARKDOWN_ROLES prose lines. The render is capped to
+    # RULE_WIDTH so a table never exceeds the chrome.
+    def initialize(palette: nil, markdown: false)
+      @palette  = palette
+      @markdown = markdown ? MarkdownRenderer.new(palette:, width: RULE_WIDTH) : nil
     end
 
     # origin: for a status type, the bracket label ("file.read", "access",
@@ -68,6 +79,7 @@ module UI
 
       return status_line(type, text, origin) if STATUS_GLYPHS.key?(type)
       return boundary_line(type, text) if BOUNDARY_ROLES.include?(type)
+      return labeled_markdown_line(type, text) if markdown_role?(type)
 
       paint(type, labeled(type, text))
     end
@@ -108,7 +120,15 @@ module UI
       rule  = fused_rule(label, type)
       return rule if type == :step_label || content.empty?
 
-      "#{rule}\n#{paint(type, content)}"
+      "#{rule}\n#{boundary_body(type, content)}"
+    end
+
+    # An opted-in :response is rendered as markdown (issue #106); every other
+    # boundary and a markdown-off :response stay exactly as emitted.
+    def boundary_body(type, content)
+      return @markdown.render(content) if type == :response && @markdown
+
+      paint(type, content)
     end
 
     # The spare is split in two; an odd one (a wider label) gives its extra dash
@@ -129,6 +149,26 @@ module UI
       return "#{content} [untyped:#{type}]" if label.nil?
 
       "#{label}#{content}"
+    end
+
+    def markdown_role?(type)
+      @markdown && MARKDOWN_ROLES.include?(type)
+    end
+
+    # A labeled model-prose line (plan / say) whose markdown renders multi-line:
+    # the label keeps its role color on the FIRST line, and every continuation
+    # line is padded to align under the label text, so the block still reads as
+    # one labeled entry. The body carries the gem's own (palette-seeded) colors;
+    # only the label is painted here.
+    def labeled_markdown_line(type, content)
+      label = LABELS[type]
+      return paint(type, label) if content.empty?
+
+      lines = @markdown.render(content).split("\n")
+      pad   = " " * label.length
+      out   = [segment(type, label) + lines.first.to_s]
+      lines[1..].each { |cont| out << (cont.empty? ? "" : pad + cont) }
+      out.join("\n")
     end
 
     def paint(type, text)

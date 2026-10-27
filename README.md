@@ -234,6 +234,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/yolo [on|off|status]` | Toggle the YOLO consent posture: shell commands and file access in the workdir (saved with the session) |
 | `/palette [name\|status]` | Show or switch the output palette (saved with the session) |
 | `/stream [on|off|status]` | Toggle streamed LLM responses - show each part as it arrives (saved with the session) |
+| `/markdown [on\|off\|status]` | Toggle markdown rendering of the assistant's answer - headings, bold/italic, code and tables get ANSI styling (saved with the session) |
 | `/help` | Show command help |
 | `/exit` | Quit (auto-saves the session) |
 

@@ -145,6 +145,10 @@ class Harness
     # the session. Read per request, so a mid-turn toggle applies to the next.
     @stream = options[:stream] == true
     @stream_preview = nil
+    # Markdown rendering posture (issue #106): opt-in, default off. The initial
+    # value comes from the config like streaming; /markdown switches it live
+    # (it lands on the next turn, the same as /palette).
+    @markdown = options[:markdown] == true
     # Planning posture (issue #359): advisory by the owner's decision, so it
     # gates nothing. The initial value comes from the config like streaming;
     # /plan switches it live.
@@ -352,6 +356,29 @@ class Harness
   # default. /stream status reports the off state.
   def stream_mode_label
     @stream ? "STREAM" : nil
+  end
+
+  # -- Markdown rendering posture (issue #106) -------------------------------
+  #
+  # An OUTPUT posture (like the palette, not like stream/plan): it decides how
+  # the assistant answer is rendered, not how the model behaves, so it carries
+  # NO spinner badge. Read when a Task builds its renderer, so a /markdown
+  # toggle lands on the next turn (the same as /palette).
+
+  def markdown?
+    @markdown
+  end
+
+  def markdown=(val)
+    @markdown = (val == true)
+    options[:markdown] = @markdown
+  end
+
+  # Returns the new state as a label (the same shape as toggle_stream /
+  # toggle_plan), not a boolean.
+  def toggle_markdown
+    self.markdown = !@markdown
+    markdown? ? "MARKDOWN ON" : "MARKDOWN OFF"
   end
 
   # -- Planning posture (issue #359) -----------------------------------------
@@ -1010,6 +1037,10 @@ class Harness
     logger.info("yolo posture restored: #{yolo? ? 'ON' : 'OFF'}")
     self.stream = data[:stream] == true
     logger.info("streaming posture restored: #{stream? ? 'ON' : 'OFF'}")
+    # issue #106: the markdown rendering posture (a harness posture, like
+    # streaming). A session saved markdown-rendered resumes markdown-rendered.
+    self.markdown = data[:markdown] == true
+    logger.info("markdown posture restored: #{markdown? ? 'ON' : 'OFF'}")
     # #285: the saved per-request performance (#251) is a server measurement, so
     # a resumed session can show a recent rate immediately - a client-timed one
     # would need seconds it does not have, hence nil there.

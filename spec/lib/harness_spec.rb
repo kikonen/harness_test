@@ -318,7 +318,8 @@ RSpec.describe Harness do
   # Harness built under the settled id, so log, history and session dir all
   # carry that single identity and no rebind exists anywhere.
   describe 'startup resume via resume_data (issue #276)' do
-    def seed_saved_session(id, yolo: true, output_palette: 'basic16', stream: true)
+    def seed_saved_session(id, yolo: true, output_palette: 'basic16', stream: true,
+                           markdown: false)
       FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
       data = {
         session_id:    id,
@@ -331,6 +332,7 @@ RSpec.describe Harness do
         yolo:          yolo,
         output_palette: output_palette,
         stream:        stream,
+        markdown:      markdown,
         workdir:       workdir
       }
       File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate(data))
@@ -383,6 +385,31 @@ RSpec.describe Harness do
       harness = build_harness(session_id: id, resume_data: data)
 
       expect(harness.stream?).to be(false)
+    end
+
+    # issue #106: the markdown rendering posture travels with the session too
+    # (a harness posture, like streaming). A session saved markdown-rendered
+    # must not drop back to raw markdown on resume.
+    it 'restores the markdown posture the session was saved with' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(id, markdown: true)
+
+      harness = build_harness(session_id: id, resume_data: saved_data(id))
+
+      expect(harness.markdown?).to be(true)
+    end
+
+    # A session saved BEFORE markdown rendering existed has no key at all: that
+    # is not an error, it is the markdown-off default.
+    it 'treats a session with no markdown key as markdown off' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(id)
+      data = saved_data(id)
+      data.delete(:markdown)
+
+      harness = build_harness(session_id: id, resume_data: data)
+
+      expect(harness.markdown?).to be(false)
     end
 
     # issue #303: the palette the session was saved with is restored during
@@ -1782,6 +1809,44 @@ RSpec.describe Harness do
       harness.plan = 'yes'
 
       expect(harness.plan?).to be(false)
+    end
+  end
+
+  # issue #106: the markdown rendering posture. An OUTPUT posture (like the
+  # palette, not like stream/plan): it decides how the answer is rendered, so it
+  # carries NO spinner badge. Harness state, not conversation state.
+  describe '#markdown? / toggle (issue #106)' do
+    it 'defaults to markdown off when the option is absent' do
+      harness = build_harness
+
+      expect(harness.markdown?).to be(false)
+    end
+
+    it 'starts markdown on when the option is set (config key)' do
+      harness = build_harness(markdown: true)
+
+      expect(harness.markdown?).to be(true)
+    end
+
+    it 'toggle_markdown flips the posture and returns the new state' do
+      harness = build_harness
+
+      expect(harness.toggle_markdown).to eq('MARKDOWN ON')
+      expect(harness.markdown?).to be(true)
+      expect(harness.toggle_markdown).to eq('MARKDOWN OFF')
+      expect(harness.markdown?).to be(false)
+    end
+
+    it 'coerces the markdown setter to a boolean and records it in options' do
+      harness = build_harness
+      harness.markdown = 'yes'
+
+      expect(harness.markdown?).to be(false)
+      expect(harness.options[:markdown]).to be(false)
+
+      harness.markdown = true
+      expect(harness.markdown?).to be(true)
+      expect(harness.options[:markdown]).to be(true)
     end
   end
 

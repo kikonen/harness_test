@@ -105,6 +105,66 @@ RSpec.describe UI::Renderer do
     end
   end
 
+  # issue #106: an opted-in :response is rendered as markdown; the default (off)
+  # keeps every answer byte-for-byte as emitted.
+  describe '#line (:response) markdown rendering (issue #106)' do
+    let(:answer) { "# Title\n\nSome **bold** text." }
+
+    it 'renders the answer as markdown when markdown is on' do
+      md = described_class.new(palette: UI::Palette.fetch('default'), markdown: true)
+      out = md.line(type: :response, content: answer)
+
+      # The fused rule stays; the body is now ANSI-styled markdown.
+      expect(out.lines.first.chomp).to include('model')
+      expect(out).to include("\e[1mbold\e[0m")
+      expect(out).not_to include('**bold**')
+    end
+
+    it 'leaves the answer verbatim when markdown is off (the default)' do
+      plain = described_class.new(palette: UI::Palette.fetch('default'))
+      out = plain.line(type: :response, content: answer)
+
+      expect(out).to include("**bold**")
+      expect(out).not_to include("\e[1mbold")
+    end
+  end
+
+  # issue #106: the labeled model-prose lines (plan / say) render as markdown too,
+  # with the label on the first line and continuation lines aligned under it.
+  describe '#line (MARKDOWN_ROLES) markdown rendering (issue #106)' do
+    let(:md) { described_class.new(palette: UI::Palette.fetch('default'), markdown: true) }
+    let(:plain) { described_class.new(palette: UI::Palette.fetch('default')) }
+
+    it 'renders a plan line with emphasis when markdown is on' do
+      out = md.line(type: :plan, content: 'read then **patch** the file')
+
+      expect(out).to include('plan:  ')
+      expect(out).to include("\e[1mpatch\e[0m")
+      expect(out).not_to include('**patch**')
+    end
+
+    it 'aligns a multi-line plan block under the label' do
+      out = md.line(type: :plan, content: "first line\n\n- item one\n- item two")
+      lines = out.lines.map(&:chomp)
+
+      expect(lines.first).to include('plan:  ')
+      # Continuation lines carry the label-width pad (no ANSI in the pad).
+      expect(lines.last).to start_with(' ' * 'plan:  '.length)
+    end
+
+    it 'leaves a plan line verbatim when markdown is off (the default)' do
+      out = plain.line(type: :plan, content: 'read then **patch** the file')
+
+      expect(out).to eq("\e[34mplan:  read then **patch** the file\e[0m")
+    end
+
+    it 'keeps :tool_plan verbatim even when markdown is on (a tool list, not prose)' do
+      out = md.line(type: :tool_plan, content: 'file.read, file.search')
+
+      expect(out).to eq("\e[32mtools: file.read, file.search\e[0m")
+    end
+  end
+
   describe '#line (status types) - bracket, glyph and gutter' do
     it 'builds the bracket from the ORIGIN and the glyph from the TYPE' do
       expect(renderer.line(type: :status_ok, origin: 'file.read', content: 'lib/foo.rb')).to eq(
