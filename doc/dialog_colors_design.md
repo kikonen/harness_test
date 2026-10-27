@@ -14,6 +14,16 @@ dialog) where the `MODEL VERDICT (advisory):` line, the `DENYLISTED:` line and
 the option numbers all looked exactly like the command text - the two lines the
 decision hinges on carried no more weight than the chrome around them.
 
+The issue said "highlight important parts". WHICH parts are important is the
+owner's call, not the implementer's, and the first cut of this fix answered it by
+default: it painted the option NUMBERS in the recessive `marker` gray and called
+them chrome. Measured on the owner's terminal that gray is not a highlight at all
+("not seeing gray, might be that it's so close to normal text that it is not
+visible"), and a DE-EMPHASIZING color can never make something the eye has to
+LOCATE in a list stand out. A recessive role is the right treatment for
+decoration (the `[dialog]` bracket, a status bracket, a rule) and the wrong one
+for an anchor.
+
 ## The rule: the emitter states WHAT a line is, the console decides how it looks
 
 Same separation `doc/output_rendering_design.md` established for status lines,
@@ -26,6 +36,11 @@ applied to dialogs. A dialog note carries a **kind**, never a color:
 | `alert` | the hard floor (`DENYLISTED:`) or a `dangerous:` model verdict | red `31` |
 | `safe` | a reassuring model verdict line (`MODEL VERDICT (advisory): safe:`) | green `32` |
 
+The dialog has ONE role that is not a note kind: **`dialog_option`**, the option
+NUMBER a choice line names. It is the anchor of the interaction, so it gets a
+visible hue - the step-label cyan `36`, a band code, so it survives `basic16` and
+any terminal that drops the 256-color ramp.
+
 `UI::Dialog::NOTE_KINDS` is the closed set (`Note.new` rejects an unknown kind
 instead of guessing one), `NOTE_ROLES` maps each kind to its palette role, and
 the hues live in `UI::Palette` like every other role - `basic16` keeps the same
@@ -37,9 +52,10 @@ measured recessive gray (`38;5;240`) reads as decoration on this terminal. Only
 a kind that IS a highlight gets a hue. That is why the option DESCRIPTIONS and
 the choice-prompt lines stay plain too.
 
-The chrome - the `[dialog] ⚠` marker and each option NUMBER - takes the existing
-`marker` role, the same recessive gray a status line's bracket already uses. The
-option's own words are content: `1) Allow` colors the `1)`, not `Allow`.
+The `[dialog] ⚠` marker keeps the recessive `marker` role, the same gray a status
+line's bracket already uses: it is decoration and de-emphasizing it is correct.
+An option's own WORDS are content the user reads: `1) Allow` colors the `1)` in
+cyan, not `Allow`.
 
 ## Where the palette lives: on the console, not in the call
 
@@ -95,5 +111,5 @@ and "byte-for-byte plain"), and `spec/lib/command_runner_spec.rb` asserts that a
 colored drive and a plain drive produce the same text once the escape bytes are
 stripped.
 
-`/palette` lists the four dialog roles under "dialog roles" so the hues are not
+`/palette` lists the five dialog roles under "dialog roles" so the hues are not
 guesswork, and prints `(terminal color)` for a group the palette leaves plain.

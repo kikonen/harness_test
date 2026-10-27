@@ -217,3 +217,9 @@ contradict the obvious choices:
 - 256-color and truecolor both work: `38;5;240` reads as a dark gray and
   `38;5;130` as a readable brown/orange, which is what recessive lines and
   warnings need on a light background.
+- ...but a gray is a DE-EMPHASIZER, never a highlight. Measured again while
+  fixing issue #388: the owner could not see `38;5;240` in a dialog's option
+  list at all ("so close to normal text that it is not visible"). A role the eye
+  has to LOCATE in a list - a dialog's option NUMBER - therefore needs a band
+  hue, not `marker`. Recessive roles stay correct for what they always were:
+  decoration (a bracket, a gutter, a rule).

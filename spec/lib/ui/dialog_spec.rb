@@ -621,13 +621,16 @@ RSpec.describe UI::Dialog do
         expect(out.string).to include("\n                context line\n")
       end
 
-      it 'colors the bracket and the option NUMBERS as chrome, not the text' do
+      # The bracket stays recessive chrome; the NUMBER is what the choice line
+      # names, so it gets a visible band hue of its own (gray was measured
+      # invisible in a list the eye scans). The option's own words stay plain.
+      it 'colors the bracket as chrome and the option NUMBERS as anchors' do
         console, out = painted_console
         kinds_dialog(nil).perform_direct(ui: console)
 
         expect(out.string).to include("\e[38;5;240m  [dialog] ⚠  \e[0mt")
-        expect(out.string).to include("\e[38;5;240m1)\e[0m Allow")
-        expect(out.string).to include("\e[38;5;240m3)\e[0m Cancel")
+        expect(out.string).to include("\e[36m1)\e[0m Allow")
+        expect(out.string).to include("\e[36m3)\e[0m Cancel")
       end
 
       it 'a console with no palette writes the dialog byte-for-byte plain' do

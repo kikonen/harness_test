@@ -46,6 +46,10 @@ module UI
         # (a model-asked dialog's whole question is one note), not chrome -
         # recessive would make the thing to read look like decoration. Only the
         # kinds that ARE a highlight get a hue.
+        # OPTION is not a note kind but the NUMBER a choice line names, and it is
+        # not marker-gray either: the owner could not see gray in an option list,
+        # so it takes the step-label cyan (a band code, visible in every palette).
+        dialog_option: "36",
         dialog_note: nil,
         dialog_warn: BROWN,
         dialog_alert: "31",
@@ -78,6 +82,7 @@ module UI
         # / a dangerous verdict, dark yellow for a softer refusal, green for a
         # reassuring one). CONTEXT is unpainted in every palette - a note is
         # content to read, not chrome (see the default palette's note).
+        dialog_option: "36",
         dialog_note: nil,
         dialog_warn: "33",
         dialog_alert: "31",
