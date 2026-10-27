@@ -1741,6 +1741,50 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #359: the planning posture. Advisory by the owner's decision - it
+  # gates no tool; it names itself (the [PLAN] badge). Harness state (like
+  # stream), not conversation state.
+  describe '#plan? / mode label / toggle (issue #359)' do
+    it 'defaults to planning off when the option is absent' do
+      harness = build_harness
+
+      expect(harness.plan?).to be(false)
+      expect(harness.plan_mode_label).to be_nil
+    end
+
+    it 'starts planning when the option is set (config key)' do
+      harness = build_harness(plan: true)
+
+      expect(harness.plan?).to be(true)
+      expect(harness.plan_mode_label).to eq('PLAN')
+    end
+
+    it 'labels only the non-default posture (off gets no spinner tag)' do
+      harness = build_harness
+      harness.plan = true
+      expect(harness.plan_mode_label).to eq('PLAN')
+
+      harness.plan = false
+      expect(harness.plan_mode_label).to be_nil
+    end
+
+    it 'toggle_plan flips the posture and returns the new label' do
+      harness = build_harness
+
+      expect(harness.toggle_plan).to eq('PLAN')
+      expect(harness.plan?).to be(true)
+      expect(harness.toggle_plan).to be_nil
+      expect(harness.plan?).to be(false)
+    end
+
+    it 'coerces the plan setter to a boolean' do
+      harness = build_harness
+      harness.plan = 'yes'
+
+      expect(harness.plan?).to be(false)
+    end
+  end
+
   describe '#call_llm streaming posture (issue #28)' do
     def scripted(harness, client)
       harness.instance_variable_set(:@client, client)

@@ -145,6 +145,10 @@ class Harness
     # the session. Read per request, so a mid-turn toggle applies to the next.
     @stream = options[:stream] == true
     @stream_preview = nil
+    # Planning posture (issue #359): advisory by the owner's decision, so it
+    # gates nothing. The initial value comes from the config like streaming;
+    # /plan switches it live.
+    @plan = options[:plan] == true
     # The rate of the request that last completed, for the spinner's "recent"
     # segment (issue #285). nil until a request of THIS process has finished;
     # a resumed session seeds it from its saved per-request performance when
@@ -348,6 +352,32 @@ class Harness
   # default. /stream status reports the off state.
   def stream_mode_label
     @stream ? "STREAM" : nil
+  end
+
+  # -- Planning posture (issue #359) -----------------------------------------
+  #
+  # Advisory by the owner's decision: the mode gates NO tool. What it does is
+  # name itself (the [PLAN] badge), point at one stored plan, and record one
+  # note in the chain when it turns on. Enforcement strength and the loop:
+  # doc/planning_mode_design.md.
+
+  def plan?
+    @plan
+  end
+
+  def plan=(val)
+    @plan = (val == true)
+  end
+
+  def toggle_plan
+    @plan = !@plan
+    plan_mode_label
+  end
+
+  # Badge label only when planning is ON: the badge names a NON-default
+  # posture (the same rule as STREAM / YOLO). /plan status reports the off state.
+  def plan_mode_label
+    @plan ? "PLAN" : nil
   end
 
   # The live tail of the answer currently streaming, for the spinner suffix.
