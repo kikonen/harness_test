@@ -39,6 +39,10 @@ RSpec.describe SessionManager do
       def stream?; @stream == true; end
       # issue #303: stub mirrors Harness#output_palette (save_session).
       def output_palette = UI::Palette.fetch(nil)
+      # issue #359: build_user_prompt states the planning expectation when the
+      # mode is on, so the stub mirrors Harness#plan? / plan=.
+      attr_writer :plan
+      def plan?; @plan == true; end
 
       def initialize(session, client)
         @session = session
@@ -514,6 +518,28 @@ RSpec.describe SessionManager do
         expect(save_with_stream(dir, true)['stream']).to be(true)
         expect(save_with_stream(dir, false)['stream']).to be(false)
       end
+    end
+  end
+  # issue #359: the planning mode's whole value is that the MODEL knows the mode
+  # is on and holds back from editing. build_user_prompt states the expectation
+  # every turn while the mode is on, and says nothing when it is off.
+  describe 'planning mode advisory channel (issue #359)' do
+    it 'states the planning expectation in the prompt when the mode is on' do
+      harness.plan = true
+      prompt = manager.build_user_prompt('fix the bug')
+
+      expect(prompt).to include('## Planning mode (advisory)')
+      expect(prompt).to include('Planning mode is ON')
+      expect(prompt).to include('Do not rush to edit files')
+      # The real instruction still follows the advisory section.
+      expect(prompt).to include("## Instruction\n\nfix the bug")
+    end
+
+    it 'states nothing about planning when the mode is off' do
+      harness.plan = false
+      prompt = manager.build_user_prompt('fix the bug')
+
+      expect(prompt).not_to include('Planning mode')
     end
   end
 end

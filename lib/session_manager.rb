@@ -670,6 +670,20 @@ class SessionManager
     # Task-relevant permission changes (a grant just made) reach the model
     # as system notes via ui.note instead.
 
+    # issue #359: the planning expectation, stated to the MODEL every turn while
+    # the mode is on. This is the whole point of the mode: the USER already knows
+    # they are planning; the value is that the model knows too and holds back from
+    # editing. It lives HERE (rebuilt every turn) rather than in the system prompt
+    # so it survives both compaction paths and a /reload, and disappears the
+    # moment the mode is off. config/system_prompt.txt is never touched by a
+    # posture. Advisory: it states an expectation, it gates no tool.
+    if @harness.plan?
+      parts << "## Planning mode (advisory)\n\n" \
+        "Planning mode is ON. Draft and iterate a plan with plan.add before " \
+        "modifying code, and keep it in the durable store. Do not rush to edit " \
+        "files: agree the approach first."
+    end
+
     parts << "## Instruction\n\n#{instruction}\n"
     parts.join("\n\n")
   end
