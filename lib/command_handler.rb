@@ -31,6 +31,7 @@ require_relative "commands/palette_command"
 require_relative "commands/stream_command"
 require_relative "commands/skills_command"
 require_relative "commands/memory_command"
+require_relative "commands/plans_command"
 
 require_relative "help_renderer"
 require_relative "help_topics"
@@ -70,6 +71,7 @@ class CommandHandler
     "stream"        => Commands::StreamCommand,
     "skills"        => Commands::SkillsCommand,
     "memory"        => Commands::MemoryCommand,
+    "plans"         => Commands::PlansCommand,
   }.freeze
 
   def initialize(

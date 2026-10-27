@@ -229,6 +229,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/reasoning` | Show the reasoning text of the last response |
 | `/skills [name]` | List the project's skills (`.harness/skills/`), or print one skill's body |
 | `/memory [name]` | List the project's memories (`.harness/memories/`), or print one note's body |
+| `/plans [name]` | List the project's plans (`.harness/plans/`), or print one plan's body |
 | `/yolo [on|off|status]` | Toggle the YOLO consent posture: shell commands and file access in the workdir (saved with the session) |
 | `/palette [name\|status]` | Show or switch the output palette (saved with the session) |
 | `/stream [on|off|status]` | Toggle streamed LLM responses - show each part as it arrives (saved with the session) |
