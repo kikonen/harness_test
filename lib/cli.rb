@@ -9,6 +9,7 @@ require_relative "file_list"
 require_relative "history_manager"
 require_relative "session_locator"
 require_relative "command_handler"
+require_relative "prompt_reader"
 require_relative "ui"
 
 # -- CLI ------------------------------------------------------------------
@@ -44,10 +45,6 @@ class CLI
     # dispatched by #run, so initialize never calls exit (issue #299).
     @listing = !!@options[:list_sessions]
     return if @listing
-
-    # issue #198 phase 3: draft of an Esc-cancelled idle-prompt read (the
-    # buffer is prefilled at the next prompt instead of being dropped).
-    @idle_draft = nil
 
     setup
   end
@@ -189,8 +186,9 @@ class CLI
     ui.puts
 
     begin
+      reader = PromptReader.new(ui: @ui, harness: -> { @harness })
       loop do
-        input = get_command
+        input = reader.read
         break if input.nil?
 
         begin
@@ -295,94 +293,5 @@ class CLI
   rescue StandardError => e
     ui.puts "  [warning] could not auto-save session: #{e.message}"
     nil
-  end
-
-  # Reads a full command from stdin through UI::Editor (issue #198 phase 3:
-  # the idle prompt is the editor's third user, sharing ONE code path with
-  # steering notes and dialog choice lines). On a tty that is Reline
-  # multiline mode; on a pipe (specs) it is a plain line read (a pipe has no
-  # submit key, so one line per read).
-  #
-  # Key model (robust base - no paste heuristics, no backslash continuation):
-  #   Enter      inserts a newline (typed or pasted - always a real newline)
-  #   submit key SUBMITS the whole buffer (Reline's ed_force_submit on the
-  #              [27,13] binding, bound by UI::Editor.install_esc!):
-  #              Ctrl+Enter / Shift+Enter on Windows, Alt+Enter on most Unix
-  #              terminals, CSI 13 from kcm/kitty-protocol terminals such as
-  #              a remote host seen through Windows Terminal (see doc/
-  #              reline_cursor_and_enter_handling.md)
-  #   Esc        cancels the read; the buffer is kept as a DRAFT and prefilled
-  #              at the next prompt (instead of being dropped as before)
-  #   Ctrl+C     raises Interrupt (rescued in the run loop); the draft is
-  #              cleared so a fresh prompt starts clean
-  #   Ctrl+D on an empty buffer returns nil (EOF => quit)
-  #
-  # Re-prompts on :cancelled and :empty instead of returning, so the run
-  # loop only ever sees a submitted command or nil (quit). The draft lives
-  # in @idle_draft for the life of the process.
-  def get_command
-    loop do
-      # issue #156: show the active model in the modeline so the current
-      # profile is visible at a glance (e.g. after a /model switch).
-      # The ctx indicator (issue #63) is merged into the SAME line to save a
-      # line of vertical space every turn; it is omitted until there is a
-      # conversation (nothing to measure yet). The old "harness:" label is
-      # dropped - with the model name on the line it adds no information.
-      model  = @harness.session_manager.active_model_name
-
-      # issue #219: the effective reasoning effort is visible in the modeline
-      # so a /param tweak (or the profile default) is visible at a glance.
-      effort = @harness.session_manager.param_overrides.reasoning_effort_display
-
-      # The posture tags come from the SAME builder the spinner badge uses
-      # (Task.mode_badge), so the consent AND streaming tags cannot read
-      # differently in the two places. They live in the prompt too because the
-      # spinner only exists while the model works, not while the user is idle.
-      # Bracketed model name keeps the prompt distinct from replies; posture
-      # brackets follow it, e.g. "[qwen (medium)] [YOLO] [STREAM] >".
-      tags   = ["[#{model ? "#{model} (#{effort})" : effort}]"]
-      badge  = Task.mode_badge(@harness)
-      tags  << badge if badge
-      prefix = "#{tags.join(' ')} > "
-      ctx = @harness.context_indicator
-      ui.puts ctx ? "#{ctx} #{prefix}" : prefix
-      ui.flush
-
-      result = UI::Editor
-        .new(ui.stdin)
-        .read_multiline(prompt: "  ", prefill: @idle_draft)
-
-      # Ctrl+A toggled the command-consent mode while the prompt was open:
-      # ack it and re-prompt (no command was typed). The spinner badge for
-      # the next turn shows the new mode (issue #224 follow-up).
-      if UI::Editor::CtrlAState.fired
-        label = UI::Editor::CtrlAState.label
-        UI::Editor::CtrlAState.reset!
-        ui.puts label.nil? ? "  (command mode toggle unavailable - safety check off)" \
-                            : "  [mode is now #{label}]"
-        next
-      end
-
-      case result.status
-      when :eof
-        return nil # Ctrl-D on an empty buffer => quit
-      when :edited
-        # Ctrl+G hand-off (issue #298): what the editor wrote (or the untouched
-        # buffer when the editor could not run) comes back as the DRAFT - the
-        # submit key is still what sends it, same as an Esc'd buffer.
-        @idle_draft = result.text.to_s
-        ui.puts "  (#{result.note} - draft kept; press the submit key to send)"
-        next
-      when :cancelled
-        @idle_draft = result.text.to_s # Esc: keep the buffer, prefill next
-        ui.puts "  (cancelled - draft kept; press the submit key to send)"
-        next
-      when :empty
-        next                           # bare Enter: re-prompt, draft untouched
-      end
-
-      @idle_draft = nil
-      return result.text.to_s.gsub("\r\n", "\n")
-    end
   end
 end

@@ -433,7 +433,7 @@ RSpec.describe UI::Editor do
 
     # The reader's ctrl_g_result (private) is what a caller actually sees after
     # Ctrl+G: an :edited result whose text is the editor's output and whose note
-    # names the editor. This is the exact shape CLI#get_command, Task.poll_for_note
+    # names the editor. This is the exact shape PromptReader#read, Task.poll_for_note
     # and UI::Dialog#collect_details each branch on. Runs a real child editor.
     describe 'the :edited result a Ctrl+G hand-off hands back' do
       def fake_editor_script(dir)

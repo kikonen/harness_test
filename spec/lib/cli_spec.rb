@@ -30,6 +30,13 @@ RSpec.describe CLI do
     described_class.new(options, ui)
   end
 
+  # run reads the idle prompt through PromptReader; a #run spec that only
+  # checks the banner stubs it so the loop exits at once (read => nil).
+  def stub_prompt_reader
+    reader = instance_double(PromptReader, read: nil)
+    allow(PromptReader).to receive(:new).and_return(reader)
+  end
+
   # Seed a saved session in the issue #207 layout (issue #276) so a resume has
   # something real to resolve: <sessions>/<id>/session.json. active_model is
   # nil by default - the "use whatever the config default is" state - because
@@ -323,7 +330,7 @@ RSpec.describe CLI do
   describe 'startup banner - command consent posture' do
     it 'names the MANUAL posture and how to change it' do
       cli = build_cli
-      allow(cli).to receive(:get_command).and_return(nil)
+      stub_prompt_reader
 
       expect(ui).to receive(:puts)
         .with(/^Command consent: MANUAL - unapproved commands ask/)
@@ -337,7 +344,7 @@ RSpec.describe CLI do
     # so it is named in the banner next to the consent posture.
     it 'names the output palette and how to switch it' do
       cli = build_cli
-      allow(cli).to receive(:get_command).and_return(nil)
+      stub_prompt_reader
 
       expect(ui).to receive(:puts)
         .with(/^Output palette: default \(\/palette <name> switches it\)/)
@@ -349,7 +356,7 @@ RSpec.describe CLI do
 
     it 'names YOLO with the disaster floor still asking' do
       cli = build_cli
-      allow(cli).to receive(:get_command).and_return(nil)
+      stub_prompt_reader
       cli.harness.yolo = true
 
       expected = 'Command consent: YOLO - unapproved commands run ' \
@@ -367,7 +374,7 @@ RSpec.describe CLI do
     it 'prints the session id and its log path in the banner' do
       cli = build_cli
       id  = cli.harness.session.session_id
-      allow(cli).to receive(:get_command).and_return(nil)
+      stub_prompt_reader
 
       expect(ui).to receive(:puts)
         .with(/Session: #{Regexp.escape(id)} \(log: .*harness\.log\)/)
@@ -383,7 +390,7 @@ RSpec.describe CLI do
     it 'reports a repaired harness.md in the banner' do
       File.binwrite(File.join(workdir, 'harness.md'), "rule caf\xe9 keep 90 cols\n")
       cli = build_cli
-      allow(cli).to receive(:get_command).and_return(nil)
+      stub_prompt_reader
 
       expect(ui).to receive(:puts).with(
         '  [harness.md repaired: 1 invalid byte replaced - harness.md is not valid UTF-8]'
@@ -401,7 +408,7 @@ RSpec.describe CLI do
       allow(cli.harness).to receive(:mcp_status_notes).and_return(
         ["MCP server 'fs' failed to start (RuntimeError: boom)"]
       )
-      allow(cli).to receive(:get_command).and_return(nil)
+      stub_prompt_reader
 
       expect(ui).to receive(:puts).with(
         "  [mcp] MCP server 'fs' failed to start (RuntimeError: boom)"
@@ -418,7 +425,7 @@ RSpec.describe CLI do
       opts = options.merge(editor: 'nvim -R')
       cli  = described_class.new(opts, ui)
       allow(ui).to receive(:puts)
-      allow(cli).to receive(:get_command).and_return(nil)
+      stub_prompt_reader
 
       cli.run
 
@@ -428,137 +435,11 @@ RSpec.describe CLI do
     it 'leaves UI::Editor.external_editor nil when no editor is configured' do
       cli = build_cli
       allow(ui).to receive(:puts)
-      allow(cli).to receive(:get_command).and_return(nil)
+      stub_prompt_reader
 
       cli.run
 
       expect(UI::Editor.external_editor).to be_nil
-    end
-  end
-
-  # issue #198 phase 3: the idle prompt keeps an Esc'd buffer as a draft
-  # (prefilled at the next prompt), re-prompts on bare Enter, and only
-  # returns a submitted command or nil (Ctrl-D eof => quit).
-  describe '#get_command' do
-    let(:cli) { build_cli }
-    let(:editor) { instance_double(UI::Editor) }
-    let(:stdin_io) { StringIO.new }
-
-    before do
-      allow(ui).to receive(:puts)
-      allow(ui).to receive(:stdin).and_return(stdin_io)
-      allow(ui).to receive(:flush)
-      allow(cli.harness.session_manager).to receive(:active_model_name)
-                                        .and_return('test-model')
-      allow(cli.harness).to receive(:context_indicator).and_return(nil)
-      @result_class = UI::Editor::EDITOR_RESULT
-      allow(UI::Editor).to receive(:new).with(stdin_io).and_return(editor)
-    end
-
-    def editor_result(text, status, note = nil)
-      @result_class.new(text, status, note)
-    end
-
-    it 'returns the submitted text and clears the draft' do
-      allow(editor).to receive(:read_multiline).and_return(
-        editor_result('hello world', :submitted))
-
-      expect(cli.send(:get_command)).to eq('hello world')
-    end
-
-    # issue #221 review (bug 2): the prompt modeline carries the consent
-    # posture bracket next to the model bracket, so it is visible on every
-    # turn (the spinner only exists while the model works).
-    it 'shows the consent posture in the prompt modeline' do
-      allow(editor).to receive(:read_multiline).and_return(
-        editor_result('x', :submitted))
-
-      expect(ui).to receive(:puts).with(/test-model .* \[MANUAL\] > /)
-
-      cli.send(:get_command)
-    end
-
-    it 'shows [YOLO] in the prompt modeline when YOLO is on' do
-      allow(editor).to receive(:read_multiline).and_return(
-        editor_result('x', :submitted))
-      cli.harness.yolo = true
-
-      expect(ui).to receive(:puts).with(/\[YOLO\] > /)
-
-      cli.send(:get_command)
-    end
-
-    # issue #387: the spinner badge carries the STREAM tag but the idle prompt
-    # did not - the same posture read differently in the two places. The prompt
-    # and the spinner now share ONE builder (Task.mode_badge), so a stream-on
-    # prompt must show [STREAM] exactly as the spinner does.
-    it 'shows [STREAM] in the prompt modeline when streaming is on' do
-      allow(editor).to receive(:read_multiline).and_return(
-        editor_result('x', :submitted))
-      cli.harness.stream = true
-
-      expect(ui).to receive(:puts).with(/\[MANUAL\] \[STREAM\] > /)
-
-      cli.send(:get_command)
-    end
-
-    # Buffered is the default posture, so the tag stays absent (a tag names a
-    # non-default). The consent tag is still there.
-    it 'shows no [STREAM] tag when streaming is off (the default)' do
-      allow(editor).to receive(:read_multiline).and_return(
-        editor_result('x', :submitted))
-
-      expect(ui).to receive(:puts).with(/\[MANUAL\] > /)
-
-      cli.send(:get_command)
-    end
-
-    it 'keeps a cancelled buffer as the draft and re-prompts' do
-      allow(editor).to receive(:read_multiline).and_return(
-        editor_result('partial', :cancelled),
-        editor_result('partial done', :submitted))
-
-      expect(cli.send(:get_command)).to eq('partial done')
-      expect(editor).to have_received(:read_multiline)
-                     .with(prompt: '  ', prefill: nil)
-      expect(editor).to have_received(:read_multiline)
-                     .with(prompt: '  ', prefill: 'partial')
-    end
-
-    it 're-prompts on a bare Enter without touching the draft' do
-      allow(editor).to receive(:read_multiline).and_return(
-        editor_result('', :empty),
-        editor_result('cmd', :submitted))
-
-      expect(cli.send(:get_command)).to eq('cmd')
-    end
-
-    # issue #298: Ctrl+G hands the buffer to an external editor. The text the
-    # editor produced (carried as :edited) becomes the DRAFT - the submit key is
-    # still what sends it, exactly like an Esc'd buffer.
-    it 'keeps an edited buffer as the draft and re-prompts' do
-      allow(editor).to receive(:read_multiline).and_return(
-        editor_result('from editor', :edited, 'edited with notepad'),
-        editor_result('from editor sent', :submitted))
-
-      expect(cli.send(:get_command)).to eq('from editor sent')
-      expect(editor).to have_received(:read_multiline)
-                     .with(prompt: '  ', prefill: 'from editor')
-    end
-
-    it 'names the editor on the :edited draft line' do
-      allow(editor).to receive(:read_multiline).and_return(
-        editor_result('kept', :edited, 'edited with vim'),
-        editor_result('go', :submitted))
-
-      printed = []
-      allow(ui).to receive(:puts) { |*args| printed << args.join(' ') }
-
-      cli.send(:get_command)
-
-      expect(printed).to include(
-        '  (edited with vim - draft kept; press the submit key to send)'
-      )
     end
   end
 end
