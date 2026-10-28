@@ -126,9 +126,13 @@ RSpec.describe CLI do
       seed_saved_session(saved)
       allow(ui).to receive(:puts)
 
-      expect {
-        described_class.new(options.merge(list_sessions: true, model: nil), ui)
-      }.to raise_error(SystemExit)
+      # issue #299: initialize records the listing mode and returns BEFORE
+      # setup, so no Harness is built and no session dir is minted; #run
+      # dispatches the listing and returns the exit status the entry point
+      # turns into exit. No SystemExit around CLI.new any more.
+      cli = described_class.new(options.merge(list_sessions: true, model: nil), ui)
+      expect(cli.harness).to be_nil
+      expect(cli.run).to eq(0)
 
       expect(ui).to have_received(:puts).with(/Saved sessions \(1\)/)
       expect(ui).to have_received(:puts).with(/#{Regexp.escape(saved)}/)

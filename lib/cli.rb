@@ -41,7 +41,12 @@ class CLI
 
     @file_list = build_file_list
     @locator = SessionLocator.new(@options[:workdir])
-    list_sessions_and_exit if @options[:list_sessions]
+
+    # --list-sessions renders the saved-session list and stops: it needs no
+    # Harness and no session dir (issue #276). The mode is recorded here and
+    # dispatched by #run, so initialize never calls exit (issue #299).
+    @listing = !!@options[:list_sessions]
+    return if @listing
 
     # issue #198 phase 3: draft of an Esc-cancelled idle-prompt read (the
     # buffer is prefilled at the next prompt instead of being dropped).
@@ -310,21 +315,23 @@ class CLI
     opts
   end
 
-  # List saved sessions and exit (used by --list-sessions).
-  # issue #276: listing is path + JSON reading, so it runs through the SAME
-  # renderer /sessions uses, with harness: nil - the old path constructed a
-  # whole Harness (client, logger, tool registry) just to read a few JSON
-  # files, minting a fresh random id on the way.
-  def list_sessions_and_exit
+  # Render the saved-session list (used by --list-sessions) and return the
+  # exit status. issue #276: listing is path + JSON reading, so it runs
+  # through the SAME renderer /sessions uses, with harness: nil - the old path
+  # constructed a whole Harness (client, logger, tool registry) just to read a
+  # few JSON files, minting a fresh random id on the way.
+  def list_sessions
     Commands::SessionsCommand.new(
       harness: nil,
       file_list: @file_list,
       options: @options,
       ui: @ui).handle("")
-    exit 0
+    0
   end
 
   def run
+    return list_sessions if @listing
+
     @history.load
 
     # issue #198: the double-Enter submit switch is process-global and
@@ -448,6 +455,7 @@ class CLI
       ui.puts "Session saved as #{id} (#{harness.session_manager.session_file_path(id)})."
       ui.puts "Resume it later with: #{commands.resume_command(id)}"
     end
+    0
   end
 
   private

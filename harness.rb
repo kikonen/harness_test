@@ -32,7 +32,7 @@ require_relative "lib/cli"
 # -- Entry point ----------------------------------------------------------
 
 begin
-  CLI.new.run
+  exit CLI.new.run
 rescue HarnessError => e
   puts "Error: #{e.message}"
   exit 1
