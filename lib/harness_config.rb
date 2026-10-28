@@ -153,6 +153,13 @@ class HarnessConfig
     # External MCP servers (issue #48). Opt-in: an empty list means no MCP code
     # path runs at all. Each entry is normalized to { name:, command:, args:, env: }.
     @mcp_servers = normalize_mcp_servers(Array(data[:mcp_servers]))
+    # Workdir-relative dirs the YOLO posture never auto-covers (issue #385).
+    # nil (key absent) = FileList's default (the owner's space, local/); an
+    # explicit list replaces it, and an explicit empty list protects nothing.
+    @protected_dirs =
+      if data.key?(:protected_dirs)
+        normalize_protected_dirs(Array(data[:protected_dirs]))
+      end
     # issue #303: rendered-output palette name (nil = the default palette).
     # Validated by UI::Palette.validate! in the CLI, not here: this class does
     # not know the palette list and must not start requiring the UI layer.
@@ -334,6 +341,13 @@ class HarnessConfig
     @mcp_servers
   end
 
+  # Workdir-relative dirs the YOLO posture never auto-covers (issue #385). nil
+  # when the key is absent (FileList applies its default, local/); an array
+  # (possibly empty) when the config names one.
+  def protected_dirs
+    @protected_dirs
+  end
+
   # Rendered-output palette name (issue #303), or nil for the default one.
   def output_palette_name
     @output_palette
@@ -448,6 +462,14 @@ class HarnessConfig
         env:
       }
     end
+  end
+
+  # Normalize each protected_dirs entry to a workdir-relative dir. A blank entry
+  # is dropped (it would match nothing useful); a trailing slash is trimmed so a
+  # config 'local/' still matches the exact-prefix shape FileList applies
+  # (rel == dir || rel.start_with?("#{dir}/")).
+  def normalize_protected_dirs(list)
+    list.map { |entry| nonblank(entry)&.sub(%r{/\z}, "") }.compact
   end
 
   # A string is "present" when it is non-nil and not blank.
