@@ -93,7 +93,7 @@ whenever the outbox empties again, so anything the spinner computed itself
 would restart on every rebuild. Only the runner knows how long the turn has
 been running (issue #277). The badge is `Task.mode_badge` - one bracket per
 NON-default posture - and it is the SAME builder the idle prompt line uses
-(`CLI#get_command`), so a posture cannot read differently in the spinner and
+(`PromptReader`), so a posture cannot read differently in the spinner and
 the prompt (issue #387).
 
 ## Console injection

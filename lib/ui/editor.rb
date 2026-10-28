@@ -535,7 +535,7 @@ module UI
     # GLOBAL Reline state (LineEditor prepended module + key bindings), so
     # it also affects the CLI's idle prompt: there a bare Esc cancels the
     # read and keeps the buffer as a draft for the next prompt (see
-    # CLI#get_command), and SUBMIT_KEY_SEQ submits the multiline buffer
+    # PromptReader#read), and SUBMIT_KEY_SEQ submits the multiline buffer
     # (issue #91 key model). The module is prepended only if not already
     # present, so repeated calls are safe.
     def self.install_esc!

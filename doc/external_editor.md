@@ -126,7 +126,7 @@ LF, whatever line endings the editor wrote on disk (`doc/file_editing_design.md`
 `:edited` is a distinct status, never reusing `:submitted`, so no caller can
 mistake a hand-off for an answer:
 
-- `CLI#get_command` - the text becomes `@idle_draft`, prefilled at the next
+- `PromptReader#read` - the text becomes `@draft`, prefilled at the next
   prompt; a "(<note> - draft kept; press the submit key to send)" line prints.
 - `Task.poll_for_note` - the text becomes `@note_draft`, prefilled the next time
   the note editor opens. It shares the branch with `:cancelled` (Esc): an editor
