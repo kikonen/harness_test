@@ -76,6 +76,9 @@ class CLI
     if resume_id
       @harness.logger.info("session resumed: #{session_id}")
       replaced&.logger&.close
+      # issue #48: the run being replaced owns its own MCP subprocesses; close
+      # them so a mid-run /resume does not leak the old server processes.
+      replaced&.close_mcp
     end
     @harness
   end
@@ -242,6 +245,10 @@ class CLI
     # The table-width basis: --markdown-width N > config 'markdown_max_width' >
     # nil (the renderer's default, 80% of the detected terminal).
     opts[:markdown_max_width] = config.markdown_max_width if opts[:markdown_max_width].nil?
+    # issue #48: external MCP servers. Config-only (no CLI flag - a server is a
+    # declared, persistent setup, not a one-run toggle). An empty list means the
+    # MCP code path never runs (the gem is not even loaded).
+    opts[:mcp_servers] = config.mcp_servers
 
     opts[:compact_recent] ||= config.compact_recent_messages
     opts[:compact_auto_threshold] = config.compact_auto_threshold
@@ -346,6 +353,12 @@ class CLI
     ui.puts "LLM responses: #{@harness.stream? ? 'streamed (/stream off buffers them)' \
               : 'buffered (/stream on shows each part as it arrives)'}"
     ui.puts "Tip: type a plain message (no /) to send it directly to the model."
+    # issue #48: MCP servers the user declared. Each connected server and each
+    # problem (a failed start, a name collision) is reported here, so the run
+    # never silently pretends its MCP tools are available.
+    @harness.mcp_status_notes.each do |note|
+      ui.puts "  [mcp] #{note}"
+    end
     ui.puts "Tip: Enter adds a newline; paste multiline text directly. The " \
          "submit key sends the whole buffer: Ctrl+Enter (Windows console, or " \
          "to a remote host via Windows Terminal) or Alt/AltGr+Enter (Unix " \
@@ -394,6 +407,10 @@ class CLI
       # a normal exit so that history and the session are still saved.
       ui.puts "\n  [interrupted]"
     end
+
+    # issue #48: an MCP server is a subprocess this run spawned; closing them
+    # here is what stops a server outliving the CLI.
+    @harness.close_mcp
 
     @history.save
     id = auto_save_session
