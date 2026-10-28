@@ -22,19 +22,27 @@ class KeepAliveHTTP < Net::HTTP
 
   def connect
     super
-    # NOTE: Net::HTTP#socket is private (and was removed/changed across
-    # Ruby versions), so reach the socket via the instance variable.
-    socket = @socket
-    if socket.respond_to?(:setsockopt)
-      socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_KEEPALIVE, 1)
-      begin
-        socket.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_KEEPIDLE,  KEEPALIVE_IDLE)
-        socket.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_KEEPINTVL, KEEPALIVE_INTERVAL)
-        socket.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_KEEPCNT,   KEEPALIVE_COUNT)
-      rescue StandardError => e
-        # TCP_KEEP* options are not available on all platforms (e.g. Windows)
-        logger.debug("TCP_KEEP* keepalive options not applied: #{e.class}: #{e.message}")
-      end
+    # Since Ruby 4.0 the @socket ivar is a Net::BufferedIO wrapping the real
+    # socket, not the socket itself; BufferedIO#io (public) unwraps it - an
+    # SSLSocket for https, whose setsockopt delegates to the TCP socket. The
+    # ternary keeps the older shape where @socket is already a socket.
+    socket = @socket.respond_to?(:io) ? @socket.io : @socket
+    apply_keepalive(socket)
+  end
+
+  private
+
+  def apply_keepalive(socket)
+    return unless socket.respond_to?(:setsockopt)
+
+    socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_KEEPALIVE, 1)
+    begin
+      socket.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_KEEPIDLE,  KEEPALIVE_IDLE)
+      socket.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_KEEPINTVL, KEEPALIVE_INTERVAL)
+      socket.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_KEEPCNT,   KEEPALIVE_COUNT)
+    rescue StandardError => e
+      # TCP_KEEP* options are not available on all platforms (e.g. Windows)
+      logger.debug("TCP_KEEP* keepalive options not applied: #{e.class}: #{e.message}")
     end
   end
 end
