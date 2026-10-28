@@ -89,8 +89,19 @@ class Harness
   # is then not byte-for-byte what harness.md holds.
   # mcp: the Mcp::Manager that owns the declared servers, their connections and
   # startup notes (issue #48). The MCP machinery lives there, not in Harness.
-  attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager,
-              :client, :skills, :memories, :plans, :rules_repair_note, :mcp
+  attr_reader :options,
+    :logger,
+    :tool_registry,
+    :file_list,
+    :session,
+    :session_manager,
+    :client,
+    :skills,
+    :memories,
+    :plans,
+    :rules_repair_note,
+    :mcp
+
   attr_accessor :history
 
   # Only one note is in flight: a new assignment replaces the note that has
@@ -108,24 +119,29 @@ class Harness
     @file_list     = file_list
     @locator       = SessionLocator.new(file_list.workdir)
     @skills        = Skills.new(file_list.workdir)
+
     # The project's durable notes (issue #10): one reader for the store, shared by
     # memory.* and /memory so the two sides cannot drift.
     @memories      = Memories.new(file_list.workdir)
     @session       = Session.new(build_system_prompt, session_id:)
+
     # The project's durable plans (issue #359): one reader for the store, shared
     # by plan.* and /plans so the two sides cannot drift apart.
     @plans         = Plans.new(file_list.workdir)
+
     if resume_data
       saved_id = resume_data[:session_id]
       if saved_id && saved_id != session_id
         raise HarnessError,
-              "session file says id #{saved_id} but it is stored under #{session_id}"
+          "session file says id #{saved_id} but it is stored under #{session_id}"
       end
       @session.restore(resume_data, @file_list)
     end
+
     @user_note     = nil
     @user_notes    = []
     StateMigrator.run(@file_list.workdir, HARNESS_DIR)
+
     @logger        = build_logger
     # The MCP machinery (issue #48) lives in its own object; build_tool_registry
     # asks it to connect the declared servers and register their tools.
@@ -135,10 +151,12 @@ class Harness
     @session_manager = SessionManager.new(self, file_list)
     @command_safety_auto_approve = options[:command_safety_auto_approve] == true
     @yolo = options[:yolo] == true
+
     # issue #389: the denylist half of command_safety_auto_approve. Config-derived
     # for the whole run (no live toggle); the getter exists so the banner can name
     # a relaxed floor. Rationale: doc/denylist_safe_approve_design.md.
     @denylist_safe_approve = options[:command_safety_denylist_safe_approve] == true
+
     # The same posture the shell consent reads live (issue #274): a lambda, so a
     # /yolo at the idle prompt or a mid-turn flip applies to the very next tool
     # call and switching it off removes the coverage at once. FileList never
@@ -146,24 +164,29 @@ class Harness
     @file_list.posture      = -> { yolo? }
     @file_list.audit_logger = @logger
     self.output_palette = options[:output_palette]
+
     # Streaming posture (issue #28): the initial value comes from the config
     # (global key or a profile's own key); /stream switches it for the rest of
     # the session. Read per request, so a mid-turn toggle applies to the next.
     @stream = options[:stream] == true
     @stream_preview = nil
+
     # Markdown rendering posture (issue #106): opt-in, default off. The initial
     # value comes from the config like streaming; /markdown switches it live
     # (it lands on the next turn, the same as /palette).
     @markdown = options[:markdown] == true
+
     # Planning posture (issue #359): advisory by the owner's decision, so it
     # gates nothing. The initial value comes from the config like streaming;
     # /plan switches it live.
     @plan = options[:plan] == true
+
     # The rate of the request that last completed, for the spinner's "recent"
     # segment (issue #285). nil until a request of THIS process has finished;
     # a resumed session seeds it from its saved per-request performance when
     # the server measured one.
     @last_rate = nil
+
     apply_resume_state(resume_data) if resume_data
   end
 
@@ -178,6 +201,7 @@ class Harness
 
     source  = File.read(project_file)
     content = TextNormalizer.normalize(source).strip
+
     @rules_repair_note = byte_repair_note(source)
     @logger&.info("harness.md read: #{@rules_repair_note}") if @rules_repair_note
     return base if content.empty?
@@ -227,10 +251,14 @@ class Harness
     registry.register(Tools::GitLogTool.new(@file_list))
     registry.register(Tools::GitGrepTool.new(@file_list))
     registry.register(Tools::GitApplyTool.new(@file_list, @session))
-    registry.register(Tools::RunCommandTool.new(@file_list, @options,
-                                                harness: self))
-    registry.register(Tools::WebFetchTool.new(@file_list, @options,
-                                              harness: self))
+    registry.register(Tools::RunCommandTool.new(
+      @file_list,
+      @options,
+      harness: self))
+    registry.register(Tools::WebFetchTool.new(
+      @file_list,
+      @options,
+      harness: self))
     registry.register(Tools::ToolsListTool.new(registry))
     registry.register(Tools::ToolsSearchTool.new(registry))
     registry.register(Tools::SkillsListTool.new(@skills))
@@ -501,6 +529,7 @@ class Harness
   # never touches Session, so it cannot trigger in-loop compaction.
   def precheck_batch_safety(message_calls)
     return nil unless command_safety_check
+
     # YOLO's auto-approval branch in CommandRunner#run returns before
     # safety_verdict_for is reached, so a batch check here would pay for a
     # forked round trip whose verdicts can only be thrown away (#238's cost).
@@ -511,19 +540,30 @@ class Harness
 
     commands = run_command_batch_commands(message_calls)
     return nil if commands.size < 2
+
     unapproved = commands.reject { |c| tool_allowlist.allowed?(c) }
     return nil if unapproved.size < 2
+
     skipped = commands.size - unapproved.size
     logger.info("safety pre-check: #{skipped} allowlisted command(s) skipped") if skipped.positive?
 
     logger.info("safety pre-check (#{unapproved.size} run.command in batch)")
-    Tool.push_status(label: "safety", verdict: :info,
-                     message: "checking #{unapproved.size} commands before the consent dialog...")
-    Task.emit(:spinner_detail, origin: :harness,
-              content: { message: "Model safety check (#{unapproved.size} commands)" })
-    options[:safety_verdicts] =
-      SafetyCheck.run(client, session.messages, unapproved,
-                      tools: tools_payload, logger:)
+    Tool.push_status(
+      label: "safety",
+      verdict: :info,
+      message: "checking #{unapproved.size} commands before the consent dialog...")
+
+    Task.emit(
+      :spinner_detail,
+      origin: :harness,
+      content: { message: "Model safety check (#{unapproved.size} commands)" })
+
+    options[:safety_verdicts] = SafetyCheck.run(
+      client,
+      session.messages,
+      unapproved,
+      tools: tools_payload,
+      logger:)
   rescue StandardError => e
     logger.info("safety pre-check failed (#{e.class}: #{e.message}) - continuing without verdicts")
     nil
@@ -555,8 +595,10 @@ class Harness
     window = options[:num_ctx] || LLMClient::NUM_CTX
     return nil if window.to_i <= 0
 
-    @session.compact_trigger(window, compact_auto_threshold,
-                             reserved_tokens: compact_reserved_tokens)
+    @session.compact_trigger(
+      window,
+      compact_auto_threshold,
+      reserved_tokens: compact_reserved_tokens)
   end
 
   # Returns [args, nil] or [{}, error_message]: rescuing straight to {} erased
@@ -617,6 +659,7 @@ class Harness
     loop_warning_injected = false
     loop_hard_break = false
     total_usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+
     # The LAST call's prompt_tokens is the context size: each call already
     # carries the history, so summing over counts.
     last_prompt_tokens = 0
@@ -663,6 +706,7 @@ class Harness
         total_usage[:total_tokens]      += data[:usage][:total_tokens]      || 0
         last_prompt_tokens              = data[:usage][:prompt_tokens].to_i
       end
+
       # #285: this request's rate is now the RECENT one the spinner can show
       # during the next request's prefill (or in buffered mode). It is taken
       # from the request's own clock and its reported counts, never from
@@ -1016,8 +1060,10 @@ class Harness
   # were still generating. The message is the tool NAME only: the spinner appends
   # its own "..." to every message, so a marker here would double the dots.
   def announce_tool_call(name)
-    Task.emit(:spinner_detail, origin: :harness,
-              content: { message: name, suffix: tool_wait_suffix })
+    Task.emit(
+      :spinner_detail,
+      origin: :harness,
+      content: { message: name, suffix: tool_wait_suffix })
   end
 
   # truncated: the request that produced this call was cut by the token budget.
@@ -1061,26 +1107,32 @@ class Harness
     @session_manager.restore_session_model(data[:active_model])
     @session_manager.param_overrides.load(data[:param_overrides])
     @session_manager.param_overrides.restore!
+
     self.yolo = data[:yolo] == true
     logger.info("yolo posture restored: #{yolo? ? 'ON' : 'OFF'}")
+
     self.stream = data[:stream] == true
     logger.info("streaming posture restored: #{stream? ? 'ON' : 'OFF'}")
+
     # issue #106: the markdown rendering posture (a harness posture, like
     # streaming). A session saved markdown-rendered resumes markdown-rendered.
     self.markdown = data[:markdown] == true
     logger.info("markdown posture restored: #{markdown? ? 'ON' : 'OFF'}")
+
     # #285: the saved per-request performance (#251) is a server measurement, so
     # a resumed session can show a recent rate immediately - a client-timed one
     # would need seconds it does not have, hence nil there.
     saved_rate = LLM::UsageStats.recent_generation_rate(data.dig(:last_stats, :performance), nil)
     @last_rate = saved_rate if saved_rate
     logger.info("recent generation rate restored: #{last_rate_segment}") if saved_rate
+
     # issue #303: the palette the session was saved with. Unknown names are
     # NOT fatal here (a session saved by another build may name a palette this
     # one does not have) - HarnessConfig/CLI validate a name the user typed,
     # a stored name only has to be usable.
     restored = UI::Palette.names.include?(data[:output_palette].to_s) ? data[:output_palette] : nil
     self.output_palette = restored
+
     logger.info("output palette restored: #{output_palette.name}")
   end
 end
