@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../command"
+require_relative "../cli_options"
 
 module Commands
   # /models - list configured models (marks the default and active one).
@@ -34,7 +35,7 @@ module Commands
         # issue #217: tag the API type so it is obvious which endpoint a
         # profile hits (openai -> /v1-compatible, ollama -> native /api/chat).
         api = p[:api] || "openai"
-        @ui.puts "  #{name}  ->  #{p[:model]} @ #{p[:url] || CLI::DEFAULT_BASE_URL} (#{api})#{suffix}"
+        @ui.puts "  #{name}  ->  #{p[:model]} @ #{p[:url] || CLIOptions::DEFAULT_BASE_URL} (#{api})#{suffix}"
       end
       @ui.puts
       @ui.puts "Switch with: /model <name>   (current: #{current})"

@@ -72,9 +72,9 @@ RSpec.describe Commands::ModelsCommand do
 
   # A profile with no url falls back to the CLI default endpoint rather than
   # printing an empty host.
-  it 'falls back to CLI::DEFAULT_BASE_URL when a profile has no url' do
+  it 'falls back to CLIOptions::DEFAULT_BASE_URL when a profile has no url' do
     sm = session_manager([{ name: 'qwen', model: 'qwen3:8b' }], 'qwen')
-    expect(run_command(sm)).to include("@ #{CLI::DEFAULT_BASE_URL}")
+    expect(run_command(sm)).to include("@ #{CLIOptions::DEFAULT_BASE_URL}")
   end
 
   describe 'with no profiles configured' do
