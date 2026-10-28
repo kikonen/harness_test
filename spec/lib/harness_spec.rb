@@ -2328,4 +2328,117 @@ RSpec.describe Harness do
       expect(log).to include("tool web.fetch → error: 127.0.0.1 is a blocked address")
     end
   end
+
+  # issue #48: MCP client wiring. Opt-in (no mcp_servers: = no MCP code path),
+  # a failed server degrades to a status note, a tool name that collides with a
+  # built-in is skipped, and the connections are closed on shutdown. The real
+  # gem/subprocess is never touched here: ServerConnection is stubbed.
+  describe 'MCP wiring (issue #48)' do
+    # A stand-in for one MCP tool object the gem hands back (name/description/
+    # input_schema are the three fields ToolAdapter reads).
+    FakeMcpTool = Struct.new(:name, :description, :input_schema)
+
+    def fake_connection(tools)
+      conn = instance_double('Mcp::ServerConnection')
+      allow(conn).to receive(:connect).and_return(tools)
+      allow(conn).to receive(:close)
+      conn
+    end
+
+    def server_entry(name: 'fs', command: 'ruby')
+      { name: name, command: command, args: [], env: {} }
+    end
+
+    it 'runs no MCP code path when no servers are configured' do
+      allow(Mcp::ServerConnection).to receive(:new)
+      h = build_harness
+
+      expect(h.mcp_status_notes).to eq([])
+      expect(Mcp::ServerConnection).not_to have_received(:new)
+    end
+
+    it 'registers a server\'s tools under the "<server>.<tool>" namespace' do
+      tools = [FakeMcpTool.new('read_file', 'Read a file',
+                               { 'properties' => { 'path' => { 'type' => 'string' } },
+                                 'required' => ['path'] })]
+      allow(Mcp::ServerConnection).to receive(:new).and_return(fake_connection(tools))
+      h = build_harness(mcp_servers: [server_entry])
+
+      adapter = h.tool_registry.get('fs.read_file')
+      expect(adapter).to be_a(Mcp::ToolAdapter)
+      expect(h.mcp_status_notes).to include('MCP server \'fs\' connected: 1 tool(s)')
+    end
+
+    it 'skips a tool whose name collides with a built-in and reports it' do
+      tools = [FakeMcpTool.new('read', 'Would shadow file.read', {})]
+      allow(Mcp::ServerConnection).to receive(:new).and_return(fake_connection(tools))
+      h = build_harness(mcp_servers: [server_entry(name: 'file')])
+
+      # The built-in file.read is untouched; the colliding MCP tool is not added.
+      expect(h.tool_registry.get('file.read')).to be_a(Tools::FileReadTool)
+      expect(h.mcp_status_notes).to include(
+        "skipped MCP tool 'file.read' (name collides with a built-in tool)"
+      )
+      expect(File.read(h.session_log_path)).to include('MCP tool name collision')
+    end
+
+    it 'degrades to a status note when a server fails to start' do
+      conn = instance_double('Mcp::ServerConnection')
+      allow(conn).to receive(:connect).and_raise(Errno::ENOENT, 'no such server')
+      allow(conn).to receive(:close)
+      allow(Mcp::ServerConnection).to receive(:new).and_return(conn)
+      h = build_harness(mcp_servers: [server_entry(name: 'down')])
+
+      # The half-spawned subprocess is closed and the run continues without it.
+      expect(conn).to have_received(:close)
+      expect(h.mcp_status_notes.first).to include("MCP server 'down' failed to start")
+      expect(h.mcp_status_notes.first).to include('Errno::ENOENT')
+      expect(h.tool_registry.names).not_to include(a_string_matching(/^down\./))
+    end
+
+    it 'closes every connection on close_mcp' do
+      tools = [FakeMcpTool.new('ping', 'Ping', {})]
+      conn = fake_connection(tools)
+      allow(Mcp::ServerConnection).to receive(:new).and_return(conn)
+      h = build_harness(mcp_servers: [server_entry])
+
+      h.close_mcp
+
+      expect(conn).to have_received(:close)
+    end
+
+    it 'an MCP tool call forwards to the connection and normalizes the result' do
+      tools = [FakeMcpTool.new('echo_tool', 'Echo', { 'properties' => {}, 'required' => [] })]
+      conn  = fake_connection(tools)
+      allow(conn).to receive(:call_tool).with('echo_tool', { 'message' => 'hi' })
+                                        .and_return('echo: hi')
+      allow(Mcp::ServerConnection).to receive(:new).and_return(conn)
+      h = build_harness(mcp_servers: [server_entry])
+
+      result = h.send(:execute_tool_call, {
+        id: 'c1',
+        function: { name: 'fs.echo_tool', arguments: JSON.generate(message: 'hi') }
+      })
+      expect(result).to eq('echo: hi')
+    end
+    # Standing constraint: MCP tools reach the model through tools_payload (the
+    # per-request tool definitions), NEVER by being written into the system
+    # prompt file. The harness must not write config/system_prompt.txt, and the
+    # session's system prompt must not name an MCP tool.
+    it 'exposes MCP tools in tools_payload, never in the system prompt' do
+      tools = [FakeMcpTool.new('read_file', 'Read a file', {})]
+      allow(Mcp::ServerConnection).to receive(:new).and_return(fake_connection(tools))
+      h = build_harness(mcp_servers: [server_entry])
+
+      payload_names = h.tools_payload.map { |t| t[:function][:name] }
+      expect(payload_names).to include('fs.read_file')
+      # The prompt the model was seeded with carries no MCP tool name.
+      expect(h.session.system_prompt).not_to include('fs.read_file')
+      # The built-in prompt file is read-only to the harness: it is never written.
+      prompt_path = Harness::DEFAULT_SYSTEM_PROMPT_FILE
+      before = File.read(prompt_path)
+      h.tools_payload
+      expect(File.read(prompt_path)).to eq(before)
+    end
+  end
 end

@@ -469,6 +469,64 @@ RSpec.describe CLI do
     end
   end
 
+  # Standing constraint (issue #106): markdown rendering stays default OFF. The
+  # config level is pinned in harness_config_spec; this pins the CLI resolution
+  # path - with no --markdown flag and no config key, a run renders plain.
+  describe 'option resolution - markdown stays default off (issue #106)' do
+    def resolve(argv)
+      original = ARGV.dup
+      ARGV.replace(argv)
+      described_class.allocate.send(:parse_options)
+    ensure
+      ARGV.replace(original)
+    end
+
+    it 'is off when neither the flag nor the config asks for it' do
+      path = File.join(workdir, 'md-off.yml')
+      File.write(path, "model: test-model\n")
+      opts = resolve(['-m', 'test-model', '-d', workdir, '-c', path])
+      expect(opts[:markdown]).to be(false)
+    end
+  end
+
+  # issue #48: external MCP servers are config-only (no CLI flag - a server is a
+  # declared, persistent setup, not a one-run toggle). An empty list means the
+  # MCP code path never runs.
+  describe 'option resolution - mcp_servers (issue #48)' do
+    def resolve(argv)
+      original = ARGV.dup
+      ARGV.replace(argv)
+      described_class.allocate.send(:parse_options)
+    ensure
+      ARGV.replace(original)
+    end
+
+    def write_config(body)
+      path = File.join(workdir, 'mcp-config.yml')
+      File.write(path, body)
+      path
+    end
+
+    it 'is empty when the config says nothing (no MCP code path runs)' do
+      opts = resolve(['-m', 'test-model', '-d', workdir, '-c', write_config("model: test-model\n")])
+      expect(opts[:mcp_servers]).to eq([])
+    end
+
+    it 'carries the normalized entries from the config' do
+      path = write_config(<<~YAML)
+        model: test-model
+        mcp_servers:
+          - name: fs
+            command: ruby
+            args: ["srv.rb"]
+      YAML
+      opts = resolve(['-m', 'test-model', '-d', workdir, '-c', path])
+      expect(opts[:mcp_servers]).to eq(
+        [{ name: 'fs', command: 'ruby', args: ['srv.rb'], env: {} }]
+      )
+    end
+  end
+
   describe '#run' do
     it 'prints the session id and its log path in the banner' do
       cli = build_cli
@@ -493,6 +551,24 @@ RSpec.describe CLI do
 
       expect(ui).to receive(:puts).with(
         '  [harness.md repaired: 1 invalid byte replaced - harness.md is not valid UTF-8]'
+      ).ordered
+      expect(ui).to receive(:puts).at_least(:once)
+
+      cli.run
+    end
+
+    # issue #48: a declared MCP server that failed to start (or a tool whose name
+    # collided) is reported in the banner, so the run never silently pretends its
+    # MCP tools are available.
+    it 'reports MCP status notes in the banner' do
+      cli = build_cli
+      allow(cli.harness).to receive(:mcp_status_notes).and_return(
+        ["MCP server 'fs' failed to start (RuntimeError: boom)"]
+      )
+      allow(cli).to receive(:get_command).and_return(nil)
+
+      expect(ui).to receive(:puts).with(
+        "  [mcp] MCP server 'fs' failed to start (RuntimeError: boom)"
       ).ordered
       expect(ui).to receive(:puts).at_least(:once)
 

@@ -366,6 +366,60 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  # issue #48: external MCP servers. Opt-in: an empty list means the MCP code
+  # path never runs. Each entry normalizes to { name:, command:, args:, env: }.
+  describe '#mcp_servers (issue #48)' do
+    it 'is empty when the key is absent (no MCP code path runs)' do
+      expect(described_class.new({}).mcp_servers).to eq([])
+    end
+
+    it 'is empty for an explicit empty list' do
+      expect(described_class.new(mcp_servers: []).mcp_servers).to eq([])
+    end
+
+    it 'normalizes a full entry (name, command, args, env)' do
+      cfg = described_class.new(mcp_servers: [
+        { name: 'fs', command: 'npx', args: ['-y', 'srv'], env: { 'KEY' => 'v' } }
+      ])
+      expect(cfg.mcp_servers).to eq(
+        [{ name: 'fs', command: 'npx', args: ['-y', 'srv'], env: { 'KEY' => 'v' } }]
+      )
+    end
+
+    it 'defaults args to [] and env to {} when they are omitted' do
+      cfg = described_class.new(mcp_servers: [{ name: 'fs', command: 'ruby' }])
+      expect(cfg.mcp_servers).to eq(
+        [{ name: 'fs', command: 'ruby', args: [], env: {} }]
+      )
+    end
+
+    it 'stringifies args and env keys (YAML may carry symbols/ints)' do
+      cfg = described_class.new(mcp_servers: [
+        { name: 'fs', command: 'ruby', args: [1, :x], env: { count: 2 } }
+      ])
+      entry = cfg.mcp_servers.first
+      expect(entry[:args]).to eq(%w[1 x])
+      expect(entry[:env]).to eq('count' => '2')
+    end
+
+    it 'raises when an entry is not a mapping' do
+      expect { described_class.new(mcp_servers: ['npx']) }
+        .to raise_error(HarnessError, /must be a mapping/)
+    end
+
+    it 'raises when an entry is missing a name or a command' do
+      expect { described_class.new(mcp_servers: [{ command: 'npx' }]) }
+        .to raise_error(HarnessError, /needs a 'name' and a 'command'/)
+      expect { described_class.new(mcp_servers: [{ name: 'fs' }]) }
+        .to raise_error(HarnessError, /needs a 'name' and a 'command'/)
+    end
+
+    it 'mentions the key in the default template (commented out)' do
+      expect(template).to include('mcp_servers')
+      expect(template).to include('Opt-in')
+    end
+  end
+
   # issue #33: web.fetch may not connect to a private / loopback / link-local
   # address unless the USER asked for it. It is a user-side posture like yolo:
   # no tool argument reaches it.

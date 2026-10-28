@@ -54,6 +54,13 @@ require_relative "harness_error"
 #   markdown_max_width: 120     # column basis for markdown tables (issue #106).
 #                               # Omit = 80% of the detected terminal width. An
 #                               # explicit count is clamped to the terminal width.
+#   mcp_servers:                # external MCP servers whose tools the model may
+#                               # call (issue #48). Opt-in: omit the key and no MCP
+#                               # code runs at all. Each entry is a stdio server:
+#     - name: filesystem        # namespace prefix for its tools ("<name>.<tool>")
+#       command: npx            # program to spawn
+#       args: ["-y", "@modelcontextprotocol/server-filesystem", "C:/path"]
+#       env: { KEY: value }     # optional extra environment for the server
 #   double_enter_submit: false # Enter on an empty last line submits the multiline buffer (issue #198)
 #   system_prompt_file: prompts/my.txt  # file with the full system prompt (issue #223)
 #                                       # overrides the built-in config/system_prompt.txt
@@ -143,6 +150,9 @@ class HarnessConfig
     # Table-width basis for markdown rendering (issue #106). nil = the renderer's
     # default (80% of the detected terminal); an explicit integer is used as-is.
     @markdown_max_width = int_or_nil(data[:markdown_max_width])
+    # External MCP servers (issue #48). Opt-in: an empty list means no MCP code
+    # path runs at all. Each entry is normalized to { name:, command:, args:, env: }.
+    @mcp_servers = normalize_mcp_servers(Array(data[:mcp_servers]))
     # issue #303: rendered-output palette name (nil = the default palette).
     # Validated by UI::Palette.validate! in the CLI, not here: this class does
     # not know the palette list and must not start requiring the UI layer.
@@ -318,6 +328,12 @@ class HarnessConfig
     @markdown_max_width
   end
 
+  # External MCP servers to connect at startup (issue #48). An empty array when
+  # none are configured - the MCP code path then never runs.
+  def mcp_servers
+    @mcp_servers
+  end
+
   # Rendered-output palette name (issue #303), or nil for the default one.
   def output_palette_name
     @output_palette
@@ -404,6 +420,32 @@ class HarnessConfig
         presence_penalty: float_or_nil(m[:presence_penalty]),
         repeat_penalty:   float_or_nil(m[:repeat_penalty]),
         streaming:        bool_or_nil(m[:streaming])
+      }
+    end
+  end
+
+  # Normalize each mcp_servers entry. A server needs a name (the tool namespace)
+  # and a command to spawn; args and env are optional. An entry missing either is
+  # a config error rather than a silently skipped server - a server the user typed
+  # but that quietly did not load would read as "my MCP tools are there" when they
+  # are not.
+  def normalize_mcp_servers(list)
+    list.map do |entry|
+      raise HarnessError, "each entry in 'mcp_servers' must be a mapping" unless entry.is_a?(Hash)
+
+      name    = nonblank(entry[:name])
+      command = nonblank(entry[:command])
+      raise HarnessError, "an mcp_servers entry needs a 'name' and a 'command'" if name.nil? || command.nil?
+
+      # An env value must be a string when it reaches the subprocess spawn.
+      env = (entry[:env].is_a?(Hash) ? entry[:env] : {})
+      env = env.transform_keys(&:to_s).transform_values(&:to_s)
+
+      {
+        name:,
+        command:,
+        args: Array(entry[:args]).map(&:to_s),
+        env:
       }
     end
   end

@@ -26,6 +26,15 @@ gem 'ratatui_ruby'
 # harness' own roles; a 'none' palette strips the ANSI (see UI::MarkdownRenderer).
 gem 'kramdown-ansi', '~> 0.7'
 
+# MCP client (issue #48): the official Model Context Protocol Ruby SDK. Used ONLY
+# when the user declares mcp_servers: in the config - the gem is required lazily
+# (see Harness#load_mcp_tools), so a run with no MCP servers never loads it.
+gem 'mcp', '~> 1.8'
+
+# The mcp gem's client requires base64, which stopped being a default gem in
+# Ruby 3.4 - without it `require "mcp"` raises LoadError under bundler.
+gem 'base64'
+
 group :development do
   gem 'rspec'
 

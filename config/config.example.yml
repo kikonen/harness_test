@@ -89,6 +89,19 @@ auto_save: true
 # whatever this says. The flag --markdown-width N overrides it.
 # markdown_max_width: 120
 
+# External MCP servers whose tools the model may call (issue #48). Opt-in: omit
+# the key (or leave it empty) and no MCP code runs at all - the mcp gem is not
+# even loaded. Each entry is a stdio server the harness spawns and handshakes
+# with at startup; its tools are exposed as "<name>.<tool>". A server that fails
+# to start is reported in the startup banner and the run continues without it.
+# name (the tool namespace) and command (the program to spawn) are required;
+# args and env are optional.
+# mcp_servers:
+#   - name: filesystem
+#     command: npx
+#     args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+#     env: { KEY: value }
+
 # Automatic retries for transient network errors.
 retry:
   count: 3                 # total attempts (1 initial + N-1 retries)
