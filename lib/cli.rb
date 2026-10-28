@@ -29,13 +29,16 @@ class CLI
   # pre-parsed options and a stubbed UI instead.
   def initialize(options = nil, ui = nil)
     @options   = options || parse_options
+
     # This console is the single sink every dialog and status line reaches (a
     # Task's drain loop renders to it, and Task.handle_request serves a dialog
     # on it). It is built BEFORE the Harness that resolves the palette, and
     # /palette + a mid-run Harness rebuild can change it, so the palette is
     # declared as a live reader (issue #388).
-    @ui        = ui || UI::Console.new(stdout: $stdout, stdin: $stdin,
-                                       palette: -> { @harness&.output_palette })
+    @ui = ui || UI::Console.new(
+      stdout: $stdout, stdin: $stdin,
+      palette: -> { @harness&.output_palette })
+
     @file_list = build_file_list
     @locator = SessionLocator.new(@options[:workdir])
     list_sessions_and_exit if @options[:list_sessions]
@@ -70,12 +73,18 @@ class CLI
                             session_id:, resume_data:)
     @history  = HistoryManager.new(@file_list.workdir, session_id:)
     @harness.history = @history
-    @commands = CommandHandler.new(harness: @harness, file_list: @file_list,
-                                   options: @options, ui: @ui,
-                                   on_resume: ->(id) { setup(resume_id: id) })
+
+    @commands = CommandHandler.new(
+      harness: @harness,
+      file_list: @file_list,
+      options: @options,
+      ui: @ui,
+      on_resume: ->(id) { setup(resume_id: id) })
+
     if resume_id
       @harness.logger.info("session resumed: #{session_id}")
       replaced&.logger&.close
+
       # issue #48: the run being replaced owns its own MCP subprocesses; close
       # them so a mid-run /resume does not leak the old server processes.
       replaced&.close_mcp
@@ -157,6 +166,7 @@ class CLI
     # Resolve the working directory first (config discovery depends on it).
     opts[:workdir] ||= Dir.pwd
     opts[:workdir] = File.expand_path(opts[:workdir])
+
     unless File.directory?(opts[:workdir])
       raise HarnessError, "working directory does not exist: #{opts[:workdir]}"
     end
@@ -226,6 +236,7 @@ class CLI
     # to the conservative value (YOLO off, bang confirmation on).
     opts[:yolo] = config.yolo_enabled?
     opts[:bang_requires_confirmation] = config.bang_requires_confirmation?
+
     # issue #33: web.fetch private-address opt-in (default off). A user-side
     # posture only - the model cannot set it and no tool argument can.
     opts[:web_fetch_allow_private] = config.web_fetch_allow_private?
@@ -242,6 +253,7 @@ class CLI
     # issue #106: markdown rendering of the assistant answer. The --markdown flag
     # already set it true; otherwise the config 'markdown' key decides (default off).
     opts[:markdown] = config.markdown_enabled? if opts[:markdown].nil?
+
     # The table-width basis: --markdown-width N > config 'markdown_max_width' >
     # nil (the renderer's default, 80% of the detected terminal).
     opts[:markdown_max_width] = config.markdown_max_width if opts[:markdown_max_width].nil?
@@ -304,8 +316,11 @@ class CLI
   # whole Harness (client, logger, tool registry) just to read a few JSON
   # files, minting a fresh random id on the way.
   def list_sessions_and_exit
-    Commands::SessionsCommand.new(harness: nil, file_list: @file_list,
-                                  options: @options, ui: @ui).handle("")
+    Commands::SessionsCommand.new(
+      harness: nil,
+      file_list: @file_list,
+      options: @options,
+      ui: @ui).handle("")
     exit 0
   end
 
@@ -322,21 +337,25 @@ class CLI
     UI::Editor.external_editor = @options[:editor]
 
     ui.puts "Harness ready. Type /help for commands, /exit to quit."
+
     # issue #217: show WHERE calls go (API type + endpoint path + base url),
     # not just the base url - a profile switch can change the API type.
     ui.puts "Model: #{harness.session_manager.active_model_name} " \
             "(#{harness.session_manager.target_display} @ #{@options[:base_url]})"
     ui.puts "Working directory: #{@file_list.workdir}"
+
     # issue #189: show the session id at startup so the user knows WHERE
     # this session's log is written (.harness/sessions/<id>/harness.log) -
     # and which id a later /save or --resume would refer to.
     ui.puts "Session: #{harness.session.session_id} (log: #{session_log_path_display})"
+
     # issue #341: a rules file that is not valid UTF-8 now LOADS (with the bad
     # bytes replaced) instead of crashing the run, so the repair has to be said
     # out loud: the prompt the model got is not byte-for-byte what harness.md holds.
     if harness.rules_repair_note
       ui.puts "  [harness.md repaired: #{harness.rules_repair_note}]"
     end
+
     # issue #276: --resume / --continue now restore the conversation during
     # construction, so the banner is where the user learns WHICH session this
     # run is (the old separate "Resumed session ..." line came from a resume
@@ -344,25 +363,30 @@ class CLI
     if resumed_run?
       ui.puts "  (resumed conversation and file list - see /session)"
     end
+
     # issue #221 review (bug 2): the shell consent posture is a fact about
     # how this run behaves, so it belongs in the startup banner next to the
     # model and the session - and the disaster floor is named with it so
     # YOLO ON is never mistaken for "nothing asks".
     ui.puts "Command consent: #{consent_posture_display}"
+
     # issue #303: same reasoning - which palette this run renders with is a
     # fact about the run, and /palette is the way to change it mid-session.
     ui.puts "Output palette: #{@harness.output_palette.name} (/palette <name> switches it)"
+
     # issue #28: same reasoning - whether this run streams responses decides
     # what the user sees while the model is writing, and /stream switches it.
     ui.puts "LLM responses: #{@harness.stream? ? 'streamed (/stream off buffers them)' \
               : 'buffered (/stream on shows each part as it arrives)'}"
     ui.puts "Tip: type a plain message (no /) to send it directly to the model."
+
     # issue #48: MCP servers the user declared. Each connected server and each
     # problem (a failed start, a name collision) is reported here, so the run
     # never silently pretends its MCP tools are available.
     @harness.mcp_status_notes.each do |note|
       ui.puts "  [mcp] #{note}"
     end
+
     ui.puts "Tip: Enter adds a newline; paste multiline text directly. The " \
          "submit key sends the whole buffer: Ctrl+Enter (Windows console, or " \
          "to a remote host via Windows Terminal) or Alt/AltGr+Enter (Unix " \
@@ -370,6 +394,7 @@ class CLI
     ui.puts "Tip: a line starting with ! runs a shell command locally (not sent " \
          "to the model)."
     ui.puts "Tip: a line starting with / is a command (executed immediately)."
+
     # issue #36 / #198 phase 1: steer a running turn instead of Ctrl+C -
     # any keypress while the model works opens the note editor (see /help).
     ui.puts "Tip: type a note while the model is working to steer it mid-turn " \
@@ -430,8 +455,10 @@ class CLI
   # Each run owns its grant list: startup and a mid-run /resume build it the
   # same way (one expression of the empty state a session file fills in).
   def build_file_list
-    FileList.new([], workdir: @options[:workdir],
-                 protected_dirs: @options[:protected_dirs])
+    FileList.new(
+      [],
+      workdir: @options[:workdir],
+      protected_dirs: @options[:protected_dirs])
   end
 
   # issue #189: the log path relative to the workdir (absolute paths would
@@ -515,9 +542,11 @@ class CLI
       # conversation (nothing to measure yet). The old "harness:" label is
       # dropped - with the model name on the line it adds no information.
       model  = @harness.session_manager.active_model_name
+
       # issue #219: the effective reasoning effort is visible in the modeline
       # so a /param tweak (or the profile default) is visible at a glance.
       effort = @harness.session_manager.param_overrides.reasoning_effort_display
+
       # The posture tags come from the SAME builder the spinner badge uses
       # (Task.mode_badge), so the consent AND streaming tags cannot read
       # differently in the two places. They live in the prompt too because the
@@ -532,8 +561,9 @@ class CLI
       ui.puts ctx ? "#{ctx} #{prefix}" : prefix
       ui.flush
 
-      result = UI::Editor.new(ui.stdin)
-                         .read_multiline(prompt: "  ", prefill: @idle_draft)
+      result = UI::Editor
+        .new(ui.stdin)
+        .read_multiline(prompt: "  ", prefill: @idle_draft)
 
       # Ctrl+A toggled the command-consent mode while the prompt was open:
       # ack it and re-prompt (no command was typed). The spinner badge for
