@@ -62,8 +62,7 @@ require_relative "session_manager"
 require_relative "state_migrator"
 require_relative "safety_check"
 require_relative "text_normalizer"
-require_relative "mcp/server_connection"
-require_relative "mcp/tool_adapter"
+require_relative "mcp/manager"
 
 # -- Harness --------------------------------------------------------------
 
@@ -88,10 +87,10 @@ class Harness
   # rules_repair_note: what the LAST rules-file read had to replace (nil when the
   # file was clean). A repair must not be silent - the prompt the model was given
   # is then not byte-for-byte what harness.md holds.
-  # mcp_status_notes: what the MCP startup had to report (a server that failed to
-  # start, a tool name that collided). Printed in the CLI banner.
+  # mcp: the Mcp::Manager that owns the declared servers, their connections and
+  # startup notes (issue #48). The MCP machinery lives there, not in Harness.
   attr_reader :options, :logger, :tool_registry, :file_list, :session, :session_manager,
-              :client, :skills, :memories, :plans, :rules_repair_note, :mcp_status_notes
+              :client, :skills, :memories, :plans, :rules_repair_note, :mcp
   attr_accessor :history
 
   # Only one note is in flight: a new assignment replaces the note that has
@@ -128,11 +127,9 @@ class Harness
     @user_notes    = []
     StateMigrator.run(@file_list.workdir, HARNESS_DIR)
     @logger        = build_logger
-    # MCP servers the user declared in config (issue #48). Built inside
-    # build_tool_registry (load_mcp_tools); the connections live here so the
-    # run can close them on exit, and the notes are what the banner reports.
-    @mcp_connections = []
-    @mcp_status_notes = []
+    # The MCP machinery (issue #48) lives in its own object; build_tool_registry
+    # asks it to connect the declared servers and register their tools.
+    @mcp = Mcp::Manager.new(@logger)
     @tool_registry = build_tool_registry
     @client        = LLMClient.new(options, @logger)
     @session_manager = SessionManager.new(self, file_list)
@@ -247,7 +244,7 @@ class Harness
     registry.register(Tools::PlanAddTool.new(@plans))
     registry.register(Tools::PlanDeleteTool.new(@plans))
     registry.register(Tools::PlanSearchTool.new(@plans))
-    load_mcp_tools(registry)
+    @mcp.load(registry, options[:mcp_servers])
     registry
   end
 
@@ -875,74 +872,18 @@ class Harness
     lines.join("\n")
   end
 
-  # Close every MCP server subprocess this run spawned (issue #48), so a
-  # spawned server is not left running after the CLI exits. Public: the CLI
-  # calls it on shutdown.
+  # Thin delegators to the Mcp::Manager (issue #48). The CLI calls close_mcp on
+  # shutdown and reads mcp_status_notes for the banner; the machinery itself
+  # lives in Mcp::Manager, not here.
   def close_mcp
-    @mcp_connections.each(&:close)
-    @mcp_connections = []
+    @mcp.close
+  end
+
+  def mcp_status_notes
+    @mcp.status_notes
   end
 
   private
-
-  # Connect the MCP servers the user declared in config (issue #48). Opt-in:
-  # with no mcp_servers: configured this returns BEFORE the `mcp` gem is even
-  # required, so a run without MCP servers never loads it. Each server is its
-  # own namespace ("<server>.<tool>"); a tool whose name collides with a
-  # built-in is skipped (the built-in wins) and reported, and a server that
-  # fails to start degrades to a status note rather than crashing the run.
-  def load_mcp_tools(registry)
-    servers = Array(options[:mcp_servers])
-    return if servers.empty?
-
-    begin
-      require("mcp")
-    rescue LoadError => e
-      @mcp_status_notes << "mcp gem could not be loaded (#{e.message}) - no MCP tools"
-      logger.warn("mcp gem require failed: #{e.message}")
-      return
-    end
-
-    servers.each { |server| connect_mcp_server(registry, server) }
-  end
-
-  # One server: spawn + handshake + tools/list, then register each tool. A
-  # connect failure closes the (possibly half-spawned) subprocess and records a
-  # note; the run continues without that server's tools.
-  def connect_mcp_server(registry, server)
-    connection = Mcp::ServerConnection.new(
-      name: server[:name], command: server[:command],
-      args: server[:args], env: server[:env]
-    )
-    begin
-      mcp_tools = connection.connect
-    rescue StandardError => e
-      connection.close
-      @mcp_status_notes << "MCP server '#{server[:name]}' failed to start (#{e.class}: #{e.message})"
-      logger.warn("MCP server '#{server[:name]}' failed to start: #{e.class}: #{e.message}")
-      return
-    end
-    @mcp_connections << connection
-
-    registered = 0
-    mcp_tools.each do |mcp_tool|
-      adapter = Mcp::ToolAdapter.new(
-        server_name: server[:name],
-        mcp_tool:,
-        connection:
-      )
-      if registry.get(adapter.name)
-        @mcp_status_notes << "skipped MCP tool '#{adapter.name}' (name collides with a built-in tool)"
-        logger.warn("MCP tool name collision: #{adapter.name}")
-        next
-      end
-      registry.register(adapter)
-      registered += 1
-    end
-    note = "MCP server '#{server[:name]}' connected: #{registered} tool(s)"
-    @mcp_status_notes << note
-    logger.info(note)
-  end
 
   # One LLM request. The streaming posture applies to THIS request only, so a
   # streamed turn publishes its live tail for the spinner. The preview is

@@ -2379,7 +2379,9 @@ RSpec.describe Harness do
       expect(h.mcp_status_notes).to include(
         "skipped MCP tool 'file.read' (name collides with a built-in tool)"
       )
-      expect(File.read(h.session_log_path)).to include('MCP tool name collision')
+      # The note is logged once, with the same text the banner shows.
+      expect(File.read(h.session_log_path))
+        .to include("skipped MCP tool 'file.read' (name collides with a built-in tool)")
     end
 
     it 'degrades to a status note when a server fails to start' do
