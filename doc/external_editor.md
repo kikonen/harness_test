@@ -83,7 +83,7 @@ above the config key because it is the explicit override tier - the same role
 `$HARNESS_CONFIG` plays in the config-file lookup (issue #260) - and `EDITOR`
 before `VISUAL` follows the POSIX convention (`VISUAL` is the full-screen
 preference, `EDITOR` the fallback; the harness prefers the value a user set for
-a line editor). The resolution runs ONCE, in `CLI#parse_options`; the result is
+a line editor). The resolution runs ONCE, in `CLIOptions#parse`; the result is
 stored in `options[:editor]` and installed on the process-global
 `UI::Editor.external_editor` by `CLI#run`, so the idle prompt, the mid-turn note
 editor and every dialog free-text read all honour the key with no per-call
