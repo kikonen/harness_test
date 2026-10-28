@@ -420,6 +420,37 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  # issue #385: dirs the YOLO posture never auto-covers. nil (key absent) means
+  # FileList applies its default (local/); an explicit list replaces it.
+  describe '#protected_dirs (issue #385)' do
+    it 'is nil when the key is absent (FileList applies its default, local/)' do
+      expect(described_class.new({}).protected_dirs).to be_nil
+    end
+
+    it 'reads an explicit list' do
+      cfg = described_class.new(protected_dirs: %w[secrets private])
+      expect(cfg.protected_dirs).to eq(%w[secrets private])
+    end
+
+    it 'an explicit empty list is honored (protects nothing), distinct from nil' do
+      expect(described_class.new(protected_dirs: []).protected_dirs).to eq([])
+    end
+
+    it 'trims a trailing slash so a config local/ still matches the prefix shape' do
+      cfg = described_class.new(protected_dirs: ['local/', 'private/'])
+      expect(cfg.protected_dirs).to eq(%w[local private])
+    end
+
+    it 'drops blank entries' do
+      cfg = described_class.new(protected_dirs: ['secrets', '', '  '])
+      expect(cfg.protected_dirs).to eq(['secrets'])
+    end
+
+    it 'mentions the key in the default template (commented out)' do
+      expect(template).to include('protected_dirs')
+    end
+  end
+
   # issue #33: web.fetch may not connect to a private / loopback / link-local
   # address unless the USER asked for it. It is a user-side posture like yolo:
   # no tool argument reaches it.

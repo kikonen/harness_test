@@ -26,10 +26,12 @@ module SensitiveFiles
   # grantable - the exemption lifts the .harness component only, never a .env* name.
   SKILLS_DIR = ".harness/skills"
 
-  # The owner's space, workdir-relative: top-level local/ and everything under it.
-  # NOT a sensitive dir - a human grant on it is legal, and today it is the human's
-  # dialog that protects it. The list exists so a posture that auto-grants the rest
-  # of the working directory leaves local/ asking (issue #274).
+  # The default entry of the posture-exemption list (FileList#protected_dirs,
+  # issue #385): the owner's space, workdir-relative. NOT a sensitive dir - a human
+  # grant on it is legal, and the human's dialog is what protects it. The list
+  # exists so a posture that auto-grants the rest of the working directory leaves
+  # these dirs asking (issue #274). Configurable via 'protected_dirs:'; this is the
+  # default when the key is absent.
   OWNER_DIR = "local"
 
   def self.sensitive?(path)
@@ -62,10 +64,11 @@ module SensitiveFiles
     !rel_path.nil? && (rel_path == SKILLS_DIR || rel_path.start_with?("#{SKILLS_DIR}/"))
   end
 
-  # True when a workdir-relative path IS the owner's space or lies inside it. Same
-  # exact-prefix shape as the zones above, so a resolved path that escaped local/
-  # (local/../analysis) does not match.
-  def self.owner_space?(rel_path)
-    !rel_path.nil? && (rel_path == OWNER_DIR || rel_path.start_with?("#{OWNER_DIR}/"))
+  # True when a workdir-relative path IS dir or lies inside it. The exact-prefix
+  # shape the zones above share, so a resolved path that escaped the dir
+  # (local/../analysis) does not match, and a nested lookalike (lib/local) does
+  # not either - only dir itself and its subtree.
+  def self.under_dir?(rel_path, dir)
+    !rel_path.nil? && !dir.nil? && (rel_path == dir || rel_path.start_with?("#{dir}/"))
   end
 end

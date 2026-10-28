@@ -117,6 +117,9 @@ RSpec.describe Commands::GrantCommand do
 
       expect(out).to include('Posture (YOLO):')
       expect(out).to include('not a stored grant')
+      # The dirs the posture leaves asking are named (issue #385); the default
+      # FileList here protects local/.
+      expect(out).to include('except sensitive paths and local/')
       expect(out).not_to include('Read only:')
     end
 

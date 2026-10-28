@@ -527,6 +527,36 @@ RSpec.describe CLI do
     end
   end
 
+  # issue #385: dirs the YOLO posture never auto-covers. Config-only. nil (key
+  # absent) means FileList applies its default (local/); an explicit list is
+  # carried through to build_file_list.
+  describe 'option resolution - protected_dirs (issue #385)' do
+    def resolve(argv)
+      original = ARGV.dup
+      ARGV.replace(argv)
+      described_class.allocate.send(:parse_options)
+    ensure
+      ARGV.replace(original)
+    end
+
+    def write_config(body)
+      path = File.join(workdir, 'prot-config.yml')
+      File.write(path, body)
+      path
+    end
+
+    it 'is nil when the config says nothing (FileList applies its default)' do
+      opts = resolve(['-m', 'test-model', '-d', workdir, '-c', write_config("model: test-model\n")])
+      expect(opts[:protected_dirs]).to be_nil
+    end
+
+    it 'carries the configured list' do
+      path = write_config("model: test-model\nprotected_dirs: [secrets, private]\n")
+      opts = resolve(['-m', 'test-model', '-d', workdir, '-c', path])
+      expect(opts[:protected_dirs]).to eq(%w[secrets private])
+    end
+  end
+
   describe '#run' do
     it 'prints the session id and its log path in the banner' do
       cli = build_cli

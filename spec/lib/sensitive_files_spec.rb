@@ -108,19 +108,22 @@ RSpec.describe SensitiveFiles do
   # The owner's own space (issue #274). NOT a sensitive dir: a human grant on it is
   # legal and today the human's dialog is what protects it. The list exists so a
   # posture that auto-covers the rest of the working directory leaves local/ asking.
-  describe '.owner_space? (the posture exemption)' do
-    it 'recognises local/ itself and anything under it' do
-      expect(described_class.owner_space?('local')).to be(true)
-      expect(described_class.owner_space?('local/handover_28.md')).to be(true)
-      expect(described_class.owner_space?('local/a/b/c.md')).to be(true)
+  # The exact-prefix helper the posture exemption uses (issue #385 generalized it
+  # from the single OWNER_DIR to a configurable list).
+  describe '.under_dir? (the posture exemption shape)' do
+    it 'recognises the dir itself and anything under it' do
+      expect(described_class.under_dir?('local', 'local')).to be(true)
+      expect(described_class.under_dir?('local/handover_28.md', 'local')).to be(true)
+      expect(described_class.under_dir?('local/a/b/c.md', 'local')).to be(true)
     end
 
-    it 'is one directory - a lookalike or a nested name is not the space' do
-      expect(described_class.owner_space?('localz')).to be(false)
-      expect(described_class.owner_space?('local-backup/x')).to be(false)
-      expect(described_class.owner_space?('lib/local/x')).to be(false)
-      expect(described_class.owner_space?('tmp/keep/1/local/x')).to be(false)
-      expect(described_class.owner_space?(nil)).to be(false)
+    it 'is one directory - a lookalike or a nested name is not under it' do
+      expect(described_class.under_dir?('localz', 'local')).to be(false)
+      expect(described_class.under_dir?('local-backup/x', 'local')).to be(false)
+      expect(described_class.under_dir?('lib/local/x', 'local')).to be(false)
+      expect(described_class.under_dir?('tmp/keep/1/local/x', 'local')).to be(false)
+      expect(described_class.under_dir?(nil, 'local')).to be(false)
+      expect(described_class.under_dir?('local', nil)).to be(false)
     end
   end
 

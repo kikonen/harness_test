@@ -166,6 +166,16 @@ retry:
 # above - not part of any posture.)
 # yolo: false
 
+# Workdir-relative dirs the YOLO posture never auto-covers (issue #385). The
+# posture covers read/write/delete across the working directory without asking,
+# but these dirs keep their consent dialog in every posture - a human grant can
+# still cover them, only the auto-approval is blocked. Omit the key and the
+# default is the owner's space (local/). An explicit list replaces the default;
+# an explicit empty list protects nothing.
+# protected_dirs:
+#   - local
+#   - secrets
+
 # The `! cmd` bang syntax keeps its confirmation dialog (default true).
 # Set false and a user-typed bang command runs immediately - the human's
 # own typing is already the consent. The disaster denylist still applies.

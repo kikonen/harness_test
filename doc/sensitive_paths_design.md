@@ -109,10 +109,12 @@ trail, and it reproduces on every future git measurement).
 `local/` is a THIRD kind of region, and it is NOT a sensitive path. A human grant
 on it is legal - the harness.md rule "local/ is the owner's space (never write,
 never delete)" was a rule for the model, and today the human's own dialog is what
-enforces it. `SensitiveFiles::OWNER_DIR` names it for ONE purpose: the YOLO posture
-covers read, write and delete inside the working directory without asking (#274),
-and an auto-approval must not quietly remove the veto the user kept there. So the
-posture leaves `local/` asking, exactly as a MANUAL run does.
+enforces it. It is the DEFAULT entry of the posture-exemption list (issue #385):
+the YOLO posture covers read, write and delete inside the working directory
+without asking (#274), and an auto-approval must not quietly remove the veto the
+user kept there. So the posture leaves these dirs asking, exactly as a MANUAL run
+does. The list is configurable via `protected_dirs:` in the config; `local` is
+what `FileList` applies when the key is absent.
 
 The three regions a posture never covers, and what each one protects:
 
@@ -122,10 +124,12 @@ The three regions a posture never covers, and what each one protects:
 | `local/` | yes | no | the owner's space: the dialog IS the protection |
 | outside the workdir | yes, after an explicit "OUTSIDE the working directory - granting access may be a sandbox escape" warning | no | a posture loosens consent INSIDE the sandbox; an escape route stays a decision the user makes by name |
 
-`SensitiveFiles.owner_space?(rel)` uses the same exact-prefix shape as the two zone
+`FileList#protected_space?` checks each protected dir with
+`SensitiveFiles.under_dir?(rel, dir)`, the same exact-prefix shape as the two zone
 tests, so `local/../analysis` (which `relative_path` has already resolved away) is
-not the owner's space, and `analysis/local/` is not either - only top-level `local/`
-and its subtree are.
+not under `local/`, and `analysis/local/` is not either - only the named dir and
+its subtree are. An explicit `protected_dirs:` list replaces the default; an
+explicit empty list protects nothing.
 
 ## What the YOLO posture covers (issue #274)
 
@@ -143,7 +147,7 @@ contract:
 - it requires `within_workdir?`, so the workdir is the outer bound of the coverage
   (the workdir itself has no relative form, and a `nil` rel is what makes the whole
   tree covered - that is the point of the posture);
-- it rejects `owner_space?`, so `local/` keeps its dialog;
+- it rejects `protected_space?`, so a protected dir keeps its dialog;
 - it is read LIVE through a lambda (`Harness#initialize` wires `-> { yolo? }`), so a
   `/yolo` at the idle prompt or a mid-turn flip applies to the very next tool call,
   and switching it off removes the coverage at once;
@@ -178,9 +182,10 @@ now explicit:
 - `spec/lib/sensitive_files_spec.rb` - the name test (basename patterns, any
   component) and the zone pattern, including the `<n>`-required cases and the
   lookalike directories.
-- `spec/lib/sensitive_files_spec.rb` also pins `owner_space?`: top-level `local/`
-  and its subtree match, `analysis/local/` does not, and a resolved path that
-  escaped it (`local/../analysis`) does not either.
+- `spec/lib/sensitive_files_spec.rb` also pins `under_dir?`: the dir and its
+  subtree match, a lookalike (`localz`) and a nested name (`lib/local`) do not,
+  and a resolved path that escaped it (`local/../analysis`) does not either.
+  `spec/lib/file_list_spec.rb` pins the configurable `protected_dirs` list.
 - `spec/lib/sensitive_files_spec.rb` also pins the git half of the rule (issue
   #347): real git in a tmp repo with this project's own `.gitignore`, asserting
   both scratch zones stay out of the repo while `analysis/<n>/` is trackable, and

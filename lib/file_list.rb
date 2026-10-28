@@ -86,7 +86,7 @@ class FileList
 
   attr_reader :workdir
 
-  def initialize(initial = [], workdir: Dir.pwd)
+  def initialize(initial = [], workdir: Dir.pwd, protected_dirs: nil)
     @workdir = File.expand_path(workdir)
     # grants[mode] -> { files: [...], dirs: [...] } of canonical paths.
     # "dirs" grants are recursive (cover every file under the directory).
@@ -96,6 +96,11 @@ class FileList
                 d: { files: [], dirs: [], flat_dirs: [] } }
     @posture = nil
     @posture_announced = { r: false, w: false, d: false }
+    # Workdir-relative dirs the posture never auto-covers (issue #385): a human
+    # grant may still cover them, but an auto-approval must not quietly remove the
+    # veto the user kept there. nil = the default (the owner's space, local/);
+    # the config 'protected_dirs:' key supplies the list.
+    @protected_dirs = protected_dirs.nil? ? [SensitiveFiles::OWNER_DIR] : protected_dirs
     initial.each { |f| add_file(f, :rw) }
   end
 
@@ -567,6 +572,12 @@ class FileList
     display_path(@workdir)
   end
 
+  # The workdir-relative dirs the posture never auto-covers (issue #385). Public
+  # so /grant can name them.
+  def protected_dirs
+    @protected_dirs
+  end
+
   private
 
   # The YOLO coverage (issue #274): a path INSIDE the working directory is covered
@@ -584,10 +595,19 @@ class FileList
     return false unless within_workdir?(path)
 
     rel = relative_path(path)
-    return false if rel && SensitiveFiles.owner_space?(rel)
+    # A protected dir (issue #385) keeps its dialog in every posture.
+    return false if rel && protected_space?(rel)
 
     announce_posture(mode)
     true
+  end
+
+  # True when a workdir-relative path lies inside any protected dir (issue #385).
+  # Each dir uses the exact-prefix shape SensitiveFiles.under_dir? applies to the
+  # zones, so a resolved path that escaped it (local/../analysis) and a nested
+  # lookalike (lib/local) are not protected.
+  def protected_space?(rel)
+    @protected_dirs.any? { |dir| SensitiveFiles.under_dir?(rel, dir) }
   end
 
   # An auto-approval must leave a trace, the rule YOLO's shell runs follow (issue

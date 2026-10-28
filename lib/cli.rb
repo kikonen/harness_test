@@ -250,6 +250,10 @@ class CLI
     # MCP code path never runs (the gem is not even loaded).
     opts[:mcp_servers] = config.mcp_servers
 
+    # issue #385: dirs the YOLO posture never auto-covers. Config-only. nil (key
+    # absent) = FileList's default (local/); an explicit list replaces it.
+    opts[:protected_dirs] = config.protected_dirs
+
     opts[:compact_recent] ||= config.compact_recent_messages
     opts[:compact_auto_threshold] = config.compact_auto_threshold
     opts[:compact_max_size] = config.compact_max_size
@@ -426,7 +430,8 @@ class CLI
   # Each run owns its grant list: startup and a mid-run /resume build it the
   # same way (one expression of the empty state a session file fills in).
   def build_file_list
-    FileList.new([], workdir: @options[:workdir])
+    FileList.new([], workdir: @options[:workdir],
+                 protected_dirs: @options[:protected_dirs])
   end
 
   # issue #189: the log path relative to the workdir (absolute paths would

@@ -288,6 +288,39 @@ RSpec.describe FileList do
       end
     end
 
+    # issue #385: the protected list is configurable. An explicit list replaces
+    # the default (local/), so a different dir keeps its dialog and local/ is no
+    # longer special unless named.
+    it 'honours a configured protected_dirs list instead of the default' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir, protected_dirs: %w[secrets private])
+        list.posture = -> { true }
+        expect(list.readable?('secrets/key.txt')).to be(false)
+        expect(list.writable?('private/a/b.md')).to be(false)
+        # local/ is no longer protected unless named - it is covered now.
+        expect(list.readable?('local/handover.md')).to be(true)
+        # A normal workdir path is still covered.
+        expect(list.readable?('lib/foo.rb')).to be(true)
+      end
+    end
+
+    it 'an explicit empty protected_dirs list protects nothing (posture covers all)' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir, protected_dirs: [])
+        list.posture = -> { true }
+        expect(list.readable?('local/handover.md')).to be(true)
+      end
+    end
+
+    it 'a human grant still covers a protected dir (the veto is posture-only)' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir, protected_dirs: %w[local])
+        list.add_file(File.join(dir, 'local', 'notes.md'), :rw)
+        expect(list.readable?('local/notes.md')).to be(true)
+        expect(list.writable?('local/notes.md')).to be(true)
+      end
+    end
+
     it 'never covers a sensitive path, whatever the posture' do
       Dir.mktmpdir do |dir|
         list, = list_with_posture(dir, true)
