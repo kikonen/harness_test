@@ -142,7 +142,8 @@ class Harness
     @user_notes    = []
     StateMigrator.run(@file_list.workdir, HARNESS_DIR)
 
-    @logger        = build_logger
+    @logger = build_logger
+
     # The MCP machinery (issue #48) lives in its own object; build_tool_registry
     # asks it to connect the declared servers and register their tools.
     @mcp = Mcp::Manager.new(@logger)
