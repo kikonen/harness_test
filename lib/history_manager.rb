@@ -2,6 +2,7 @@
 
 require "fileutils"
 require "reline"
+require_relative "error_text"
 
 # Manages persistence of Reline's command history to a file inside the
 # harness working directory. One entry per line, with backslashes and
@@ -47,8 +48,7 @@ class HistoryManager
       Reline::HISTORY << unescape(entry)
     end
   rescue StandardError => e
-    puts e.message
-    puts e.backtrace.join("\n")
+    puts ErrorText.detailed(e, "history load failed")
     # Corrupt or unreadable history - start fresh.
   end
 
@@ -74,8 +74,7 @@ class HistoryManager
       end
     end
   rescue StandardError => e
-    puts e.message
-    puts e.backtrace.join("\n")
+    puts ErrorText.detailed(e, "history save failed")
     # Ignore - history persistence is best-effort.
   end
 

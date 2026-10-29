@@ -7,6 +7,7 @@ require_relative "output_buffer"
 require_relative "ui/renderer"
 require_relative "ui/editor"
 require_relative "ui/spinner"
+require_relative "error_text"
 
 class Task
   # Default spinner message while the runner waits for the task thread.
@@ -94,7 +95,7 @@ class Task
       rescue => e
         # The event goes FIRST: a logger that cannot write must not swallow the
         # error the user is owed.
-        push_event(type: :error_ctrl, content: error_line(e))
+        push_event(type: :error_ctrl, content: ErrorText.label(e))
         record_task_error(e)
       ensure
         push_event(type: :done)
@@ -159,13 +160,7 @@ class Task
     logger = @harness.respond_to?(:logger) ? @harness.logger : nil
     return unless logger
 
-    logger.error("task thread raised #{error_line(error)}\n#{Array(error.backtrace).join("\n")}")
-  end
-
-  # The ONE line the outbox and the console carry: a backtrace there would be
-  # interleaved with the turn's own output.
-  def error_line(error)
-    "#{error.class.name}: #{error.message}"
+    logger.error(ErrorText.detailed(error, "task thread raised"))
   end
 
   # Push a typed event onto the single event queue (the outbox). This is the

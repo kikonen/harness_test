@@ -6,6 +6,7 @@ require_relative "harness_error"
 require_relative "cli_options"
 require_relative "harness"
 require_relative "file_list"
+require_relative "error_text"
 require_relative "history_manager"
 require_relative "session_locator"
 require_relative "command_handler"
@@ -195,17 +196,27 @@ class CLI
           commands.handle(input)
         rescue Interrupt
           ui.puts "\n  [interrupted]"
-        rescue HarnessError => e
-          ui.puts "  [error] #{e.message}"
+          @harness.logger.info("command interrupted (Ctrl+C)")
+        # LLMError and ToolLoopError are subclasses of HarnessError, so they
+        # MUST be rescued before it or the HarnessError branch swallows them
+        # and their specific hint never prints.
         rescue LLMError => e
+          @harness.logger.warn("LLM error: #{e.class.name}: #{e.message}")
           ui.puts "  [LLM error] #{e.message}"
           ui.puts "  (everything up to this point is kept in the session - type /retry"
           ui.puts "   to resume from exactly there, including tool work already done)"
         rescue ToolLoopError => e
+          @harness.logger.warn("tool loop: #{e.class.name}: #{e.message}")
           ui.puts "  [tool loop] #{e.message}"
+        rescue HarnessError => e
+          @harness.logger.warn("command error: #{e.class.name}: #{e.message}")
+          ui.puts "  [error] #{e.message}"
         rescue StandardError => e
+          # A crash the harness did not expect: full backtrace to the log, the
+          # same shape Task logs a raising thread with ("task thread raised").
+          @harness.logger.error(ErrorText.detailed(e, "unexpected error"))
           ui.puts "  [unexpected error] #{e.class}: #{e.message}"
-          ui.puts e.backtrace.join("\n")
+          ui.puts ErrorText.backtrace(e)
           ui.puts "  (harness continues - type /exit to quit)"
         end
 
@@ -218,6 +229,7 @@ class CLI
     rescue Interrupt
       # Ctrl+C at the prompt (or anywhere in the loop is waiting): treat as
       # a normal exit so that history and the session are still saved.
+      @harness.logger.info("prompt read interrupted (Ctrl+C)")
       ui.puts "\n  [interrupted]"
     end
 
