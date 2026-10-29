@@ -120,6 +120,77 @@ class CLI
     # no config key, no EDITOR/VISUAL) leaves the key exactly as Reline has it.
     UI::Editor.external_editor = @options[:editor]
 
+    print_startup_banner
+
+    begin
+      reader = PromptReader.new(ui: @ui, harness: -> { @harness })
+      loop do
+        input = reader.read
+        break if input.nil?
+
+        begin
+          commands.handle(input)
+        rescue Interrupt
+          ui.puts "\n  [interrupted]"
+          @harness.logger.info("command interrupted (Ctrl+C)")
+        # LLMError and ToolLoopError are subclasses of HarnessError, so they
+        # MUST be rescued before it or the HarnessError branch swallows them
+        # and their specific hint never prints.
+        rescue LLMError => e
+          @harness.logger.warn("LLM error: #{e.class.name}: #{e.message}")
+          ui.puts "  [LLM error] #{e.message}"
+          ui.puts "  (everything up to this point is kept in the session - type /retry"
+          ui.puts "   to resume from exactly there, including tool work already done)"
+        rescue ToolLoopError => e
+          @harness.logger.warn("tool loop: #{e.class.name}: #{e.message}")
+          ui.puts "  [tool loop] #{e.message}"
+        rescue HarnessError => e
+          @harness.logger.warn("command error: #{e.class.name}: #{e.message}")
+          ui.puts "  [error] #{e.message}"
+        rescue StandardError => e
+          # A crash the harness did not expect: full backtrace to the log, the
+          # same shape Task logs a raising thread with ("task thread raised").
+          @harness.logger.error(ErrorText.detailed(e, "unexpected error"))
+          ui.puts "  [unexpected error] #{e.class}: #{e.message}"
+          ui.puts ErrorText.backtrace(e)
+          ui.puts "  (harness continues - type /exit to quit)"
+        end
+
+        break if commands.exiting?
+
+        ui.puts
+        ui.puts "-" * 40
+        ui.puts
+      end
+    rescue Interrupt
+      # Ctrl+C at the prompt (or anywhere in the loop is waiting): treat as
+      # a normal exit so that history and the session are still saved.
+      @harness.logger.info("prompt read interrupted (Ctrl+C)")
+      ui.puts "\n  [interrupted]"
+    end
+
+    # issue #48: an MCP server is a subprocess this run spawned; closing them
+    # here is what stops a server outliving the CLI.
+    @harness.close_mcp
+
+    @history.save
+    id = auto_save_session
+    ui.puts "Goodbye."
+    if id
+      ui.puts "Session saved as #{id} (#{harness.session_manager.session_file_path(id)})."
+      ui.puts "Resume it later with: #{commands.resume_command(id)}"
+    end
+    0
+  end
+
+  private
+
+  # The startup facts of the run, printed once before the prompt loop: model,
+  # endpoint, workdir, session id + log path, any harness.md repair, whether a
+  # session was resumed, the shell consent posture, the output palette, the
+  # streaming posture, MCP status, and the input/command tips. Each line names
+  # something the user cannot learn another way at a glance.
+  def print_startup_banner
     ui.puts "Harness ready. Type /help for commands, /exit to quit."
 
     # issue #217: show WHERE calls go (API type + endpoint path + base url),
@@ -185,69 +256,7 @@ class CLI
          "(Enter = newline, submit key sends the whole block as one note; " \
          "no Ctrl+C; see /help notes)."
     ui.puts
-
-    begin
-      reader = PromptReader.new(ui: @ui, harness: -> { @harness })
-      loop do
-        input = reader.read
-        break if input.nil?
-
-        begin
-          commands.handle(input)
-        rescue Interrupt
-          ui.puts "\n  [interrupted]"
-          @harness.logger.info("command interrupted (Ctrl+C)")
-        # LLMError and ToolLoopError are subclasses of HarnessError, so they
-        # MUST be rescued before it or the HarnessError branch swallows them
-        # and their specific hint never prints.
-        rescue LLMError => e
-          @harness.logger.warn("LLM error: #{e.class.name}: #{e.message}")
-          ui.puts "  [LLM error] #{e.message}"
-          ui.puts "  (everything up to this point is kept in the session - type /retry"
-          ui.puts "   to resume from exactly there, including tool work already done)"
-        rescue ToolLoopError => e
-          @harness.logger.warn("tool loop: #{e.class.name}: #{e.message}")
-          ui.puts "  [tool loop] #{e.message}"
-        rescue HarnessError => e
-          @harness.logger.warn("command error: #{e.class.name}: #{e.message}")
-          ui.puts "  [error] #{e.message}"
-        rescue StandardError => e
-          # A crash the harness did not expect: full backtrace to the log, the
-          # same shape Task logs a raising thread with ("task thread raised").
-          @harness.logger.error(ErrorText.detailed(e, "unexpected error"))
-          ui.puts "  [unexpected error] #{e.class}: #{e.message}"
-          ui.puts ErrorText.backtrace(e)
-          ui.puts "  (harness continues - type /exit to quit)"
-        end
-
-        break if commands.exiting?
-
-        ui.puts
-        ui.puts "-" * 40
-        ui.puts
-      end
-    rescue Interrupt
-      # Ctrl+C at the prompt (or anywhere in the loop is waiting): treat as
-      # a normal exit so that history and the session are still saved.
-      @harness.logger.info("prompt read interrupted (Ctrl+C)")
-      ui.puts "\n  [interrupted]"
-    end
-
-    # issue #48: an MCP server is a subprocess this run spawned; closing them
-    # here is what stops a server outliving the CLI.
-    @harness.close_mcp
-
-    @history.save
-    id = auto_save_session
-    ui.puts "Goodbye."
-    if id
-      ui.puts "Session saved as #{id} (#{harness.session_manager.session_file_path(id)})."
-      ui.puts "Resume it later with: #{commands.resume_command(id)}"
-    end
-    0
   end
-
-  private
 
   # Each run owns its grant list: startup and a mid-run /resume build it the
   # same way (one expression of the empty state a session file fills in).
