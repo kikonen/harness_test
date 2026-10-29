@@ -588,7 +588,7 @@ RSpec.describe Task do
       expect(error).to eq("NoMethodError: undefined method 'record' for nil")
       logged = log.string
       expect(logged).to include('ERROR')
-      expect(logged).to include("task thread raised NoMethodError: undefined method 'record' for nil")
+      expect(logged).to include("task thread raised: NoMethodError: undefined method 'record' for nil")
       # The frames: the raising line and the drain-loop frame that ran the block.
       expect(logged).to include('task_spec.rb')
       expect(logged).to include('lib/task.rb')
