@@ -8,6 +8,7 @@ require_relative "shared"
 require_relative "../keep_alive_http"
 require_relative "../harness_error"
 require_relative "../text_normalizer"
+require_relative "../error_text"
 require_relative "stream_accumulator"
 require_relative "stream_decoder"
 require_relative "stream_error"
@@ -116,7 +117,7 @@ module LLM
           if attempt < attempts - 1
             delay = retry_delay * (2 ** attempt)
             msg = "network error (attempt #{attempt + 1}/#{attempts}): " \
-                  "#{e.class}: #{e.message} - retrying in #{delay}s"
+                  "#{ErrorText.label(e)} - retrying in #{delay}s"
             @logger.warn msg
             sleep(delay)
             next

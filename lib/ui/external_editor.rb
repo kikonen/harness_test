@@ -5,6 +5,7 @@ require "tmpdir"
 require "fileutils"
 
 require_relative "../file_text"
+require_relative "../error_text"
 
 # -- UI::ExternalEditor ---------------------------------------------------
 #
@@ -101,7 +102,7 @@ module UI
 
       "exited with status #{code}"
     rescue StandardError => e
-      e.message
+      ErrorText.label(e)
     end
   end
 end

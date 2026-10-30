@@ -2,6 +2,7 @@
 
 require_relative "server_connection"
 require_relative "tool_adapter"
+require_relative "../error_text"
 
 module Mcp
   # Owns everything MCP-side for one harness run (issue #48): the declared
@@ -60,7 +61,7 @@ module Mcp
         mcp_tools = connection.connect
       rescue StandardError => e
         connection.close
-        msg = "MCP server '#{server[:name]}' failed to start (#{e.class}: #{e.message})"
+        msg = "MCP server '#{server[:name]}' failed to start (#{ErrorText.label(e)})"
         note(msg, :warn)
         return
       end

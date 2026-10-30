@@ -2,6 +2,7 @@
 
 require "fileutils"
 require_relative "session_manager"
+require_relative "error_text"
 
 # One-time migration of harness state that used to live scattered in the
 # working directory into the .harness directory:
@@ -44,7 +45,7 @@ class StateMigrator
   def migrate_step(step)
     yield
   rescue StandardError => e
-    warn "  [state-migrator] #{step} migration failed: #{e.class}: #{e.message}"
+    warn "  [state-migrator] #{step} migration failed: #{ErrorText.label(e)}"
   end
 
   def migrate_sessions

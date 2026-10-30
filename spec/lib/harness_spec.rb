@@ -1258,8 +1258,10 @@ RSpec.describe Harness do
       end
 
       expect(events.join("\n"))
-        .to include('in-loop compaction failed: LLM answered the summary request ' \
-                    'with a tool call (test.echo)')
+        # issue #409: a failed compaction is a KNOWN degrade, so the outbox line
+        # is the label - the class names the failure alongside its message.
+        .to include('in-loop compaction failed: HarnessError: LLM answered the ' \
+                    'summary request with a tool call (test.echo)')
       expect(File.read(h.session_log_path)).not_to include('PWNED')
       expect(client.calls.size).to eq(4) # turn, turn, summary fork, post-compact turn
     end

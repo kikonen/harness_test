@@ -567,7 +567,7 @@ class Harness
       tools: tools_payload,
       logger:)
   rescue StandardError => e
-    logger.info "safety pre-check failed (#{e.class}: #{e.message}) - continuing without verdicts"
+    logger.info "safety pre-check failed (#{ErrorText.label(e)}) - continuing without verdicts"
     nil
   end
 
@@ -612,7 +612,7 @@ class Harness
   rescue JSON::ParserError => e
     [{}, e.message]
   rescue StandardError => e
-    [{}, "#{e.class}: #{e.message}"]
+    [{}, ErrorText.label(e)]
   end
 
   # Returns true only for 'length' - the reason that makes the tool round below
