@@ -160,7 +160,7 @@ class Task
     logger = @harness.respond_to?(:logger) ? @harness.logger : nil
     return unless logger
 
-    logger.error(ErrorText.detailed(error, "task thread raised"))
+    logger.error ErrorText.detailed(error, "task thread raised")
   end
 
   # Push a typed event onto the single event queue (the outbox). This is the

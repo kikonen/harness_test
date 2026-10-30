@@ -223,6 +223,15 @@ Style/MethodCallWithArgsParentheses:
     - sleep
     - warn
     - yield
+    # A logger call reads as a sentence (receiver = who speaks, method = how
+    # loud, argument = the message), so the log-level methods omit them. No
+    # non-logger receiver in lib/ or harness.rb answers to these four plus
+    # `warn` above - measured, so the exemption cannot excuse any other call.
+    # doc/rubocop_style.md.
+    - debug
+    - error
+    - fatal
+    - info
   Exclude:
     - spec/**/*
 

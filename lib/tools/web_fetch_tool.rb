@@ -225,7 +225,7 @@ module Tools
     # the model must not retry blindly.
     def failure(host, outcome)
       status(:fail, "#{host} #{outcome}")
-      @harness&.logger&.warn("web.fetch failed (#{host}): #{outcome}")
+      @harness&.logger&.warn "web.fetch failed (#{host}): #{outcome}"
       outcome
     end
 

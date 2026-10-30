@@ -62,9 +62,9 @@ class SessionManager
     user_prompt = build_user_prompt(instruction)
 
     if @harness.options[:verbose]
-      @harness.logger.info("--- system ---\n#{@harness.session.system_prompt}")
-      @harness.logger.info("--- user ---\n#{user_prompt}")
-      @harness.logger.info("--- #{@harness.options[:model]} @ #{@harness.options[:base_url]} ---")
+      @harness.logger.info "--- system ---\n#{@harness.session.system_prompt}"
+      @harness.logger.info "--- user ---\n#{user_prompt}"
+      @harness.logger.info "--- #{@harness.options[:model]} @ #{@harness.options[:base_url]} ---"
     end
 
     @harness.session.add_user(user_prompt)
@@ -119,7 +119,7 @@ class SessionManager
       end
     end
 
-    @harness.logger.info("--- retry: re-sending session chain (#{@harness.session.messages.size} messages) ---")
+    @harness.logger.info "--- retry: re-sending session chain (#{@harness.session.messages.size} messages) ---"
     send_session
   end
 
@@ -141,7 +141,7 @@ class SessionManager
     @last_autosave = now
     begin
       save_session
-      @harness.logger.info("auto-save (#{tag})")
+      @harness.logger.info "auto-save (#{tag})"
     rescue StandardError => e
       Task.emit(
         :warn,
@@ -175,7 +175,7 @@ class SessionManager
           "LLM answered the summary request with a tool call (#{named}) instead of a summary"
     end
     if calls.any?
-      @harness.logger.info("summary call returned tool calls (#{calls.join(', ')}) - ignored")
+      @harness.logger.info "summary call returned tool calls (#{calls.join(', ')}) - ignored"
     end
 
     text.strip
@@ -228,9 +228,8 @@ class SessionManager
     # the summary itself (the valuable part) was never in the log at all.
     log_retained_window(@harness.session.messages)
 
-    @harness.logger.info(
-      "session compacted: #{before} to #{after} messages " \
-        "(summary: #{summary_text.length} chars, #{retained} recent retained)")
+    @harness.logger.info "session compacted: #{before} to #{after} messages " \
+      "(summary: #{summary_text.length} chars, #{retained} recent retained)"
 
     # issue #70: report the resulting context size so the user can verify
     # that compaction freed space without burning tokens on a follow-up.
@@ -334,9 +333,8 @@ class SessionManager
     # see INLOOP_SUMMARY_INSTRUCTION).
     log_retained_window(messages)
 
-    @harness.logger.info(
-      "in-loop compaction: #{before} -> #{messages.size} messages " \
-        "(summary: #{summary_text.length} chars)")
+    @harness.logger.info "in-loop compaction: #{before} -> #{messages.size} messages " \
+      "(summary: #{summary_text.length} chars)"
     maybe_auto_save("in-loop compact")
     true
   rescue StandardError => e
@@ -484,8 +482,8 @@ class SessionManager
   # labeled "(none)" so responses without reasoning don't leave blank
   # "--- reasoning ---" blocks.
   def log_response(reasoning:, content:)
-    @harness.logger.info("--- reasoning ---\n#{log_text_or_none(reasoning)}")
-    @harness.logger.info("--- response ---\n#{log_text_or_none(content)}")
+    @harness.logger.info "--- reasoning ---\n#{log_text_or_none(reasoning)}"
+    @harness.logger.info "--- response ---\n#{log_text_or_none(content)}"
   end
 
   def log_text_or_none(text)
@@ -504,7 +502,7 @@ class SessionManager
     lines = messages.reject { |m| m[:role] == "system" }.map do |m|
       %(#{m[:role]}:\n#{m[:content].to_s})
     end
-    @harness.logger.info("retained after compaction:\n" + lines.join("\n"))
+    @harness.logger.info "retained after compaction:\n" + lines.join("\n")
   end
 
   # -- Rules file (harness.md) ---------------------------------------------
@@ -528,7 +526,7 @@ class SessionManager
     @rules_mtime   = mtime
     new_prompt     = build_system_prompt
     @harness.session.update_system_prompt(new_prompt)
-    @harness.logger.info("harness.md reloaded (mtime changed)")
+    @harness.logger.info "harness.md reloaded (mtime changed)"
     true
   end
 
@@ -539,7 +537,7 @@ class SessionManager
   def reload_rules
     new_prompt = build_system_prompt
     @rules_mtime = current_rules_mtime
-    @harness.logger.info("system prompt reloaded (base file + harness.md, manual /reload)")
+    @harness.logger.info "system prompt reloaded (base file + harness.md, manual /reload)"
     new_prompt
   end
 
@@ -739,7 +737,7 @@ class SessionManager
     json = JSON.generate(data)
 
     File.write(path, json)
-    @harness.logger.info("session saved: #{id} (#{path})")
+    @harness.logger.info "session saved: #{id} (#{path})"
     id
   end
 

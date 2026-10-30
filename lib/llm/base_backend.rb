@@ -106,8 +106,8 @@ module LLM
 
       attempts = retry_count
       attempts.times do |attempt|
-        @logger.info("REQ: POST #{uri} (#{req.body.bytesize} bytes, " \
-                     "attempt #{attempt + 1}/#{attempts})")
+        @logger.info "REQ: POST #{uri} (#{req.body.bytesize} bytes, " \
+          "attempt #{attempt + 1}/#{attempts})"
         started = Time.now
 
         begin
@@ -117,7 +117,7 @@ module LLM
             delay = retry_delay * (2 ** attempt)
             msg = "network error (attempt #{attempt + 1}/#{attempts}): " \
                   "#{e.class}: #{e.message} - retrying in #{delay}s"
-            @logger.warn(msg)
+            @logger.warn msg
             sleep(delay)
             next
           end
@@ -127,15 +127,15 @@ module LLM
         unless resp.is_a?(Net::HTTPSuccess)
           if resp.code.to_i >= 500 && attempt < attempts - 1
             delay = retry_delay * (2 ** attempt)
-            @logger.warn("HTTP #{resp.code} (attempt #{attempt + 1}/" \
-                         "#{attempts}) - retrying in #{delay}s")
+            @logger.warn "HTTP #{resp.code} (attempt #{attempt + 1}/" \
+              "#{attempts}) - retrying in #{delay}s"
             sleep(delay)
             next
           end
           # issue #215: a client error (4xx) is terminal for the request -
           # log the server's body before raising so the failure is in
           # harness.log, not only on the console.
-          @logger.warn("LLM error (HTTP #{resp.code}):\n#{resp.body}")
+          @logger.warn "LLM error (HTTP #{resp.code}):\n#{resp.body}"
           raise LLMError, "LLM error (HTTP #{resp.code}):\n#{resp.body}"
         end
 
@@ -160,9 +160,9 @@ module LLM
         # goes to harness.log with --verbose, while the parsed reasoning /
         # content sections are ALWAYS logged by SessionManager#log_response.
         if @options[:verbose]
-          @logger.info("=" * 50)
-          @logger.info(resp.body)
-          @logger.info("=" * 50)
+          @logger.info "=" * 50
+          @logger.info resp.body
+          @logger.info "=" * 50
         end
 
         return parse_response(parsed)
@@ -183,8 +183,8 @@ module LLM
 
       attempts = retry_count
       attempts.times do |attempt|
-        @logger.info("REQ: POST #{uri} (#{req.body.bytesize} bytes, " \
-                     "attempt #{attempt + 1}/#{attempts}, streaming)")
+        @logger.info "REQ: POST #{uri} (#{req.body.bytesize} bytes, " \
+          "attempt #{attempt + 1}/#{attempts}, streaming)"
         started  = Time.now
         acc      = StreamAccumulator.new
         decoder  = StreamDecoder.new
@@ -245,26 +245,26 @@ module LLM
     def retry_streamed_status(error, attempt, attempts)
       delay = retry_delay * (2**attempt)
       if error.code >= 500 && attempt < attempts - 1
-        @logger.warn("HTTP #{error.code} (attempt #{attempt + 1}/#{attempts}) - " \
-                     "retrying in #{delay}s")
+        @logger.warn "HTTP #{error.code} (attempt #{attempt + 1}/#{attempts}) - " \
+          "retrying in #{delay}s"
         sleep(delay)
         return
       end
-      @logger.warn("LLM error (HTTP #{error.code}):\n#{error.body}")
+      @logger.warn "LLM error (HTTP #{error.code}):\n#{error.body}"
       raise LLMError, "LLM error (HTTP #{error.code}):\n#{error.body}"
     end
 
     def next_attempt_or_raise(acc, attempt, attempts, error, received)
       delay = retry_delay * (2**attempt)
       if acc.started?
-        @logger.warn("stream failed after #{received} bytes with a partial " \
-                     "answer (#{error.class}: #{error.message}) - not retrying")
+        @logger.warn "stream failed after #{received} bytes with a partial " \
+          "answer (#{error.class}: #{error.message}) - not retrying"
         raise StreamError, "stream lost after #{received} bytes: #{error.message}"
       end
       if attempt < attempts - 1
         msg = "stream error before any answer (attempt #{attempt + 1}/#{attempts}): " \
               "#{error.class}: #{error.message} - retrying in #{delay}s"
-        @logger.warn(msg)
+        @logger.warn msg
         sleep(delay)
         return
       end
@@ -272,8 +272,8 @@ module LLM
     end
 
     def log_streamed_stats(resp, received, elapsed, usage)
-      @logger.info("RESP: HTTP #{resp.code} (#{received} streamed bytes) " \
-                   "in #{format_seconds(elapsed)}s#{usage_note(usage)}")
+      @logger.info "RESP: HTTP #{resp.code} (#{received} streamed bytes) " \
+        "in #{format_seconds(elapsed)}s#{usage_note(usage)}"
     end
 
     # Subclasses: build the request body (a Hash serializable to JSON).
@@ -358,8 +358,8 @@ module LLM
     # One line per successful attempt: what was called, how big the answer
     # was, how long it took and the token counts.
     def log_response_stats(resp, parsed, elapsed)
-      @logger.info("RESP: HTTP #{resp.code} (#{resp.body.to_s.bytesize} bytes) " \
-                   "in #{format_seconds(elapsed)}s#{usage_note(usage_for(parsed))}")
+      @logger.info "RESP: HTTP #{resp.code} (#{resp.body.to_s.bytesize} bytes) " \
+        "in #{format_seconds(elapsed)}s#{usage_note(usage_for(parsed))}"
     end
 
     # The usage of one RAW parsed response, before normalization: the OpenAI
