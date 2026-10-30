@@ -441,5 +441,23 @@ RSpec.describe CLI do
 
       expect(UI::Editor.external_editor).to be_nil
     end
+
+    # issue #409: a save that raises on the exit path is an unexpected crash.
+    # The warning line alone told the user nothing, so the frames now go to
+    # this session's harness.log via ErrorText.detailed.
+    it 'logs a failed auto-save WITH ITS FRAMES in the session log' do
+      cli = build_cli
+      cli.harness.session.add_user('keep this turn')
+      allow(cli.harness.session_manager).to receive(:save_session)
+        .and_raise(RuntimeError, 'save exploded')
+      allow(ui).to receive(:puts)
+      stub_prompt_reader
+
+      expect { cli.run }.not_to raise_error
+
+      log = File.read(cli.harness.session_log_path)
+      expect(log).to include('auto-save failed: RuntimeError: save exploded')
+      expect(log).to include('cli_spec.rb')
+    end
   end
 end
