@@ -75,11 +75,11 @@ module SafetyCheck
         # "AUTO-APPROVE stopped approving" symptom with nothing to explain it.
         names = Array(message[:tool_calls]).filter_map { |tc| tc.dig(:function, :name) }
         shape = names.empty? ? "blank" : "a tool call: #{names.join(', ')}"
-        logger&.info("safety check: no verdict lines (answer was #{shape})")
+        logger&.info "safety check: no verdict lines (answer was #{shape})"
       end
       verdicts, dropped = parse_verdicts(text, commands)
       if dropped.any?
-        logger&.info("safety check: #{dropped.join('; ')}")
+        logger&.info "safety check: #{dropped.join('; ')}"
       end
       verdicts
     end

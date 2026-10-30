@@ -169,7 +169,7 @@ module Tools
     # Mandatory audit trail (issue #290): the deletion is only traceable if
     # each path lands in harness.log.
     def log(line)
-      @harness&.logger&.info("dir.delete: #{line}")
+      @harness&.logger&.info "dir.delete: #{line}"
     end
 
     # A tool built without a harness (unit specs) has nowhere to write the

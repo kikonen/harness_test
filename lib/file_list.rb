@@ -626,7 +626,7 @@ class FileList
       verdict: :ok,
       message: "auto-granted (YOLO): #{label} in the working directory"
     )
-    @audit_logger&.info("auto-granted (YOLO): #{label} access in #{@workdir}")
+    @audit_logger&.info "auto-granted (YOLO): #{label} access in #{@workdir}"
   end
 
   # True if the path itself (when it is a granted directory) or any of its

@@ -189,7 +189,7 @@ class CommandRunner
         end
       end
       status(:warn, "denylisted (auto-approval refused in every posture): #{command}")
-      @harness&.logger&.warn("denylisted command needs an explicit Allow: #{command}")
+      @harness&.logger&.warn "denylisted command needs an explicit Allow: #{command}"
       # The refusal line above printed the full command BEFORE the dialog, so
       # this run counts as already named, like an auto-approved one.
       full_shown = true
@@ -425,7 +425,7 @@ class CommandRunner
     logger = @harness&.logger
     return unless logger
 
-    logger.info("auto-approved (#{reason}): #{command}")
+    logger.info "auto-approved (#{reason}): #{command}"
   end
 
   # Issue #389: is the denylist-safe override armed? Unlike the YOLO posture it is
@@ -445,9 +445,9 @@ class CommandRunner
     logger = @harness&.logger
     return unless logger
 
-    logger.warn("denylist safe-override auto-approved " \
-                "(command_safety_denylist_safe_approve, verdict: #{verdict}): " \
-                "#{command}")
+    logger.warn "denylist safe-override auto-approved " \
+      "(command_safety_denylist_safe_approve, verdict: #{verdict}): " \
+      "#{command}"
   end
 
   # A verdict auto-approves when it is a non-empty line starting with
@@ -477,7 +477,7 @@ class CommandRunner
     results
   rescue StandardError => e
     logger = @harness&.logger
-    logger&.info("command safety check failed (#{e.class}: #{e.message}) - no verdict")
+    logger&.info "command safety check failed (#{e.class}: #{e.message}) - no verdict"
     nil
   end
 
@@ -614,7 +614,7 @@ class CommandRunner
     if stdout
       parts << "--- output ---\n#{stdout.strip.empty? ? '(none)' : stdout}"
     end
-    logger.warn("shell command failed:\n" + parts.join("\n"))
+    logger.warn "shell command failed:\n" + parts.join("\n")
   end
 
   # Runs the command in a shell with the inherited bundler env stripped

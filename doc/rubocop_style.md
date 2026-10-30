@@ -147,12 +147,23 @@ unreadable form); a call that takes none never wears them; `super` stays bare
 unless suppressing the forwarding is the point (`super()` is right only when
 zero arguments must reach the parent).
 
-Measured, the repo already followed this: all 62 `logger.*` calls parenthesised,
-zero bare; zero `super()`; six bare `super`. These cops lock in a habit rather
-than fix a defect (1 offense baselined: an optparse `separator ""` in `cli.rb`).
-`AllowedMethods` covers the calls Ruby itself writes without parens (`puts`,
-`print`, `p`, `warn`, `raise`, `exit`, `sleep`, `yield`, `emit_line`), which is
-why the config's `yield` entry never fires.
+`logger.*` is the ONE exception, by method name: `AllowedMethods` lists the five
+log-level methods (`info`, `warn`, `error`, `debug`, `fatal`) alongside the calls
+Ruby itself writes without parens (`puts`, `print`, `p`, `warn`, `raise`, `exit`,
+`sleep`, `yield`, `emit_line` - the `yield` entry never fires). A log line reads
+as a sentence: the receiver says who speaks, the method says how loud, the
+argument IS the message; the brackets only interrupt it. Measured, the exemption
+is precise: no non-logger receiver in `lib/**` or `harness.rb` answers to those
+five names, so widening `AllowedMethods` cannot excuse a paren-free call
+anywhere else. Re-measured over `lib/**` + `harness.rb` at RuboCop 1.92.0 after
+the sweep: 69 logger-level calls, 0 parenthesized (`info` 44, `warn` 20,
+`error` 4, `debug` 1).
+
+The rest is unchanged and was already true: zero `super()`; six bare `super`.
+The cops lock in a habit rather than fix a defect, so no offense is baselined
+for this cop - the `separator ""` that used to be baselined in `cli.rb` moved to
+`cli_options.rb` in #408 and its todo entry was dropped as stale (verified: a
+run without it reports no offense for this cop).
 
 ## Hash values: no `x: x` tautology
 

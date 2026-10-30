@@ -42,7 +42,7 @@ class KeepAliveHTTP < Net::HTTP
       socket.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_KEEPCNT,   KEEPALIVE_COUNT)
     rescue StandardError => e
       # TCP_KEEP* options are not available on all platforms (e.g. Windows)
-      logger.debug("TCP_KEEP* keepalive options not applied: #{e.class}: #{e.message}")
+      logger.debug "TCP_KEEP* keepalive options not applied: #{e.class}: #{e.message}"
     end
   end
 end

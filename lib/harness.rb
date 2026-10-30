@@ -205,7 +205,7 @@ class Harness
     content = TextNormalizer.normalize(source).strip
 
     @rules_repair_note = byte_repair_note(source)
-    @logger&.info("harness.md read: #{@rules_repair_note}") if @rules_repair_note
+    @logger&.info "harness.md read: #{@rules_repair_note}" if @rules_repair_note
     return base if content.empty?
 
     "#{base}\n\n## Project-Specific Rules\n\n#{content}\n"
@@ -536,7 +536,7 @@ class Harness
     # safety_verdict_for is reached, so a batch check here would pay for a
     # forked round trip whose verdicts can only be thrown away (#238's cost).
     if yolo?
-      logger.info("safety pre-check skipped (YOLO consumes no verdicts)")
+      logger.info "safety pre-check skipped (YOLO consumes no verdicts)"
       return nil
     end
 
@@ -547,9 +547,9 @@ class Harness
     return nil if unapproved.size < 2
 
     skipped = commands.size - unapproved.size
-    logger.info("safety pre-check: #{skipped} allowlisted command(s) skipped") if skipped.positive?
+    logger.info "safety pre-check: #{skipped} allowlisted command(s) skipped" if skipped.positive?
 
-    logger.info("safety pre-check (#{unapproved.size} run.command in batch)")
+    logger.info "safety pre-check (#{unapproved.size} run.command in batch)"
     Tool.push_status(
       label: "safety",
       verdict: :info,
@@ -567,7 +567,7 @@ class Harness
       tools: tools_payload,
       logger:)
   rescue StandardError => e
-    logger.info("safety pre-check failed (#{e.class}: #{e.message}) - continuing without verdicts")
+    logger.info "safety pre-check failed (#{e.class}: #{e.message}) - continuing without verdicts"
     nil
   end
 
@@ -584,8 +584,8 @@ class Harness
 
       args, parse_error = parse_tool_arguments(tc.dig(:function, :arguments))
       if parse_error
-        logger.warn("run.command arguments did not parse (#{parse_error}) - " \
-                    "this command is NOT safety pre-checked")
+        logger.warn "run.command arguments did not parse (#{parse_error}) - " \
+          "this command is NOT safety pre-checked"
         next
       end
       args["command"].to_s
@@ -628,7 +628,7 @@ class Harness
       else
         "finish reason '#{reason}' (iteration #{iteration})"
       end
-    logger.warn(message)
+    logger.warn message
     Task.emit(:warn, origin: :harness, content: message)
     reason == "length"
   end
@@ -685,7 +685,7 @@ class Harness
         note = @user_note
         @user_note = nil
         @user_notes << note
-        logger.info("user mid-turn note injected: #{note}")
+        logger.info "user mid-turn note injected: #{note}"
         messages << { role: "user", content: "User note (mid-turn): #{note}" }
         Tool.push_status(label: "note", verdict: :info, message: "sent to model")
       end
@@ -734,16 +734,16 @@ class Harness
         end
 
         if consecutive_tool_calls >= TOOL_LOOP_HARD_LIMIT
-          logger.warn("tool-loop hard limit reached (#{consecutive_tool_calls} consecutive calls to '#{current_tool_name}') - forcing final response")
+          logger.warn "tool-loop hard limit reached (#{consecutive_tool_calls} consecutive calls to '#{current_tool_name}') - forcing final response"
           loop_hard_break = true
         elsif consecutive_tool_calls >= TOOL_LOOP_WARN_THRESHOLD && !loop_warning_injected
-          logger.warn("tool-loop warning: #{consecutive_tool_calls} consecutive calls to '#{current_tool_name}' - injecting stop message")
+          logger.warn "tool-loop warning: #{consecutive_tool_calls} consecutive calls to '#{current_tool_name}' - injecting stop message"
           loop_warning_injected = true
         end
 
-        logger.info("--- tool_calls (iteration #{iteration}, consecutive: #{consecutive_tool_calls}) ---")
+        logger.info "--- tool_calls (iteration #{iteration}, consecutive: #{consecutive_tool_calls}) ---"
         message[:tool_calls].each do |tc|
-          logger.info("  calling #{tc[:function][:name]}(#{tc[:function][:arguments]})")
+          logger.info "  calling #{tc[:function][:name]}(#{tc[:function][:arguments]})"
         end
 
         assistant_msg = { role: "assistant", content: message[:content] }
@@ -825,7 +825,7 @@ class Harness
 
     args, parse_error = parse_tool_arguments(tool_call[:function][:arguments])
     if parse_error
-      logger.warn("ui.note arguments did not parse (#{parse_error}) - note not buffered")
+      logger.warn "ui.note arguments did not parse (#{parse_error}) - note not buffered"
       return
     end
     @session.add_note(args["text"])
@@ -1075,7 +1075,7 @@ class Harness
     func_name = tool_call[:function][:name]
     args, parse_error = parse_tool_arguments(tool_call[:function][:arguments])
     if parse_error
-      logger.warn("tool #{func_name} arguments did not parse (#{parse_error})")
+      logger.warn "tool #{func_name} arguments did not parse (#{parse_error})"
       if truncated
         return "error: the response was cut off by the token budget before " \
                "this call's arguments arrived complete, so the call was NOT " \
@@ -1094,12 +1094,12 @@ class Harness
 
     begin
       result = tool.execute(args)
-      logger.info("tool #{func_name} → #{result}")
+      logger.info "tool #{func_name} → #{result}"
       # A byte invalid in UTF-8 would make the NEXT JSON.generate raise -
       # including the save that should record the failure.
       TextNormalizer.normalize(result)
     rescue => e
-      logger.error(ErrorText.detailed(e, "tool #{func_name} failed"))
+      logger.error ErrorText.detailed(e, "tool #{func_name} failed")
       "error: #{ErrorText.label(e)}"
     end
   end
@@ -1111,22 +1111,22 @@ class Harness
     @session_manager.param_overrides.restore!
 
     self.yolo = data[:yolo] == true
-    logger.info("yolo posture restored: #{yolo? ? 'ON' : 'OFF'}")
+    logger.info "yolo posture restored: #{yolo? ? 'ON' : 'OFF'}"
 
     self.stream = data[:stream] == true
-    logger.info("streaming posture restored: #{stream? ? 'ON' : 'OFF'}")
+    logger.info "streaming posture restored: #{stream? ? 'ON' : 'OFF'}"
 
     # issue #106: the markdown rendering posture (a harness posture, like
     # streaming). A session saved markdown-rendered resumes markdown-rendered.
     self.markdown = data[:markdown] == true
-    logger.info("markdown posture restored: #{markdown? ? 'ON' : 'OFF'}")
+    logger.info "markdown posture restored: #{markdown? ? 'ON' : 'OFF'}"
 
     # #285: the saved per-request performance (#251) is a server measurement, so
     # a resumed session can show a recent rate immediately - a client-timed one
     # would need seconds it does not have, hence nil there.
     saved_rate = LLM::UsageStats.recent_generation_rate(data.dig(:last_stats, :performance), nil)
     @last_rate = saved_rate if saved_rate
-    logger.info("recent generation rate restored: #{last_rate_segment}") if saved_rate
+    logger.info "recent generation rate restored: #{last_rate_segment}" if saved_rate
 
     # issue #303: the palette the session was saved with. Unknown names are
     # NOT fatal here (a session saved by another build may name a palette this
@@ -1135,6 +1135,6 @@ class Harness
     restored = UI::Palette.names.include?(data[:output_palette].to_s) ? data[:output_palette] : nil
     self.output_palette = restored
 
-    logger.info("output palette restored: #{output_palette.name}")
+    logger.info "output palette restored: #{output_palette.name}"
   end
 end

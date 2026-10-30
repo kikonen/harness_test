@@ -554,10 +554,3 @@ Naming/PredicateMethod:
     - 'lib/session_manager.rb'
     - 'lib/ui/dialog.rb'
 
-# Offense count: 1
-# This cop supports safe autocorrection (--autocorrect).
-# Configuration parameters: IgnoreMacros, AllowedMethods, AllowedPatterns, IncludedMacros, IncludedMacroPatterns, AllowParenthesesInMultilineCall, AllowParenthesesInChaining, AllowParenthesesInCamelCaseMethod, AllowParenthesesInStringInterpolation, EnforcedStyle.
-# SupportedStyles: require_parentheses, omit_parentheses
-Style/MethodCallWithArgsParentheses:
-  Exclude:
-    - 'lib/cli.rb'
