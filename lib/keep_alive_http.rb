@@ -3,6 +3,8 @@
 require "net/http"
 require "logger"
 
+require_relative "error_text"
+
 # Net::HTTP with TCP keepalive enabled on the underlying socket, so that
 # long-running LLM generations are not cut off by idle-connection timeouts
 # (NATs, proxies, or the server itself dropping quiet connections).
@@ -42,7 +44,7 @@ class KeepAliveHTTP < Net::HTTP
       socket.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_KEEPCNT,   KEEPALIVE_COUNT)
     rescue StandardError => e
       # TCP_KEEP* options are not available on all platforms (e.g. Windows)
-      logger.debug "TCP_KEEP* keepalive options not applied: #{e.class}: #{e.message}"
+      logger.debug "TCP_KEEP* keepalive options not applied: #{ErrorText.label(e)}"
     end
   end
 end

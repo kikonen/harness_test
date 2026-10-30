@@ -7,6 +7,7 @@ require_relative "command_allowlist"
 require_relative "ui/dialog"
 require_relative "safety_check"
 require_relative "text_normalizer"
+require_relative "error_text"
 require_relative "ui/renderer"
 
 # Shared consent + execution logic for shell commands (issue #129).
@@ -477,7 +478,7 @@ class CommandRunner
     results
   rescue StandardError => e
     logger = @harness&.logger
-    logger&.info "command safety check failed (#{e.class}: #{e.message}) - no verdict"
+    logger&.info "command safety check failed (#{ErrorText.label(e)}) - no verdict"
     nil
   end
 

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../text_normalizer"
+require_relative "../error_text"
 
 # One stdio MCP server connection (issue #48). Owns the subprocess spawned by
 # the gem's stdio transport, the initialize handshake, the tool list, and the
@@ -47,7 +48,7 @@ module Mcp
     rescue ::MCP::Client::ServerError => e
       "error: MCP tool '#{tool_name}' failed: #{e.message}"
     rescue StandardError => e
-      "error: MCP tool '#{tool_name}' failed (#{e.class}: #{e.message})"
+      "error: MCP tool '#{tool_name}' failed (#{ErrorText.label(e)})"
     end
 
     def close

@@ -151,7 +151,7 @@ class CLI
           # A crash the harness did not expect: full backtrace to the log, the
           # same shape Task logs a raising thread with ("task thread raised").
           @harness.logger.error ErrorText.detailed(e, "unexpected error")
-          ui.puts "  [unexpected error] #{e.class}: #{e.message}"
+          ui.puts "  [unexpected error] #{ErrorText.label(e)}"
           ui.puts ErrorText.backtrace(e)
           ui.puts "  (harness continues - type /exit to quit)"
         end

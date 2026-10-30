@@ -6,6 +6,7 @@ require "fileutils"
 require_relative "harness_error"
 require_relative "session_locator"
 require_relative "param_overrides"
+require_relative "error_text"
 
 # Manages all session-related logic: prompt flow, compaction, rules file,
 # model switching, and persistence (save/resume/list).
@@ -146,7 +147,7 @@ class SessionManager
       Task.emit(
         :warn,
         origin: :session_manager,
-        content: "auto-save failed: #{e.message}")
+        content: "auto-save failed: #{ErrorText.label(e)}")
     end
   end
 
@@ -344,7 +345,7 @@ class SessionManager
     Task.emit(
       :warn,
       origin: :session_manager,
-      content: "in-loop compaction failed: #{e.message} - keeping the existing chain")
+      content: "in-loop compaction failed: #{ErrorText.label(e)} - keeping the existing chain")
     false
   end
 
@@ -468,7 +469,7 @@ class SessionManager
     Task.emit(
       :warn,
       origin: :session_manager,
-      content: "auto-compact failed: #{e.message} - try /compact manually")
+      content: "auto-compact failed: #{ErrorText.label(e)} - try /compact manually")
   end
 
   # The effective auto-compact trigger for the active window (issue #151):
