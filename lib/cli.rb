@@ -312,6 +312,7 @@ class CLI
 
     @harness.session_manager.save_session
   rescue StandardError => e
+    @harness.logger.error(ErrorText.detailed(e, "auto-save failed"))
     ui.puts "  [warning] could not auto-save session: #{e.message}"
     nil
   end

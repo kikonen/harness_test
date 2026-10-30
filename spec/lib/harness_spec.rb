@@ -636,6 +636,28 @@ RSpec.describe Harness do
 
       expect(drain_outbox(task).map { |m| m[:type] }).not_to include(:spinner_detail)
     end
+
+    # issue #409: a tool that raises is an unexpected crash - the frames are
+    # what explains it, so the log records them (ErrorText.detailed). The
+    # string returned to the model stays the one-line label: a backtrace in a
+    # tool result is noise it cannot act on, replayed on every request.
+    it 'logs a raising tool WITH ITS FRAMES and returns the label to the model' do
+      boom_tool = Class.new(Tool) do
+        define_method(:execute) { |_args| nil.record }
+      end.new(name: 'ui.notify', description: 'fake', parameters: {})
+      harness.tool_registry.register(boom_tool)
+      call = { id: 'c1', function: { name: 'ui.notify', arguments: '{}' } }
+
+      result = harness.send(:execute_tool_call, call)
+
+      expect(result).to eq(
+        "error: NoMethodError: undefined method 'record' for nil"
+      )
+      log = File.read(harness.session_log_path)
+      expect(log).to include("tool ui.notify failed: " \
+                             "NoMethodError: undefined method 'record' for nil")
+      expect(log).to include('harness_spec.rb')
+    end
   end
 
   describe '#record_note (issue #138)' do

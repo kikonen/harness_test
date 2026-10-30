@@ -62,6 +62,7 @@ require_relative "session_manager"
 require_relative "state_migrator"
 require_relative "safety_check"
 require_relative "text_normalizer"
+require_relative "error_text"
 require_relative "mcp/manager"
 
 # -- Harness --------------------------------------------------------------
@@ -1098,8 +1099,8 @@ class Harness
       # including the save that should record the failure.
       TextNormalizer.normalize(result)
     rescue => e
-      logger.error("tool #{func_name} failed: #{e.message}")
-      "error: #{e.message}"
+      logger.error(ErrorText.detailed(e, "tool #{func_name} failed"))
+      "error: #{ErrorText.label(e)}"
     end
   end
 
