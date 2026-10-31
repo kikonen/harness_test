@@ -56,6 +56,35 @@ children the git under test would otherwise spawn (issue #292:
 `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` - git's own config env mechanism,
 no global config touched).
 
+## Parallel vs serial test runs (issue #396)
+
+Two ways to run the suite, for two jobs. `bin/rspec` (serial, documentation
+format) is the default and the debugging path: it runs one file or one example
+exactly (`bin/rspec spec/lib/task_spec.rb`, `rspec -e "name"`, `--only-failures`)
+in a single process, so a failure prints in place. `bin/rspec-parallel` splits
+`spec/` across processes for a faster whole-suite run; it only ADDS that option
+and changes nothing about the serial path.
+
+The suite is slow because of subprocess/IO waits, not CPU-bound Ruby: six git
+tool specs each `git init`+commit a temp repo per example, `task_spec` carries
+drain-loop sleeps plus a `sleep 5` hang guard, `external_editor` and
+`run_command`/`command_runner` spawn real child processes. Those are wall-clock
+waits, so concurrent processes overlap them almost for free.
+
+Measured 2026-10-30 on Windows (ruby 4.0.7, 8 cores): serial 2251 examples =
+74s (`--profile`; ~1m20s in the documentation format); parallel via
+`bin/rspec-parallel` = 2251/0 in ~18-20s wall, groups balanced 233-339 specs
+each. The floor (~17s) is the slowest single file - the gem splits by FILE, so
+`task_spec` (~9s) sets a line no process count can go below. CI stays serial:
+its runners have 2 cores, so the gain there is small and a single serial job is
+easier to read.
+
+The gem balances groups automatically, but its proxy is file SIZE, not time:
+time-based grouping needs a recorded per-file runtime log, and for rspec that
+log only comes from the `RuntimeLogger` formatter, whose RSpec-2 interface
+RSpec 3.13 rejects without the deprecated `rspec-legacy_formatters` gem. Size
+already balances to within a couple of seconds here, so that gem is not added.
+
 ## Refreshing this page
 
 When `.ruby-version`, the workflow's `ruby-version:` or the runner image

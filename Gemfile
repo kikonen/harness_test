@@ -43,4 +43,9 @@ group :development do
   # trailing whitespace) is a cop set here rather than a habit each session
   # has to remember. Opinionated cops are disabled in .rubocop.yml.
   gem "rubocop", "~> 1.92"
+
+  # Parallel test runner (issue #396): splits spec/ across processes. Local-only
+  # - CI stays serial (its runners have 2 cores, so the gain there is small).
+  # Run it through bin/rspec-parallel, not the raw executable (see that script).
+  gem "parallel_tests", "~> 5.8"
 end

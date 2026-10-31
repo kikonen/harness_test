@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Parallel test runner (issue #396): the whole suite in N concurrent rspec
+# processes. It only ADDS an option - serial runs are unchanged (`bin/rspec`,
+# `bundle exec rspec`, one file, one example with -e), still the way to debug a
+# single failing spec. The gem is local-only: CI stays serial.
+#
+# Why this wrapper exists: parallel_tests auto-detects a `bin/rspec` binstub and
+# assumes a RUBY one (on Windows: `ruby -- bin/rspec`). Ours is bash, so the bare
+# `bundle exec parallel_rspec` dies in every worker with "no Ruby script found in
+# input (LoadError)". PARALLEL_TESTS_EXECUTABLE is the gem's own hook, read
+# before that detection, so it points at `bundle exec rspec` and keeps the gem's
+# process-splitting.
+set -euo pipefail
+
+# Same environment hygiene as bin/rspec (project-root Gemfile, rbenv), so the
+# suite is found from any directory and a polluted parent env cannot skew it.
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+export RBENV_DIR="$ROOT_DIR"
+if [ -d "$HOME/.rbenv/bin" ]; then
+  export PATH="$HOME/.rbenv/bin:$PATH"
+fi
+if command -v rbenv >/dev/null 2>&1; then
+  eval "$(rbenv init - bash)"
+fi
+
+if [ -f "$ROOT_DIR/Gemfile" ]; then
+  export BUNDLE_GEMFILE="$ROOT_DIR/Gemfile"
+fi
+
+# The gem splits spec/ by FILE and balances the groups automatically. Its default
+# size proxy is file SIZE, which is used here: its time-based grouping needs a
+# recorded per-file runtime log, and for rspec that log only comes from the
+# RuntimeLogger formatter, whose RSpec-2 interface RSpec 3.13 rejects without the
+# deprecated `rspec-legacy_formatters` gem - not worth adding (filesize already
+# balances to within a couple of seconds). Grouping is BY FILE, so the slowest
+# single file (task_spec, the git tools) is a floor parallel cannot go below.
+export PARALLEL_TESTS_EXECUTABLE="bundle exec rspec"
+
+cd "$ROOT_DIR"
+# Defaults: all of spec/, process count = CPU count. Pass args through, e.g.
+#   bin/rspec-parallel                # all of spec/, one process per core
+#   bin/rspec-parallel spec/ -n 4     # fewer processes
+exec bundle exec parallel_rspec "${@:-spec/}"

@@ -159,6 +159,11 @@ answer - are framed by the same 80-column gray rule that names the role
 printed untouched.
 
 `bin/rspec` runs the harness's own test suite (rspec), from any directory.
+`bin/rspec-parallel` runs the same suite split across processes for a faster
+full run (issue #396) - it only ADDS that option, so a single file or a single
+example (`bundle exec rspec spec/lib/task_spec.rb`, `-e "name"`) still runs
+serially, which is the way to debug one failing spec. Numbers and why the two
+paths differ by machine: `doc/dev_environment.md`.
 
 Type a plain message to send it to the model. Lines starting with `/` are
 commands. `/help` lists every command and topic; `/help <command>` shows one
@@ -389,6 +394,8 @@ lib/skills.rb       # the skills loader (.harness/skills) - index + body on dema
 harness.rb          # entry point
 bin/harness         # launcher (env, rbenv, bundle)
 bin/rspec           # test runner (same env hygiene as the launcher)
+bin/rspec-parallel  # same suite split across processes, local full-suite speed
+                    # (issue #396; doc/dev_environment.md)
 CHANGELOG.md        # GENERATED per-issue history, regenerated on request
                     # (doc/changelog_generation.md; harness.md holds coding rules only)
 lib/cli.rb          # option parsing, REPL loop, input handling
