@@ -125,11 +125,18 @@ RSpec.describe UI::ExternalEditor do
     end
 
     it 'leaves no scratch directory behind, even on a failing editor' do
+      # Both the editor's scratch dir and this example's leftover scan have to
+      # land in a PRIVATE temp root: a concurrent rspec process (parallel suite
+      # runs, issue #396) holds its own live harness-editor* dir in the shared
+      # one at the same moment. All three vars because Dir.tmpdir prefers
+      # TMP/TEMP over TMPDIR on Windows.
+      %w[TMP TEMP TMPDIR].each { |k| ENV[k] = @dir }
       ENV['EDITOR_FAIL'] = '1'
       begin
         described_class.new("ruby #{@script}").open('d')
       ensure
         ENV.delete('EDITOR_FAIL')
+        %w[TMP TEMP TMPDIR].each { |k| ENV.delete(k) }
       end
 
       leftovers = Dir.glob(File.join(Dir.tmpdir, 'harness-editor*'))

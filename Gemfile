@@ -44,8 +44,10 @@ group :development do
   # has to remember. Opinionated cops are disabled in .rubocop.yml.
   gem "rubocop", "~> 1.92"
 
-  # Parallel test runner (issue #396): splits spec/ across processes. Local-only
+  # Parallel test runner (issue #396): the whole suite across processes. Local-only
   # - CI stays serial (its runners have 2 cores, so the gain there is small).
-  # Run it through bin/rspec-parallel, not the raw executable (see that script).
+  # Reached through bare `bin/rspec`, not the raw executable: the gem assumes a
+  # bin/rspec binstub is RUBY and ours is bash (bin/rspec sets
+  # PARALLEL_TESTS_EXECUTABLE for that reason).
   gem "parallel_tests", "~> 5.8"
 end

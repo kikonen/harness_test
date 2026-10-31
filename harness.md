@@ -126,6 +126,16 @@ Keep this in mind:
   One spec file per class: each class gets its own `<name>_spec.rb`
   (e.g. `FileReadTool` in `file_read_tool_spec.rb`). Do NOT bundle
   tests for multiple classes into a single "catch-all" spec file.
+- Test runs (issue #396): the WHOLE suite through `bin/rspec` with no arguments -
+  it runs across processes and prints the compact progress format when piped.
+  One file or one example goes through `bin/rspec <file> [-e "name"]` - plain
+  serial rspec exactly as typed: faster for a single file, and the only mode
+  that treats `-e` as rspec's (the gem claims `-e` as its own `--execute`).
+  `PARALLEL=false bin/rspec` is the whole suite serially (what to reach for
+  when a parallel run must be reproduced). A spec that inspects machine-wide
+  state (a shared temp dir, a global ENV) must isolate it - it now runs
+  beside other processes. Numbers per machine:
+  `doc/dev_environment.md`.
 
 ## PR Workflow
 
