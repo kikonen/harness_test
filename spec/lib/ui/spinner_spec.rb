@@ -29,6 +29,11 @@ class SizedSink < StringIO
   end
 end
 
+# A sink whose reported size CHANGES between frames - a live terminal resize.
+class ResizingSink < SizedSink
+  attr_accessor :winsize
+end
+
 RSpec.describe UI::Spinner do
   # A non-capturing console for examples that only need a valid constructor
   # argument (state queries).
@@ -588,6 +593,30 @@ RSpec.describe UI::Spinner do
 
       expect(Kramdown::ANSI::Width.display_width(frames[0])).to be <= 120
       expect(Kramdown::ANSI::Width.display_width(frames[1])).to be <= 20
+    end
+
+    # Resizing the terminal mid-turn: the width is re-probed every frame, so
+    # each frame is fitted to the terminal it is actually drawn into - a wide
+    # frame is never left on screen after the terminal shrinks, and the full
+    # frame returns when it widens again.
+    it 'refits every frame after a terminal resize' do
+      sink    = ResizingSink.new(50, 160)
+      spinner = described_class.new('Sending to model', 'x' * 200,
+                                    ui: UI::Console.new(stdout: sink))
+      spinner.badge = '[STREAM]'
+      widths = [160, 60, 30, 60, 160]
+      spinner.start
+      widths.each do |columns|
+        sink.winsize = [50, columns]
+        spinner.render!
+      end
+      spinner.stop
+
+      frames = sink.string.split("\e[2K")[1..]
+      widths.each_with_index do |columns, i|
+        limit = columns - described_class::RESERVED_COLUMNS
+        expect(Kramdown::ANSI::Width.display_width(frames[i])).to be <= limit
+      end
     end
   end
 end
