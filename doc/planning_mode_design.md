@@ -208,10 +208,24 @@ Yes - a `plan.*` tool set mirroring `memory.*` (which is `memory.list` /
   capability memories deliberately omit, added here because the owner asked for
   it and a plan store is expected to outgrow a listable one.
 
-On the owner's side, `/plans [name]` lists the store and prints one plan's body
-(the same listing and body `/memory` gives). `/plan [on|off|status]` is the
-posture toggle (separate from the store commands, just as `/stream` is separate
-from any store).
+On the owner's side, `/plans [name|N]` lists the store numbered and prints one
+plan's body (the same listing and body `/memory` gives, apart from the two
+#416 details below). `/plan [on|off|status]` is the posture toggle (separate
+from the store commands, just as `/stream` is separate from any store).
+
+What #416 changed about that owner-side command:
+
+- The listing is NUMBERED and `plans <N>` opens the Nth plan of it (1-based, the
+  same sorted order the listing prints). The index is only honoured while it is
+  IN RANGE, so a plan genuinely named with digits stays reachable by name.
+  Adding or deleting a plan shifts the numbering, which is why `/plans <name>`
+  keeps working unchanged.
+- The body is a markdown FILE, so it is RENDERED rather than dumped: with a
+  palette the headings/bold/code/lists are styled, palette `none` (--no-color)
+  renders plain marker-free text, and only a harness that answers no palette at
+  all (a spec double, a bare console) prints the file verbatim. `/memory` and
+  `/skills` print their bodies the old verbatim way - the same three copies of
+  one bug, deliberately left for a follow-up rather than folded into this one.
 
 **Read-on-demand vs injected.** A `plan.*` tool set means a stored plan is read
 when asked, not injected into every prompt - the same "never injected" rule
@@ -322,7 +336,8 @@ independent.
 ## Where it would surface (if built)
 
 - `/plan [on|off|status]` - toggle the planning posture.
-- `/plans [name]` - list the durable store, or print one plan's body.
+- `/plans [name|N]` - list the durable store numbered, or print one plan's body
+  by name or by its listing number.
 - `plan.list` / `plan.read` / `plan.add` / `plan.write` / `plan.delete` /
   `plan.search` - the model's side of the store.
 - `[PLAN]` tag in the prompt line and spinner badge (via `Task.mode_badge`, the
