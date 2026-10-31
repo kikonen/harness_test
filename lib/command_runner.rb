@@ -247,7 +247,11 @@ class CommandRunner
         title: "Always allow '#{p}'",
         # Unique per prefix so a multi-select answer maps back to the
         # exact prefixes chosen (issue #102).
-        value: { always_allow: p }
+        value: { always_allow: p },
+        # A DIRECTORY glob is the broadest offer the dialog makes, so its trust
+        # boundary is stated where it is chosen (issue #417). An exact prefix
+        # gets no description at all.
+        description: CommandAllowlist.glob_note(p)
       )
     end
 
@@ -255,13 +259,16 @@ class CommandRunner
     # stated with its KIND so the console can color it - DENYLISTED is the hard
     # floor, UNSAFE is a refusal that is not a disaster match (issue #388).
     deterministic = nil
-    # UNSAFETY_NOTE only when the command itself contains unsafe
-    # constructs (all_candidates empty). If candidates existed but were
-    # all filtered out because a stored grant already covers them, the
-    # command is fine - no scary note. When unsafe, name the specific
-    # construct instead of a generic list (issue #102).
-    if all_candidates.empty?
-      label = CommandAllowlist.classify_unsafe(command)
+    # UNSAFE only for a command that genuinely CANNOT be auto-approved: a
+    # dangerous shell construct (named, issue #102) or a parse failure. It is
+    # NOT inferred from "no candidate prefix", which used to accuse a plain
+    # path-shaped command ('bin/rspec' had no grantable prefix before
+    # issue #417) of containing unsafe constructs it does not have, and equally
+    # accused a safe command whose candidates were all filtered out because a
+    # stored grant already covers them.
+    label  = CommandAllowlist.classify_unsafe(command)
+    unsafe = label || parse_failed?(command)
+    if unsafe
       text = label ? "UNSAFE: #{label} cannot be auto-approved" : UNSAFETY_NOTE
       deterministic = UI::Dialog::Note.new(text, kind: "warn")
     end
@@ -311,6 +318,14 @@ class CommandRunner
   end
 
   private
+
+  # A command the ShellParser cannot decompose into simple segments (a danger
+  # token or a syntax error): there is no prefix to grant for it. Distinct
+  # from "no candidate" - a plain command with no grantable prefix is NOT a
+  # parse failure (issue #417). Empty input is not a failure either.
+  def parse_failed?(command)
+    !command.empty? && CommandAllowlist.split_segments(command).empty?
+  end
 
   # Status line for this caller's label ("run.command" / "shell"). Within a
   # Task thread it goes onto the event queue; on the main thread the runner
