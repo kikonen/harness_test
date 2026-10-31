@@ -50,13 +50,25 @@ require_relative "text_normalizer"
 #     through an explicit one-off "Allow". The check inspects the raw
 #     command (not only the allowlist-decomposable segments), so it also
 #     covers the unsafe constructs YOLO otherwise auto-approves.
+#     The recursive-force delete tests match the verb by BASENAME
+#     (verb_token?): 'bin/rm -rf /' is the same disaster as 'rm -rf /',
+#     because a DIRECTORY grant covers the program in that directory. A
+#     quoted PHRASE is never a verb (verb_text returns nil for it), so a
+#     commit message that merely names a path verb stays clean.
 #   YOLO posture (issue #221): switched on by the user (/yolo), it skips
 #     the consent dialog for every run.command call - except denylisted
 #     disaster commands, which keep the dialog in every posture. It is the
 #     user's own decision, never a model decision, and every auto-approved
 #     command is logged (harness.log) and status-lined.
 #   Quotes are NOT in the blocklist: they only affect argument splitting,
-#   not what runs. Operators inside quotes are literal characters.
+#     not what runs. Operators inside quotes are literal characters.
+#   DIRECTORY GLOB GRANTS (issue #417): a stored grant token of the form
+#     '<dir>/*' auto-approves every program DIRECTLY in that directory
+#     (token_matches_grant?). It is the broadest grant the harness offers:
+#     it also covers a program the model writes there LATER, so the trust
+#     boundary is stated in the dialog option (glob_note) at the moment it
+#     is chosen, and the basename disaster rule above is what keeps it from
+#     standing for 'bin/rm -rf /'.
 #
 # INTERNALS:
 #   Tokenization is done by ShellTokenizer (StringScanner-based).
@@ -78,6 +90,21 @@ class CommandAllowlist
   # with a letter. Distinguishes subcommands (status, log, exec) from
   # arguments (-la, --oneline, main, 68, spec/foo_spec.rb).
   SUBCOMMAND_TOKEN = /\A[a-z][a-z0-9]*\z/
+
+  # Issue #417: a program invoked BY PATH ('bin/rspec', './script.sh',
+  # 'C:\work\tool.exe') names the same verb as the bare word, and a grant for
+  # it may be written as a DIRECTORY glob ('bin/*'). SEPARATOR_CHARS is what a
+  # path token or a glob carries; GLOB_TOKEN is exactly one trailing '*' after
+  # a directory part, PATH_TOKEN_CHARS the shape of an unquoted path token, and
+  # PROGRAM_NAME the basename that makes a path token a PROGRAM rather than an
+  # argument ('spec/' and '2>&1' name nothing).
+  SEPARATOR_CHARS = %r{[/\\]}
+  GLOB_TOKEN      = %r{\A.*[/\\]\*\z}
+  PATH_TOKEN_CHARS = %r{\A[\w.\-:/\\]+\z}
+  PROGRAM_NAME     = /\A[a-z][a-z0-9_]*(\.\w+)?\z/i
+  # A token that looks like a URL rather than a path: 'https://evil.sh' spells
+  # no program, and a 'https://*' grant would be meaningless.
+  SCHEME           = %r{\A[a-z][a-z0-9+.-]*://}i
 
   # Separator token kinds (ShellTokenizer) - used to split a command into
   # raw segments for the disaster scan.
@@ -170,6 +197,11 @@ class CommandAllowlist
   # free of duplicates and of verbs that are not real cmd.exe commands.
   WIN_DELETE_COMMANDS = %w[del erase rd rmdir].freeze
 
+  # The POSIX twin of WIN_DELETE_COMMANDS (see recursive_force_rm?). Path verbs
+  # matter for the disaster gate because a directory grant ('bin/*') would
+  # otherwise stand for 'bin/rm -rf /' (issue #417).
+  RM_COMMANDS = %w[rm].freeze
+
   # ------------------------------------------------------------------
   # Disaster scan (issue #221)
   # ------------------------------------------------------------------
@@ -234,17 +266,110 @@ class CommandAllowlist
     recursive_force_rm?(segment)
   end
 
+  # True when a command token IS one of `verbs`: the bare word, or a PATH
+  # naming that program ('bin/rm', './rd', 'C:\work\bin\rm.exe', 'rm.exe').
+  # A path token counts by its BASENAME (the part after the last separator,
+  # '.exe' dropped, case-insensitive) because a directory grant ('bin/*')
+  # stands for every program in that directory - the mitigation the gate needs
+  # before such a grant can be OFFERED at all.
+  def self.verb_token?(token, verbs)
+    text = verb_text(token)
+    return false if text.nil?
+    return verbs.include?(bare_word(text)) unless SEPARATOR_CHARS.match?(text)
+
+    verbs.include?(bare_word(text.split(SEPARATOR_CHARS).last.to_s))
+  end
+
+  # The text a token spells as a WORD: its own text, or the text inside quotes
+  # when the whole token is ONE quoted word ('"rm"', '"/usr/bin/rm"' - quoting
+  # a verb does not change what runs). A quoted PHRASE yields nil: it names no
+  # program, which is what keeps the quoted-message rule - a commit message
+  # merely containing 'bin/rm -rf x' is not a disaster.
+  def self.verb_text(token)
+    text  = token.to_s
+    quote = text[0]
+    return text unless quote == '"' || quote == "'"
+    return nil unless text.end_with?(quote)
+
+    inner = text[1..-2].to_s
+    return nil if inner.empty? || /\s/.match?(inner)
+
+    inner
+  end
+
+  # A verb as the command names it: lower-case, without an '.exe' suffix.
+  def self.bare_word(text)
+    text.to_s.downcase.sub(/\.exe\z/, "")
+  end
+
+  # True when a token names a PROGRAM a grant could stand for. Position 0 of a
+  # segment may be a PATH program ('bin/rspec' - issue #417); later positions
+  # must look like plain subcommands, so an argument that merely contains a
+  # separator ('tmp/probe.rb', 'spec/foo_spec.rb') never joins the run.
+  def self.program_token?(token, index)
+    return true if SUBCOMMAND_TOKEN.match?(token)
+    return false unless index.zero?
+
+    path_program_token?(token)
+  end
+
+  # A PATH token whose basename names a program: 'bin/rspec', './script.sh',
+  # 'C:\work\tool.exe', '/usr/bin/rm'. A quoted or scheme-shaped token
+  # ('https://evil.sh') is never one, nor one whose basename names nothing
+  # ('spec/', '2>&1').
+  def self.path_program_token?(token)
+    text = token.to_s
+    return false if text.start_with?('"', "'")
+    return false if SCHEME.match?(text)
+    return false unless PATH_TOKEN_CHARS.match?(text) && SEPARATOR_CHARS.match?(text)
+
+    PROGRAM_NAME.match?(bare_word(text.split(SEPARATOR_CHARS).last.to_s))
+  end
+
+  # The DIRECTORY glob a single path program could be granted as, keeping the
+  # token's OWN separator: 'bin/rspec' -> 'bin/*', 'C:\work\tool.exe' ->
+  # 'C:\work\*'. A directory with a '.', '..' or EMPTY segment is refused:
+  # a glob for the current directory, one that resolves out of it
+  # ('bin/../*' is the working-tree root), or one whose spelling is not the
+  # clean directory shown to the user ('bin//evil'), would trust programs
+  # outside that directory - including one the model writes there later.
+  def self.directory_glob(token)
+    return nil unless path_program_token?(token)
+
+    text  = token.to_s
+    index = text.rindex(SEPARATOR_CHARS)
+    dir   = text[0, index.to_i]
+    return nil if dir.empty?
+    # split(-1) keeps the empty segments: an absolute path may have ONE leading
+    # empty (the root), but no empty anywhere else ('bin//evil' - the spelling
+    # is not a clean directory), and no '.' or '..' segment.
+    segments = dir.split(SEPARATOR_CHARS, -1)
+    segments = segments[1..].to_a if segments.first.to_s.empty?
+    return nil if segments.empty?
+    return nil if segments.any? { |s| s.empty? || s == "." || s == ".." }
+
+    "#{dir}#{text[index]}*"
+  end
+
+  # The dialog note for a DIRECTORY glob candidate, nil for an exact prefix:
+  # the broadest grant the dialog offers must state what it trusts AT THE
+  # MOMENT IT IS CHOSEN (issue #417).
+  def self.glob_note(candidate)
+    return nil unless GLOB_TOKEN.match?(candidate.to_s)
+
+    "covers every program in that directory, including one written there later"
+  end
+
   # cmd.exe / Windows recursive-force delete: `del /s /q C:\...`,
   # `rd /s /q dir`, `erase /s`, and their PowerShell cousins (handled by
-  # Remove-Item above). Matched on the bare command word plus its flags so
+  # Remove-Item above). Matched on the command word plus its flags so
   # `git commit -m "del /s /q"` inside quotes does not trip it - quoted
   # words are not :word-kind flags here.
   def self.win_recursive_force_delete?(segment)
     words = ShellTokenizer.tokenize(segment)
             .select { |kind, _t| kind == :word }
             .map { |_k, t| t.to_s }
-    bare  = ->(w) { w.downcase.sub(/\.exe\z/, "") }
-    idx   = words.index { |w| WIN_DELETE_COMMANDS.include?(bare.call(w)) }
+    idx   = words.index { |w| verb_token?(w, WIN_DELETE_COMMANDS) }
     return false unless idx
 
     recursive = false
@@ -259,16 +384,16 @@ class CommandAllowlist
   end
 
   # `rm` with BOTH a recursive and a force flag, in any spelling or order
-  # (rm -rf /, rm -fr tmp/, rm -r -f ..., rm --recursive --force ...).
-  # Split out from DISASTER_PATTERNS because the test is about flag
-  # combination, not a fixed phrase. Quoted arguments are skipped so a
-  # message like git commit -m "rm -rf is dangerous" is not flagged: the
-  # scan only looks at unquoted words.
+  # (rm -rf /, rm -fr tmp/, rm -r -f ..., rm --recursive --force ...), whether
+  # the verb is bare or a path ('bin/rm -rf /'). Split out from
+  # DISASTER_PATTERNS because the test is about flag combination, not a fixed
+  # phrase. Quoted arguments are skipped so a message like git commit -m
+  # "rm -rf is dangerous" is not flagged: the scan only looks at unquoted words.
   def self.recursive_force_rm?(segment)
     words = ShellTokenizer.tokenize(segment)
             .select { |kind, _t| kind == :word }
             .map { |_k, t| t.to_s }
-    rm_idx = words.index { |w| w == "rm" }
+    rm_idx = words.index { |w| verb_token?(w, RM_COMMANDS) }
     return false unless rm_idx
 
     recursive = false
@@ -353,8 +478,9 @@ class CommandAllowlist
   end
 
   # Extract the command prefix from a single safe segment string.
-  # The prefix is the leading sequence of subcommand-looking tokens, up to
-  # MAX_PREFIX_TOKENS. Stops at the first argument-looking token.
+  # The prefix is the leading sequence of program-looking tokens (subcommands,
+  # or the leading PATH token - issue #417), up to MAX_PREFIX_TOKENS. Stops at
+  # the first argument-looking token.
   def self.extract_prefix(segment)
     segment = segment.to_s.strip
     return "" unless segment_safe?(segment)
@@ -363,9 +489,9 @@ class CommandAllowlist
     words  = tokens.select { |kind, _t| kind == :word }.map { |_k, t| t }
 
     prefix = []
-    words.each do |tok|
+    words.each_with_index do |tok, index|
       break if prefix.size >= MAX_PREFIX_TOKENS
-      break unless SUBCOMMAND_TOKEN.match?(tok)
+      break unless program_token?(tok, index)
       prefix << tok
     end
     prefix.join(" ")
@@ -413,18 +539,21 @@ class CommandAllowlist
   end
 
   # The candidate prefixes for a single safe segment: every leading run
-  # of subcommand-looking tokens (1..MAX_PREFIX_TOKENS), plus - when the
-  # segment has flag-like arguments (e.g. "-c") - the invocation up to
-  # and including the first flag IF that flag is followed by an argument
-  # (e.g. "ruby -c lib/cli.rb" offers ["ruby", "ruby -c"]), but NOT when
-  # the flag is trailing (e.g. "tail -5" offers only ["tail"] - "-5" is
-  # a parameter, not a subcommand). When the subcommand run is just one
-  # token and the rest are arguments/paths (e.g. "cd C:/work/x"), the short
-  # prefix is offered alongside the full invocation (issue #249) - the user
-  # chooses whether to grant every directory or exactly what they typed.
-  # When the run hit the MAX_PREFIX_TOKENS cap and the next token is also
-  # a subcommand, the full invocation is appended as an exact-match option
-  # (e.g. "a b c d e" offers "a", "a b", "a b c", "a b c d e").
+  # of program-looking tokens (1..MAX_PREFIX_TOKENS: subcommands, or a leading
+  # PATH program - issue #417), plus these options:
+  #   * the whole invocation when the run is a single program and the rest are
+  #     arguments ("cd C:/work/x", the issue #249 shape "ruby tmp/probe.rb");
+  #   * the invocation up to and INCLUDING the first flag, but only when that
+  #     flag directly follows the run ("ruby -c" is a different grant from bare
+  #     "ruby"; a flag buried in the arguments - "bin/rspec spec/x -e" - would
+  #     only ever authorize THAT command, so it is not offered);
+  #   * the run's DIRECTORY glob when the run is one path program
+  #     ("bin/rspec" -> "bin/*"), which is what makes a grant useful for the
+  #     harness' own bin/ scripts (issue #417).
+  # A trailing flag ("tail -5") is just a parameter - never offered. When the
+  # run hit the MAX_PREFIX_TOKENS cap and the next token is also a subcommand,
+  # the full invocation is appended as an exact-match option (e.g.
+  # "a b c d e" offers "a", "a b", "a b c", "a b c d e").
   def self.prefix_lengths(segment)
     segment = segment.to_s.strip
     return [] unless segment_safe?(segment)
@@ -435,13 +564,22 @@ class CommandAllowlist
 
     flag_idx = words.index { |w| w.start_with?("-") }
 
-    # Collect the leading run of subcommand-looking tokens.
-    lengths = []
-    (1..MAX_PREFIX_TOKENS).each do |n|
-      break if n > words.size
-      break unless words[0...n].all? { |w| SUBCOMMAND_TOKEN.match?(w) }
-      lengths << words[0...n].join(" ")
+    # The leading run of program tokens. A PATH program ('bin/rspec') is ONE
+    # token: whatever follows it is its arguments, even a word that would
+    # otherwise read as a subcommand ('bin/rspec spec -e'). A bare-word run
+    # continues over subcommand-looking tokens only ('bundle exec rspec'),
+    # never over an argument that happens to be a path ('ruby tmp/probe.rb').
+    run_size = 0
+    if path_program_token?(words[0])
+      run_size = 1
+    else
+      words.each_with_index do |word, index|
+        break if run_size >= MAX_PREFIX_TOKENS
+        break unless program_token?(word, index)
+        run_size += 1
+      end
     end
+    lengths = (1..run_size).map { |n| words[0...n].join(" ") }
 
     # Single subcommand + non-subcommand args (e.g. "cd C:/work/x", or the
     # issue #249 shape "ruby tmp/issue240_probe.rb"): offer the short prefix
@@ -452,12 +590,18 @@ class CommandAllowlist
       lengths << full unless lengths.include?(full)
     end
 
-    # When the first flag is followed by an argument, include it in the
-    # prefix: "ruby -c" is a different grant than bare "ruby". A trailing
-    # flag (e.g. "tail -5") is just a parameter - don't offer it.
-    if flag_idx && flag_idx < words.size - 1
+    # The first flag directly after the run, and followed by an argument:
+    # "ruby -c" is a different grant than bare "ruby". A flag inside the
+    # arguments is not a grant shape at all.
+    if flag_idx && flag_idx == run_size && flag_idx < words.size - 1
       with_flag = words[0..flag_idx].join(" ")
       lengths << with_flag unless lengths.include?(with_flag)
+    end
+
+    # A program invoked by path also gets its DIRECTORY glob: 'bin/rspec'
+    # alone would authorize one exact invocation, which is not a grant.
+    if run_size == 1 && (glob = directory_glob(words[0]))
+      lengths << glob unless lengths.include?(glob)
     end
 
     # The subcommand run hit the MAX_PREFIX_TOKENS cap and the next
@@ -521,7 +665,12 @@ class CommandAllowlist
   #     candidate 'git' - saving 'git' would make the stored 'git log'
   #     entry dead weight, so it is not offered).
   # Candidates in a DIFFERENT command tree are kept (issue #164): a
-  # stored 'gh issue view' must not hide an unrelated 'git remote'.
+  # stored 'gh issue view' must not hide an unrelated 'git remote'. A stored
+  # DIRECTORY glob covers every program of that directory, so its exact
+  # candidates are dropped (issue #417); the reverse is NOT dropped - a glob
+  # candidate next to a narrower stored grant ('bin/*' beside 'bin/harness')
+  # genuinely adds behaviour, and refusing it would leave no way to widen a
+  # grant from the dialog.
   def filter_uncovered(candidates)
     (candidates || []).reject do |cand|
       cand = cand.to_s.strip
@@ -536,18 +685,45 @@ class CommandAllowlist
         # of the other - either the candidate is already covered by the
         # stored grant, or it would cover the stored grant.
         self.class.starts_with_tokens?(stored_tokens, c_tokens) ||
-          self.class.starts_with_tokens?(c_tokens, stored_tokens)
+          self.class.grant_covers_tokens?(c_tokens, stored_tokens)
       end
     end
   end
 
-  # True when `head` starts with every token of `prefix`. Used by
-  # filter_uncovered to detect token-level subsumption in either
+  # True when `head` starts with every token of `prefix`, token for token.
+  # Used by filter_uncovered to detect token-level subsumption in either
   # direction (issue #164).
   def self.starts_with_tokens?(head, prefix)
     return false if prefix.empty? || head.size < prefix.size
 
     (0...prefix.size).all? { |i| head[i] == prefix[i] }
+  end
+
+  # True when the stored grant `grant` covers the candidate `candidate` token
+  # for token (issue #417): the only glob-aware direction, because only a
+  # STORED grant can be a directory glob.
+  def self.grant_covers_tokens?(candidate, grant)
+    return false if grant.empty? || candidate.size < grant.size
+
+    (0...grant.size).all? { |i| token_matches_grant?(candidate[i], grant[i]) }
+  end
+
+  # True when the command token `token` is authorized by the stored grant
+  # token `grant`: exact equality, or a DIRECTORY glob grant ('bin/*' authorizes
+  # 'bin/rspec' and 'bin/harness', both spellings of the separator). A glob
+  # never authorizes another glob, and never a token whose directory differs -
+  # 'bin/*' says nothing about 'tools/build', and a bare 'bin' matches no path.
+  def self.token_matches_grant?(token, grant)
+    return true if token == grant
+    return false unless GLOB_TOKEN.match?(grant)
+    return false if GLOB_TOKEN.match?(token)
+
+    index = grant.rindex(SEPARATOR_CHARS)
+    dir   = grant[0, index.to_i]
+    return false if dir.empty?
+
+    token.start_with?("#{dir}#{grant[index]}") &&
+      !SEPARATOR_CHARS.match?(token[(dir.length + 1)..].to_s)
   end
 
   # Remove a previously saved prefix and persist.
@@ -560,7 +736,8 @@ class CommandAllowlist
   private
 
   # A single segment is allowed when it is safe AND its leading tokens
-  # match one of the stored prefixes.
+  # match one of the stored prefixes (a stored DIRECTORY glob authorizes any
+  # direct program of that directory - issue #417).
   def segment_allowed?(segment)
     segment = segment.strip
     return false if segment.empty?
@@ -572,7 +749,9 @@ class CommandAllowlist
     @prefixes.any? do |prefix|
       p_tokens = prefix.split(/\s+/)
       p_tokens.size <= words.size &&
-        (0...p_tokens.size).all? { |i| words[i] == p_tokens[i] }
+        (0...p_tokens.size).all? do |i|
+          self.class.token_matches_grant?(words[i], p_tokens[i])
+        end
     end
   end
 
