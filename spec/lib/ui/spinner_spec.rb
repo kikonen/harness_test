@@ -416,4 +416,104 @@ RSpec.describe UI::Spinner do
       expect(out).to include("#{UI::Spinner::FRAMES[0]} Working...  9.0 tok/s [STREAM]")
     end
   end
+
+  # Issue #401: a frame wider than the terminal soft-wraps onto extra physical
+  # rows that the next frame's "\r\e[2K" cannot clear (it erases only the row
+  # the cursor sits on), so the overflow row survives as residue. #fit_line
+  # fits one frame to one row by sacrificing segments in SURVIVAL_PRIORITY
+  # order: glyph and message are anchors (never dropped), and the long suffix
+  # (streamed text + context + rate) is truncated first, then dropped.
+  describe '#fit_line (issue #401: priority truncate-then-drop)' do
+    def width_of(text)
+      Kramdown::ANSI::Width.display_width(text)
+    end
+
+    def full_spinner(message: 'Sending to local / ollama', suffix: '🧠 ~12% (160K) ~38.0 tok/s',
+                     elapsed: '12s', badge: '[STREAM] [MANUAL]')
+      spinner = described_class.new(message, suffix, ui: quiet_console)
+      spinner.elapsed = elapsed
+      spinner.badge   = badge
+      spinner
+    end
+
+    it 'returns the frame byte-for-byte when it already fits' do
+      spinner = full_spinner
+      expect(spinner.fit_line(0, 200)).to eq(spinner.line(0))
+    end
+
+    it 'truncates the lowest-priority segment (the suffix), keeping the rest whole' do
+      # width chosen so glyph+message+elapsed+badge fit whole and only the
+      # suffix does not: the suffix carries the "…" marker and the fit never
+      # exceeds the width.
+      spinner = full_spinner
+      fit = spinner.fit_line(0, 55)
+      expect(width_of(fit)).to be <= 55
+      expect(fit).to start_with(UI::Spinner::FRAMES[0])
+      expect(fit).to include('12s')
+      expect(fit).to include('Sending to local / ollama...')
+      expect(fit).to end_with('[STREAM] [MANUAL]')
+      expect(fit).to include('…')
+    end
+
+    it 'drops the lowest-priority segment before a higher one is truncated' do
+      spinner = full_spinner
+      fit = spinner.fit_line(0, 44)
+      expect(width_of(fit)).to eq(44)
+      # The suffix (lowest priority) is gone, the marker moved to the badge.
+      expect(fit).not_to include('🧠')
+      expect(fit).not_to include('160K')
+      expect(fit).to include('Sending to local / ollama...')
+    end
+
+    it 'keeps only glyph and message once the droppable segments are gone' do
+      spinner = full_spinner
+      fit = spinner.fit_line(0, 30)
+      expect(width_of(fit)).to be <= 30
+      expect(fit).to eq("#{UI::Spinner::FRAMES[0]} Sending to local / ollama...")
+    end
+
+    it 'truncates the message only as the last resort, glyph never dropped' do
+      spinner = full_spinner(suffix: nil, elapsed: nil, badge: nil)
+      fit = spinner.fit_line(0, 10)
+      expect(width_of(fit)).to eq(10)
+      expect(fit).to start_with(UI::Spinner::FRAMES[0])
+      expect(fit).to end_with('…')
+    end
+
+    it 'renders the glyph alone at a one-column width and nothing below it' do
+      spinner = full_spinner(suffix: nil, elapsed: nil, badge: nil)
+      expect(spinner.fit_line(0, 1)).to eq(UI::Spinner::FRAMES[0])
+      expect(spinner.fit_line(0, 0)).to eq('')
+    end
+  end
+
+  # The width a frame is fitted to comes from #columns= (issue #401). The
+  # default nil probes the console the frame is written to; a StringIO sink is
+  # not a tty, so it answers nil and frames stay UNFITTED - which is why every
+  # render! example above still asserts the full frame byte-for-byte.
+  describe '#columns= (issue #401: width wiring for render!)' do
+    it 'is nil by default (no fitting through a StringIO console)' do
+      spinner = described_class.new('Working', ui: quiet_console)
+      expect(spinner.columns).to be_nil
+
+      out = capture('Working', 'x' * 200) do |s|
+        s.start
+        s.render!
+        s.stop
+      end
+      # The long suffix survives unfitted (the spec console has no width).
+      expect(out).to include('x' * 200)
+    end
+
+    it 'fits the written frame when a fixed width is injected' do
+      out = capture('Working', 'x' * 200) do |s|
+        s.columns = 20
+        s.start
+        s.render!
+        s.stop
+      end
+      frame = out.split("\e[2K").last
+      expect(Kramdown::ANSI::Width.display_width(frame)).to be <= 20
+    end
+  end
 end
