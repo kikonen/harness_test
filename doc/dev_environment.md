@@ -56,14 +56,33 @@ children the git under test would otherwise spawn (issue #292:
 `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` - git's own config env mechanism,
 no global config touched).
 
-## Parallel vs serial test runs (issue #396)
+## Parallel and serial test runs in one script (issue #396)
 
-Two ways to run the suite, for two jobs. `bin/rspec` (serial, documentation
-format) is the default and the debugging path: it runs one file or one example
-exactly (`bin/rspec spec/lib/task_spec.rb`, `rspec -e "name"`, `--only-failures`)
-in a single process, so a failure prints in place. `bin/rspec-parallel` splits
-`spec/` across processes for a faster whole-suite run; it only ADDS that option
-and changes nothing about the serial path.
+`bin/rspec` picks the mode by its arguments:
+
+| command | what runs |
+|---|---|
+| `bin/rspec` | whole suite, one process per core (`parallel_tests`) |
+| `bin/rspec spec/lib/task_spec.rb -e "name"` | plain `bundle exec rspec`, exactly as typed |
+| `PARALLEL=false bin/rspec` | whole suite, serially |
+| `PARALLEL_TEST_PROCESSORS=4 bin/rspec` | whole suite, in 4 processes |
+
+Anything with arguments stays serial on purpose: the gem groups BY FILE, so one
+file is FASTER in a single process (measured: `spec/lib/ui/dialog_spec.rb` 2.4s
+serial, 3.1s in parallel). Debugging options are the other half of the reason:
+the gem claims `-e` as its OWN `-e, --execute COMMAND` flag, so a bare
+`-e "name"` makes it try to RUN the example name as a program
+(`Errno::ENOENT - colors`); forwarded between its `--` separators it works, but
+only after it has already split the suite across processes.
+(`--only-failures` needs `config.example_status_persistence_file_path`, which
+this repo does not set, so it fails serially too.)
+
+A whole-suite run picks its format by its destination, because a piped one is
+read by the `run.command` tool, which keeps the FIRST `limit` lines: a
+documentation-format whole-suite run is ~3000 lines, so its own summary would
+never reach the model. An interactive TTY gets documentation; a pipe gets
+progress (~80 lines), for the parallel and the `PARALLEL=false` run alike. A
+run with arguments keeps whatever format was typed (or `.rspec`'s).
 
 The suite is slow because of subprocess/IO waits, not CPU-bound Ruby: six git
 tool specs each `git init`+commit a temp repo per example, `task_spec` carries
@@ -71,19 +90,26 @@ drain-loop sleeps plus a `sleep 5` hang guard, `external_editor` and
 `run_command`/`command_runner` spawn real child processes. Those are wall-clock
 waits, so concurrent processes overlap them almost for free.
 
-Measured 2026-10-30 on Windows (ruby 4.0.7, 8 cores): serial 2251 examples =
-74s (`--profile`; ~1m20s in the documentation format); parallel via
-`bin/rspec-parallel` = 2251/0 in ~18-20s wall, groups balanced 233-339 specs
-each. The floor (~17s) is the slowest single file - the gem splits by FILE, so
-`task_spec` (~9s) sets a line no process count can go below. CI stays serial:
-its runners have 2 cores, so the gain there is small and a single serial job is
-easier to read.
+Measured 2026-10-31 on Windows (ruby 4.0.7, 8 cores), 2251 examples: serial in
+the documentation format 1m41s, serial `--format progress` 74s; parallel in the
+documentation format 32s (3057 output lines), parallel progress 26s (81 lines),
+`bin/rspec` piped 21-29s. The floor is the slowest SINGLE file - grouping is by
+file, so `task_spec` (~9s) sets a line no process count goes below. CI stays on
+serial `bundle exec rspec`: its runners have 2 cores, the gain is small, and one
+serial job reads more cleanly.
 
 The gem balances groups automatically, but its proxy is file SIZE, not time:
 time-based grouping needs a recorded per-file runtime log, and for rspec that
 log only comes from the `RuntimeLogger` formatter, whose RSpec-2 interface
 RSpec 3.13 rejects without the deprecated `rspec-legacy_formatters` gem. Size
 already balances to within a couple of seconds here, so that gem is not added.
+
+Parallel runs expose examples that assume a machine-wide namespace. The first
+parallel run failed `external_editor_spec`'s "leaves no scratch directory
+behind": it globs `Dir.tmpdir` for `harness-editor*`, and a sibling process had
+its own live one at that moment. Fixed by giving that example a private temp
+root through `TMP`/`TEMP`/`TMPDIR` (all three, because `Dir.tmpdir` prefers
+TMP/TEMP on Windows). Any leftover/shared-temp check needs the same treatment.
 
 ## Refreshing this page
 

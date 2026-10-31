@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Test runner: runs rspec for the harness itself, with the same environment
-# hygiene as bin/harness (project-root Gemfile, rbenv), so tests work from
-# any directory and are not affected by a polluted parent environment.
+# Test runner. Bare invocation runs the whole suite across processes; anything
+# with arguments is plain serial rspec, exactly as typed. Mode rules, the
+# measured numbers and why: doc/dev_environment.md (issue #396).
 set -euo pipefail
 
 # This script lives in bin/; the project root (Gemfile) is its parent.
@@ -25,4 +25,26 @@ fi
 # rspec resolves spec/ relative to the CWD; run from the project root so
 # the suite is found no matter where the script is invoked from.
 cd "$ROOT_DIR"
+
+if [ "$#" -eq 0 ]; then
+  # A whole-suite run picks its format by destination: piped output goes to
+  # run.command, which keeps only the FIRST `limit` lines, and documentation
+  # output runs to ~3000 of them - the run's own summary would never reach the
+  # model. A TTY keeps .rspec's format.
+  if [ -t 1 ]; then
+    FORMAT=(--format documentation)
+  else
+    FORMAT=(--format progress)
+  fi
+  if [ "${PARALLEL:-parallel}" = "false" ]; then
+    exec bundle exec rspec "${FORMAT[@]}"
+  fi
+  # parallel_tests assumes a bin/rspec binstub is RUBY and runs `ruby --
+  # bin/rspec`; ours is bash, so its PARALLEL_TESTS_EXECUTABLE hook must name
+  # the worker or every worker dies in a LoadError. Its own options come
+  # before rspec's, so rspec's go between the two `--`.
+  export PARALLEL_TESTS_EXECUTABLE="bundle exec rspec"
+  exec bundle exec parallel_rspec -- "${FORMAT[@]}" -- spec/
+fi
+
 exec bundle exec rspec "$@"

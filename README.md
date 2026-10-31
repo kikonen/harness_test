@@ -158,12 +158,13 @@ answer - are framed by the same 80-column gray rule that names the role
 (`------- step 8 -------`, `------- model -------`), and the answer itself is
 printed untouched.
 
-`bin/rspec` runs the harness's own test suite (rspec), from any directory.
-`bin/rspec-parallel` runs the same suite split across processes for a faster
-full run (issue #396) - it only ADDS that option, so a single file or a single
-example (`bundle exec rspec spec/lib/task_spec.rb`, `-e "name"`) still runs
-serially, which is the way to debug one failing spec. Numbers and why the two
-paths differ by machine: `doc/dev_environment.md`.
+`bin/rspec` runs the harness's own test suite (rspec), from any directory, in
+one script with two modes (issue #396): bare `bin/rspec` runs the whole suite
+across processes (the fast path), while `bin/rspec <file> <opts>` is plain
+serial rspec exactly as typed - the debugging path, because the gem groups BY
+FILE (one file is faster in one process) and cannot pass `-e` /
+`--only-failures` through. `PARALLEL=false bin/rspec` runs the whole suite
+serially. Numbers and why the two paths differ by machine: `doc/dev_environment.md`.
 
 Type a plain message to send it to the model. Lines starting with `/` are
 commands. `/help` lists every command and topic; `/help <command>` shows one
@@ -393,9 +394,8 @@ re-include anything, because git skips the excluded directory.
 lib/skills.rb       # the skills loader (.harness/skills) - index + body on demand
 harness.rb          # entry point
 bin/harness         # launcher (env, rbenv, bundle)
-bin/rspec           # test runner (same env hygiene as the launcher)
-bin/rspec-parallel  # same suite split across processes, local full-suite speed
-                    # (issue #396; doc/dev_environment.md)
+bin/rspec           # test runner: whole suite in parallel, serial with args or
+                    # PARALLEL=false (issue #396; doc/dev_environment.md)
 CHANGELOG.md        # GENERATED per-issue history, regenerated on request
                     # (doc/changelog_generation.md; harness.md holds coding rules only)
 lib/cli.rb          # option parsing, REPL loop, input handling
