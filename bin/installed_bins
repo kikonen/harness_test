@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+bundle exec ruby -e 'Bundler.load.specs.sort_by(&:name).each { |s| puts "#{s.name}: #{s.executables.join(", ")}" unless s.executables.empty? }'
