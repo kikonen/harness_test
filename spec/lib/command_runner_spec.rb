@@ -178,6 +178,80 @@ RSpec.describe CommandRunner do
     end
   end
 
+  # -- Path-shaped commands and DIRECTORY glob grants (issue #417) ----------
+
+  it 'offers a path program and its directory glob as grants' do
+    Dir.mktmpdir do |dir|
+      out    = drive_dialog(['4']) # Allow(1), 'bin/harness'(2), 'bin/*'(3), Cancel(4)
+      result = make_tool_runner(dir).run('bin/harness --version')
+
+      expect(out.string).to include("Always allow 'bin/harness'")
+      expect(out.string).to include("Always allow 'bin/*'")
+      expect(result).to start_with('error: user denied')
+    end
+  end
+
+  it 'saves a directory glob and auto-approves every program in it' do
+    Dir.mktmpdir do |dir|
+      # Allow(1), 'bin/ok.sh'(2), 'bin/ok.sh one'(3), 'bin/*'(4).
+      out    = drive_dialog(['4'])
+      first  = make_tool_runner(dir).run('bin/ok.sh one')
+
+      yml = File.join(dir, '.harness', 'allowed_commands.yml')
+      expect(YAML.safe_load(File.read(yml))).to eq(['bin/*'])
+      expect(first).to start_with('exit code:')
+
+      # A fresh runner (fresh allowlist load) auto-approves without a dialog.
+      # Nothing typed: had the dialog opened it would hit EOF and cancel.
+      out2   = drive_dialog([])
+      second = make_tool_runner(dir).run('bin/ok.sh again')
+      expect(out2.string).to eq('')
+      # It RAN (no dialog). The script does not exist in the tmpdir, so the
+      # child answers 127 - the contract under test is that it was not asked for.
+      expect(second).to start_with('exit code:')
+
+      # A program in ANOTHER directory is not covered by the stored glob.
+      out3 = drive_dialog(['4']) # Allow(1), 'tools/build'(2), 'tools/*'(3), Cancel(4)
+      third = make_tool_runner(dir).run('tools/build')
+      expect(third).to start_with('error: user denied')
+      expect(out3.string).to include("Always allow 'tools/build'")
+    end
+  end
+
+  it 'states the trust boundary of a glob offer and nothing for an exact prefix' do
+    Dir.mktmpdir do |dir|
+      out = drive_dialog(['4']) # Allow(1), 'bin/rspec'(2), 'bin/*'(3), Cancel(4)
+      make_tool_runner(dir).run('bin/rspec')
+
+      expect(out.string).to include('covers every program in that directory')
+      # Only the glob option carries the note: one such line for two offers.
+      expect(out.string.scan('covers every program').size).to eq(1)
+    end
+  end
+
+  it 'asks for a denylisted path verb without offering its directory' do
+    Dir.mktmpdir do |dir|
+      out    = drive_dialog(['2']) # Allow(1), Cancel(2): no grants offered
+      result = make_tool_runner(dir).run('bin/rm -rf /somewhere')
+
+      expect(result).to start_with('error: user denied')
+      expect(out.string).to include('DENYLISTED: recursive-force delete')
+      expect(out.string).not_to include("Always allow 'bin/*'")
+    end
+  end
+
+  it 'does not accuse a plain command of being UNSAFE when nothing is grantable' do
+    Dir.mktmpdir do |dir|
+      out = drive_dialog(['2'])
+      # '~/bin/tool' yields no grantable candidate and no danger token: the
+      # UNSAFE line used to be inferred from the empty candidate list, so this
+      # plain command was accused of carrying shell constructs (issue #417).
+      make_tool_runner(dir).run('~/bin/tool')
+
+      expect(out.string).not_to include('UNSAFE')
+    end
+  end
+
   it 'reports a non-zero exit code' do
     Dir.mktmpdir do |dir|
       seed_allowlist(dir, 'false')

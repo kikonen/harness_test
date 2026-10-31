@@ -305,6 +305,13 @@ context), `test.echo` (test-only)
   the model never flips them. A model verdict is bound to its command by the
   NUMBER the model wrote, never by line position, and an answer that cannot be
   placed yields no verdict at all (plain dialog) - `doc/safety_check_design.md`.
+  A command invoked BY PATH is grantable too (issue #417): `bin/rspec` offers
+  the program itself and its DIRECTORY glob `bin/*`, which covers every program
+  directly in that directory - including one the model writes there later, which
+  is why the glob option states that boundary in the dialog and why the denylist
+  matches a recursive-force delete by BASENAME (`bin/rm -rf /` is `rm -rf /`).
+  A relative current-directory or traversing path (`./tool`, `bin/../evil`) is
+  never globbable.
 - A web fetch asks on a SEPARATE axis: an ungranted host reaches the dialog in
   every posture (a YOLO decision about `git status` says nothing about a URL),
   the grant is for one EXACT host, and it only decides whether that host may be
