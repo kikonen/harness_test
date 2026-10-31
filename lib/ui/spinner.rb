@@ -10,6 +10,13 @@ module UI
   class Spinner
     FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
+    # A DETECTED width keeps this many columns free: a frame written into every
+    # column makes the terminal wrap the line itself, which lands the next
+    # frame's "\r\e[2K" on the wrong row and the residue is back. The same
+    # reason HelpRenderer::DEFAULT_WIDTH is 78 and not 80. An injected width is
+    # NOT reserved - that is exactly what a caller asked for.
+    RESERVED_COLUMNS = 1
+
     # A live status badge rendered at the END of the frame line (issue #224
     # follow-up: the command consent MODE, e.g. "[YOLO]"). It may be a plain
     # string or a callable re-evaluated on EVERY frame so it always
@@ -40,8 +47,9 @@ module UI
     # The terminal width a frame is fitted to (issue #401). A plain Integer, a
     # callable re-read every frame (so a resize lands on the next frame), or
     # nil to detect it per frame (see #detect_columns). nil is the default: the
-    # harness never sets it, the spinner asks the terminal. A spec injects a
-    # fixed Integer so a fit is deterministic without a real terminal.
+    # harness never sets it, the spinner asks the terminal. A detected width is
+    # reserved by RESERVED_COLUMNS, an injected Integer is used exactly as
+    # given - which is what a spec asserting a fit relies on.
     def columns=(value)
       @columns = value
     end
@@ -110,9 +118,11 @@ module UI
     def render!
       return unless running?
 
-      text = frame_line
+      # ONE snapshot of this frame's segments: a live suffix/clock/badge is
+      # resolved once per frame, never once per composing step.
+      parts = frame_parts(@frame)
       width = resolve_columns
-      text = fit_line(@frame, width) if width
+      text = width ? fit_parts(parts, width) : parts.values.join
       ui.print("\r\e[2K#{text}")
       ui.flush
       @frame += 1
@@ -165,10 +175,27 @@ module UI
     SURVIVAL_PRIORITY = %i[glyph message elapsed badge suffix].freeze
 
     def fit_line(i, width)
+      fit_parts(frame_parts(i), width)
+    end
+
+    # Draw ONE TUI frame (index i) into the viewport, then drain the event
+    # queue with a short timeout. Public so headless tests can drive a single
+    # deterministic frame through ratatui's test terminal (issue #74).
+    def draw_tui_frame(tui, i)
+      tui.draw { |frame| frame.render_widget(tui.paragraph(text: line(i)), frame.area) }
+      tui.poll_event(timeout: 0.05)
+    end
+
+    private
+
+    # Fit one already-resolved frame (the {prio => text} hash #frame_parts
+    # builds) to `width` display columns. #fit_line is the convenience entry
+    # that resolves the frame first; #render! passes its own single snapshot
+    # so a live segment is never evaluated twice for one drawn frame.
+    def fit_parts(parts, width)
       width = width.to_i
       return "" if width <= 0
 
-      parts = frame_parts(i) # {prio => text}, already in visual form
       glyph_w = display_width(parts[:glyph])
       return "" if glyph_w > width
 
@@ -198,16 +225,6 @@ module UI
       parts.keys.map { |prio| out[prio] }.join
     end
 
-    # Draw ONE TUI frame (index i) into the viewport, then drain the event
-    # queue with a short timeout. Public so headless tests can drive a single
-    # deterministic frame through ratatui's test terminal (issue #74).
-    def draw_tui_frame(tui, i)
-      tui.draw { |frame| frame.render_widget(tui.paragraph(text: line(i)), frame.area) }
-      tui.poll_event(timeout: 0.05)
-    end
-
-    private
-
     # The frame's droppable segments, keyed by priority, in the order they are
     # drawn (glyph first, badge last). Each string already carries its own
     # leading separator space, so concatenating them in this key order rebuilds
@@ -231,9 +248,15 @@ module UI
     def resolve_columns
       value = @columns.respond_to?(:call) ? @columns.call : @columns
       return value if value.is_a?(Integer) && value.positive?
-      return detect_columns if @columns.nil?
+      return reserve_columns(detect_columns) if @columns.nil?
 
       nil
+    end
+
+    def reserve_columns(width)
+      return nil if width.nil?
+
+      [width - RESERVED_COLUMNS, 1].max
     end
 
     # Width of the console the frame is actually written to (@ui.stdout), NOT
@@ -241,7 +264,8 @@ module UI
     # tty, so it answers nil and those frames stay UNFITTED - the byte-for-byte
     # behavior every render! example above relies on. Preference order: the
     # sink's own winsize (a real terminal File answers even when its isatty is
-    # unreliable, as some MSYS2 setups report), then - only for a tty sink -
+    # unreliable, as some MSYS2 setups report; IO#winsize answers
+    # [rows, columns] so the COLUMNS are index 1), then - only for a tty sink -
     # IO.console and $ENV['COLUMNS'].
     def detect_columns
       io = @ui.respond_to?(:stdout) ? @ui.stdout : nil
@@ -255,7 +279,7 @@ module UI
     def sink_columns(io)
       return nil unless io.respond_to?(:winsize)
 
-      positive_cols(io.winsize[0])
+      positive_cols(io.winsize[1])
     rescue StandardError
       nil
     end
@@ -264,7 +288,7 @@ module UI
       io = IO.console
       return nil unless io.respond_to?(:winsize)
 
-      positive_cols(io.winsize[0])
+      positive_cols(io.winsize[1])
     rescue StandardError
       nil
     end

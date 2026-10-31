@@ -12,6 +12,23 @@ require 'stringio'
 # render! on each drain tick. Tests assert the frame text by constructing
 # the spinner against a captured StringIO-backed UI::Console, not via
 # sleep-based thread observation - no $stdout/$stdin globals anywhere.
+
+# A sink that REPORTS a terminal size the way a real terminal File does
+# (#winsize -> [rows, columns]); StringIO alone has no #winsize, so the
+# detection path would never be exercised without it.
+class SizedSink < StringIO
+  def initialize(rows, columns)
+    super(+'')
+    @winsize = [rows, columns]
+  end
+
+  attr_reader :winsize
+
+  def tty?
+    false
+  end
+end
+
 RSpec.describe UI::Spinner do
   # A non-capturing console for examples that only need a valid constructor
   # argument (state queries).
@@ -26,6 +43,16 @@ RSpec.describe UI::Spinner do
     io      = StringIO.new
     spinner = described_class.new(*args, ui: UI::Console.new(stdout: io))
     yield(spinner)
+    io.string
+  end
+
+  def capture_for_sink(rows:, columns:)
+    io      = SizedSink.new(rows, columns)
+    spinner = described_class.new('Working', 'x' * 200,
+                                  ui: UI::Console.new(stdout: io))
+    spinner.start
+    spinner.render!
+    spinner.stop
     io.string
   end
 
@@ -514,6 +541,53 @@ RSpec.describe UI::Spinner do
       end
       frame = out.split("\e[2K").last
       expect(Kramdown::ANSI::Width.display_width(frame)).to be <= 20
+    end
+
+    # The auto-detected width is the sink's COLUMN count, not its row count:
+    # IO#winsize answers [rows, columns]. Reading index 0 fits frames to the
+    # terminal's height - which wastes the width of a wide terminal and, when
+    # rows exceed columns, leaves the overflow (and the residue bug) intact.
+    it 'fits to the sink winsize columns, not its rows' do
+      out = capture_for_sink(rows: 50, columns: 20)
+      frame = out.split("\e[2K").last
+
+      expect(Kramdown::ANSI::Width.display_width(frame)).to be <= 20
+    end
+
+    it 'fits to columns on a tall narrow sink (rows > columns)' do
+      out = capture_for_sink(rows: 90, columns: 40)
+      frame = out.split("\e[2K").last
+
+      expect(Kramdown::ANSI::Width.display_width(frame)).to be <= 40
+    end
+
+    # A DETECTED width keeps one column free: a frame written into every column
+    # makes the terminal wrap the line itself, which lands the next frame's
+    # erase on the wrong row (the residue #401 is about). An injected width is
+    # exact - the caller (or a spec) already decided it.
+    it 'keeps one column free on a detected width' do
+      # The frame is far wider than the terminal, so the fit saturates the
+      # budget: it lands on exactly 29 (columns - 1), never on column 30.
+      out = capture_for_sink(rows: 20, columns: 30)
+      frame = out.split("\e[2K").last
+
+      expect(Kramdown::ANSI::Width.display_width(frame)).to eq(29)
+    end
+
+    it 're-reads a callable columns every frame (a resize lands on the next frame)' do
+      width = 120
+      out = capture('Working', 'x' * 200) do |s|
+        s.columns = -> { width }
+        s.start
+        s.render!
+        width = 20
+        s.render!
+        s.stop
+      end
+      frames = out.split("\e[2K")[1..]
+
+      expect(Kramdown::ANSI::Width.display_width(frames[0])).to be <= 120
+      expect(Kramdown::ANSI::Width.display_width(frames[1])).to be <= 20
     end
   end
 end
