@@ -265,6 +265,12 @@ unless the prefix is already allowlisted or the posture you picked accepts it
 (AUTO-APPROVE on a "safe:" verdict, or YOLO for everything); timeout-guarded,
 output truncated)
 
+**Ruby scripts** - the harness seeds a per-project sandbox Gemfile at
+`.harness/sandbox/Gemfile` so a model-run Ruby script gets pinned gem versions
+instead of whatever happens to be installed on the box: run it through
+`BUNDLE_GEMFILE=.harness/sandbox/Gemfile bundle exec ruby <script>`. The model
+extends that Gemfile (it is gitignored, per-machine); `bundle install` runs as an
+ordinary `run.command`. `doc/sandbox_gemfile_design.md`, issue #340.
 **Web** - `web.fetch` (fetches one http(s) URL and returns the body as text;
 the full URL is shown before anything is sent, and every host you have not
 granted asks in EVERY posture - the shell postures are about shell commands, so
@@ -386,6 +392,9 @@ All harness state lives in `.harness/` inside the working directory:
       harness_history  # that session's prompt history (issue #119)
   skills/           # the project's own skills (issue #12) - the ONE part of
     <name>/SKILL.md # .harness/ that is git-tracked and grantable
+  sandbox/          # the model-managed Ruby sandbox (issue #340): a seeded
+    Gemfile         # Gemfile the harness writes but the model extends; gitignored
+                    # like the rest of .harness/ (per-machine, not repo content)
 ```
 
 `.harness/config.yml` is no longer auto-created there (issue #260): the
@@ -401,6 +410,7 @@ re-include anything, because git skips the excluded directory.
 ```
 lib/skills.rb       # the skills loader (.harness/skills) - index + body on demand
 harness.rb          # entry point
+lib/sandbox_gemfile.rb  # the harness-seeded, model-managed Ruby sandbox (.harness/sandbox)
 bin/harness         # launcher (env, rbenv, bundle)
 bin/rspec           # test runner: whole suite in parallel, serial with args or
                     # PARALLEL=false (issue #396; doc/dev_environment.md)

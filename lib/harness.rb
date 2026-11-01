@@ -64,6 +64,7 @@ require_relative "safety_check"
 require_relative "text_normalizer"
 require_relative "error_text"
 require_relative "mcp/manager"
+require_relative "sandbox_gemfile"
 
 # -- Harness --------------------------------------------------------------
 
@@ -90,8 +91,11 @@ class Harness
   # is then not byte-for-byte what harness.md holds.
   # mcp: the Mcp::Manager that owns the declared servers, their connections and
   # startup notes (issue #48). The MCP machinery lives there, not in Harness.
+  # sandbox_gemfile: the harness-seeded, model-managed project Ruby sandbox
+  # (issue #340). doc/sandbox_gemfile_design.md.
   attr_reader :options,
     :logger,
+    :sandbox_gemfile,
     :tool_registry,
     :file_list,
     :session,
@@ -142,6 +146,12 @@ class Harness
     @user_note     = nil
     @user_notes    = []
     StateMigrator.run(@file_list.workdir, HARNESS_DIR)
+
+    # Harness-seeded because the model's file tools cannot write the sensitive
+    # .harness/; ensure_starter! never clobbers a model-managed Gemfile.
+    # doc/sandbox_gemfile_design.md.
+    @sandbox_gemfile = SandboxGemfile.new(@file_list.workdir)
+    @sandbox_gemfile.ensure_starter!
 
     @logger = build_logger
 
