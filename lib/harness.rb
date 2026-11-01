@@ -929,6 +929,13 @@ class Harness
     @mcp.status_notes
   end
 
+  # issue #405: what THIS run connected, for the saved session. The saved run's
+  # own servers are what the conversation had tools from, so the summary is read
+  # at save time from the live Manager rather than tracked separately.
+  def mcp_connected_summary
+    @mcp.connected_summary
+  end
+
   private
 
   # One LLM request. The streaming posture applies to THIS request only, so a
@@ -1136,5 +1143,15 @@ class Harness
     self.output_palette = restored
 
     logger.info "output palette restored: #{output_palette.name}"
+
+    # issue #405: the saved session names the MCP tools its conversation had.
+    # THIS run already connected what its own config declared (build_tool_registry
+    # runs before this), so the two can be compared: a server the saved
+    # conversation used that this run cannot reach is stated out loud rather than
+    # left as a tool set the model quietly lost. The notes land in the startup
+    # banner next to the run's own MCP lines.
+    # A session saved before #405 has no key at all, which reads as nothing to
+    # compare - the run's own banner is then the whole story.
+    @mcp.report_saved_session(data[:mcp_connected])
   end
 end

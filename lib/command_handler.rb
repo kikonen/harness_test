@@ -21,6 +21,7 @@ require_relative "commands/resume_command"
 require_relative "commands/reasoning_command"
 require_relative "commands/sessions_command"
 require_relative "commands/tools_command"
+require_relative "commands/mcp_command"
 require_relative "commands/models_command"
 require_relative "commands/model_command"
 require_relative "commands/param_command"
@@ -63,6 +64,7 @@ class CommandHandler
     "resume"        => Commands::ResumeCommand,
     "sessions"      => Commands::SessionsCommand,
     "tools"         => Commands::ToolsCommand,
+    "mcp"           => Commands::McpCommand,
     "models"        => Commands::ModelsCommand,
     "model"         => Commands::ModelCommand,
     "param"         => Commands::ParamCommand,

@@ -1,4 +1,4 @@
-# MCP client support (issue #48, HTTP/SSE transport issue #402)
+# MCP client support (issue #48, HTTP/SSE transport #402, /mcp + persistence #405)
 
 The harness is an MCP **client**: it connects to external Model Context Protocol
 servers and exposes their tools to the model as ordinary harness tools. It is
@@ -15,8 +15,8 @@ are deferred (issue #403).
   `Client` API, so only `ServerConnection#connect` branches.
 - **Tools only.** `tools/list` builds the tool set; `tools/call` runs one.
 - **Opt-in.** With no `mcp_servers:` in the config, no MCP code runs at all:
-  `Harness#load_mcp_tools` returns before `require "mcp"`, so the gem is never
-  loaded and a run without MCP servers pays nothing for the feature.
+  `Mcp::Manager#load` returns before `require "mcp"`, so the gem is never loaded
+  and a run without MCP servers pays nothing for the feature.
 - **No OAuth wiring.** The gem ships `MCP::Client::OAuth`; a url entry passes
   `url:` and `headers:` only. Static headers (an `Authorization` value the user
   wrote in the config) are the whole authentication surface today.
@@ -82,10 +82,11 @@ value when it reaches the HTTP request).
   own namespace, and its OpenAI `parameters` are the MCP `inputSchema` (already a
   JSON-Schema object, so it maps directly; the JSON-Schema bookkeeping such as
   `$schema`/`type` is dropped).
-- `Harness#load_mcp_tools` (called from `build_tool_registry`) requires the gem
-  lazily, connects each server, and registers each tool. A tool whose name
-  collides with a built-in is skipped (the built-in wins) and reported. A server
-  that fails to start degrades to a status note rather than crashing the run.
+- `Harness#build_tool_registry` asks `Mcp::Manager#load` to require the gem
+  lazily, connect each declared server, and register each tool. A tool whose
+  name collides with a built-in is skipped (the built-in wins) and reported. A
+  server that fails to start degrades to a status note rather than crashing the
+  run.
 - `Harness#mcp_status_notes` records what startup had to report (a connected
   server's tool count, a failed start, a name collision). The CLI prints each in
   the startup banner, so a run never silently pretends its MCP tools are
@@ -93,6 +94,39 @@ value when it reaches the HTTP request).
 - `Harness#close_mcp` closes every connection this run opened. The CLI calls it
   on shutdown and on a mid-run `/resume` rebuild (the run being replaced owns its
   own servers).
+
+## Reporting and session persistence (issue #405)
+
+`Mcp::Manager` keeps one `ServerState` per **declared** server (name, transport,
+target, connected, tool names, error) in addition to the notes, so the MCP
+outcome of a run is queryable after startup rather than only being printed once.
+
+- **`/mcp`** (`Commands::McpCommand`) is a **report**, not a control: declared /
+  connected counts, each server's transport and target, `DOWN` with its error
+  label, the collision notes, and each connected server's tools with their
+  registry descriptions. The tool set is **fixed for the run** - MCP tools reach
+  the model through `tools_payload`, which #246 requires to be identical on every
+  request - so there is no live enable/disable toggle to offer, and the command
+  says so. With nothing configured it points at `mcp_servers:` and
+  `examples/mcp/` instead of printing an empty list.
+- **Persistence.** `SessionManager#save_session` writes `data[:mcp_connected]`
+  = `Mcp::Manager#connected_summary`: only the servers THIS run **connected**,
+  with the tool names they contributed. It is named `mcp_connected`, not
+  `mcp_servers`: the config DECLARES servers and this records what one run
+  reached - a session file must not read like a config override, and a resumed
+  run's servers stay entirely config-driven. A server that never connected is
+  not stored (it contributed no tools, so it says nothing about what the
+  conversation had).
+- **Resume comparison.** `Harness#apply_resume_state` ends with
+  `Mcp::Manager#report_saved_session(data[:mcp_connected])`. It runs AFTER
+  `build_tool_registry`, so this run's own server states exist to compare
+  against. Three states are stated out loud, in the startup banner next to the
+  run's own MCP lines: a saved server this run's config does not declare; one it
+  declares but could not reach; and, for a connected server, the saved tool names
+  it no longer lists. A session saved before #405 has no key at all, which reads
+  as nothing to compare - not an error. The point is that a resumed run whose
+  tool set is smaller than the one its own conversation used says so instead of
+  quietly sending a shorter `tools_payload`.
 
 ## Consent
 

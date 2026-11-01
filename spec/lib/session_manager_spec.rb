@@ -42,6 +42,11 @@ RSpec.describe SessionManager do
       # issue #106: save/resume persists the markdown rendering posture too.
       attr_writer :markdown
       def markdown?; @markdown == true; end
+      # issue #405: save_session records what MCP servers connected, so the
+      # stub mirrors Harness#mcp_connected_summary (settable so a spec can put a
+      # connected summary in place of the empty default).
+      attr_writer :mcp_connected_summary
+      def mcp_connected_summary = @mcp_connected_summary || []
       # issue #359: build_user_prompt states the planning expectation when the
       # mode is on, so the stub mirrors Harness#plan? / plan=.
       attr_writer :plan
@@ -502,6 +507,39 @@ RSpec.describe SessionManager do
     end
   end
 
+  # issue #405: the MCP servers THIS run connected travel with the session, so a
+  # resumed run can compare them with its own config and say what the saved
+  # conversation could call. Stored per connected server (a down server
+  # contributed no tools, so it is not part of what the conversation had).
+  # RESUME side (Harness#apply_resume_state -> Mcp::Manager#report_saved_session)
+  # is tested in harness_spec.rb and manager_spec.rb.
+  describe 'MCP connected servers round trip (issue #405)' do
+    def save_with_mcp(dir, summary)
+      file_list = FileList.new([], workdir: dir)
+      manager   = described_class.new(harness, file_list)
+      harness.mcp_connected_summary = summary
+      session.add_user('hello')
+      manager.save_session
+      JSON.parse(File.read(manager.session_file_path(session.session_id)))
+    end
+
+    it 'saves each connected server with the tool names it contributed' do
+      summary = [{ name: 'fs', transport: 'stdio', tools: ['fs.read_file'] }]
+      Dir.mktmpdir do |dir|
+        # The read-back is plain JSON.parse (string keys); the resume side parses
+        # with symbolize_names and report_saved_session normalizes either shape.
+        expect(save_with_mcp(dir, summary)['mcp_connected'])
+          .to eq([{ 'name' => 'fs', 'transport' => 'stdio', 'tools' => ['fs.read_file'] }])
+      end
+    end
+
+    it 'saves an empty list when no MCP server connected (no MCP code ran)' do
+      Dir.mktmpdir do |dir|
+        expect(save_with_mcp(dir, [])['mcp_connected']).to eq([])
+      end
+    end
+  end
+
   # issue #28: the streaming posture travels with the session save too (same
   # treatment as yolo - harness posture, not conversation state), as a plain
   # boolean so a session saved before the feature simply has no key. The
@@ -606,6 +644,8 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       # issue #106: stub mirrors Harness#markdown? (save_session).
       attr_writer :markdown
       def markdown?; @markdown == true; end
+      # issue #405: stub mirrors Harness#mcp_connected_summary (save_session).
+      def mcp_connected_summary = []
       def compact_recent_messages; 6; end
       def compact_auto_threshold; 88; end
       def compact_reserved_tokens; 8192; end
@@ -667,6 +707,9 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
       end
 
       attr_reader :options, :logger
+
+      # issue #405: stub mirrors Harness#mcp_connected_summary (save_session).
+      def mcp_connected_summary = []
 
       def compact_max_size
         nil
@@ -1015,6 +1058,9 @@ RSpec.describe SessionManager, '#retry (issue #208)' do
       end
 
       attr_reader :options
+
+      # issue #405: stub mirrors Harness#mcp_connected_summary (save_session).
+      def mcp_connected_summary = []
 
       def compact_auto_threshold
         Session::AUTO_COMPACT_THRESHOLD

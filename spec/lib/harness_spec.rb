@@ -319,7 +319,7 @@ RSpec.describe Harness do
   # carry that single identity and no rebind exists anywhere.
   describe 'startup resume via resume_data (issue #276)' do
     def seed_saved_session(id, yolo: true, output_palette: 'basic16', stream: true,
-                           markdown: false)
+                           markdown: false, saved_mcp: nil)
       FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
       data = {
         session_id:    id,
@@ -335,6 +335,9 @@ RSpec.describe Harness do
         markdown:      markdown,
         workdir:       workdir
       }
+      # A session saved before issue #405 has no mcp_connected key at all; nil
+      # models that so the resume side has to tolerate its absence.
+      data[:mcp_connected] = saved_mcp if saved_mcp
       File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate(data))
     end
 
@@ -445,6 +448,89 @@ RSpec.describe Harness do
       # across two session directories.
       expect { build_harness(session_id: id, resume_data: data) }
         .to raise_error(HarnessError, /says id a{8}-bbbb-cccc-dddd-eeeeeeeeeeee/)
+    end
+
+    # issue #405: the session file records WHICH MCP tools its conversation had
+    # (mcp_connected). The resumed run's own config decides what it can reach, so
+    # the two lists can disagree - and the run must state that rather than
+    # silently send a smaller tools payload. The comparison happens after this
+    # run's own servers loaded, so the notes land next to its own MCP banner lines.
+    describe 'MCP saved-servers comparison (issue #405)' do
+      # One tool as the MCP gem reports it (the fields ToolAdapter reads).
+      def fake_mcp_tool(name)
+        Struct.new(:name, :description, :input_schema).new(name, 'fake tool', {})
+      end
+
+      # A connection that lists these tools on connect.
+      def connected_connection(tool_names)
+        conn = instance_double('Mcp::ServerConnection')
+        allow(conn).to receive(:connect).and_return(
+          tool_names.map { |n| fake_mcp_tool(n) }
+        )
+        allow(conn).to receive(:close)
+        conn
+      end
+
+      # What a session saved with this server connected would carry (the shape
+      # JSON round-trips, hence the string keys).
+      def saved_server(name, tools)
+        [{ 'name' => name, 'transport' => 'stdio', 'tools' => tools }]
+      end
+
+      # Build a resumed run whose config declares one stdio server exposing
+      # declared_tools, against a session that saved saved (or none).
+      def resume_with_config(id, declared_tools, saved)
+        seed_saved_session(id, saved_mcp: saved)
+        allow(Mcp::ServerConnection).to receive(:new)
+          .and_return(connected_connection(declared_tools))
+
+        build_harness(session_id: id, resume_data: saved_data(id),
+                      mcp_servers: [{ name: 'fs', command: 'ruby', args: [], env: {} }])
+      end
+
+      it 'says nothing extra when this run provides the saved tools' do
+        id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+        harness = resume_with_config(id, ['ping'], saved_server('fs', ['fs.ping']))
+
+        expect(harness.mcp_status_notes).to eq(
+          ["MCP server 'fs' connected: 1 tool(s)"]
+        )
+      end
+
+      it 'states it when the saved server is not declared in this run' do
+        id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+        harness = resume_with_config(id, ['ping'], saved_server('old', ['old.read']))
+
+        expect(harness.mcp_status_notes)
+          .to include(a_string_including(
+            "old (1 tool(s) in the saved session) is not declared in this run's config"
+          ))
+      end
+
+      it 'names the saved tools a connected server no longer provides' do
+        id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+        harness = resume_with_config(
+          id, %w[ping], saved_server('fs', %w[fs.ping fs.gone])
+        )
+
+        expect(harness.mcp_status_notes)
+          .to include(a_string_matching(/saved session are missing: fs\.gone/))
+      end
+
+      # A session saved before #405 has no mcp_connected key: that is the
+      # nothing-to-compare case, not an error, and the run's own banner is then
+      # the whole story.
+      it "reports only this run's own lines for a session with no saved servers" do
+        id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+        seed_saved_session(id)
+        allow(Mcp::ServerConnection).to receive(:new)
+          .and_return(connected_connection(['ping']))
+
+        harness = build_harness(session_id: id, resume_data: saved_data(id),
+                                mcp_servers: [{ name: 'fs', command: 'ruby', args: [], env: {} }])
+
+        expect(harness.mcp_status_notes).to eq(["MCP server 'fs' connected: 1 tool(s)"])
+      end
     end
   end
 
