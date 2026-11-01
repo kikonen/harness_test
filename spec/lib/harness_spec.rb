@@ -2342,6 +2342,21 @@ RSpec.describe Harness do
     end
   end
 
+  describe '#sandbox_gemfile (issue #340)' do
+    # The harness seeds the scaffold at construction (the model's file tools
+    # cannot write the sensitive .harness/), so a fresh run already has it.
+    it 'points at .harness/sandbox/Gemfile under this run\'s workdir and seeds it' do
+      h = build_harness
+
+      expect(h.sandbox_gemfile).to be_a(SandboxGemfile)
+      expect(h.sandbox_gemfile.dir).to eq(File.join(workdir, '.harness', 'sandbox'))
+      expect(h.sandbox_gemfile.gemfile_path).to eq(
+        File.join(workdir, '.harness', 'sandbox', 'Gemfile'))
+      expect(h.sandbox_gemfile.exist?).to be true
+      expect(File.read(h.sandbox_gemfile.gemfile_path)).to eq(SandboxGemfile::STARTER_GEMFILE)
+    end
+  end
+
   # Issue #10: the store is one reader (Memories) shared by memory.* and /memory,
   # and the harness hands that ONE object to every tool, so the two sides cannot
   # disagree about which notes exist.
