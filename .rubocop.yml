@@ -85,6 +85,9 @@ Layout/FirstHashElementIndentation:
 Layout/HashAlignment:
   EnforcedColonStyle: key
 
+Layout/LeadingCommentSpace:
+  Enabled: false
+
 # '}' of a multi-line hash on the line after its last key.
 Layout/MultilineHashBraceLayout:
   EnforcedStyle: symmetrical
