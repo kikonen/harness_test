@@ -103,7 +103,9 @@ models:
   - name: local
     url: http://localhost:11434/v1
     model: qwen2.5-coder:32b
-    # token: sk-...
+    # token: sk-...            # literal bearer token (visible in the file), or
+                               # token: ${OPENAI_TOKEN} to keep the secret in the
+                               # ENV and out of the file (issue #422)
     num_ctx: 65536
     temperature: 0.6
     top_p: 0.95
@@ -122,6 +124,15 @@ Config lookup order (issue #260): `-c FILE` > `$HARNESS_CONFIG` >
 file wins; there is no installation-dir tier because `$HARNESS_CONFIG` / `-c`
 already covers that case. Every key is optional; missing values fall back to
 built-in defaults.
+
+Any `token:` in a model profile, and any `env:`/`headers:` **value** in an
+`mcp_servers` entry, may be written as `${NAME}` (issue #422): the harness
+replaces it with the value of the environment variable `NAME` at startup, so the
+secret lives only in your environment and never in the config file - opening,
+pasting or screen-capturing `config.yml` shows only `${NAME}`, never the secret.
+A reference to an unset variable is a startup error naming it (not a silent
+empty), and the lookup is a plain ENV read - never eval/ERB - so a config value
+cannot run code. Design: `doc/config_secrets_design.md`.
 
 ## Usage
 
@@ -460,4 +471,6 @@ doc/truncation_design.md # what a finish reason is for, what each endpoint
 doc/compaction_cache_design.md # why every advisory fork (both compacts + the
                         # safety check) sends the full chain AND the live turn's
                         # tools: a prefix cache matches the RENDERED prompt
+doc/config_secrets_design.md # config ${NAME}: a secret read from ENV, never in
+                        # the file; plain ENV read (no eval/ERB), unset = startup error
 ```

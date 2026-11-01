@@ -530,4 +530,101 @@ RSpec.describe HarnessConfig do
       expect(template).to include('Opt-in')
     end
   end
+
+  # issue #422: a ${NAME} in a model token or an mcp_servers env/header VALUE
+  # is replaced by the ENV of that name, so the secret never lives in the file.
+  describe '#expand_env in config values (issue #422)' do
+    def with_env(name, value)
+      ENV[name] = value
+      yield
+    ensure
+      ENV.delete(name)
+    end
+
+    def profile_token(token)
+      described_class.new(models: [{ name: 'm', token: token }]).models.first[:token]
+    end
+
+    it 'a plain token is untouched' do
+      expect(profile_token('sk-abc')).to eq('sk-abc')
+    end
+
+    # A bare $ (not ${NAME}) is literal: real keys often contain $, and this
+    # must not be mistaken for a reference.
+    it 'a value containing a bare $ is literal' do
+      expect(profile_token('sk-pl$ain$with$dollars')).to eq('sk-pl$ain$with$dollars')
+    end
+
+    # ${NAME} where NAME is not a legal identifier stays literal too (the regex
+    # is strict on purpose).
+    it 'a ${...} with a non-identifier name is literal' do
+      expect(profile_token('foo${bad-name}')).to eq('foo${bad-name}')
+    end
+
+    it 'expands a whole-var token from the environment' do
+      with_env('OPENAI_TOKEN_422', 'sk-live-123') do
+        expect(profile_token('${OPENAI_TOKEN_422}')).to eq('sk-live-123')
+      end
+    end
+
+    it 'expands a var embedded in a template' do
+      with_env('API_KEY_422', 'k1') do
+        expect(profile_token('Bearer ${API_KEY_422}')).to eq('Bearer k1')
+      end
+    end
+
+    it 'expands several references in one value' do
+      with_env('A_422', 'a') do
+        with_env('B_422', 'b') do
+          expect(profile_token('${A_422}-${B_422}')).to eq('a-b')
+        end
+      end
+    end
+
+    # A missing reference is a config error naming the var, not a silent empty.
+    it 'a missing reference raises, naming the var' do
+      ENV.delete('MISSING_422')
+      expect { profile_token('${MISSING_422}') }
+        .to raise_error(HarnessError, /references \$\{MISSING_422\} but MISSING_422 is not set/)
+    end
+
+    it 'a var set to an empty string expands to empty' do
+      with_env('EMPTY_422', '') do
+        expect(profile_token('x${EMPTY_422}y')).to eq('xy')
+      end
+    end
+
+    it 'expands an mcp_servers command env value' do
+      with_env('MCP_KEY_422', 'secret') do
+        cfg = described_class.new(mcp_servers: [
+          { name: 'fs', command: 'ruby', env: { 'KEY' => '${MCP_KEY_422}' } }
+        ])
+        expect(cfg.mcp_servers.first[:env]).to eq('KEY' => 'secret')
+      end
+    end
+
+    # An HTTP header value embeds the secret; the header NAME stays literal,
+    # only the value is expanded.
+    it 'expands an mcp_servers http header value, keeping the header name' do
+      with_env('API_KEY_422', 'k1') do
+        cfg = described_class.new(mcp_servers: [
+          { name: 'remote', url: 'https://x/mcp',
+            headers: { 'Authorization' => 'Bearer ${API_KEY_422}' } }
+        ])
+        expect(cfg.mcp_servers.first[:headers]).to eq('Authorization' => 'Bearer k1')
+      end
+    end
+
+    # The config file holds only the reference, so a screenshot of it cannot
+    # show the secret - the whole point of the feature.
+    it 'a token that references ENV is never a literal secret in the parsed value' do
+      with_env('SECRET_422', 'super-secret-value') do
+        token = profile_token('${SECRET_422}')
+        # The expanded in-memory value IS the secret, but the config never
+        # stored it: only the var name appears in the input hash.
+        expect(token).to eq('super-secret-value')
+        expect(described_class::ENV_REF).to match('${SECRET_422}')
+      end
+    end
+  end
 end
