@@ -22,6 +22,7 @@ require_relative "commands/reasoning_command"
 require_relative "commands/sessions_command"
 require_relative "commands/tools_command"
 require_relative "commands/mcp_command"
+require_relative "commands/env_command"
 require_relative "commands/models_command"
 require_relative "commands/model_command"
 require_relative "commands/param_command"
@@ -65,6 +66,7 @@ class CommandHandler
     "sessions"      => Commands::SessionsCommand,
     "tools"         => Commands::ToolsCommand,
     "mcp"           => Commands::McpCommand,
+    "env"           => Commands::EnvCommand,
     "models"        => Commands::ModelsCommand,
     "model"         => Commands::ModelCommand,
     "param"         => Commands::ParamCommand,

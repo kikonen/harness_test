@@ -45,6 +45,8 @@ require_relative "tools/run_command_tool"
 require_relative "tools/web_fetch_tool"
 require_relative "tools/tools_list_tool"
 require_relative "tools/tools_search_tool"
+require_relative "tools/env_ruby_tool"
+require_relative "env_ruby"
 require_relative "skills"
 require_relative "tools/skills_list_tool"
 require_relative "tools/skills_read_tool"
@@ -90,6 +92,8 @@ class Harness
   # is then not byte-for-byte what harness.md holds.
   # mcp: the Mcp::Manager that owns the declared servers, their connections and
   # startup notes (issue #48). The MCP machinery lives there, not in Harness.
+  # env_ruby: the EnvRuby probe of the CHILD ruby a run.command script runs under
+  # (issue #340) - what gems such a script can require, NOT this harness' bundle.
   attr_reader :options,
     :logger,
     :tool_registry,
@@ -101,7 +105,8 @@ class Harness
     :memories,
     :plans,
     :rules_repair_note,
-    :mcp
+    :mcp,
+    :env_ruby
 
   attr_accessor :history
 
@@ -129,6 +134,10 @@ class Harness
     # The project's durable plans (issue #359): one reader for the store, shared
     # by plan.* and /plans so the two sides cannot drift apart.
     @plans         = Plans.new(file_list.workdir)
+
+    # Issue #340: one probe shared by env.ruby and /env so they cannot disagree
+    # about what the child ruby has. Lazy: it spawns a probe ruby only when asked.
+    @env_ruby      = EnvRuby.new(file_list.workdir)
 
     if resume_data
       saved_id = resume_data[:session_id]
@@ -263,6 +272,7 @@ class Harness
       harness: self))
     registry.register(Tools::ToolsListTool.new(registry))
     registry.register(Tools::ToolsSearchTool.new(registry))
+    registry.register(Tools::EnvRubyTool.new(@env_ruby))
     registry.register(Tools::SkillsListTool.new(@skills))
     registry.register(Tools::SkillsReadTool.new(@skills))
     registry.register(Tools::MemoryListTool.new(@memories))

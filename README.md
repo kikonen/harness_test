@@ -229,6 +229,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/resume <id>` | Restore a saved session: the run is rebuilt under that id (new conversation, grants, log and history file) |
 | `/tools` | List available tools |
 | `/mcp` | List the MCP servers this run declared: whether each connected, the tools each contributed, and any startup problem |
+| `/env [gems...]` | Report the child Ruby a run.command script runs under and the gems it can require (not the harness' own bundle) |
 | `/models` | Show configured models (default and active marked) |
 | `/model [name]` | Show or switch the active model |
 | `/param [key [value]]` | Show, override or reset a model parameter |
@@ -264,6 +265,16 @@ front and logged path by path; needs one DELETE grant - so `rm -rf` through
 unless the prefix is already allowlisted or the posture you picked accepts it
 (AUTO-APPROVE on a "safe:" verdict, or YOLO for everything); timeout-guarded,
 output truncated)
+
+**Ruby environment** - `env.ruby` (reports what a `run.command` script can
+actually use: the CHILD ruby the harness spawns for shell commands, whose
+environment is NOT the harness' own bundle - `run.command` runs unbundled, so
+the harness' gems are hidden from a script it runs. `env.ruby` MEASURES that
+child ruby and lists its installed gems grouped by kind (stdlib = ships with
+Ruby, ruby = this Ruby's gem home, user = user-installed, other = GEM_PATH),
+or answers per name for `gems: [..]`. Read it before hand-writing something a
+well-known gem would do. Report only - it installs nothing. `/env [gems...]`
+prints the same thing. Design: `doc/env_ruby_design.md`)
 
 **Web** - `web.fetch` (fetches one http(s) URL and returns the body as text;
 the full URL is shown before anything is sent, and every host you have not

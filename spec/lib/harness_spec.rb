@@ -2439,6 +2439,40 @@ RSpec.describe Harness do
     end
   end
 
+  # Issue #340: what a model-run script can require is a property of the CHILD
+  # ruby run.command spawns (unbundled, #185), not of this harness' bundle. The
+  # probe is one object shared by env.ruby and /env so the two cannot disagree,
+  # and it is lazy: building a harness must not spawn a probe ruby.
+  describe 'env.ruby (issue #340)' do
+    it 'points at the harness workdir' do
+      expect(build_harness.env_ruby.instance_variable_get(:@workdir)).to eq(workdir)
+    end
+
+    it 'registers env.ruby over that SAME probe object' do
+      h = build_harness
+      tool = h.tool_registry.get('env.ruby')
+
+      expect(tool).to be_a(Tools::EnvRubyTool)
+      expect(tool.instance_variable_get(:@env_ruby)).to equal(h.env_ruby)
+      expect(h.tool_registry.names).to include('env.ruby')
+    end
+
+    # A run that never asks about gems must pay nothing for the feature (the same
+    # opt-in logic as the MCP code path, issue #48).
+    it 'spawns no probe ruby during construction' do
+      env = EnvRuby.new(workdir)
+      allow(env).to receive(:probe)
+      allow(EnvRuby).to receive(:new).and_return(env)
+      h = build_harness
+
+      expect(EnvRuby).to have_received(:new).with(workdir)
+      # The spy IS the harness' probe, so a probe made during construction would
+      # have been recorded on it.
+      expect(h.env_ruby).to equal(env)
+      expect(env).not_to have_received(:probe)
+    end
+  end
+
   # issue #48: MCP client wiring. Opt-in (no mcp_servers: = no MCP code path),
   # a failed server degrades to a status note, a tool name that collides with a
   # built-in is skipped, and the connections are closed on shutdown. The real
