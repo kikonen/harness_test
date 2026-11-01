@@ -24,7 +24,13 @@ gem "ratatui_ruby"
 # author. Preserves inline emphasis (bold/italic/code) - the point of rendering
 # markdown. Its ansi_styles are seeded from UI::Palette so colors match the
 # harness" own roles; a "none" palette strips the ANSI (see UI::MarkdownRenderer).
-gem "kramdown-ansi", "~> 0.7"
+gem "kramdown-ansi" #, "~> 0.7"
+gem "kramdown"
+gem "tins"
+gem "unicode-emoji"
+
+#gem "reverse_markdown"
+#gem "tty-markdown"
 
 # MCP client (issue #48): the official Model Context Protocol Ruby SDK. Used ONLY
 # when the user declares mcp_servers: in the config - the gem is required lazily
