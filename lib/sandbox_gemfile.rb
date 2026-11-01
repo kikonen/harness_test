@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "bundler"
 require "fileutils"
 
 # The blessed location for project-specific Ruby scripts and their gems
@@ -19,7 +20,8 @@ class SandboxGemfile
     #   BUNDLE_GEMFILE=.harness/sandbox/Gemfile bundle exec ruby script.rb
     # Add a gem you need with:  BUNDLE_GEMFILE=.harness/sandbox/Gemfile bundle install
     # This pins versions so a script's result does not vary with the box's ambient
-    # gems. The harness seeded these; edit freely (bundle add/lock updates the lock).
+    # gems. The harness seeded these and tried to write a lock for them offline;
+    # if one is missing (gem not on this box yet), run bundle install. Edit freely.
     source "https://rubygems.org"
 
     gem "csv"
@@ -51,15 +53,36 @@ class SandboxGemfile
     File.file?(gemfile_path)
   end
 
-  # Create the directory and drop the starter ONLY if no Gemfile is there yet, so
-  # a model-managed Gemfile is never overwritten. No bundler/network: this only
-  # writes a text scaffold; the model runs `bundle install` through run.command
-  # (consent-gated) when it first uses the sandbox.
+  # Seed the starter ONLY when no Gemfile is there yet, so a model-managed one is
+  # never overwritten, then try to make it a working bundle by locking it offline.
+  # Returns :existing (nothing touched), :seeded_locked or :seeded_unlocked so the
+  # caller can say whether the seed is ready to run. The lock attempt runs only on
+  # a FRESH seed - every later launch hits the early return and runs no bundler.
   def ensure_starter!
-    return gemfile_path if exist?
+    return :existing if exist?
 
     FileUtils.mkdir_p(dir)
     File.write(gemfile_path, STARTER_GEMFILE)
-    gemfile_path
+    lock_seeded? ? :seeded_locked : :seeded_unlocked
+  end
+
+  # Make the seeded Gemfile a real, resolvable bundle WITHOUT the network:
+  # `bundle lock --local` writes a Gemfile.lock only when every declared gem is
+  # already on this box, and a missing gem (or no bundler) leaves NO partial lock
+  # (measured). That is why this never installs: an absent gem is the model's
+  # consent-gated `bundle install`, not a harness network call. A bundler problem
+  # must never crash harness startup, so failures and raises collapse to false.
+  def lock_seeded?
+    Bundler.with_unbundled_env do
+      system(
+        { "BUNDLE_GEMFILE" => gemfile_path },
+        "bundle",
+        "lock",
+        "--local",
+        out: File::NULL,
+        err: File::NULL) ? true : false
+    end
+  rescue StandardError
+    false
   end
 end

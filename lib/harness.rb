@@ -147,13 +147,20 @@ class Harness
     @user_notes    = []
     StateMigrator.run(@file_list.workdir, HARNESS_DIR)
 
-    # Harness-seeded because the model's file tools cannot write the sensitive
-    # .harness/; ensure_starter! never clobbers a model-managed Gemfile.
-    # doc/sandbox_gemfile_design.md.
-    @sandbox_gemfile = SandboxGemfile.new(@file_list.workdir)
-    @sandbox_gemfile.ensure_starter!
-
     @logger = build_logger
+
+    # Harness-seeded because the model's file tools cannot write the sensitive
+    # .harness/. A fresh seed also locks it offline (no network); the outcome is
+    # logged so a seed that could NOT lock (a gem absent on this box) is visible
+    # rather than surfacing as a mid-run LoadError. doc/sandbox_gemfile_design.md.
+    @sandbox_gemfile = SandboxGemfile.new(@file_list.workdir)
+    case @sandbox_gemfile.ensure_starter!
+    when :seeded_locked
+      @logger.info "ruby sandbox seeded and locked offline"
+    when :seeded_unlocked
+      @logger.info "ruby sandbox seeded but the offline lock failed " \
+                   "(a starter gem is absent on this box) - bundle install it"
+    end
 
     # The MCP machinery (issue #48) lives in its own object; build_tool_registry
     # asks it to connect the declared servers and register their tools.

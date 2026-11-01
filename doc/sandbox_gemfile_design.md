@@ -1,7 +1,7 @@
 # The project Ruby sandbox: `.harness/sandbox/Gemfile`
 
 Why a model-run Ruby script goes through a pinned per-project Gemfile, why the
-harness seeds it but the model manages it, and the `bundle exec` load-path trap
+harness seeds AND offline-locks it but the model manages it, and the `bundle exec` load-path trap
 that decides the starter's shape. Issue #340.
 
 ---
@@ -43,21 +43,33 @@ Verified against the seeded starter: it resolves offline via
 the measurement) works; a not-installed gem fails cleanly at `bundle install`
 rather than at `require`.
 
-## Harness seeds it, the model manages it
+## Harness seeds and offline-locks it, the model manages it
 
 `.harness/` is a SENSITIVE path (`doc/sensitive_paths_design.md`): the model's
 file tools cannot write into it. So the scaffold has to be written by the
 harness. `SandboxGemfile#ensure_starter!` (lib/sandbox_gemfile.rb) creates the
 directory and writes the starter ONLY when no Gemfile is there yet - it never
-overwrites a Gemfile the model has since edited. That is the whole ownership
-split: the harness guarantees a blessed starting point exists; from then on the
-Gemfile is the model's to extend per project, because needs vary and there is no
-fixed toolset to enforce.
+overwrites a Gemfile the model has since edited - then, for that fresh seed
+only, tries to make it a real bundle. A seeded-but-unlocked Gemfile is only a
+manifest: `bundle exec` resolves it from locally installed gems, so it works on
+this box (every starter gem is present here) but fails on a box missing one with
+"Could not find gem ... in locally installed gems" (measured - a gem absent on
+the box cannot be resolved offline, and csv/rexml/logger/racc/base64 stop being
+Ruby defaults at 3.5, so a clean future box is exactly that case).
 
-`SandboxGemfile` performs NO bundler work and touches NO network - it only
-writes a text scaffold. Turning the scaffold into a resolved lock is a
-`bundle install` the model runs itself through `run.command`, so it follows the
-same consent posture as any other shell command; the harness never runs a
+So `#lock_seeded?` runs `bundle lock --local` once, in `Bundler.with_unbundled_env`
+with stdout/stderr discarded, and keeps the `Gemfile.lock` only if it succeeds.
+`--local` is OFFLINE: it never contacts rubygems.org, so it adds no network call
+and no download to startup - it only records the versions ALREADY on this box. On
+a missing gem it leaves NO partial lock and the method returns false. It runs ONLY
+on a fresh seed: every later launch hits the `exist?` early return, so no bundler
+is ever spawned again. `ensure_starter!` returns `:existing` / `:seeded_locked` /
+`:seeded_unlocked` so Harness can log which happened - a seed that could not lock
+is visible at startup instead of surfacing later as a mid-run LoadError.
+
+A bundler failure must never crash harness startup, so any raise in `lock_seeded?`
+collapses to false. Installing a gem the box lacks stays the model's own,
+consent-gated `bundle install` through `run.command` - the harness never runs a
 network install on the model's behalf.
 
 ## Why it stays gitignored (unlike skills)

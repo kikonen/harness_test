@@ -14,6 +14,12 @@ RSpec.describe Harness do
   let(:workdir) { Dir.mktmpdir('harness-spec') }
   after { FileUtils.remove_entry(workdir) if File.directory?(workdir) }
 
+  # Every fresh seed in this spec would otherwise spawn a real `bundle lock`
+  # subprocess (~1s each x ~160 build_harness calls) AND make the wiring asserts
+  # depend on which gems the runner box happens to have. Stub it to a fixed value;
+  # the real offline lock is proven by real subprocess in sandbox_gemfile_spec.
+  before { allow_any_instance_of(SandboxGemfile).to receive(:lock_seeded?).and_return(true) }
+
   # Fake LLM client shared by the call_llm coverage below: records every
   # message chain it is called with and answers from a SCRIPTED queue.
   # Each item is either a tool round (a hash with :tool_calls), a final
@@ -2354,6 +2360,37 @@ RSpec.describe Harness do
         File.join(workdir, '.harness', 'sandbox', 'Gemfile'))
       expect(h.sandbox_gemfile.exist?).to be true
       expect(File.read(h.sandbox_gemfile.gemfile_path)).to eq(SandboxGemfile::STARTER_GEMFILE)
+    end
+
+    # A fresh seed's outcome is logged, so a seed that could NOT lock (a gem
+    # absent here) is visible at startup instead of surfacing later as a mid-run
+    # LoadError. The top-level stub makes the locked branch deterministic here.
+    it 'logs the locked branch when the offline lock succeeded' do
+      h = build_harness
+
+      expect(File.read(h.session_log_path)).to include('ruby sandbox seeded and locked offline')
+    end
+
+    # The unlocked branch (a starter gem absent on the box) is the same seed
+    # outcome with the opposite tail - proven by flipping the same stub.
+    it 'logs the unlocked branch when the offline lock failed' do
+      allow_any_instance_of(SandboxGemfile).to receive(:lock_seeded?).and_return(false)
+      h = build_harness
+
+      expect(File.read(h.session_log_path)).to include('ruby sandbox seeded')
+      expect(File.read(h.session_log_path)).to include('offline lock failed')
+    end
+
+    # A model-managed Gemfile is never re-locked or overwritten on a later launch:
+    # ensure_starter! early-returns :existing, so no bundler runs and no second
+    # seed line appears.
+    it 'leaves an existing sandbox untouched on a later launch' do
+      FileUtils.mkdir_p(File.join(workdir, '.harness', 'sandbox'))
+      File.write(File.join(workdir, '.harness', 'sandbox', 'Gemfile'), "gem 'mine'\n")
+
+      h = build_harness
+      expect(File.read(h.sandbox_gemfile.gemfile_path)).to eq("gem 'mine'\n")
+      expect(File.read(h.session_log_path)).not_to include('ruby sandbox seeded')
     end
   end
 
