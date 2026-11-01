@@ -14,7 +14,12 @@ models:
     url: http://localhost:11434/v1
     api: openai            # endpoint type: openai (default) | ollama (issue #197)
     model: qwen2.5-coder:32b
-    # token: sk-...        # optional bearer token
+    # token: sk-...        # optional bearer token. To keep the secret out of
+    #                      # this file (so opening or screen-capturing it cannot
+    #                      # leak it - issue #422), reference an ENV var instead:
+    #   token: ${OPENAI_TOKEN}
+    #                      # the harness reads OPENAI_TOKEN from the environment;
+    #                      # only the variable name appears here, never the secret.
     num_ctx: 65536         # context window size (tokens)
     reasoning_effort: medium
     temperature: 0.6
@@ -104,10 +109,13 @@ auto_save: true
 #   - name: filesystem
 #     command: npx
 #     args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
-#     env: { KEY: value }
+#     env: { KEY: value }       # a value may reference ENV as ${NAME}, e.g.
+#                               # { KEY: "${MCP_KEY}" } (issue #422)
 #   - name: remote          # HTTP/SSE transport instead of a subprocess
 #     url: https://example.com/mcp
-#     headers: { Authorization: "Bearer ..." }
+#     headers: { Authorization: "Bearer ..." }   # a value may embed ENV as
+#                               # "Bearer ${API_KEY}" so the secret lives only in
+#                               # the environment, never in this file (#422).
 
 # Automatic retries for transient network errors.
 retry:
