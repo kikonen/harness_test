@@ -3,35 +3,51 @@
 require_relative "../text_normalizer"
 require_relative "../error_text"
 
-# One stdio MCP server connection (issue #48). Owns the subprocess spawned by
-# the gem's stdio transport, the initialize handshake, the tool list, and the
-# tools/call round-trip. The `MCP` gem is NOT required here: Harness requires it
-# lazily only when mcp_servers: is configured, so a run with no MCP servers never
-# loads it. The ::MCP:: constants below resolve at call time, after that require.
+# One MCP server connection (issue #48, HTTP transport issue #402). Owns the
+# transport - a subprocess spawned by the gem's stdio transport, or a streamable
+# HTTP/SSE connection to a remote endpoint - plus the initialize handshake, the
+# tool list, and the tools/call round-trip. Everything below the transport is
+# the same for both: the gem's Client API (connect / tools / call_tool) is
+# transport-agnostic, so only #connect branches.
+#
+# The `MCP` gem is NOT required here: Harness requires it lazily only when
+# mcp_servers: is configured, so a run with no MCP servers never loads it. The
+# ::MCP:: constants below resolve at call time, after that require.
 module Mcp
   class ServerConnection
+    # Stdio only: the gem's stdio transport takes a read_timeout, its HTTP
+    # transport does NOT (its knobs are max_message_bytes and
+    # max_reconnection_wait, which bound a message size and a reconnection
+    # budget - not a read). Mapping 30 onto either would be a different policy
+    # wearing the same number, so an HTTP connection uses the gem's own
+    # defaults and this constant stays on the stdio transport only.
     READ_TIMEOUT = 30
 
     attr_reader :name, :client, :transport
 
-    def initialize(name:, command:, args: [], env: {})
+    # A connection is either a spawned program (command/args/env) or a remote
+    # endpoint (url/headers). HarnessConfig guarantees exactly one of them.
+    def initialize(name:, command: nil, args: [], env: {}, url: nil, headers: {})
       @name     = name
       @command  = command
-      @args     = args
-      @env      = env
+      @args     = args || []
+      @env      = env || {}
+      @url      = url
+      @headers  = headers || {}
       @transport = nil
       @client    = nil
     end
 
-    # Spawn the server, run the initialize handshake, and return its tool list.
-    # Raises if the server cannot be reached - Harness turns that into a status
-    # note rather than crashing the run.
+    def http?
+      !@url.nil?
+    end
+
+    # Open the transport, run the initialize handshake, and return its tool
+    # list. For stdio this SPAWNS the server; for HTTP it connects to an already
+    # running endpoint. Raises if the server cannot be reached - Harness turns
+    # that into a status note rather than crashing the run.
     def connect
-      @transport = ::MCP::Client::Stdio.new(
-        command: @command,
-        args: @args,
-        env: @env,
-        read_timeout: READ_TIMEOUT)
+      @transport = http? ? http_transport : stdio_transport
       @client = ::MCP::Client.new(transport: @transport)
       @client.connect
       @client.tools
@@ -91,6 +107,20 @@ module Mcp
       return content.to_s unless content.nil?
 
       "[resource: #{resource["uri"] || "unknown"}]"
+    end
+
+    private
+
+    def stdio_transport
+      ::MCP::Client::Stdio.new(
+        command: @command,
+        args: @args,
+        env: @env,
+        read_timeout: READ_TIMEOUT)
+    end
+
+    def http_transport
+      ::MCP::Client::HTTP.new(url: @url, headers: @headers)
     end
   end
 end
