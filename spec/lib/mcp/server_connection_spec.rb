@@ -135,6 +135,28 @@ RSpec.describe Mcp::ServerConnection do
     end
   end
 
+  # The transport branch above is stubbed, so this is the one place that checks
+  # the REAL HTTP transport can be built from this project's bundle. The gem
+  # loads faraday lazily (#require_faraday!) without declaring it as a
+  # dependency; with faraday absent, the build raises NameError for the
+  # unresolved Faraday constant in the transport's own rescue clauses instead of
+  # the gem's "add faraday to your Gemfile" LoadError - so removing faraday from
+  # the Gemfile must fail HERE, not in a user's startup banner.
+  describe 'HTTP transport dependencies (real gem, no network)' do
+    it 'can build the HTTP transport connection (faraday is bundled)' do
+      transport = MCP::Client::HTTP.new(
+        url: 'http://127.0.0.1:4560/mcp',
+        headers: { 'Authorization' => 'Bearer t' })
+      begin
+        connection = transport.send(:client)
+        expect(connection.class.name).to eq('Faraday::Connection')
+        expect(connection.headers['Authorization']).to eq('Bearer t')
+      ensure
+        transport.close
+      end
+    end
+  end
+
   describe '#call_tool (round-trip error mapping)' do
     # The gem is not required by this file; call_tool resolves ::MCP:: lazily, so
     # a stubbed client exercises the mapping without a real server.

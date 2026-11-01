@@ -1,0 +1,30 @@
+# frozen_string_literal: true
+
+# Isolated bundle for the MCP examples (issue #48 stdio, issue #402 HTTP/SSE).
+# These scripts must not depend on the harness's own Gemfile: an example that
+# SERVES needs a Rack handler, and the harness never serves. Install here with:
+#   cd examples/mcp && bundle install
+
+source "https://rubygems.org"
+
+# The MCP SDK itself (client and server halves). The harness bundles the same
+# gem; declaring it here keeps the examples runnable from their own bundle.
+gem "mcp", "~> 1.8"
+
+# The mcp gem requires base64, which stopped being a default gem in Ruby 3.4.
+gem "base64"
+
+# http_client.rb: MCP::Client::HTTP builds its connection with Faraday
+# (MCP::Client::HTTP#require_faraday!). faraday is not a declared dependency of
+# mcp 1.8.2, so it must be named here - otherwise the client raises NameError
+# for the unresolved constant instead of the gem's own LoadError hint.
+gem "faraday", ">= 2.0"
+
+# http_server.rb: MCP::Server::Transports::StreamableHTTPTransport IS a Rack
+# app (the gem refuses to load it without rack) and the example mounts it with
+# the WEBrick handler rackup supplies, so no app framework of its own is
+# needed. A server the harness talks to runs somewhere else; the harness itself
+# never loads these three.
+gem "rack"
+gem "rackup"
+gem "webrick"
