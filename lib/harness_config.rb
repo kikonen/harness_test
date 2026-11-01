@@ -25,7 +25,10 @@ require_relative "harness_error"
 #                               # url is the base for the endpoint's path:
 #                               # openai -> .../v1, ollama -> server root.
 #       model: qwen2.5-coder:32b
-#       token: sk-...           # optional bearer token
+#       token: sk-...           # optional bearer token. A value may reference an
+#                               # ENV var as ${NAME} (issue #422) so the secret
+#                               # lives only in the environment, never in this
+#                               # file: token: ${OPENAI_TOKEN}.
 #       num_predict: -1         # same, native ollama name - omit = server default
 #       num_ctx: 65536          # optional context window size (tokens)
 #       reasoning_effort: medium
@@ -62,10 +65,12 @@ require_relative "harness_error"
 #     - name: filesystem        # namespace prefix for its tools ("<name>.<tool>")
 #       command: npx            # program to spawn
 #       args: ["-y", "@modelcontextprotocol/server-filesystem", "C:/path"]
-#       env: { KEY: value }     # optional extra environment for the server
+#       env: { KEY: value }     # optional extra environment for the server. A
+#                               # value may reference ENV as ${NAME} (issue #422).
 #     - name: remote            # HTTP/SSE transport instead of a subprocess
 #       url: https://example.com/mcp
-#       headers: { Authorization: "Bearer ..." }   # optional request headers
+#       headers: { Authorization: "Bearer ..." }   # optional request headers. A
+#                               # value may embed ENV as "Bearer ${API_KEY}" (#422).
 #   double_enter_submit: false # Enter on an empty last line submits the multiline buffer (issue #198)
 #   system_prompt_file: prompts/my.txt  # file with the full system prompt (issue #223)
 #                                       # overrides the built-in config/system_prompt.txt
@@ -127,6 +132,14 @@ class HarnessConfig
     "denylist"      => { approve: false, denylist: true },
     "safe_denylist" => { approve: true,  denylist: true }
   }.freeze
+
+  # issue #422: a ${VAR} reference in a config string value is replaced by the
+  # ENV of that name, so a bearer token / MCP credential lives ONLY in the
+  # environment and never in config.yml (opening or screen-capturing the file
+  # cannot leak it). Strict identifier regex on purpose: a name that is not a
+  # legal identifier stays literal, and the lookup is a plain ENV read - never
+  # eval / ERB, so a config value can never run code.
+  ENV_REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/
 
   attr_reader :models, :default_model, :system_prompt_file
 
@@ -427,7 +440,7 @@ class HarnessConfig
         url:              nonblank(m[:url]),
         api:              nonblank(m[:api]),
         model:            nonblank(m[:model]),
-        token:            nonblank(m[:token]),
+        token:            expand_env(nonblank(m[:token]), "a model token"),
         num_ctx:          int_or_nil(m[:num_ctx]),
         max_tokens:       int_or_nil(m[:max_tokens]),
         num_predict:      int_or_nil(m[:num_predict]),
@@ -509,7 +522,26 @@ class HarnessConfig
   def stringified(val)
     return {} unless val.is_a?(Hash)
 
-    val.transform_keys(&:to_s).transform_values(&:to_s)
+    val.transform_keys(&:to_s).transform_values { |v| expand_env(v.to_s, "an mcp_servers value") }
+  end
+
+  # issue #422: replace every ${NAME} in a config string with the ENV of that
+  # name. A missing reference is a config error (naming the var), not a silent
+  # empty: an unset bearer token / MCP credential that quietly became "" would
+  # only fail later as an opaque auth error. A value with no ${NAME} is returned
+  # unchanged, so plain config values (and values with a bare $) are untouched.
+  # The lookup is ENV[name] - never eval/ERB - so a config value cannot run code.
+  def expand_env(val, label)
+    return val unless val.is_a?(String) && ENV_REF.match?(val)
+
+    val.gsub(ENV_REF) do
+      name = Regexp.last_match(1)
+      unless ENV.key?(name)
+        raise HarnessError,
+          "#{label} references \${#{name}} but #{name} is not set in the environment"
+      end
+      ENV[name]
+    end
   end
 
   # Normalize each protected_dirs entry to a workdir-relative dir. A blank entry
