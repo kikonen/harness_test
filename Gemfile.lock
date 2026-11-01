@@ -10,6 +10,12 @@ GEM
       reline (>= 0.3.8)
     diff-lcs (1.6.2)
     erb (6.0.7)
+    faraday (2.15.1)
+      faraday-net_http (>= 2.0, < 3.6)
+      json
+      logger
+    faraday-net_http (3.5.0)
+      net-http (~> 0.5)
     fiddle (1.1.8)
     hana (1.3.7)
     io-console (0.9.5)
@@ -41,6 +47,11 @@ GEM
     mcp (1.8.2)
       json_schemer (>= 2.4)
     mize (0.7.0)
+    net-http (0.10.0)
+      net-protocol (>= 0.3.0)
+      uri (>= 0.11.1)
+    net-protocol (0.4.0)
+      timeout
     parallel (2.3.0)
     parallel_tests (5.9.0)
       parallel
@@ -111,6 +122,7 @@ GEM
       tins (~> 1)
     terminal-table (4.0.0)
       unicode-display_width (>= 1.1.1, < 4)
+    timeout (0.6.1)
     tins (1.61.0)
       bigdecimal
       irb
@@ -121,6 +133,7 @@ GEM
     unicode-display_width (3.3.0)
       unicode-emoji (~> 4.3)
     unicode-emoji (4.3.0)
+    uri (1.1.2)
 
 PLATFORMS
   x64-mingw-ucrt
@@ -130,6 +143,7 @@ DEPENDENCIES
   amazing_print
   base64
   debug
+  faraday (>= 2.0)
   fiddle
   kramdown
   kramdown-ansi

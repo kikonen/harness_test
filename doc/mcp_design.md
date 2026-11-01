@@ -27,6 +27,18 @@ The official `mcp` Ruby SDK (`gem 'mcp', '~> 1.8'`). It requires `base64`, which
 stopped being a default gem in Ruby 3.4, so `base64` is declared in the Gemfile
 too - without it `require "mcp"` raises LoadError under bundler.
 
+Its **HTTP** client transport (`MCP::Client::HTTP`, issue #402) requires
+`faraday` the same lazy way (`#require_faraday!`) and does not declare it as a
+dependency, so `faraday` is in the Gemfile too. Without it a `url:` entry fails
+at connect - and NOT with the gem's own "add faraday to your Gemfile" LoadError:
+the NameError for the unresolved `Faraday` constant in the transport's rescue
+clauses fires first, which is what the failure looks like in the banner
+(measured on mcp 1.8.2 / ruby 4.0.7). Only the HTTP half pays for it - a stdio
+setup never loads faraday.
+
+Runnable examples of both transports: `examples/mcp/` (its own bundle - its
+HTTP example serves too, which needs `rack`, and the harness never serves).
+
 ## Config
 
 `mcp_servers:` is a list of servers (config-only; there is no CLI flag - a

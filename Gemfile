@@ -41,6 +41,16 @@ gem "mcp", "~> 1.8"
 # Ruby 3.4 - without it `require "mcp"` raises LoadError under bundler.
 gem "base64"
 
+# The mcp gem"s CLIENT HTTP transport (issue #402) needs faraday the same lazy
+# way: MCP::Client::HTTP#require_faraday!. faraday is NOT a declared dependency
+# of mcp 1.8.2 (only json_schemer is), so without this line a url entry in
+# mcp_servers: fails at connect, and not with the gem's own LoadError hint - the
+# NameError for the unresolved Faraday constant in its rescue clauses fires
+# first (measured on mcp 1.8.2 / ruby 4.0.7: "uninitialized constant
+# MCP::Client::HTTP::Faraday"). A stdio-only setup never loads it, so listing
+# it costs one entry in the bundle, not a startup path.
+gem "faraday", ">= 2.0"
+
 group :development do
   gem "rspec"
 
