@@ -56,11 +56,16 @@ require_relative "harness_error"
 #                               # explicit count is clamped to the terminal width.
 #   mcp_servers:                # external MCP servers whose tools the model may
 #                               # call (issue #48). Opt-in: omit the key and no MCP
-#                               # code runs at all. Each entry is a stdio server:
+#                               # code runs at all. Each entry names ONE server,
+#                               # reached either as a spawned subprocess (command)
+#                               # or as a remote endpoint (url, issue #402):
 #     - name: filesystem        # namespace prefix for its tools ("<name>.<tool>")
 #       command: npx            # program to spawn
 #       args: ["-y", "@modelcontextprotocol/server-filesystem", "C:/path"]
 #       env: { KEY: value }     # optional extra environment for the server
+#     - name: remote            # HTTP/SSE transport instead of a subprocess
+#       url: https://example.com/mcp
+#       headers: { Authorization: "Bearer ..." }   # optional request headers
 #   double_enter_submit: false # Enter on an empty last line submits the multiline buffer (issue #198)
 #   system_prompt_file: prompts/my.txt  # file with the full system prompt (issue #223)
 #                                       # overrides the built-in config/system_prompt.txt
@@ -439,29 +444,72 @@ class HarnessConfig
   end
 
   # Normalize each mcp_servers entry. A server needs a name (the tool namespace)
-  # and a command to spawn; args and env are optional. An entry missing either is
-  # a config error rather than a silently skipped server - a server the user typed
-  # but that quietly did not load would read as "my MCP tools are there" when they
-  # are not.
+  # and exactly ONE way to reach it: a command to spawn (stdio) or a url to
+  # connect to (HTTP/SSE, issue #402). args/env belong to a command entry,
+  # headers to a url entry; both are optional.
+  #
+  # Every mismatch here is a config error rather than a silently degraded server,
+  # for the reason that has always applied to this key: a server the user typed
+  # that quietly did not load reads as "my MCP tools are there" when they are not.
+  # An entry with BOTH transports is refused too - the harness would have to guess
+  # which one the user meant, and the two reach different trust boundaries (a
+  # program the user can inspect locally vs. a remote host).
   def normalize_mcp_servers(list)
     list.map do |entry|
       raise HarnessError, "each entry in 'mcp_servers' must be a mapping" unless entry.is_a?(Hash)
 
-      name    = nonblank(entry[:name])
+      name    = require_name(entry)
       command = nonblank(entry[:command])
-      raise HarnessError, "an mcp_servers entry needs a 'name' and a 'command'" if name.nil? || command.nil?
+      url     = nonblank(entry[:url])
 
-      # An env value must be a string when it reaches the subprocess spawn.
-      env = (entry[:env].is_a?(Hash) ? entry[:env] : {})
-      env = env.transform_keys(&:to_s).transform_values(&:to_s)
+      if command.nil? && url.nil?
+        raise HarnessError,
+          "an mcp_servers entry needs a 'name' and one of 'command' or 'url' " \
+            "(got: #{entry.keys.inspect})"
+      end
+      raise HarnessError, "mcp_servers entry '#{name}' has both 'command' and 'url'" if command && url
 
-      {
-        name:,
-        command:,
-        args: Array(entry[:args]).map(&:to_s),
-        env:
-      }
+      if command
+        # An env value must be a string when it reaches the subprocess spawn.
+        {
+          name:,
+          command:,
+          args: Array(entry[:args]).map(&:to_s),
+          env: stringified(entry[:env])
+        }
+      else
+        {
+          name:,
+          url: require_http_url(name, url),
+          headers: stringified(entry[:headers])
+        }
+      end
     end
+  end
+
+  def require_name(entry)
+    name = nonblank(entry[:name])
+    raise HarnessError, "an mcp_servers entry needs a 'name'" if name.nil?
+
+    name
+  end
+
+  # The MCP HTTP transport speaks HTTP(S) - any other scheme would fail deep
+  # inside connect and surface as a broken server rather than a bad config.
+  def require_http_url(name, url)
+    return url if url.start_with?("http://", "https://")
+
+    raise HarnessError,
+      "mcp_servers entry '#{name}' url must start with http:// or https:// (got: #{url})"
+  end
+
+  # A non-Hash is treated as empty (the shape today's env handling already uses);
+  # keys and values are stringified because they reach HTTP headers / the
+  # subprocess environment, which hold strings.
+  def stringified(val)
+    return {} unless val.is_a?(Hash)
+
+    val.transform_keys(&:to_s).transform_values(&:to_s)
   end
 
   # Normalize each protected_dirs entry to a workdir-relative dir. A blank entry

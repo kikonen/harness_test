@@ -367,7 +367,9 @@ RSpec.describe HarnessConfig do
   end
 
   # issue #48: external MCP servers. Opt-in: an empty list means the MCP code
-  # path never runs. Each entry normalizes to { name:, command:, args:, env: }.
+  # path never runs. Each entry names one server reached either as a spawned
+  # command ({ name:, command:, args:, env: }) or as a remote url
+  # ({ name:, url:, headers: }) - issue #402.
   describe '#mcp_servers (issue #48)' do
     it 'is empty when the key is absent (no MCP code path runs)' do
       expect(described_class.new({}).mcp_servers).to eq([])
@@ -407,16 +409,69 @@ RSpec.describe HarnessConfig do
         .to raise_error(HarnessError, /must be a mapping/)
     end
 
-    it 'raises when an entry is missing a name or a command' do
+    it 'raises when an entry has neither a command nor a url' do
       expect { described_class.new(mcp_servers: [{ command: 'npx' }]) }
-        .to raise_error(HarnessError, /needs a 'name' and a 'command'/)
+        .to raise_error(HarnessError, /needs a 'name'/)
       expect { described_class.new(mcp_servers: [{ name: 'fs' }]) }
-        .to raise_error(HarnessError, /needs a 'name' and a 'command'/)
+        .to raise_error(HarnessError, /needs a 'name' and one of 'command' or 'url'/)
+    end
+
+    it 'normalizes an http entry (name, url, headers)' do
+      cfg = described_class.new(mcp_servers: [
+        { name: 'remote', url: 'https://example.com/mcp',
+          headers: { 'Authorization' => 'Bearer t' } }
+      ])
+      expect(cfg.mcp_servers).to eq(
+        [{ name: 'remote', url: 'https://example.com/mcp',
+           headers: { 'Authorization' => 'Bearer t' } }]
+      )
+    end
+
+    it 'defaults headers to {} on a url entry and carries no command keys' do
+      cfg = described_class.new(mcp_servers: [{ name: 'remote', url: 'http://localhost:8080/mcp' }])
+
+      expect(cfg.mcp_servers).to eq(
+        [{ name: 'remote', url: 'http://localhost:8080/mcp', headers: {} }]
+      )
+    end
+
+    it 'stringifies headers keys and values (they reach HTTP headers)' do
+      cfg = described_class.new(mcp_servers: [
+        { name: 'remote', url: 'https://example.com/mcp', headers: { count: 2 } }
+      ])
+
+      expect(cfg.mcp_servers.first[:headers]).to eq('count' => '2')
+    end
+
+    it 'rejects a url entry that is not http(s) rather than failing inside connect' do
+      expect { described_class.new(mcp_servers: [{ name: 'r', url: 'ws://example.com/mcp' }]) }
+        .to raise_error(HarnessError, /url must start with http:\/\/ or https:\/\//)
+    end
+
+    it 'rejects an entry with both transports (the harness would have to guess)' do
+      expect {
+        described_class.new(mcp_servers: [
+          { name: 'both', command: 'npx', url: 'https://example.com/mcp' }
+        ])
+      }.to raise_error(HarnessError, /'both' has both 'command' and 'url'/)
+    end
+
+    it 'accepts both kinds in one list' do
+      cfg = described_class.new(mcp_servers: [
+        { name: 'fs', command: 'npx' },
+        { name: 'remote', url: 'https://example.com/mcp' }
+      ])
+
+      expect(cfg.mcp_servers.map { |e| e.keys }).to eq(
+        [[:name, :command, :args, :env], [:name, :url, :headers]]
+      )
     end
 
     it 'mentions the key in the default template (commented out)' do
       expect(template).to include('mcp_servers')
       expect(template).to include('Opt-in')
+      expect(template).to include('url:')
+      expect(template).to include('headers:')
     end
   end
 

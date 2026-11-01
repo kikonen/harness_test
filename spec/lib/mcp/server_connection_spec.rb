@@ -76,6 +76,65 @@ RSpec.describe Mcp::ServerConnection do
     end
   end
 
+  describe '#connect (transport branch)' do
+    # connect builds the transport, then a Client around it; stubbing both
+    # classes exercises the branch with no subprocess and no endpoint.
+    def stub_client(tools)
+      client = instance_double('MCP::Client')
+      allow(client).to receive(:connect)
+      allow(client).to receive(:tools).and_return(tools)
+      allow(MCP::Client).to receive(:new).and_return(client)
+      client
+    end
+
+    it 'spawns a stdio transport for a command entry' do
+      transport = instance_double('MCP::Client::Stdio')
+      allow(MCP::Client::Stdio).to receive(:new).and_return(transport)
+      allow(MCP::Client::HTTP).to receive(:new)
+      stub_client([])
+      conn = described_class.new(name: 'fs', command: 'npx', args: ['-y', 'srv'],
+                                 env: { 'KEY' => 'v' })
+
+      conn.connect
+
+      expect(conn).not_to be_http
+      expect(MCP::Client::Stdio).to have_received(:new).with(
+        command: 'npx', args: ['-y', 'srv'], env: { 'KEY' => 'v' },
+        read_timeout: described_class::READ_TIMEOUT
+      )
+      expect(MCP::Client::HTTP).not_to have_received(:new)
+    end
+
+    it 'opens an HTTP transport for a url entry, passing url and headers' do
+      transport = instance_double('MCP::Client::HTTP')
+      allow(MCP::Client::HTTP).to receive(:new).and_return(transport)
+      stub_client([])
+      conn = described_class.new(name: 'remote', url: 'https://example.com/mcp',
+                                 headers: { 'Authorization' => 'Bearer t' })
+
+      conn.connect
+
+      expect(conn).to be_http
+      expect(MCP::Client::HTTP).to have_received(:new).with(
+        url: 'https://example.com/mcp', headers: { 'Authorization' => 'Bearer t' }
+      )
+      expect(conn.transport).to be(transport)
+    end
+
+    it 'does not give the HTTP transport a read_timeout (it has no such knob)' do
+      transport = instance_double('MCP::Client::HTTP')
+      allow(MCP::Client::HTTP).to receive(:new).and_return(transport)
+      stub_client([])
+      conn = described_class.new(name: 'remote', url: 'https://example.com/mcp')
+
+      conn.connect
+
+      expect(MCP::Client::HTTP).to have_received(:new).with(
+        url: 'https://example.com/mcp', headers: {}
+      )
+    end
+  end
+
   describe '#call_tool (round-trip error mapping)' do
     # The gem is not required by this file; call_tool resolves ::MCP:: lazily, so
     # a stubbed client exercises the mapping without a real server.

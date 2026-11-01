@@ -19,6 +19,10 @@ RSpec.describe Mcp::Manager do
     { name: name, command: command, args: [], env: {} }
   end
 
+  def http_server_entry(name: 'remote')
+    { name: name, url: 'https://example.com/mcp', headers: {} }
+  end
+
   def build_manager(logger = instance_double('Logger'))
     allow(logger).to receive(:warn)
     allow(logger).to receive(:info)
@@ -46,6 +50,21 @@ RSpec.describe Mcp::Manager do
 
       expect(registry.get('fs.read_file')).to be_a(Mcp::ToolAdapter)
       expect(manager.status_notes).to include("MCP server 'fs' connected: 1 tool(s)")
+    end
+
+    it 'passes a url entry through to the connection (issue #402)' do
+      tools = [fake_tool('ping')]
+      allow(Mcp::ServerConnection).to receive(:new).and_return(fake_connection(tools))
+      registry = ToolRegistry.new
+      manager  = build_manager
+
+      manager.load(registry, [http_server_entry])
+
+      expect(Mcp::ServerConnection).to have_received(:new).with(
+        name: 'remote', command: nil, args: nil, env: nil,
+        url: 'https://example.com/mcp', headers: {}
+      )
+      expect(registry.get('remote.ping')).to be_a(Mcp::ToolAdapter)
     end
 
     it 'skips a tool whose name collides with a built-in and reports it' do

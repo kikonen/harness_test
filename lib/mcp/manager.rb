@@ -6,9 +6,10 @@ require_relative "../error_text"
 
 module Mcp
   # Owns everything MCP-side for one harness run (issue #48): the declared
-  # servers, their live subprocess connections, the tools they contribute to the
-  # registry, and the startup notes the banner reports. Harness holds ONE of
-  # these and delegates to it, so the MCP machinery does not live in Harness.
+  # servers, their live connections (spawned subprocess or remote endpoint),
+  # the tools they contribute to the registry, and the startup notes the banner
+  # reports. Harness holds ONE of these and delegates to it, so the MCP
+  # machinery does not live in Harness.
   #
   # Opt-in: #load returns before the `mcp` gem is required when no servers are
   # configured, so a run without MCP servers never loads it.
@@ -39,7 +40,7 @@ module Mcp
       servers.each { |server| connect_server(registry, server) }
     end
 
-    # Close every server subprocess this run spawned, so a spawned server is not
+    # Close every server connection this run opened, so a spawned server is not
     # left running after the CLI exits.
     def close
       @connections.each(&:close)
@@ -48,15 +49,17 @@ module Mcp
 
     private
 
-    # One server: spawn + handshake + tools/list, then register each tool. A
-    # connect failure closes the (possibly half-spawned) subprocess and records
-    # a note; the run continues without that server's tools.
+    # One server: open its transport + handshake + tools/list, then register
+    # each tool. A connect failure closes the (possibly half-open) connection
+    # and records a note; the run continues without that server's tools.
     def connect_server(registry, server)
       connection = ServerConnection.new(
         name: server[:name],
         command: server[:command],
         args: server[:args],
-        env: server[:env])
+        env: server[:env],
+        url: server[:url],
+        headers: server[:headers])
       begin
         mcp_tools = connection.connect
       rescue StandardError => e
