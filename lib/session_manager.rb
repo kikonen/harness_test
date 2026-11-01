@@ -735,6 +735,15 @@ class SessionManager
     # resume side can validate it against the palettes this build has.
     data[:output_palette] = @harness.output_palette.name
 
+    # issue #405: what a session's conversation actually had tools from. The
+    # servers themselves come from the config (they are not a session posture),
+    # but the TOOLS the conversation used are a property of the session: a
+    # resumed run whose config no longer reaches one of those servers must say so
+    # instead of quietly sending a smaller tools payload. Named mcp_connected,
+    # not mcp_servers: the config DECLARES servers, this records what THIS run
+    # reached, and a session file must not read like a config override.
+    data[:mcp_connected] = @harness.mcp_connected_summary
+
     json = JSON.generate(data)
 
     File.write(path, json)

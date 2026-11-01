@@ -228,6 +228,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/sessions` | List saved sessions |
 | `/resume <id>` | Restore a saved session: the run is rebuilt under that id (new conversation, grants, log and history file) |
 | `/tools` | List available tools |
+| `/mcp` | List the MCP servers this run declared: whether each connected, the tools each contributed, and any startup problem |
 | `/models` | Show configured models (default and active marked) |
 | `/model [name]` | Show or switch the active model |
 | `/param [key [value]]` | Show, override or reset a model parameter |
