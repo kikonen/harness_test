@@ -51,6 +51,59 @@ RSpec.describe Tools::DialogTool do
     end
   end
 
+  context 'malformed arguments (issue #427)' do
+    it 'names a missing title differently from a blank one' do
+      expect(tool.execute(base_args.merge('title' => nil))).to include('required')
+      expect(tool.execute(base_args.reject { |k, _| k == 'title' })).to include('required')
+      expect(tool.execute(base_args.merge('title' => '   '))).to include('non-empty')
+    end
+
+    it 'accepts options re-encoded by the model as a JSON string' do
+      str_opts = JSON.generate([{ 'title' => 'A', 'value' => 'a' }, { 'title' => 'B', 'value' => 'b' }])
+      out, kwargs = run_tool(base_args.merge('options' => str_opts), 'a')
+      expect(out).to eq("selected: \"a\"")
+      expect(kwargs[:options].size).to eq(2)
+    end
+
+    it 'rejects an options string that is not a JSON array' do
+      expect(tool.execute(base_args.merge('options' => 'just words'))).to include('not a JSON array')
+    end
+
+    it 'parses a single option that arrived as a JSON object string' do
+      one_opt = JSON.generate({ 'title' => 'A', 'value' => 'a' })
+      out, kwargs = run_tool(base_args.merge('options' => [one_opt]), 'a')
+      expect(out).to eq("selected: \"a\"")
+      expect(kwargs[:options].size).to eq(1)
+    end
+
+    it 'names the option that is missing a title' do
+      bad = base_args.merge('options' => [
+        { 'title' => 'A', 'value' => 'a' },
+        { 'description' => 'no title here', 'value' => 'b' }
+      ])
+      expect(tool.execute(bad)).to include('option 2')
+      expect(tool.execute(bad)).to include('missing a')
+    end
+
+    it 'names the option with an empty title' do
+      bad = base_args.merge('options' => [{ 'title' => '  ', 'value' => 'b' }])
+      expect(tool.execute(bad)).to include('option 1')
+      expect(tool.execute(bad)).to include('non-empty')
+    end
+
+    it 'names the option missing a value' do
+      bad = base_args.merge('options' => [{ 'title' => 'A' }])
+      expect(tool.execute(bad)).to include('option 1')
+      expect(tool.execute(bad)).to include('missing a')
+    end
+
+    it 'names the option with an empty value' do
+      bad = base_args.merge('options' => [{ 'title' => 'A', 'value' => '' }])
+      expect(tool.execute(bad)).to include('option 1')
+      expect(tool.execute(bad)).to include('non-empty')
+    end
+  end
+
   context 'dialog construction' do
     it 'passes title and options through' do
       out, kwargs = run_tool(base_args, :a)
