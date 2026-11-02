@@ -266,6 +266,11 @@ class CLIOptions
     # nil here lets Harness fall back to its built-in default.
     opts[:max_tool_iterations] = config.max_tool_iterations
 
+    # issue #435: max memory notes one store holds (config key). nil here
+    # lets Memories fall back to its built-in default. Config-only: there is
+    # no CLI flag (it is a store limit, not a per-run posture).
+    opts[:max_memories] = config.max_memories
+
     # issue #303: rendered-output palette. CLI flag > config > default palette.
     # Validated HERE rather than when the Harness builds the palette, so a typo
     # is reported before the model is contacted (and --list-sessions, which

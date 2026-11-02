@@ -34,9 +34,9 @@ module Tools
           "save one with memory.add(name:, text:)"
       end
 
-      status(:info, "#{notes.size}/#{Memories::MAX_MEMORIES} memories")
+      status(:info, "#{notes.size}/#{@memories.max_memories} memories")
       lines = notes.map { |m| "#{m.name} - #{m.description}" }
-      "Memories (#{notes.size}/#{Memories::MAX_MEMORIES}), read one with " \
+      "Memories (#{notes.size}/#{@memories.max_memories}), read one with " \
         "memory.read:\n#{lines.join("\n")}"
     end
   end

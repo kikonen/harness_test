@@ -154,8 +154,9 @@ class Harness
     @skills        = Skills.new(file_list.workdir)
 
     # The project's durable notes (issue #10): one reader for the store, shared by
-    # memory.* and /memory so the two sides cannot drift.
-    @memories      = Memories.new(file_list.workdir)
+    # memory.* and /memory so the two sides cannot drift. The note cap is the
+    # config 'max_memories:' key (issue #435); nil falls back to the default.
+    @memories      = Memories.new(file_list.workdir, max_memories: options[:max_memories])
     @session       = Session.new(build_system_prompt, session_id:)
 
     # The project's durable plans (issue #359): one reader for the store, shared

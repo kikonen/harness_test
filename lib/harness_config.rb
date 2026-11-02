@@ -46,6 +46,9 @@ require_relative "harness_error"
 #     reserved_tokens: 8192     # absolute headroom (tokens) kept free before auto-compact (issue #151)
 #   auto_save: true             # auto-save the session at every prompt boundary (issue #107)
 #   max_tool_iterations: 200    # max tool-loop iterations for one turn (issue #226)
+#   max_memories: 50            # max memory notes one store may hold (issue #435).
+#                               # Omit = the built-in default. A note cap is the
+#                               # store's own limit (doc/memory_design.md).
 #   retry:
 #     count: 3                  # total attempts for transient network errors
 #     delay: 2                  # base delay (seconds) between retries
@@ -160,6 +163,7 @@ class HarnessConfig
       mode[:denylist] || data[:command_safety_denylist_safe_approve] == true
     @double_enter_submit = data[:double_enter_submit] == true
     @max_tool_iterations = int_or_nil(data[:max_tool_iterations])
+    @max_memories = int_or_nil(data[:max_memories])
     # Opt-in streamed LLM responses (default off: a profile or global key
     # that does not ask for it gets the buffered request unchanged).
     @streaming = data[:streaming] == true
@@ -334,6 +338,11 @@ class HarnessConfig
   # Max tool-loop iterations for one turn (or nil; the built-in default then applies).
   def max_tool_iterations
     @max_tool_iterations
+  end
+
+  # Max memory notes for one store (or nil; the built-in default applies).
+  def max_memories
+    @max_memories
   end
 
   # Opt-in streamed LLM responses (global key). Default false; a model

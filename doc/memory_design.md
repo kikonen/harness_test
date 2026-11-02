@@ -80,13 +80,14 @@ removal of one note the model named.
 
 ## The caps, and why refusing is the right answer
 
-`MAX_MEMORIES = 40` notes, `MAX_BODY_CHARS = 2000` per note. Over either,
-`memory.add` REFUSES rather than truncating or evicting.
+`MAX_MEMORIES` notes (the built-in default, currently **50**) and
+`MAX_BODY_CHARS = 2000` per note. Over either, `memory.add` REFUSES rather
+than truncating or evicting.
 
 - A body over the cap is a subsystem document pretending to be a memory; that
   content belongs in `doc/<topic>.md` (the rule harness.md already states), and a
   silent truncation would store a broken note the model believes is whole.
-- An 41st note forces curation: the refusal names the way out (read the narrow
+- The note past the cap forces curation: the refusal names the way out (read the narrow
   notes, write one broader one, delete the narrow ones). Without a cap the store
   grows into exactly the always-paid-for context the injection rule exists to
   avoid, just one note at a time.
@@ -94,6 +95,13 @@ removal of one note the model named.
   cap limits how many notes exist, not how often one may be corrected. Correcting
   a note must stay cheaper than leaving a wrong one, because a later session reads
   a stored note as fact.
+
+`Memories#max_memories` is the cap of ONE store instance. The built-in
+`MAX_MEMORIES` is only the default used when nothing overrides it; the config
+`max_memories:` key (issue #435) is threaded through `Harness` into
+`Memories.new(workdir, max_memories:)`, so a project can raise or lower its own
+store without a code change. A nil or non-positive configured value falls back
+to the built-in default.
 
 A note that already exists is refused unless `overwrite: true` is passed - a note
 is never lost by an accidental second `memory.add` of the same shape.
@@ -135,12 +143,13 @@ carries CRLF or an undecodable byte is stored as clean UTF-8 LF.
   The alternatives and what they would take: the "Deferred" section at the end.
 - **Not injected, not searched.** There is no relevance ranking and no keyword
   search: `memory.list` returns every note's index line and the model decides what
-  to read. 40 notes is the size at which that is still affordable; if it ever is
-  not, the answer is a smaller store or a real search, not a bigger cap.
+  to read. A store small enough to read in one glance stays affordable this way;
+  the default cap is set to that size, and once a store outgrows it the answer is
+  a smaller store or a real search, not a bigger cap.
 
 ## Where it surfaces
 
-- `memory.list` - `Memories (2/40), read one with memory.read:` then
+- `memory.list` - `Memories (2/50), read one with memory.read:` then
   `name - description` per note; an empty store answers with the way to fill it.
 - `memory.read(name)` - the note body as an ordinary tool result.
 - `memory.add` / `memory.delete` - one status line, plus the harness' tool-call log
