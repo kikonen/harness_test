@@ -30,10 +30,6 @@ RSpec.describe Tools::DialogTool do
   end
 
   context 'argument validation' do
-    it 'requires a non-empty title' do
-      expect(tool.execute(base_args.merge('title' => '  '))).to include('title')
-    end
-
     it 'requires a non-empty array of options' do
       expect(tool.execute(base_args.merge('options' => []))).to include('options')
     end
@@ -52,10 +48,15 @@ RSpec.describe Tools::DialogTool do
   end
 
   context 'malformed arguments (issue #427)' do
-    it 'names a missing title differently from a blank one' do
-      expect(tool.execute(base_args.merge('title' => nil))).to include('required')
-      expect(tool.execute(base_args.reject { |k, _| k == 'title' })).to include('required')
-      expect(tool.execute(base_args.merge('title' => '   '))).to include('non-empty')
+    it 'fills a neutral head for a title-less call' do
+      out, kwargs = run_tool(base_args.reject { |k, _| k == 'title' }, :a)
+      expect(out).to eq('selected: :a')
+      expect(kwargs[:title]).to eq(Tools::DialogTool::DEFAULT_TITLE)
+    end
+
+    it 'fills the same head when the title is blank' do
+      _out, kwargs = run_tool(base_args.merge('title' => '   '), :a)
+      expect(kwargs[:title]).to eq(Tools::DialogTool::DEFAULT_TITLE)
     end
 
     it 'accepts options re-encoded by the model as a JSON string' do
