@@ -180,4 +180,72 @@ RSpec.describe SessionLocator do
       expect(locator.list.map { |s| s[:id] }).to eq([sid_a])
     end
   end
+
+  # issue #279: find a saved session by what it was ABOUT (message text / id),
+  # not just list them. The search shape SessionsSearchTool renders.
+  describe '#search (issue #279)' do
+    it 'is empty for a blank query' do
+      expect(locator.search('')).to eq([])
+      expect(locator.search('   ')).to eq([])
+    end
+
+    it 'is empty when no sessions are saved' do
+      expect(locator.search('anything')).to eq([])
+    end
+
+    it 'matches a session by message content and reports a snippet and hit count' do
+      seed_session(sid_a, messages: 1) # content is "m0" - no hit for 'refactor'
+      dir  = File.join(workdir, '.harness', 'sessions', sid_b)
+      path = File.join(dir, 'session.json')
+      FileUtils.mkdir_p(dir)
+      File.write(path, JSON.generate({
+                                      session_id: sid_b, workdir:,
+                                      messages: [{ role: 'user', content: 'we refactored the parser' },
+                                                 { role: 'user', content: 'refactor done' }]
+                                    }))
+
+      matches = locator.search('refactor')
+
+      expect(matches.map { |m| m[:id] }).to eq([sid_b])
+      expect(matches.first[:hits]).to eq(2)
+      expect(matches.first[:snippet]).to include('refactored the parser')
+      expect(matches.first[:saved_at]).to be_a(Time)
+      expect(matches.first[:workdir]).to eq(workdir)
+    end
+
+    it 'is case-insensitive and also matches the id' do
+      dir  = File.join(workdir, '.harness', 'sessions', sid_a)
+      path = File.join(dir, 'session.json')
+      FileUtils.mkdir_p(dir)
+      File.write(path, JSON.generate({
+                                      session_id: sid_a, workdir:,
+                                      messages: [{ role: 'user', content: 'kubernetes' }]
+                                    }))
+
+      expect(locator.search('KUBERNETES').map { |m| m[:id] }).to eq([sid_a])
+      expect(locator.search(sid_a[0, 8]).map { |m| m[:id] }).to eq([sid_a])
+    end
+
+    it 'returns matches newest first' do
+      older = Time.now - 60
+      newer = Time.now
+      a_path = seed_session(sid_a)
+      b_path = seed_session(sid_b)
+      File.write(a_path, JSON.generate({ session_id: sid_a, workdir:, messages: [{ content: 'topic' }] }))
+      File.write(b_path, JSON.generate({ session_id: sid_b, workdir:, messages: [{ content: 'topic' }] }))
+      File.utime(older, older, a_path)
+      File.utime(newer, newer, b_path)
+
+      ids = locator.search('topic').map { |m| m[:id] }
+      expect(ids).to eq([sid_b, sid_a])
+    end
+
+    it 'skips an unreadable session file instead of failing the search' do
+      seed_session(sid_a)
+      path = seed_session(sid_b)
+      File.write(path, '{ not json')
+
+      expect(locator.search('m0').map { |m| m[:id] }).to eq([sid_a])
+    end
+  end
 end

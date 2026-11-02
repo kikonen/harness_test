@@ -58,6 +58,7 @@ require_relative "tools/plan_add_tool"
 require_relative "tools/plan_delete_tool"
 require_relative "tools/plan_search_tool"
 require_relative "tools/memory_delete_tool"
+require_relative "tools/sessions_search_tool"
 require_relative "session_manager"
 require_relative "state_migrator"
 require_relative "safety_check"
@@ -320,6 +321,10 @@ class Harness
     registry.register(Tools::PlanAddTool.new(@plans))
     registry.register(Tools::PlanDeleteTool.new(@plans))
     registry.register(Tools::PlanSearchTool.new(@plans))
+    # issue #279: let the model FIND a saved session by what it was ABOUT, not
+    # just count them. Read-only, over the run's own SessionLocator (the single
+    # place that knows where sessions live) - no Harness, no resume, no delete.
+    registry.register(Tools::SessionsSearchTool.new(@locator))
     @mcp.load(registry, options[:mcp_servers])
     registry
   end

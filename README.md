@@ -47,7 +47,9 @@ scoped to a working directory you choose.
   `.harness/sessions/<id>/session.json` (its own directory, issue #207) at
   every prompt boundary (before each send and after each reply) and again on
   exit; resume any saved session later, or pick up the newest one with
-  `--continue`.
+  `--continue`. The model can search saved sessions by what they were ABOUT
+  (`sessions.search`, issue #279) to answer "which session was I doing X in?",
+  and `--delete-session <id>` removes one saved session's whole directory.
 - **Per-session logs** - each session writes its request/tool log to its
   own directory, so concurrent sessions do not interleave (issue #113).
 - **Multi-model config** - named model profiles in one YAML file, switch
@@ -144,6 +146,7 @@ bin/harness -d /path/to/project        # set the working directory
 bin/harness --list-sessions            # list saved sessions and exit
 bin/harness -r <id>                    # resume a saved session
 bin/harness --continue                 # resume the newest saved session in this workdir
+bin/harness --delete-session <id>      # delete one saved session (whole dir) and exit
 bin/harness --no-auto-save             # disable periodic auto-save at prompt boundaries
 bin/harness --system-file my.md        # override the system prompt
 bin/harness -v                         # verbose: full prompt + raw response in the log

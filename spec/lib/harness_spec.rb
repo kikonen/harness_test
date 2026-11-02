@@ -2565,6 +2565,35 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #279: sessions.search is registered in every run and reads THIS run's
+  # SessionLocator (the single place that knows where sessions live), so the
+  # model can find a saved session by content. Read-only: no resume, no delete.
+  describe 'sessions.search (issue #279)' do
+    it 'is registered in every run over the run\'s own locator' do
+      h    = build_harness
+      tool = h.tool_registry.get('sessions.search')
+
+      expect(tool).to be_a(Tools::SessionsSearchTool)
+      expect(h.tool_registry.names).to include('sessions.search')
+      expect(tool.instance_variable_get(:@locator).workdir).to eq(workdir)
+    end
+
+    it 'finds a saved session by its message content through the registry' do
+      id   = 'aaaaaaaa-bbbb-cccc-dddd-111111111111'
+      dir  = File.join(workdir, '.harness', 'sessions', id)
+      FileUtils.mkdir_p(dir)
+      File.write(File.join(dir, 'session.json'),
+                 JSON.generate(session_id: id, workdir:,
+                               messages: [{ role: 'user', content: 'refactor the parser' }]))
+
+      out = build_harness.tool_registry.get('sessions.search')
+                  .execute('query' => 'refactor')
+
+      expect(out).to include(id)
+      expect(out).to include('refactor the parser')
+    end
+  end
+
   # Issue #10: the store is one reader (Memories) shared by memory.* and /memory,
   # and the harness hands that ONE object to every tool, so the two sides cannot
   # disagree about which notes exist.
