@@ -194,6 +194,11 @@ module HelpTopics
           "or pasted as one note. The harness acknowledges it with a \"[note] " \
           "got it - ...\" line. Submitting an empty note commits nothing and " \
           "returns to the spinner.",
+        "A note belongs to the turn it was typed in. If it lands while the " \
+          "model is already writing its final answer it cannot steer that " \
+          "answer any more: the harness says so (\"arrived too late\") and " \
+          "drops it instead of applying it later - a note you still mean is " \
+          "sent again with your next prompt.",
         "Text typed mid-turn is ALWAYS a note - a / or ! prefix has no " \
           "special meaning then. While a dialog (grant prompt or ui.dialog) is " \
           "open the keyboard belongs to the dialog: answer it normally, and its " \

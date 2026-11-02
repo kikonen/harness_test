@@ -48,6 +48,11 @@ class SessionManager
   # If the request fails, the prompt stays in the session (pending) so it can
   # be re-sent with #retry.
   def run_prompt(instruction)
+    # A new prompt is a new turn: a note left pending by a turn that ended
+    # abnormally must not ride along as a phantom mid-turn note (issue #430).
+    # /retry deliberately does NOT do this - it continues the same turn.
+    @harness.discard_pending_user_note(:leftover)
+
     if check_rules_reload
       Task.emit(
         :system,

@@ -869,6 +869,154 @@ RSpec.describe Harness do
       expect(harness.session.pending?).to be(false) # final reply committed
     end
 
+    # issue #430: a note typed WHILE the final answer's request is in flight
+    # cannot steer that answer any more. It is dropped, not kept for a later
+    # turn: the honest ack ("arrived too late") replaces the phantom injection.
+    def drained_status_events(task)
+      events = []
+      loop do
+        m = task.poll(0)
+        break unless m
+        events << m
+      end
+      events.select { |m| m[:type].to_s.start_with?('status_') }
+    end
+
+    def late_note_harness
+      client = FakeScriptedClient.new([{ content: 'the final answer' }])
+      h = build_harness_with_responses([{ content: 'the final answer' }])
+      h.instance_variable_set(:@client, client)
+      # The hook runs after the final answer is built but before call_llm
+      # returns - exactly the race the issue describes.
+      client.after_call = -> { h.user_note_text = 'use ruby instead' }
+      [h, client]
+    end
+
+    it 'discards a note that arrives while the final answer is being produced' do
+      harness, = late_note_harness
+      harness.session.add_user('original prompt')
+
+      expect(harness.call_llm[:content]).to eq('the final answer')
+
+      sent = harness.client.calls.first
+      notes = sent.select { |m| m[:role] == 'user' && m[:content].to_s.include?('User note (mid-turn):') }
+      expect(notes).to be_empty
+      expect(harness.user_notes).to be_empty
+      # Nothing phantom is left for a later turn either.
+      expect(harness.session.messages.map { |m| m[:content].to_s })
+        .not_to include(a_string_including('use ruby instead'))
+      expect(harness.client.calls.size).to eq(1)
+    end
+
+    it 'does not leak a late note into the NEXT turn (the reported bug)' do
+      harness, = late_note_harness
+      harness.session.add_user('original prompt')
+      harness.call_llm
+
+      harness.session.add_user('an unrelated prompt')
+      harness.call_llm
+
+      second = harness.client.calls.last
+      expect(second.map { |m| m[:content].to_s }).not_to include(a_string_including('use ruby instead'))
+      expect(second.map { |m| m[:content].to_s }).to include('an unrelated prompt')
+    end
+
+    it 'says on the console that the late note was NOT applied (issue #430)' do
+      harness, = late_note_harness
+      task = Task.new { }
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+      begin
+        harness.session.add_user('original prompt')
+        harness.call_llm
+      ensure
+        Thread.current[:harness_task] = old_current
+      end
+
+      events = drained_status_events(task)
+      late = events.select { |m| m[:origin] == 'note' }
+      expect(late.size).to eq(1)
+      expect(late.first[:type]).to eq(:status_warn)
+      expect(late.first[:content]).to include('arrived too late to steer this answer')
+      expect(late.first[:content]).to include('NOT sent to the model')
+      # The note itself is named, so the user knows which one the line refers to.
+      expect(File.read(harness.session_log_path))
+        .to include('user mid-turn note discarded (late): use ruby instead')
+    end
+
+    it 'leaves the "sent to model" ack when the note WAS injected' do
+      task = Task.new { }
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+      begin
+        harness.session.add_user('original prompt')
+        harness.user_note_text = 'steer left'
+        harness.call_llm
+      ensure
+        Thread.current[:harness_task] = old_current
+      end
+
+      expect(drained_status_events(task).map { |m| m[:content] })
+        .not_to include(a_string_matching(/too late/))
+    end
+
+    it 'says nothing when no note is pending at the final answer' do
+      task = Task.new { }
+      old_current = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+      begin
+        harness.session.add_user('original prompt')
+        harness.call_llm
+      ensure
+        Thread.current[:harness_task] = old_current
+      end
+
+      expect(drained_status_events(task).select { |m| m[:origin] == 'note' }).to be_empty
+    end
+
+    describe '#discard_pending_user_note (issue #430)' do
+      it 'returns nil and emits nothing when nothing is pending' do
+        task = Task.new { }
+        old_current = Thread.current[:harness_task]
+        Thread.current[:harness_task] = task
+        begin
+          expect(harness.discard_pending_user_note(:leftover)).to be_nil
+        ensure
+          Thread.current[:harness_task] = old_current
+        end
+
+        expect(drained_status_events(task)).to be_empty
+      end
+
+      it 'clears the pending slot so the note cannot reach a later turn' do
+        harness.user_note_text = 'stale steering'
+
+        expect(harness.discard_pending_user_note(:leftover)).to eq('stale steering')
+
+        harness.session.add_user('next prompt')
+        harness.call_llm
+        expect(harness.client.calls.last.map { |m| m[:content].to_s })
+          .not_to include(a_string_including('stale steering'))
+      end
+
+      it 'names the leftover case differently from the late one' do
+        task = Task.new { }
+        old_current = Thread.current[:harness_task]
+        Thread.current[:harness_task] = task
+        begin
+          harness.user_note_text = 'stale steering'
+          harness.discard_pending_user_note(:leftover)
+        ensure
+          Thread.current[:harness_task] = old_current
+        end
+
+        line = drained_status_events(task).first[:content]
+        expect(line).to include('left over from your previous turn')
+        expect(File.read(harness.session_log_path))
+          .to include('user mid-turn note discarded (leftover): stale steering')
+      end
+    end
+
     it 'shows a console ack that the note was sent to the model (issue #198)' do
       task = Task.new { }
       old_current = Thread.current[:harness_task]
