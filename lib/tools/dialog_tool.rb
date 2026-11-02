@@ -28,6 +28,12 @@ module Tools
   class DialogTool < Tool
     MAX_OPTIONS = 10
 
+    # Neutral head the dialog shows when the model sends only options and no
+    # title. The on-screen anchor is never missing (and UI::Dialog / the safety
+    # prompts keep their own hard-required titles); a title-less call is a
+    # legitimate "A / B / C" chooser, not an error (issue #427).
+    DEFAULT_TITLE = "Choose an option"
+
     def initialize
       super(
         name: "ui.dialog",
@@ -48,7 +54,8 @@ module Tools
           properties: {
             title: {
               type: "string",
-              description: 'What the dialog is about (required), e.g. "Which Ruby version should I target?"'
+              description: 'What the dialog is about, e.g. "Which Ruby version should I target?". ' \
+                           "Optional: omit it for a plain options-only chooser, a neutral head is shown."
             },
             note: {
               type: "string",
@@ -82,21 +89,16 @@ module Tools
                            "Use for questions where any combination of options is valid."
             }
           },
-          required: ["title", "options"]
+          required: ["options"]
         }
       )
     end
 
     def execute(args)
       title = args["title"]
-      if title.nil?
-        return "error: 'title' is required (pass a non-empty title)"
-      end
-
-      title = title.to_s.strip
-      if title.empty?
-        return "error: 'title' must be a non-empty string"
-      end
+      # Title is model-optional (issue #427): a missing or blank title is not an
+      # error - it gets the neutral DEFAULT_TITLE so the dialog still has a head.
+      title = DEFAULT_TITLE if title.nil? || title.to_s.strip.empty?
 
       normalized = normalize_options(args["options"])
       return normalized if normalized.is_a?(String)
