@@ -121,6 +121,16 @@ gets one line per read (a pipe has no submit key). The note is acked and stored
 on the harness (`Harness#user_note_text=`), where `Harness#call_llm` injects it
 into the chain before the next LLM call.
 
+The commit-time ack cannot know whether the note will still be in time, so a
+note still pending when a turn ENDS is dropped, not carried: `call_llm` discards
+it at the final-answer return (it could no longer steer that answer, kind
+`:late`) and `SessionManager#run_prompt` discards anything left over from a turn
+that died mid-loop before a NEW prompt starts (kind `:leftover`), each via
+`Harness#discard_pending_user_note` with a `#note` warn line naming the case
+(issue #430). `/retry` deliberately keeps a pending note - it continues the
+same turn. A note is therefore scoped to its own turn: the
+user re-sends it with the next prompt if they still mean it.
+
 Because nothing else is ever parked on stdin, dialogs served by this same loop
 route their tty choice line through the SAME `UI::Editor`: one code path,
 nothing to race for the keyboard. See also

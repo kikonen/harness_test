@@ -121,6 +121,23 @@ RSpec.describe SessionManager do
       def request_wait_suffix
         -> { context_indicator_live }
       end
+
+      # issue #430: stub mirrors Harness#user_note_text= /
+      # #discard_pending_user_note (run_prompt calls the latter).
+      attr_reader :discarded_notes
+
+      def user_note_text=(text)
+        @user_note = text.to_s.strip.empty? ? nil : text.to_s.strip
+      end
+
+      def discard_pending_user_note(kind)
+        return nil if @user_note.nil?
+
+        note = @user_note
+        @user_note = nil
+        (@discarded_notes ||= []) << [kind, note]
+        note
+      end
     end.new(session, client)
   end
 
@@ -256,6 +273,21 @@ RSpec.describe SessionManager do
 
       expect { manager.run_prompt('next instruction') }.not_to raise_error
       expect(client).to have_received(:chat)
+    end
+  end
+
+  # issue #430: a note is scoped to the turn it was typed in. When a turn ends
+  # or dies with one still pending, the next send must drop it (with an honest
+  # line - Harness#discard_pending_user_note) instead of injecting it as a
+  # phantom mid-turn note into an unrelated prompt.
+  describe 'a note left over from an earlier turn (issue #430)' do
+    it 'is dropped at the start of the send, not injected into the new prompt' do
+      harness.user_note_text = 'stale steering'
+      allow(client).to receive(:chat)
+
+      manager.run_prompt('next instruction')
+
+      expect(harness.discarded_notes).to eq([[:leftover, 'stale steering']])
     end
   end
 
@@ -1075,6 +1107,24 @@ RSpec.describe SessionManager, '#retry (issue #208)' do
         { reasoning: nil, content: 'ok', stats: {} }
       end
 
+      # issue #430: stub mirrors Harness#user_note_text= /
+      # #discard_pending_user_note. #retry must NOT discard (it continues the
+      # same turn), so this double tracks what a discard would have taken.
+      def user_note_text=(text)
+        @user_note = text.to_s.strip.empty? ? nil : text.to_s.strip
+      end
+
+      def discard_pending_user_note(kind)
+        return nil if @user_note.nil?
+
+        note = @user_note
+        @user_note = nil
+        (@discarded ||= []) << [kind, note]
+        note
+      end
+
+      attr_reader :discarded
+
       def print_stats(_stats); end
     end.new(session, client, Logger.new(File::NULL), sent_chains)
   end
@@ -1129,5 +1179,18 @@ RSpec.describe SessionManager, '#retry (issue #208)' do
 
     expect(sent_chains.first.map { |m| m[:role] })
       .to eq(%w[system user assistant])
+  end
+
+  # issue #430: /retry resumes the SAME turn, so a steering note typed during
+  # that turn must survive the retry and stay injectable - unlike a fresh
+  # prompt, which discards a leftover.
+  it 'keeps a pending note across a retry (the same turn continues)' do
+    seed_midloop_failure
+    harness.user_note_text = 'steer the retry'
+    allow(session).to receive(:auto_compact_due?).and_return(false)
+
+    manager.retry
+
+    expect(harness.discarded).to be_nil
   end
 end

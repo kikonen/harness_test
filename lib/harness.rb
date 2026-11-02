@@ -86,6 +86,16 @@ class Harness
 
   SESSION_LOG_FILE = SessionLocator::SESSION_LOG_FILE
 
+  # The console line naming WHY a mid-turn note could not be applied (:late -
+  # the answer was already being written; :leftover - the turn that received it
+  # died before any request could take it). Issue #430.
+  NOTE_DISCARD_MESSAGES = {
+    late: "arrived too late to steer this answer - it was NOT sent to the model. " \
+          "Send it again if you still mean it.",
+    leftover: "was left over from your previous turn and never reached the model - " \
+              "it is NOT applied. Send it again if you still mean it."
+  }.freeze
+
   # rules_repair_note: what the LAST rules-file read had to replace (nil when the
   # file was clean). A repair must not be silent - the prompt the model was given
   # is then not byte-for-byte what harness.md holds.
@@ -117,6 +127,24 @@ class Harness
 
   def user_notes
     @user_notes
+  end
+
+  # The commit-time ack is optimistic - only a finished turn can tell a late
+  # note from a usable one - so a note still pending when a turn ends is
+  # dropped here rather than injected into the NEXT prompt as a phantom
+  # mid-turn note (issue #430).
+  def discard_pending_user_note(kind)
+    return nil if @user_note.nil?
+
+    note = @user_note
+    @user_note = nil
+    logger.warn "user mid-turn note discarded (#{kind}): #{note}"
+    Tool.push_status(
+      label: "note",
+      verdict: :warn,
+      message: NOTE_DISCARD_MESSAGES.fetch(kind)
+    )
+    note
   end
 
   def initialize(options, file_list, session_id: nil, resume_data: nil)
@@ -811,6 +839,8 @@ class Harness
 
         next
       end
+
+      discard_pending_user_note(:late)
 
       elapsed = (Time.now - start_time).round(2)
       stats = {
