@@ -30,6 +30,10 @@ class SessionLocator
   # issue #113: each session logs to its own file inside its session dir, so
   # concurrent sessions in one workdir do not interleave in a shared log.
   SESSION_LOG_FILE = "harness.log"
+  # issue #279: characters of surrounding text #search shows around a match,
+  # so a hit reads as context rather than a bare id. Fixed window - the whole
+  # conversation is never dumped to the model, only these windows.
+  SNIPPET_RADIUS = 80
 
   def initialize(workdir)
     @workdir = workdir
@@ -146,9 +150,72 @@ class SessionLocator
     end.compact
   end
 
+  # Saved sessions whose CONTENT mentions a query (issue #279). The point is to
+  # let the model answer "which session was I doing X in?" - /sessions only
+  # shows counts, so the only way to find a session by what it was ABOUT was to
+  # open each one. Matches the id and every message's text, case-insensitively,
+  # by substring. Each hit carries a snippet around the first match so the
+  # model can tell the sessions apart without reading them whole. An unreadable
+  # file is skipped, the same as #list. Newest first, like #list.
+  def search(query)
+    q = query.to_s.strip.downcase
+    return [] if q.empty?
+
+    session_files.sort_by { |p| File.mtime(p) }.reverse.filter_map do |path|
+      data = begin
+        JSON.parse(File.read(path), symbolize_names: true)
+      rescue StandardError
+        nil
+      end
+      next if data.nil?
+
+      id      = File.basename(File.dirname(path))
+      matches = match_locations(data, id, query: q)
+      next if matches.empty?
+
+      {
+        id:,
+        path:,
+        saved_at:   File.mtime(path),
+        messages:   (data[:messages] || []).size,
+        workdir:    data[:workdir],
+        hits:       matches.size,
+        snippet:    matches.first
+      }
+    end
+  end
+
   private
 
   def valid_id?(id)
     !id.to_s.strip.empty? && id.to_s.match?(/\A[0-9a-fA-F-]+\Z/)
+  end
+
+  # Where a query appears in one session: the id, then each message content.
+  # Returns one snippet per location that matches, so a session that mentions
+  # the query several times reports its hit count but the model still only
+  # sees compact windows, not the whole conversation.
+  def match_locations(data, id, query:)
+    found = []
+    found << snippet(id.to_s, query) if id.to_s.downcase.include?(query)
+    (data[:messages] || []).each do |msg|
+      text = msg[:content].to_s
+      found << snippet(text, query) if text.downcase.include?(query)
+    end
+    found
+  end
+
+  # A compact window of text centred on the first case-insensitive occurrence
+  # of the query, with leading/trailing ellipses when the real text is longer.
+  def snippet(text, query)
+    down = text.downcase
+    at   = down.index(query)
+    return text unless at
+
+    start = [at - SNIPPET_RADIUS, 0].max
+    stop  = [at + query.length + SNIPPET_RADIUS, text.length].min
+    head  = start.zero? ? "" : "..."
+    tail  = stop == text.length ? "" : "..."
+    "#{head}#{text[start...stop]}#{tail}"
   end
 end

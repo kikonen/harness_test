@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "fileutils"
+
 require "reline"
 
 require_relative "harness_error"
@@ -45,7 +47,10 @@ class CLI
     # Harness and no session dir (issue #276). The mode is recorded here and
     # dispatched by #run, so initialize never calls exit (issue #299).
     @listing = !!@options[:list_sessions]
-    return if @listing
+    # --delete-session removes one saved session and stops, the same shape:
+    # no Harness, no session dir, dispatched by #run (issue #279).
+    @deleting = !@options[:delete_session].to_s.strip.empty?
+    return if @listing || @deleting
 
     setup
   end
@@ -106,8 +111,27 @@ class CLI
     0
   end
 
+  # Delete one saved session (--delete-session, issue #279) and return the
+  # exit status. Path-only, like #list_sessions: no Harness, no session dir
+  # minted. The whole session directory goes (conversation, log, history) -
+  # there is no undo, which is why the flag names the id explicitly. Raises a
+  # HarnessError for an unknown or ambiguous id (HarnessError is caught by the
+  # entry point, which prints "Error: ..." and exits 1); find_session_file
+  # already raises on an ambiguous prefix and returns nil when nothing matches.
+  def delete_session
+    id   = @options[:delete_session].to_s.strip
+    path = @locator.find_session_file(id)
+    raise HarnessError, "no saved session matching '#{id}' (see /sessions)" unless path
+
+    session_dir = File.dirname(path)
+    FileUtils.remove_entry(session_dir)
+    ui.puts "Deleted session #{File.basename(session_dir)} (#{session_dir})."
+    0
+  end
+
   def run
     return list_sessions if @listing
+    return delete_session if @deleting
 
     @history.load
 

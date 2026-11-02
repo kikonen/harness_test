@@ -80,6 +80,13 @@ class CLIOptions
         "--list-sessions",
         "List saved sessions and exit (no model needed)") { |v| opts[:list_sessions] = v }
       o.on(
+        "--delete-session ID",
+        "Delete one saved session by id and exit (no model needed). The whole " \
+          "session directory (conversation, log, history) is removed; there is " \
+          "no undo, so /sessions first to see the id (issue #279).") do |v|
+        opts[:delete_session] = v
+      end
+      o.on(
         "--no-auto-save",
         "Disable periodic auto-save of the session at prompt boundaries " \
           "(issue #107). Overrides the config 'auto_save' key.") do
@@ -144,7 +151,10 @@ class CLIOptions
   # Resolve the active model profile from the config. When no models are
   # configured, -m is treated as a raw model id (backward compatible).
   def resolve_profile(opts, config)
-    return nil unless config.models_configured? && !opts[:list_sessions]
+    # --list-sessions and --delete-session act on saved sessions without ever
+    # contacting a model, so they skip profile resolution entirely.
+    return nil if opts[:list_sessions] || opts[:delete_session]
+    return nil unless config.models_configured?
 
     config.resolve_model(opts[:model])
   end
@@ -292,7 +302,7 @@ class CLIOptions
   end
 
   def validate!(opts)
-    return if opts[:model] || opts[:list_sessions]
+    return if opts[:model] || opts[:list_sessions] || opts[:delete_session]
 
     raise HarnessError, "-m / --model is required (or set default_model in the config)"
   end

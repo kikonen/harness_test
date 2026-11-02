@@ -171,4 +171,21 @@ RSpec.describe CLIOptions do
       expect(opts[:list_sessions]).to be_truthy
     end
   end
+
+  # issue #279: --delete-session is a one-shot action on a saved session, so it
+  # needs no model and reaches the CLI as opts[:delete_session].
+  describe '--delete-session (issue #279)' do
+    it 'records the id and does not require a model' do
+      opts = resolve(['--delete-session', 'f7931611', '-d', workdir,
+                      '-c', write_config('del.yml', "default_model: \n")])
+      expect(opts[:delete_session]).to eq('f7931611')
+    end
+
+    it 'does not resolve a model profile when set' do
+      path  = write_config('models.yml', "models:\n  - name: a\n    model: ma\n")
+      opts  = resolve(['--delete-session', 'id1', '-d', workdir, '-c', path])
+      expect(opts[:delete_session]).to eq('id1')
+      expect(opts[:active_model]).to be_nil
+    end
+  end
 end

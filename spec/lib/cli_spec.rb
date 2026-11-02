@@ -149,6 +149,54 @@ RSpec.describe CLI do
     end
   end
 
+  # issue #279: --delete-session removes one saved session and stops. Same
+  # no-Harness shape as --list-sessions: no session dir is minted, the run
+  # never builds a Harness, and a bad id raises HarnessError before deleting.
+  describe 'delete-session mode (issue #279)' do
+    it 'removes the whole session dir and exits 0 without building a Harness' do
+      saved  = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      dir    = seed_saved_session(saved)
+      # Seed a log + history file inside it too - the whole dir must go.
+      File.write(File.join(dir, 'harness.log'), "log\n")
+      File.write(File.join(dir, 'harness_history'), "/model x\n")
+      allow(ui).to receive(:puts)
+
+      cli = described_class.new(
+        options.merge(delete_session: saved[0, 8], model: nil), ui)
+
+      expect(cli.harness).to be_nil
+      expect(cli.run).to eq(0)
+      expect(File.directory?(dir)).to be false
+      expect(session_dirs).to eq([])
+      expect(ui).to have_received(:puts).with(/Deleted session #{Regexp.escape(saved)}/)
+    end
+
+    it 'raises HarnessError for an unknown id and deletes nothing' do
+      seed_saved_session('aaaaaaaa-bbbb-cccc-dddd-111111111111')
+      allow(ui).to receive(:puts)
+
+      cli = described_class.new(
+        options.merge(delete_session: 'deadbeef', model: nil), ui)
+
+      expect { cli.run }.to raise_error(HarnessError, /no saved session matching 'deadbeef'/)
+      expect(session_dirs).to eq(['aaaaaaaa-bbbb-cccc-dddd-111111111111'])
+    end
+
+    it 'leaves the other saved sessions untouched' do
+      keep = 'aaaaaaaa-bbbb-cccc-dddd-111111111111'
+      gone = 'ffffffff-0000-1111-2222-333333333333'
+      seed_saved_session(keep)
+      seed_saved_session(gone)
+      allow(ui).to receive(:puts)
+
+      cli = described_class.new(
+        options.merge(delete_session: gone, model: nil), ui)
+      cli.run
+
+      expect(session_dirs).to eq([keep])
+    end
+  end
+
   describe '#session_log_path_display' do
     it 'is the per-session log path relative to the workdir' do
       cli = build_cli
