@@ -124,6 +124,45 @@ RSpec.describe FileList do
       end
     end
   end
+  # issue #105: a grant on a path that has just been deleted is stale, and
+  # grant_access returns :granted without a dialog when a path is already
+  # granted - so a leftover would skip fresh consent if the same path is
+  # re-created. revoke_grants drops the EXACT path across all modes/tiers and
+  # leaves an ancestor recursive grant (a different path string) intact.
+  describe '#revoke_grants (issue #105)' do
+    it 'drops every mode and tier grant on the exact path' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        list.add_file('a.txt', :r)
+        list.add_file('a.txt', :w)
+        list.add_file('a.txt', :d)
+
+        expect(list.revoke_grants('a.txt')).to eq(3)
+        expect(list.readable?('a.txt')).to be(false)
+        expect(list.writable?('a.txt')).to be(false)
+        expect(list.deletable?('a.txt')).to be(false)
+      end
+    end
+
+    it 'leaves an ancestor recursive grant covering OTHER paths intact' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        list.add_dir('sub', :d)
+        list.add_file('sub/gone.txt', :d)
+
+        list.revoke_grants('sub/gone.txt')
+        # The parent recursive grant still covers the sibling.
+        expect(list.deletable?('sub/keep.txt')).to be(true)
+      end
+    end
+
+    it 'returns 0 and changes nothing for a path with no grant' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        expect(list.revoke_grants('never.txt')).to eq(0)
+      end
+    end
+  end
   describe 'the scratch-zone exemption (issue #321)' do
     # The guard protects THIS project's git/harness state. A scratch repo the
     # harness cloned under tmp/keep/<n>/ is disposable, and that zone is exactly

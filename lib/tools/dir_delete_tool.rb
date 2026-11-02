@@ -92,6 +92,9 @@ module Tools
       warn_unlogged
       files, dirs = delete_tree(entries)
       Dir.rmdir(path)
+      # issue #105: the top directory itself (delete_tree only sees its
+      # descendants) keeps no grant once it is gone.
+      @file_list.revoke_grants(path)
       log("deleted directory #{shown} (#{files} file(s), #{dirs} dir(s))")
 
       status(:ok, "#{shown} (#{files} file(s), #{dirs} dir(s) deleted)")
@@ -156,9 +159,13 @@ module Tools
         if dir
           Dir.rmdir(entry)
           dirs += 1
+          # issue #105: a removed path keeps no grant - a re-created path of
+          # the same name needs a fresh consent decision.
+          @file_list.revoke_grants(entry)
         else
           File.unlink(entry)
           files += 1
+          @file_list.revoke_grants(entry)
           @session&.file_cache&.clear(entry, workdir: @file_list.workdir)
         end
         log("deleted #{dir ? 'directory' : 'file'} #{@file_list.display_path(entry)}")

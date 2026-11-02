@@ -495,6 +495,26 @@ class FileList
     :renamed
   end
 
+  # Revoke every stored grant (all modes, all tiers) whose path is EXACTLY
+  # `path`, and return how many grant entries were dropped. Called after a
+  # successful delete (issue #105): a grant on a path that has just been
+  # removed is stale, and grant_access returns :granted without a dialog when
+  # a path is already granted - so a lingering grant would skip fresh consent
+  # if the same path is later re-created. Only the exact path is touched; an
+  # ancestor RECURSIVE grant (a different path string) stays, because the
+  # user granted that parent and it still covers everything else under it.
+  def revoke_grants(path)
+    path    = resolve(path)
+    removed = 0
+    %i[r w d].each do |mode|
+      %i[files dirs flat_dirs].each do |tier|
+        removed += 1 if @grants[mode][tier].delete(path)
+      end
+    end
+    @audit_logger&.info "grants revoked for #{display_path(path)} (#{removed})" if removed.positive?
+    removed
+  end
+
   def clear
     [:r, :w, :d].each do |mode|
       @grants[mode][:files].clear
