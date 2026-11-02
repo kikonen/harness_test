@@ -157,4 +157,38 @@ RSpec.describe HistoryManager do
       expect(history_entries).to eq(%w[a b])
     end
   end
+  # issue #188: #save decides "should I write?" with the same test the CLI
+  # needs for "did this run change anything worth a saved session?". The CLI
+  # must read it BEFORE #save (which clears it), hence a public query.
+  describe '#has_pending_entries? (issue #188)' do
+    it 'is true when the buffer holds an entry this session has not persisted' do
+      m = manager(sid_a)
+      Reline::HISTORY << '/model qwen'
+
+      expect(m.has_pending_entries?).to be(true)
+    end
+
+    it 'is false for a fresh session with an empty buffer' do
+      expect(manager(sid_a).has_pending_entries?).to be(false)
+    end
+
+    it 'is false once those entries have been saved' do
+      m = manager(sid_a)
+      Reline::HISTORY << '/model qwen'
+      m.save
+
+      expect(m.has_pending_entries?).to be(false)
+    end
+
+    it 'is false when the buffer only holds entries already persisted' do
+      seed = manager(sid_a)
+      Reline::HISTORY << 'persisted'
+      seed.save
+
+      later = manager(sid_a)
+      Reline::HISTORY.clear
+      later.load # 'persisted' is back in the buffer, but already on disk
+      expect(later.has_pending_entries?).to be(false)
+    end
+  end
 end

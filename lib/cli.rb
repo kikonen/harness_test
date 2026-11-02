@@ -173,8 +173,12 @@ class CLI
     # here is what stops a server outliving the CLI.
     @harness.close_mcp
 
+    # issue #188: a run that changed settings (e.g. /model) but sent no
+    # prompt still has session-worthy state. The new history entry is the
+    # evidence - read it BEFORE #save, which clears it.
+    state_changed = @history.has_pending_entries?
     @history.save
-    id = auto_save_session
+    id = auto_save_session(state_changed)
     ui.puts "Goodbye."
     if id
       ui.puts "Session saved as #{id} (#{harness.session_manager.session_file_path(id)})."
@@ -307,8 +311,10 @@ class CLI
 
   # Auto-save the session on exit (best-effort). Returns the session id,
   # or nil when there was nothing to save or saving failed.
-  def auto_save_session
-    return nil if @harness.session.empty?
+  # state_changed: the run submitted a command but built no conversation
+  # (issue #188) - settings like /model then still deserve a saved session.
+  def auto_save_session(state_changed = false)
+    return nil if @harness.session.empty? && !state_changed
 
     @harness.session_manager.save_session
   rescue StandardError => e

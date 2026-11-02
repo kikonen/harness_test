@@ -52,6 +52,15 @@ class HistoryManager
     # Corrupt or unreadable history - start fresh.
   end
 
+  # True when this run typed at least one command this session id has not
+  # persisted yet - the same test #save uses, exposed so the CLI can ask it
+  # BEFORE #save clears it (issue #188: a run that changed settings but sent
+  # no prompt still has session-worthy state, and the new history entry is
+  # the evidence).
+  def has_pending_entries?
+    has_new_entry?(@history_file)
+  end
+
   # Persist current Reline history to disk (best-effort).
   # issue #135: Reline::HISTORY is GLOBAL to the process. When a run
   # resumes a saved session, the /resume command itself is already in it -
