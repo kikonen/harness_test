@@ -460,4 +460,55 @@ RSpec.describe CLI do
       expect(log).to include('cli_spec.rb')
     end
   end
+
+  # issue #188: session saving was bound to "a prompt was sent". A run that
+  # changed settings (e.g. /model) but sent no prompt saved nothing, so
+  # --continue/--resume could not recover them and the typed command was
+  # orphaned under a throwaway id. The exit-save now also fires when the run
+  # changed state (a new history entry is the evidence).
+  describe 'exit-save on a state change with no conversation (issue #188)' do
+    def session_json(id)
+      File.join(workdir, '.harness', 'sessions', id, 'session.json')
+    end
+
+    it 'saves the session when a command was typed but no prompt was sent' do
+      Reline::HISTORY.clear
+      Reline::HISTORY << '/model some-model'
+      cli = build_cli
+      allow(ui).to receive(:puts)
+      stub_prompt_reader
+      id = cli.harness.session.session_id
+
+      cli.run
+
+      expect(File.file?(session_json(id))).to be(true)
+    end
+
+    it 'saves nothing when the session is empty and no command was typed' do
+      Reline::HISTORY.clear
+      cli = build_cli
+      allow(ui).to receive(:puts)
+      stub_prompt_reader
+      id = cli.harness.session.session_id
+
+      cli.run
+
+      # The session dir exists (the run wrote its harness.log under the id),
+      # but no session.json was written for a run that changed nothing.
+      expect(File.exist?(session_json(id))).to be(false)
+    end
+
+    it 'still saves a normal conversation (the empty? path is unchanged)' do
+      Reline::HISTORY.clear
+      cli = build_cli
+      cli.harness.session.add_user('a real prompt')
+      allow(ui).to receive(:puts)
+      stub_prompt_reader
+      id = cli.harness.session.session_id
+
+      cli.run
+
+      expect(File.file?(session_json(id))).to be(true)
+    end
+  end
 end

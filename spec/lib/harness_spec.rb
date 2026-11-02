@@ -443,6 +443,29 @@ RSpec.describe Harness do
       expect(harness.output_palette.name).to eq('default')
     end
 
+    # issue #188: a run that changed postures but sent no prompt now saves a
+    # session whose chain is JUST the system prompt. The resume side must
+    # restore those postures (not choke on the empty conversation) so
+    # --continue/--resume recovers them - the whole point of saving it.
+    it 'restores the postures of a saved session that has no conversation yet' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
+      File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate({
+        session_id: id, created_at: Time.now.iso8601, system_prompt: 'saved prompt',
+        messages: [{ role: 'system', content: 'saved prompt' }],
+        yolo: true, stream: true, markdown: true, output_palette: 'basic16',
+        workdir: workdir
+      }))
+
+      harness = build_harness(session_id: id, resume_data: saved_data(id))
+
+      expect(harness.yolo?).to be(true)
+      expect(harness.stream?).to be(true)
+      expect(harness.markdown?).to be(true)
+      expect(harness.output_palette.name).to eq('basic16')
+      expect(harness.session.messages.map { |m| m[:role] }).to eq(['system'])
+    end
+
     it 'refuses a session file whose stored id is not the one it lives under' do
       id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
       seed_saved_session(id)
