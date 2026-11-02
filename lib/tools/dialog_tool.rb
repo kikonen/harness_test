@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "json"
 require_relative "../tool"
 require_relative "../ui/dialog"
 
@@ -87,13 +88,22 @@ module Tools
     end
 
     def execute(args)
-      title = args["title"].to_s.strip
+      title = args["title"]
+      if title.nil?
+        return "error: 'title' is required (pass a non-empty title)"
+      end
+
+      title = title.to_s.strip
       if title.empty?
         return "error: 'title' must be a non-empty string"
       end
 
-      raw_options = args["options"]
-      unless raw_options.is_a?(Array) && !raw_options.empty?
+      normalized = normalize_options(args["options"])
+      return normalized if normalized.is_a?(String)
+
+      raw_options = normalized
+
+      if raw_options.empty?
         return "error: 'options' must be a non-empty array"
       end
       if raw_options.size > MAX_OPTIONS
@@ -101,25 +111,34 @@ module Tools
       end
 
       options = []
-      raw_options.each do |raw|
-        unless raw.is_a?(Hash)
-          return "error: every option must be an object with 'title' and 'value'"
+      raw_options.each_with_index do |raw, i|
+        opt = normalize_option(raw)
+        unless opt.is_a?(Hash)
+          return "error: option #{i + 1} must be an object with 'title' and 'value'"
         end
 
-        opt_title = raw["title"].to_s.strip
+        unless opt.key?("title")
+          return "error: option #{i + 1} is missing a 'title' (needs both title and value)"
+        end
+
+        opt_title = opt["title"].to_s.strip
         if opt_title.empty?
-          return "error: every option needs a non-empty 'title'"
+          return "error: option #{i + 1} needs a non-empty 'title'"
         end
 
-        value = raw["value"]
+        unless opt.key?("value")
+          return "error: option #{i + 1} is missing a 'value' (needs both title and value)"
+        end
+
+        value = opt["value"]
         if value.nil? || (value.is_a?(String) && value.empty?)
-          return "error: every option needs a 'value' (non-empty string, number, or boolean)"
+          return "error: option #{i + 1} needs a 'value' (non-empty string, number, or boolean)"
         end
 
         options << UI::Dialog::Option.new(
           title: opt_title,
           value:,
-          description: raw["description"]
+          description: opt["description"]
         )
       end
 
@@ -138,6 +157,38 @@ module Tools
     end
 
     private
+
+    # The model sometimes re-encodes the options array as a JSON string; parse
+    # that form instead of rejecting it, and name any other non-array by its
+    # actual shape so the model fixes the real field instead of its title.
+    def normalize_options(raw_options)
+      return raw_options if raw_options.is_a?(Array)
+
+      if raw_options.is_a?(String)
+        begin
+          parsed = JSON.parse(raw_options)
+        rescue JSON::ParserError
+          return "error: 'options' was sent as a string that is not a JSON array"
+        end
+        return parsed if parsed.is_a?(Array)
+      end
+
+      "error: 'options' must be a non-empty array"
+    end
+
+    # An option that arrived double-encoded as a JSON object string is parsed
+    # into the object it stands for; anything else stays so the caller reports
+    # it as not an option object.
+    def normalize_option(raw)
+      return raw unless raw.is_a?(String)
+
+      begin
+        parsed = JSON.parse(raw)
+      rescue JSON::ParserError
+        return raw
+      end
+      parsed.is_a?(Hash) ? parsed : raw
+    end
 
     def format_choice(choice)
       ft = UI::Dialog::FREE_TEXT
