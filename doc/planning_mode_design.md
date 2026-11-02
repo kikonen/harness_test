@@ -91,9 +91,10 @@ This store satisfies "not bound to session" directly: a plan saved in one sessio
 is readable, listable and searchable by any later session in the same workdir,
 and survives every compaction because it was never in the chain.
 
-**How this differs from a memory.** A memory is capped at 40 notes / 2000 chars
-and is deliberately *not searched* (doc/memory_design.md: 40 notes is small
-enough to list). Plans are expected to be longer (a real plan is more than one
+**How this differs from a memory.** A memory is capped at a default of 50 notes /
+2000 chars and is deliberately *not searched* (doc/memory_design.md: the default
+store is small enough to list). Plans are expected to be longer (a real plan is
+more than one
 fact) and the owner wants search, so the plan store relaxes the memory rules in
 two ways: a larger body budget, and a real `plan.search`. It keeps the memory
 rules that matter: one reader, name-not-path, no grant, never injected.
@@ -372,9 +373,9 @@ seam and adds no tool-behavior change in the first cut.
 - **Naming**: built-in wordlist (recommended) vs the `unique_names_generator` gem.
 - **Active plan injected vs read-on-demand** while the mode is on (the
   prefix-cache cost memory_design.md resolved as "never injected").
-- **Caps**: a plan body budget and a store size cap (memories cap at 40/2000 to
-  keep listing affordable; a searchable plan store can be larger but still needs
-  *some* cap to avoid unbounded growth).
+- **Caps**: a plan body budget and a store size cap (memories cap at 50/2000 by
+  default to keep listing affordable; a searchable plan store can be larger but
+  still needs *some* cap to avoid unbounded growth).
 - **Search depth**: plain substring match (recommended, no ranking) vs anything
   smarter.
 - **Whether a plan survives `/session-clear`**: it is not conversation state, so

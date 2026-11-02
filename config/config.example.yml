@@ -53,6 +53,15 @@ auto_save: true
 # (issue #226). Built-in default: 200.
 # max_tool_iterations: 200
 
+# Max number of memory notes one store may hold (issue #435). A memory is a
+# short durable note the model writes for a later session (.harness/memories/);
+# the cap is the store's own limit - over it memory.add refuses and names the
+# way out (consolidate or delete) rather than evicting a note behind the
+# model's back. Omit the key for the built-in default (50). Each note is also
+# capped at MAX_BODY_CHARS; a body over it is a subsystem document that belongs
+# in doc/<topic>.md. doc/memory_design.md.
+# max_memories: 50
+
 # Rendered-output palette (issue #303): colors the lines the output renderer
 # prints (step labels, plan/say lines, warn/error, stats). Available:
 # 'default' (colored), 'basic16' (16-color band only - no 256/truecolor),

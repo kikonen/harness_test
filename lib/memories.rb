@@ -24,7 +24,9 @@ class Memories
   # The caps are the feature's own limit, not a polite suggestion: a note store
   # the model can grow freely becomes context the model pays for forever. Over a
   # cap, memory.add refuses and names the way out (consolidate or delete).
-  MAX_MEMORIES   = 40
+  # MAX_MEMORIES is the built-in DEFAULT used when the config sets no
+  # 'max_memories:' key; the effective cap of one store is #max_memories (issue #435).
+  MAX_MEMORIES   = 50
   MAX_BODY_CHARS = 2000
 
   # Truncation of the index line (the same glanceable-index idea as a skill's
@@ -37,10 +39,20 @@ class Memories
 
   Memory = Struct.new(:name, :description, :path, :chars, keyword_init: true)
 
-  attr_reader :dir
+  attr_reader :dir, :max_memories
 
-  def initialize(workdir)
+  # max_memories: the note cap for THIS store (issue #435), normally the value
+  # the config 'max_memories:' key supplies through Harness. nil (or a
+  # non-positive value) falls back to MAX_MEMORIES, so a store built without a
+  # configured cap - a tool spec, a standalone use - still has the default.
+  def initialize(workdir, max_memories: nil)
     @dir = File.expand_path(DIR, workdir)
+    @max_memories =
+      if max_memories.is_a?(Integer) && max_memories.positive?
+        max_memories
+      else
+        MAX_MEMORIES
+      end
   end
 
   def exist?
@@ -65,7 +77,7 @@ class Memories
   end
 
   def full?
-    count >= MAX_MEMORIES
+    count >= @max_memories
   end
 
   def find(raw_name)
@@ -104,7 +116,7 @@ class Memories
     existing = stored_as(name)
     if existing.nil? && full?
       raise HarnessError,
-        "memory store is full (#{MAX_MEMORIES} notes): consolidate what you " \
+        "memory store is full (#{@max_memories} notes): consolidate what you " \
           "stored (memory.read, then one broader note) and memory.delete the " \
           "narrow ones before adding"
     end

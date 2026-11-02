@@ -41,7 +41,7 @@ module Commands
         return
       end
 
-      @ui.puts "Memories (#{all.size}/#{Memories::MAX_MEMORIES} notes, " \
+      @ui.puts "Memories (#{all.size}/#{memories.max_memories} notes, " \
         "#{Memories::MAX_BODY_CHARS} chars max each):"
       all.each { |m| @ui.puts "  #{m.name} - #{m.description} (#{m.chars} chars)" }
       @ui.puts "Show one with: /memory <name>"

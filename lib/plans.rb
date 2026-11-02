@@ -21,8 +21,8 @@ require_relative "text_normalizer"
 # Plans mirror Memories (lib/memories.rb) in shape and consent - one reader,
 # name-not-path, no grant, never injected - and differ in the two ways the
 # design calls for: a plan is longer than a note (larger body budget) and the
-# store is searchable (Memories deliberately omit search because 40 notes are
-# listable).
+# store is searchable (Memories deliberately omit search because their default
+# cap is small enough to list).
 class Plans
   DIR        = ".harness/plans"
   PLAN_EXT   = ".md"

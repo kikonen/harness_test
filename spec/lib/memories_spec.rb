@@ -237,6 +237,47 @@ RSpec.describe Memories do
     end
   end
 
+  # issue #435: the note cap is the store instance's own, so a configured
+  # 'max_memories:' can raise or lower it without a code change.
+  describe 'a configured cap (issue #435)' do
+    def memories_with_cap(dir, cap)
+      described_class.new(dir, max_memories: cap)
+    end
+
+    it 'honours a cap lower than the built-in default' do
+      Dir.mktmpdir do |dir|
+        m = memories_with_cap(dir, 3)
+        expect(m.max_memories).to eq(3)
+
+        3.times { |i| m.add("note-#{i}", 'text') }
+
+        expect(m.full?).to be true
+        expect { m.add('fourth', 'text') }
+          .to raise_error(HarnessError, /full \(3 notes\)/)
+      end
+    end
+
+    it 'honours a cap higher than the built-in default' do
+      Dir.mktmpdir do |dir|
+        m = memories_with_cap(dir, 60)
+        expect(m.max_memories).to eq(60)
+
+        described_class::MAX_MEMORIES.times { |i| m.add("note-#{i}", 'text') }
+        expect(m.full?).to be false
+        expect { m.add('over-the-default', 'text') }.not_to raise_error
+      end
+    end
+
+    it 'falls back to the default when the cap is nil, zero or negative' do
+      Dir.mktmpdir do |dir|
+        [nil, 0, -5].each do |bad|
+          expect(described_class.new(dir, max_memories: bad).max_memories)
+            .to eq(described_class::MAX_MEMORIES), bad.inspect
+        end
+      end
+    end
+  end
+
   describe '#all / #find' do
     it 'lists notes sorted by name with description and size' do
       Dir.mktmpdir do |dir|

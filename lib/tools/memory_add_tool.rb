@@ -22,7 +22,7 @@ module Tools
           "Save what a later session would otherwise have to rediscover - not " \
           "the content of the file you are editing, which it can read itself. " \
           "Text is one fact, max #{Memories::MAX_BODY_CHARS} chars. At most " \
-          "#{Memories::MAX_MEMORIES} notes exist: when the store is full this " \
+          "#{memories.max_memories} notes exist: when the store is full this " \
           "refuses and you must consolidate (memory.read + rewrite a broader " \
           "note, memory.delete the narrow ones) before adding.",
         parameters: {

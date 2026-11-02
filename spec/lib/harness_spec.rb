@@ -2614,6 +2614,23 @@ RSpec.describe Harness do
       expect(log).to include("tool memory.add → ok: saved memory 'logged-note'")
       expect(h.memories.body('logged-note')).to eq('a fact')
     end
+
+    # issue #435: the config 'max_memories:' cap reaches the store this run
+    # builds, so a project can raise or lower its note cap without a code change.
+    it 'threads the max_memories option into the store' do
+      capped = build_harness(max_memories: 4)
+
+      expect(capped.memories.max_memories).to eq(4)
+      # The four memory tools all read the SAME store object the harness built.
+      %w[memory.add memory.list].each do |name|
+        tool = capped.tool_registry.get(name)
+        expect(tool.instance_variable_get(:@memories)).to equal(capped.memories)
+      end
+    end
+
+    it 'leaves the built-in default cap when no max_memories option is set' do
+      expect(build_harness.memories.max_memories).to eq(Memories::MAX_MEMORIES)
+    end
   end
 
   # Issue #33: web.fetch is the harness' only outbound network call outside the
