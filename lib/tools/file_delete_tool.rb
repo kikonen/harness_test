@@ -51,6 +51,9 @@ module Tools
 
       File.delete(path)
       status(:ok, "#{shown} (deleted)")
+      # issue #105: the file is gone - drop any stored grant on it, so a
+      # re-created path of the same name needs a fresh consent decision.
+      @file_list.revoke_grants(path)
       # issue #170: the file is gone - drop its cache entry.
       # &. guards only the next send, so BOTH hops carry one.
       @session&.file_cache&.clear(path, workdir: @file_list.workdir)

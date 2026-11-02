@@ -37,6 +37,24 @@ RSpec.describe Tools::FileDeleteTool do
     end
   end
 
+  # issue #105: the grant that authorized the delete must not survive the
+  # file. A leftover grant would let grant_access auto-approve the same path
+  # if it is later re-created, skipping a fresh consent decision.
+  it 'revokes the delete grant (and any read/write grant) on the deleted file' do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'gone.txt'), "x\n")
+      list = file_list(dir)
+      list.add_file('gone.txt', :rw)
+      list.add_file('gone.txt', :d)
+
+      described_class.new(list, session).execute('path' => 'gone.txt')
+
+      expect(list.deletable?('gone.txt')).to be(false)
+      expect(list.writable?('gone.txt')).to be(false)
+      expect(list.readable?('gone.txt')).to be(false)
+    end
+  end
+
   # Issue #92: delete is its OWN mode. A read grant, a write grant, or both do
   # not make a file deletable - the tool must still ask.
   it 'asks for the DELETE grant even when read and write are already granted' do

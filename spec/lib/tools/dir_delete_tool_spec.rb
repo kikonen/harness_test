@@ -75,6 +75,25 @@ RSpec.describe Tools::DirDeleteTool do
       end
     end
 
+    # issue #105: the grants that authorized the tree deletion must not survive
+    # it. The top dir's grant (the only exact grant here) and any exact grant
+    # on a removed descendant are dropped, so a re-created path of the same
+    # name needs a fresh consent decision rather than being auto-approved.
+    it 'revokes the delete grants on the deleted directory and its contents' do
+      Dir.mktmpdir do |dir|
+        seed_tree(dir)
+        list = FileList.new(workdir: dir)
+        list.add_dir('tree', :d)
+        list.add_file('tree/a.txt', :d)
+        harness, = harness_with_log
+
+        build(list, harness: harness).execute('path' => 'tree')
+
+        expect(list.deletable?('tree')).to be(false)
+        expect(list.deletable?('tree/a.txt')).to be(false)
+      end
+    end
+
     it 'deletes an empty directory exactly as before' do
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, 'gone'))
