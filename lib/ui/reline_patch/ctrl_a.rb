@@ -3,13 +3,20 @@
 require "reline"
 
 # Ctrl+A command-consent MODE toggle. The MODE itself is documented in
-# doc/safety_check_design.md; this file covers the key interception.
-# Shared detection rule: UI::Editor.control_key? (doc/editor_input_design.md).
+# doc/safety_check_design.md; this file covers the key interception. The
+# fired/label state the reader hands back rides on this module's own accessor
+# (PromptReader#read and Task.poll_for_note read it). Shared detection rule:
+# UI::Editor.control_key? (doc/editor_input_design.md).
 module UI
-  class Editor
-    # Parked fired/label state the reader hands back so the caller can print
-    # the ack line (see PromptReader#read and Task.poll_for_note).
-    module CtrlAState
+  module RelinePatch
+    # Ctrl+A is Reline's "beginning of line" cursor move; we consume it and
+    # finish so the editor does not stay open after the toggle. A harness
+    # with no toggle (unit tests) makes the key a no-op (label = nil) but
+    # still closes the read.
+    module CtrlAToggle
+      # Process-global parked state; the accessor lives on the patch module
+      # itself. A prepended instance's #input_key reaches it by the module's
+      # name (its self.class is Reline::LineEditor, not this module).
       class << self
         attr_accessor :fired, :label
 
@@ -23,16 +30,10 @@ module UI
           @label = label
         end
       end
-    end
 
-    # Ctrl+A is Reline's "beginning of line" cursor move; we consume it and
-    # finish so the editor does not stay open after the toggle. A harness
-    # with no toggle (unit tests) makes the key a no-op (label = nil) but
-    # still closes the read.
-    module RelineCtrlAToggle
       def input_key(key)
         if UI::Editor.control_key?(key.char, UI::Editor::CTRL_A_BYTE)
-          CtrlAState.fire!(run_mode_toggle)
+          CtrlAToggle.fire!(run_mode_toggle)
           finish
           return false
         end

@@ -2,16 +2,19 @@
 
 require "reline"
 require_relative "external_editor"
-require_relative "reline_esc_cancel"
-require_relative "reline_enter_policy"
-require_relative "reline_lf_submit"
-require_relative "reline_ctrl_a"
-require_relative "reline_ctrl_g"
-require_relative "windows_esc_hook"
+require_relative "reline_patch/esc_state"
+require_relative "reline_patch/esc_cancel"
+require_relative "reline_patch/paste_guard"
+require_relative "reline_patch/enter_policy"
+require_relative "reline_patch/lf_submit"
+require_relative "reline_patch/ctrl_a"
+require_relative "reline_patch/ctrl_g"
+require_relative "reline_patch/windows_esc_hook"
 
 # UI::Editor: the shared keyboard reader for the note editor, dialog choice
-# line, and CLI idle prompt. Architecture and the EditorResult status contract:
-# doc/editor_input_design.md.
+# line, and CLI idle prompt. The Reline-level key patches live in UI::RelinePatch
+# (lib/ui/reline_patch/); this file holds only the Editor core. Architecture and
+# the EditorResult status contract: doc/editor_input_design.md.
 module UI
   class Editor
     DEFAULT_PROMPT = "note> "
@@ -45,14 +48,14 @@ module UI
     CSI_CTRL_ENTER_SEQ = [ESC_KEY_BYTE, CSI_OPEN_BYTE, DIGIT_1_BYTE,
                          DIGIT_3_BYTE, CSI_END_TILDE].freeze
 
-    # The LineEditor patches in prepend order. Kept as the single ordered list
+    # The RelinePatch modules, in prepend order. Kept as the single ordered list
     # so the load-bearing precedence is stated once.
     PATCH_ORDER = [
-      RelineEscCancel,
-      RelineEnterPolicy,
-      RelineLFSubmit,
-      RelineCtrlAToggle,
-      RelineCtrlGHandoff
+      RelinePatch::EscCancel,
+      RelinePatch::EnterPolicy,
+      RelinePatch::LFSubmit,
+      RelinePatch::CtrlAToggle,
+      RelinePatch::CtrlGHandoff
     ].freeze
 
     # Does this keypress carry the control key whose byte is `byte`? Every
@@ -76,11 +79,11 @@ module UI
     end
 
     def self.submit_on_enter=(value)
-      EnterState.enabled = value
+      RelinePatch::EnterPolicy.enabled = value
     end
 
     def self.submit_on_enter?
-      !!EnterState.enabled
+      RelinePatch::EnterPolicy.enabled?
     end
 
     def initialize(stdin)
@@ -135,7 +138,7 @@ module UI
     end
 
     def reline_read(prompt, prefill)
-      self.class.install_esc!
+      self.class.install_reline_patches!
       install_prefill(prefill)
       text = Reline.readline(prompt, false) # add_history: false - editor lines are not commands
       return EDITOR_RESULT.new(nil, :eof) if text.nil?
@@ -159,14 +162,14 @@ module UI
     # newline. A cancelled Esc returns the buffer intact (the CLI keeps it as a
     # draft). Design in doc/editor_input_design.md.
     def reline_read_multiline(prompt, prefill)
-      self.class.install_esc!
+      self.class.install_reline_patches!
       install_prefill(prefill)
       text = Reline.readmultiline(
         prompt, false, rprompt: prompt
       ) { |_buf| false } # Enter always inserts a newline; submit is the key
-      if CtrlGState.fired
-        snapshot = CtrlGState.text.to_s
-        CtrlGState.reset!
+      if RelinePatch::CtrlGHandoff.fired
+        snapshot = RelinePatch::CtrlGHandoff.text.to_s
+        RelinePatch::CtrlGHandoff.reset!
         return ctrl_g_result(snapshot)
       end
       return EDITOR_RESULT.new(nil, :eof) if text.nil?
@@ -177,9 +180,9 @@ module UI
       Reline::HISTORY << text if status == :submitted && !text.empty?
       EDITOR_RESULT.new(text, status)
     ensure
-      # Clearing CtrlGState here too means a read that raised after fire! cannot
+      # Clearing CtrlGHandoff here too means a read that raised after fire! cannot
       # leak the flag into the next.
-      CtrlGState.reset!
+      RelinePatch::CtrlGHandoff.reset!
       Reline.pre_input_hook = nil
     end
 
@@ -200,11 +203,11 @@ module UI
       EDITOR_RESULT.new(result.text, :edited, result.note)
     end
 
-    # Prepends each LineEditor patch module (idempotently, only if not already
-    # present) and binds the submit keys, mutating GLOBAL Reline state once per
-    # process. Prepend ORDER (last prepended = highest keypress priority) is
-    # load-bearing. Design: doc/editor_input_design.md.
-    def self.install_esc!
+    # Prepends each RelinePatch LineEditor module (idempotently, only if not
+    # already present) and binds the submit keys, mutating GLOBAL Reline state
+    # once per process. Prepend ORDER (last prepended = highest keypress
+    # priority) is load-bearing. Design: doc/editor_input_design.md.
+    def self.install_reline_patches!
       PATCH_ORDER.each do |patch|
         Reline::LineEditor.prepend(patch) unless Reline::LineEditor.ancestors.include?(patch)
       end
@@ -218,7 +221,7 @@ module UI
       # Reline::Windows exists only on the Windows IOGate (undefined on Unix),
       # so guard before the is_a? check.
       if defined?(Reline::Windows) && Reline::IOGate.is_a?(Reline::Windows)
-        Reline::Windows.prepend(WindowsEscHook)
+        Reline::Windows.prepend(RelinePatch::WindowsEscHook)
       else
         cfg.add_default_key_binding_by_keymap(:emacs, [ESC_KEY_BYTE], :cancel_input)
       end

@@ -16,10 +16,10 @@ class LFFakeEditor
   def key_newline(_key); @newlined = true; end
 end
 
-RSpec.describe UI::Editor::RelineLFSubmit do
-  after { UI::Editor::RelineEnterPolicy::PasteGuard.clear! }
+RSpec.describe UI::RelinePatch::LFSubmit do
+  after { UI::RelinePatch::PasteGuard.clear! }
 
-  def lf_ed(**opts) = LFFakeEditor.new(**opts).extend(UI::Editor::RelineLFSubmit)
+  def lf_ed(**opts) = LFFakeEditor.new(**opts).extend(UI::RelinePatch::LFSubmit)
 
   it 'submits a plain LF when not pasting' do
     e = lf_ed
@@ -34,7 +34,7 @@ RSpec.describe UI::Editor::RelineLFSubmit do
     expect(e.submitted).to be(false)
     expect(e.newlined).to be(true)
 
-    UI::Editor::RelineEnterPolicy::PasteGuard.mark
+    UI::RelinePatch::PasteGuard.mark
     e2 = lf_ed
     e2.send(:lf_force_submit, nil)
     expect(e2.submitted).to be(false)

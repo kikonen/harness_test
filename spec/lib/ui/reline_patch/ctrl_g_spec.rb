@@ -5,13 +5,13 @@ require 'tmpdir'
 require 'stringio'
 require 'ui/editor'
 
-RSpec.describe UI::Editor::RelineCtrlGHandoff do
+RSpec.describe UI::RelinePatch::CtrlGHandoff do
   after { UI::Editor.external_editor = nil }
 
-  it 'is installed on Reline::LineEditor by install_esc!' do
-    UI::Editor.install_esc!
+  it 'is installed on Reline::LineEditor by install_reline_patches!' do
+    UI::Editor.install_reline_patches!
     expect(Reline::LineEditor.ancestors)
-      .to include(UI::Editor::RelineCtrlGHandoff)
+      .to include(UI::RelinePatch::CtrlGHandoff)
   end
 
   it 'external_editor= normalizes a blank command to nil (the key stays Reline\'s)' do
@@ -24,7 +24,7 @@ RSpec.describe UI::Editor::RelineCtrlGHandoff do
   # Feeds bytes through Reline's own expansion and reports what the patch left
   # behind: whether it fired, and what the buffer became.
   def ctrl_g_feed(bytes, multiline: true)
-    UI::Editor.install_esc!
+    UI::Editor.install_reline_patches!
     cfg = Reline::Config.new
     ks  = Reline::KeyStroke.new(cfg, Encoding::UTF_8)
     le  = Reline::LineEditor.new(cfg)
@@ -34,10 +34,10 @@ RSpec.describe UI::Editor::RelineCtrlGHandoff do
       le.confirm_multiline_termination_proc = ->(_buf) { false }
     end
     bytes.each { |b| ks.expand([b]).first.each { |k| le.input_key(k) } }
-    { fired: UI::Editor::CtrlGState.fired, text: UI::Editor::CtrlGState.text,
+    { fired: UI::RelinePatch::CtrlGHandoff.fired, text: UI::RelinePatch::CtrlGHandoff.text,
       finished: le.finished?, buffer: le.whole_buffer }
   ensure
-    UI::Editor::CtrlGState.reset!
+    UI::RelinePatch::CtrlGHandoff.reset!
   end
 
   it 'does NOT take the key when no editor is configured (Reline keeps it)' do

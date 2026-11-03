@@ -295,7 +295,7 @@ cursor-based default for Enter:
 Reline.core.config.add_default_key_binding_by_keymap(:emacs, [27, 13], :ed_force_submit)
 ```
 
-The harness (`UI::Editor#install_esc!`) binds a SECOND sequence too:
+The harness (`UI::Editor.install_reline_patches!`) binds a SECOND sequence too:
 CSI Ctrl+Enter, `ESC [ 1 3 ~` (bytes `[27, 91, 49, 51, 126]`), to the same
 action. See the remote-setup note in the platform table below.
 

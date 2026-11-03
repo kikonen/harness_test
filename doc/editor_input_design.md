@@ -1,8 +1,8 @@
 # UI::Editor input design
 
-Design doc for `lib/ui/editor.rb` and the prepended Reline patch modules split
-out alongside it (`reline_esc_cancel.rb`, `reline_enter_policy.rb`,
-`reline_lf_submit.rb`, `reline_ctrl_a.rb`, `reline_ctrl_g.rb`,
+Design doc for `lib/ui/editor.rb` (the Editor core) and the prepended Reline
+patch modules in `lib/ui/reline_patch/` (`esc_state.rb`, `esc_cancel.rb`,
+`paste_guard.rb`, `enter_policy.rb`, `lf_submit.rb`, `ctrl_a.rb`, `ctrl_g.rb`,
 `windows_esc_hook.rb`). The source files keep a 3-line pointer here; the
 rationale lives here.
 
@@ -57,28 +57,37 @@ interprets a status in its own domain:
 
 ## Prepended Reline patch modules
 
-`install_esc!` mutates GLOBAL Reline state once per process: it prepends each
-patch module onto `Reline::LineEditor` (idempotently - only if not already
-present) and binds the submit keys. Each patch is a small `module UI::Editor::*`
-in its own file, kept nested under `UI::Editor` so callers reach them as
-`UI::Editor::RelineCtrlAToggle` etc. Install order in `install_esc!` is the
-prepend order and is load-bearing (last prepended = highest priority on a
-keypress); the existing install-idempotency and key-binding specs pin it.
+These files patch a third-party class (`Reline::LineEditor`, and on Windows
+`Reline::Windows`), so they live in their own namespace `UI::RelinePatch`
+(`lib/ui/reline_patch/`), NOT inside `UI::Editor`: `editor.rb` is the only
+file that writes `class Editor`, and each patch file opens
+`module UI; module RelinePatch` and defines exactly one module. The name says
+what they are (patches onto Reline) and, unlike a bare `UI::Reline`, it cannot
+shadow the reline gem's top-level `Reline` for the 20+ unqualified `Reline.`
+calls `UI::Editor` makes.
 
-- `RelineEscCancel` - a bare Esc marks the read cancelled and leaves the buffer
-  INTACT (the caller hands it back as a prefilled draft). `EscState` carries the
-  marker byte shared with the Windows hook.
-- `RelineEnterPolicy` + `PasteGuard` - opt-in "double Enter submits" for setups
-  where no submit key reaches the terminal; `EnterState` is its process-global
-  flag. Paste guard so a pasted blank line never submits mid-paste.
-- `RelineLFSubmit` - Ctrl+Enter arriving as LF (byte 10) on a remote host seen
+`Editor.install_reline_patches!` mutates GLOBAL Reline state once per process:
+it prepends each patch module onto `Reline::LineEditor` (idempotently - only if
+not already present) and binds the submit keys. Install order is `Editor::PATCH_ORDER`
+and is load-bearing (last prepended = highest priority on a keypress); the
+install-idempotency and key-binding specs pin it.
+
+- `EscState` - the marker byte shared between the Esc patch and the Windows hook.
+- `EscCancel` - a bare Esc marks the read cancelled and leaves the buffer
+  INTACT (the caller hands it back as a prefilled draft).
+- `PasteGuard` - shared by the Enter and LF patches: a pasted blank line never
+  submits mid-paste (nor just after a paste, within the grace window).
+- `EnterPolicy` - opt-in "double Enter submits" for setups where no submit key
+  reaches the terminal; its process-global enabled flag is the module's own
+  accessor (set via `Editor.submit_on_enter=`).
+- `LFSubmit` - Ctrl+Enter arriving as LF (byte 10) on a remote host seen
   through Windows Terminal; guarded by the same `PasteGuard`.
-- `RelineCtrlAToggle` - toggles the command-consent MODE on Ctrl+A; the new
-  label rides on `CtrlAState` for the reader to ack (see
+- `CtrlAToggle` - toggles the command-consent MODE on Ctrl+A; the fired flag and
+  new label ride on the module's own accessor for the reader to ack (see
   `doc/safety_check_design.md` for the MODE itself).
-- `RelineCtrlGHandoff` - Ctrl+G hands the buffer to an external editor; the
-  snapshot rides on `CtrlGState`, and the READER (not the key patch) spawns the
-  editor because Reline must have left raw mode first. Full design:
+- `CtrlGHandoff` - Ctrl+G hands the buffer to an external editor; the snapshot
+  rides on the module's own accessor, and the READER (not the key patch) spawns
+  the editor because Reline must have left raw mode first. Full design:
   `doc/external_editor.md`.
 - `WindowsEscHook` - on the Windows IOGate a bare Esc is a virtual key, not a
   byte; translated to `EscState::ESC_MARKER` (auto-repeat guarded).

@@ -26,15 +26,15 @@ class CtrlAFakeEditor
   def self.key(char) = Struct.new(:char).new(char)
 end
 
-RSpec.describe UI::Editor::RelineCtrlAToggle do
-  after { UI::Editor::CtrlAState.reset! }
+RSpec.describe UI::RelinePatch::CtrlAToggle do
+  after { UI::RelinePatch::CtrlAToggle.reset! }
 
   def ctrl_a_ed(harness: nil) = CtrlAFakeEditor.new(harness: harness)
 
-  it 'is installed on Reline::LineEditor by install_esc!' do
-    UI::Editor.install_esc!
+  it 'is installed on Reline::LineEditor by install_reline_patches!' do
+    UI::Editor.install_reline_patches!
     expect(Reline::LineEditor.ancestors)
-      .to include(UI::Editor::RelineCtrlAToggle)
+      .to include(UI::RelinePatch::CtrlAToggle)
   end
 
   # run_mode_toggle reads the harness off the ACTIVE task (Thread current),
@@ -51,30 +51,30 @@ RSpec.describe UI::Editor::RelineCtrlAToggle do
     end
   end
 
-  it 'fires CtrlAState with the new label and closes the read on Ctrl+A (String shape)' do
+  it 'fires CtrlAToggle with the new label and closes the read on Ctrl+A (String shape)' do
     harness = double('harness', toggle_command_mode: 'AUTO-APPROVE')
     e = ctrl_a_ed
-    e.extend(UI::Editor::RelineCtrlAToggle)
+    e.extend(UI::RelinePatch::CtrlAToggle)
 
     with_active_harness(harness) do
       e.input_key(CtrlAFakeEditor.key("\u0001"))
     end
 
-    expect(UI::Editor::CtrlAState.fired).to be(true)
-    expect(UI::Editor::CtrlAState.label).to eq('AUTO-APPROVE')
+    expect(UI::RelinePatch::CtrlAToggle.fired).to be(true)
+    expect(UI::RelinePatch::CtrlAToggle.label).to eq('AUTO-APPROVE')
     expect(e.finished).to be(true)
   end
 
   it 'does NOT fire for a plain "a" (String "a")' do
     harness = double('harness', toggle_command_mode: 'AUTO-APPROVE')
     e = ctrl_a_ed
-    e.extend(UI::Editor::RelineCtrlAToggle)
+    e.extend(UI::RelinePatch::CtrlAToggle)
 
     with_active_harness(harness) do
       e.input_key(CtrlAFakeEditor.key("a"))
     end
 
-    expect(UI::Editor::CtrlAState.fired).to be_falsy
+    expect(UI::RelinePatch::CtrlAToggle.fired).to be_falsy
   end
 
   # A pasted block arrives as a String longer than one character whose first
@@ -82,31 +82,31 @@ RSpec.describe UI::Editor::RelineCtrlAToggle do
   it 'does NOT fire for a multi-character pasted String starting with the Ctrl+A byte' do
     harness = double('harness', toggle_command_mode: 'AUTO-APPROVE')
     e = ctrl_a_ed
-    e.extend(UI::Editor::RelineCtrlAToggle)
+    e.extend(UI::RelinePatch::CtrlAToggle)
 
     with_active_harness(harness) do
       e.input_key(CtrlAFakeEditor.key("\u0001abc"))
     end
 
-    expect(UI::Editor::CtrlAState.fired).to be_falsy
+    expect(UI::RelinePatch::CtrlAToggle.fired).to be_falsy
   end
 
   it 'fires with a nil label when no active harness exists' do
     e = ctrl_a_ed
-    e.extend(UI::Editor::RelineCtrlAToggle)
+    e.extend(UI::RelinePatch::CtrlAToggle)
 
     e.input_key(CtrlAFakeEditor.key("\u0001")) # no task/harness -> nil toggle
 
-    expect(UI::Editor::CtrlAState.fired).to be(true)
-    expect(UI::Editor::CtrlAState.label).to be_nil
+    expect(UI::RelinePatch::CtrlAToggle.fired).to be(true)
+    expect(UI::RelinePatch::CtrlAToggle.label).to be_nil
     expect(e.finished).to be(true)
   end
 
-  it 'CtrlAState.reset! clears the fired flag and label' do
-    UI::Editor::CtrlAState.fire!('MANUAL')
-    UI::Editor::CtrlAState.reset!
-    expect(UI::Editor::CtrlAState.fired).to be(false)
-    expect(UI::Editor::CtrlAState.label).to be_nil
+  it 'CtrlAToggle.reset! clears the fired flag and label' do
+    UI::RelinePatch::CtrlAToggle.fire!('MANUAL')
+    UI::RelinePatch::CtrlAToggle.reset!
+    expect(UI::RelinePatch::CtrlAToggle.fired).to be(false)
+    expect(UI::RelinePatch::CtrlAToggle.label).to be_nil
   end
 
   # Regression guard for #236: a control key reaches #input_key through
@@ -114,7 +114,7 @@ RSpec.describe UI::Editor::RelineCtrlAToggle do
   # an Integer. Driving the real path means an Integer-only comparison can no
   # longer pass a spec while breaking the terminal.
   def ctrl_a_feed(bytes)
-    UI::Editor.install_esc!
+    UI::Editor.install_reline_patches!
     cfg = Reline::Config.new
     ks  = Reline::KeyStroke.new(cfg, Encoding::UTF_8)
     le  = Reline::LineEditor.new(cfg)
@@ -122,10 +122,11 @@ RSpec.describe UI::Editor::RelineCtrlAToggle do
     le.multiline_on
     le.confirm_multiline_termination_proc = ->(_buf) { false }
     bytes.each { |b| ks.expand([b]).first.each { |k| le.input_key(k) } }
-    { fired: UI::Editor::CtrlAState.fired, label: UI::Editor::CtrlAState.label,
+    { fired: UI::RelinePatch::CtrlAToggle.fired,
+      label: UI::RelinePatch::CtrlAToggle.label,
       finished: le.finished?, buffer: le.whole_buffer }
   ensure
-    UI::Editor::CtrlAState.reset!
+    UI::RelinePatch::CtrlAToggle.reset!
   end
 
   it 'fires on the real Reline path (KeyStroke.expand -> input_key)' do

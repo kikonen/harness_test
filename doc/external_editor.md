@@ -43,11 +43,11 @@ accessor the hand-off snapshots) is `whole_lines.join("\n")`.
 left raw mode and released the terminal. A child editor needs that terminal, so
 it may only start once the read is closed. Two halves, in this order:
 
-1. `RelineCtrlGHandoff#input_key` (prepended on `Reline::LineEditor`) snapshots
-   `whole_buffer` into `CtrlGState` and calls `finish` - the same close Ctrl+A
-   uses. It does not spawn anything: inside the key handler the terminal is still
-   raw.
-2. The reader (`reline_read_multiline`) sees `CtrlGState.fired` after
+1. `RelinePatch::CtrlGHandoff#input_key` (prepended on `Reline::LineEditor`)
+   snapshots `whole_buffer` into the module's own accessor and calls `finish` -
+   the same close Ctrl+A uses. It does not spawn anything: inside the key
+   handler the terminal is still raw.
+2. The reader (`reline_read_multiline`) sees `CtrlGHandoff.fired` after
    `readmultiline` has returned, and only then runs `UI::ExternalEditor`. By
    then `with_raw_input` is closed.
 

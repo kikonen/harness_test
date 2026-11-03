@@ -83,14 +83,14 @@ RSpec.describe UI::Editor do
     end
   end
 
-  describe 'install_esc! (idempotent global Reline patch)' do
+  describe 'install_reline_patches! (idempotent global Reline patch)' do
     it 'installs the LineEditor module once and stays idempotent' do
-      described_class.install_esc!
+      described_class.install_reline_patches!
       expect(Reline::LineEditor.ancestors)
-        .to include(UI::Editor::RelineEscCancel)
+        .to include(UI::RelinePatch::EscCancel)
 
       before = Reline::LineEditor.ancestors.count
-      described_class.install_esc!
+      described_class.install_reline_patches!
       expect(Reline::LineEditor.ancestors.count).to eq(before)
     end
 
@@ -98,7 +98,7 @@ RSpec.describe UI::Editor do
     # Windows, Alt+Enter on most Unix terminals) commits the multiline
     # buffer via Reline's built-in ed_force_submit.
     it 'binds the submit key sequence to :ed_force_submit in emacs mode' do
-      described_class.install_esc!
+      described_class.install_reline_patches!
       kb = Reline.core.config.editing_mode
       expect(kb.get(UI::Editor::SUBMIT_KEY_SEQ)).to eq(:ed_force_submit)
       # Plain Enter stays a newline - it never submits at the idle prompt.
@@ -106,9 +106,9 @@ RSpec.describe UI::Editor do
     end
 
     it 'is idempotent for key bindings (no accumulation on re-call)' do
-      described_class.install_esc!
+      described_class.install_reline_patches!
       kb = Reline.core.config.editing_mode
-      described_class.install_esc!
+      described_class.install_reline_patches!
       expect(kb.get(UI::Editor::SUBMIT_KEY_SEQ)).to eq(:ed_force_submit)
     end
 
@@ -116,7 +116,7 @@ RSpec.describe UI::Editor do
     # Ctrl+Enter ("ESC [ 1 3 ~"), sent for Ctrl+Enter by terminals with an
     # extended keyboard protocol (kitty/kcm), is bound to the submit action.
     it 'binds CSI Ctrl+Enter to :ed_force_submit in emacs mode' do
-      described_class.install_esc!
+      described_class.install_reline_patches!
       kb = Reline.core.config.editing_mode
       expect(kb.get(UI::Editor::CSI_CTRL_ENTER_SEQ)).to eq(:ed_force_submit)
     end
@@ -125,7 +125,7 @@ RSpec.describe UI::Editor do
     # Terminal (ssh / WSL2) Ctrl+Enter arrives as LF (byte 10) while Enter
     # sends CR - byte 10 is bound to the paste-guarded submit action.
     it 'binds LF (Ctrl+Enter via Windows Terminal) to the guarded submit' do
-      described_class.install_esc!
+      described_class.install_reline_patches!
       kb = Reline.core.config.editing_mode
       expect(kb.get([UI::Editor::CTRL_ENTER_LF_BYTE])).to eq(:lf_force_submit)
     end
