@@ -16,7 +16,7 @@ require_relative "../../lib/command_allowlist"
 
 # What the dialog offers as "Always allow" options for a command.
 CANDIDATE_COMMANDS = [
-  "git branch --show-current && git log --oneline -3",  # the report's own line
+  "git branch --show-current && git log --oneline -3", # the report's own line
   "git branch",
   "git branch --show-current",
   "git branch -a",
