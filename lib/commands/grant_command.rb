@@ -38,7 +38,11 @@ module Commands
         idx = files.size + 1
         unless dirs.empty?
           dirs.each_with_index do |d, i|
-            @ui.puts "  #{idx + i}. #{@file_list.display_path(d)}/ (recursive)"
+            # The standing grant (issue #384) is on the working directory, whose
+            # display form is "."; "./" reads as noise, so name it.
+            label = d == @file_list.workdir ? "the working directory" \
+                                            : "#{@file_list.display_path(d)}/"
+            @ui.puts "  #{idx + i}. #{label} (recursive)"
           end
         end
         idx += dirs.size

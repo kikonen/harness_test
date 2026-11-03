@@ -60,6 +60,29 @@ RSpec.describe CLI do
     dir
   end
 
+  # A saved session WITH grants, so a resumed run has something to restore onto
+  # its own FileList. Shared by the /resume specs and the standing-grant specs
+  # (issue #384), so it lives at the top level like #seed_saved_session.
+  def seed_saved_session_with_grants(id)
+    dir  = File.join(workdir, '.harness', 'sessions', id)
+    FileUtils.mkdir_p(dir)
+    data = {
+      session_id:    id,
+      created_at:    Time.now.iso8601,
+      system_prompt: 'saved system prompt',
+      user_prompts:  2,
+      messages:      [{ role: 'system', content: 'saved system prompt' },
+                      { role: 'user', content: 'earlier prompt' }],
+      yolo:          true,
+      workdir:       workdir,
+      access:        { both:  { files: ['lib/foo.rb'], dirs: [], flat_dirs: [] },
+                       read:  { files: [], dirs: ['spec/lib'], flat_dirs: [] },
+                       write: { files: [], dirs: [], flat_dirs: [] },
+                       delete: { files: [], dirs: [], flat_dirs: [] } }
+    }
+    File.write(File.join(dir, 'session.json'), JSON.generate(data))
+  end
+
   def session_dirs
     dir = File.join(workdir, '.harness', 'sessions')
     Dir.exist?(dir) ? Dir.children(dir).sort : []
@@ -277,28 +300,6 @@ RSpec.describe CLI do
   # injected into the CommandHandler) and the WHOLE run is rebuilt under the
   # resumed id - nothing of the replaced run is patched in place.
   describe 'mid-run /resume (issue #280)' do
-    # A saved session WITH grants, so the resumed run has something to restore
-    # onto its own FileList.
-    def seed_saved_session_with_grants(id)
-      dir  = File.join(workdir, '.harness', 'sessions', id)
-      FileUtils.mkdir_p(dir)
-      data = {
-        session_id:    id,
-        created_at:    Time.now.iso8601,
-        system_prompt: 'saved system prompt',
-        user_prompts:  2,
-        messages:      [{ role: 'system', content: 'saved system prompt' },
-                        { role: 'user', content: 'earlier prompt' }],
-        yolo:          true,
-        workdir:       workdir,
-        access:        { both:  { files: ['lib/foo.rb'], dirs: [], flat_dirs: [] },
-                         read:  { files: [], dirs: ['spec/lib'], flat_dirs: [] },
-                         write: { files: [], dirs: [], flat_dirs: [] },
-                         delete: { files: [], dirs: [], flat_dirs: [] } }
-      }
-      File.write(File.join(dir, 'session.json'), JSON.generate(data))
-    end
-
     def log_path(id)
       File.join(workdir, '.harness', 'sessions', id, 'harness.log')
     end
@@ -411,6 +412,138 @@ RSpec.describe CLI do
                  'without asking; disaster commands still ask'
       expect(ui).to receive(:puts)
         .with(expected)
+        .ordered
+      expect(ui).to receive(:puts).at_least(:once)
+
+      cli.run
+    end
+  end
+
+  # issue #384: the run starts with a STANDING grant on the working directory,
+  # so the model no longer asks per file. The grant is seeded at the CLI layer
+  # only (FileList's own constructor default is unchanged), so the guard rules
+  # are what these specs really test: a NAME guard survives a grant on an
+  # ancestor, an OUTSIDE-workdir path is not covered, and the owner's own space
+  # local/ IS covered here (the grant came from the user's own config) even
+  # though the YOLO posture never reaches it (#274).
+  describe 'standing file-access grant (issue #384)' do
+    it 'covers a file inside the project for read, write and delete with no dialog' do
+      cli = build_cli
+
+      expect(cli.file_list.readable?('lib/foo.rb')).to be true
+      expect(cli.file_list.writable?('lib/foo.rb')).to be true
+      # Delete is seeded as its own tier (:d), not implied by :rw - a file
+      # delete must not still ask (issue #92's mode stays independent).
+      expect(cli.file_list.deletable?('analysis/246/repro.rb')).to be true
+    end
+
+    # The whole point of the guard: it is a NAME rule, so a recursive grant on
+    # an ancestor never reaches a sensitive name sitting under it.
+    it 'keeps sensitive names blocked despite the standing grant' do
+      cli = build_cli
+
+      expect(cli.file_list.readable?('.env')).to be false
+      expect(cli.file_list.writable?('.git/config')).to be false
+      expect(cli.file_list.deletable?('.harness/sessions/x/session.json')).to be false
+      # A nested sensitive dir under a normal path is blocked too.
+      expect(cli.file_list.readable?('sub/.git/config')).to be false
+    end
+
+    it 'does not cover a path outside the working directory' do
+      cli = build_cli
+
+      expect(cli.file_list.readable?('../outside.rb')).to be false
+      expect(cli.file_list.writable?('../outside.rb')).to be false
+    end
+
+    # The owner's decision (2026-11-03): a standing grant a user DECLARED in
+    # their own config covers local/ too - it is the decision, already made.
+    # Contrast the posture, which never reaches it (#274 / protected_dirs).
+    it 'covers the owner space local/ (a config grant, not a posture)' do
+      cli = build_cli
+
+      expect(cli.file_list.writable?('local/notes.md')).to be true
+      expect(cli.file_list.deletable?('local/sub/deep.md')).to be true
+    end
+
+    # The opt-out key brings the old per-file consent back: nothing is seeded.
+    it 'grants nothing when grant_workdir: false (per-file consent restored)' do
+      cli = described_class.new(options.merge(grant_workdir: false), ui)
+
+      expect(cli.file_list.access_grant_count).to eq(0)
+      expect(cli.file_list.readable?('lib/foo.rb')).to be false
+      expect(cli.file_list.deletable?('lib/foo.rb')).to be false
+    end
+
+    it 'is a real stored grant - it shows up in the access lists /grant and a save read' do
+      cli = build_cli
+      access = cli.file_list.accessible_paths
+
+      expect(access[:both][:dirs]).to include(cli.file_list.workdir)
+      expect(access[:delete][:dirs]).to include(cli.file_list.workdir)
+    end
+    # The seed runs BEFORE the Harness restores a session (Session#restore
+    # clears the list first), so a resumed run ends with exactly the grants its
+    # session file saved: a /clear before saving is not silently undone by the
+    # resume (the #105 rule that a grant must never come back from nowhere).
+    it 'a resumed session keeps its own saved grants, not a fresh standing one' do
+      saved = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session_with_grants(saved)
+
+      cli = described_class.new(options.merge(resume: saved), ui)
+      stored = cli.file_list.accessible_paths
+
+      expect(stored[:both][:files]).to eq([File.expand_path('lib/foo.rb', workdir)])
+      expect(stored[:both][:dirs]).to be_empty
+      expect(stored[:delete][:dirs]).to be_empty
+      expect(cli.file_list.deletable?('local/notes.md')).to be false
+    end
+
+    # Conversely: a run that saved WITH the standing grant restores it, because
+    # it is an ordinary stored grant in the session's access section.
+    it 'a session saved with the standing grant restores it' do
+      saved = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+      dir   = File.join(workdir, '.harness', 'sessions', saved)
+      FileUtils.mkdir_p(dir)
+      access = {
+        both:   { files: [], dirs: [workdir], flat_dirs: [] },
+        read:   { files: [], dirs: [], flat_dirs: [] },
+        write:  { files: [], dirs: [], flat_dirs: [] },
+        delete: { files: [], dirs: [workdir], flat_dirs: [] }
+      }
+      File.write(File.join(dir, 'session.json'), JSON.generate({
+                   session_id: saved, created_at: Time.now.iso8601,
+                   system_prompt: 'sp', user_prompts: 1, workdir: workdir,
+                   messages: [{ role: 'system', content: 'sp' }], access: access
+                 }))
+
+      cli = described_class.new(options.merge(resume: saved), ui)
+
+      expect(cli.file_list.writable?('lib/anything.rb')).to be true
+      expect(cli.file_list.readable?('.env')).to be false
+    end
+
+    # The startup banner states the run's file consent, the same way it states
+    # the command consent posture (#221): "no dialogs for your files" is a
+    # claim that must be visible and auditable from the first line.
+    it 'states the standing grant in the startup banner' do
+      cli = build_cli
+      stub_prompt_reader
+
+      expect(ui).to receive(:puts)
+        .with(/^File consent: standing grant on .* - read, write and delete/)
+        .ordered
+      expect(ui).to receive(:puts).at_least(:once)
+
+      cli.run
+    end
+
+    it 'states per-path consent in the banner when the key is off' do
+      cli = described_class.new(options.merge(grant_workdir: false), ui)
+      stub_prompt_reader
+
+      expect(ui).to receive(:puts)
+        .with(/^File consent: per-path consent - every file and directory asks/)
         .ordered
       expect(ui).to receive(:puts).at_least(:once)
 

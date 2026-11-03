@@ -331,74 +331,104 @@ class FileList
            else "write access"
            end
 
-    # Decide the branch on PATH LOCATION, not existence: a new file that does
-    # not exist yet must still be treated as inside-workdir. Existence is only
-    # used to pick dir-style vs file-style prompt options.
-    is_dir      = File.directory?(path)
-    inside      = within_workdir?(path)
-    # Treat an inside-workdir path as a "file" prompt unless it is a real
-    # directory (a non-existent target defaults to the file-style prompt).
-    dir_prompt  = inside && is_dir
-    file_prompt = inside && !is_dir
+    # inside/outside is decided on PATH LOCATION (a not-yet-existing path is
+    # still inside if it resolves under the workdir); is_dir picks dir- vs
+    # file-style options; a path that does not exist yet AND is being written
+    # takes the create (target-first) ladder - see the options branch below.
+    is_dir = File.directory?(path)
+    inside = within_workdir?(path)
 
     parent       = File.dirname(path)
     parent_shown = display_path(parent)
 
-    options = if dir_prompt || is_dir
-      # Directory: offer flat or recursive.
+    # issue #384: plain-language, WIDEST-FIRST choices. The user reads a scope
+    # ladder (project > whole directory > just this) instead of decoding
+    # "(dir only)" vs "(recursive)". An option is dropped when it would do
+    # exactly what a wider one already does. The project-wide option is offered
+    # only when the workdir itself is not a sensitive path (a workdir under
+    # .git/.harness has no grantable project-wide scope).
+    project = !sensitive?(@workdir) && UI::Dialog::Option.new(
+      title: "Allow every file in the project",
+      value: :workdir,
+      description: "one grant covering the whole working directory - sensitive " \
+                   "paths (.git/.harness/.env*) still stay blocked"
+    )
+    whole_dir = lambda do |dir_path, dir_shown|
+      UI::Dialog::Option.new(
+        title: "Allow everything in #{dir_shown}/ and below (whole tree)",
+        value: :recursive,
+        description: "every file under #{dir_shown}/, at any depth"
+      ) if dir_path != @workdir
+    end
+    direct_only = lambda do |dir_path, dir_shown|
+      label = dir_path == @workdir ? "the project" : "#{dir_shown}/"
+      UI::Dialog::Option.new(
+        title: "Allow only the files directly in #{label} (not subfolders)",
+        value: :flat
+      )
+    end
+
+    options = if inside && is_dir
+      # A directory inside the workdir.
+      ladder = []
+      ladder << project if project
+      whole = whole_dir.call(path, shown)
+      ladder << whole if whole
+      ladder << direct_only.call(path, shown)
+      ladder
+    elsif inside && !File.exist?(path) && mode == :w
+      # A path being CREATED (dir.create, or a write to a not-yet-existing file):
+      # issue #54 keeps the new path offered FIRST (narrow-first on purpose), so
+      # granting it does NOT make the parent's existing siblings writeable. A
+      # parent that IS the project reads as "the project", not "./".
+      parent_label = parent == @workdir ? "the project" : "#{parent_shown}/"
       [
-        UI::Dialog::Option.new(title: "Allow this directory only", value: :flat),
         UI::Dialog::Option.new(
-          title: "Allow this directory and subdirs (recursive)",
-          value: :recursive,
-          description: "covers every file under the directory"
-        )
-      ]
-    elsif file_prompt && mode == :w
-      # A not-yet-existing directory (e.g. dir.create): prefer a grant on
-      # the target itself so existing siblings of the parent are NOT made
-      # writeable (issue #54).
-      [
-        UI::Dialog::Option.new(
-          title: "Allow this directory only: #{shown}",
+          title: "Allow only this new path: #{shown}",
           value: :target,
-          description: "grant covers just this new directory"
+          description: "covers only this new file or directory - existing siblings of " \
+                       "#{parent_label} stay ungranted"
         ),
         UI::Dialog::Option.new(
-          title: "Allow parent directory: #{parent_shown}/ (dir only)",
-          value: :parent_flat,
-          description: "the parent itself + direct children - makes ALL of them writeable"
+          title: "Allow every file under #{parent_label} (whole directory)",
+          value: :parent_recursive
         ),
         UI::Dialog::Option.new(
-          title: "Allow parent directory: #{parent_shown}/ (recursive)",
-          value: :parent_recursive,
-          description: "every file under the parent"
+          title: "Allow only the files directly in #{parent_label} (not subfolders)",
+          value: :parent_flat
         )
       ]
-    elsif file_prompt
-      # File within workdir: offer file-only or parent-dir (flat/recursive).
-      [
-        UI::Dialog::Option.new(title: "Allow this file only", value: :file),
-        UI::Dialog::Option.new(
-          title: "Allow directory: #{parent_shown}/ (dir only)",
-          value: :parent_flat,
-          description: "the directory itself + direct children only"
-        ),
-        UI::Dialog::Option.new(
-          title: "Allow directory: #{parent_shown}/ (recursive)",
-          value: :parent_recursive,
-          description: "every file under the directory"
-        )
-      ]
+    elsif inside
+      # A file inside the workdir: project > parent (whole dir) > this file.
+      # The parent option is dropped when the parent IS the project root (it
+      # would equal the project option). A parent "direct children only" grant
+      # is no longer offered for a single file - issue #384 drops that tier.
+      file_opts = []
+      file_opts << project if project
+      whole = whole_dir.call(parent, parent_shown)
+      file_opts << whole if whole
+      file_opts << UI::Dialog::Option.new(title: "Allow only this file", value: :file)
+      file_opts
     else
-      # Outside workdir or special path.
-      [
-        UI::Dialog::Option.new(
-          title: "Allow",
-          value: :flat,
-          description: is_dir ? "this directory only (not subdirs)" : nil
-        )
-      ]
+      # Outside the workdir: the project-wide ladder does not apply (there is no
+      # project scope over an outside path). A directory keeps its two grant
+      # levels (whole tree / direct children only - the same capability the
+      # pre-#384 dialog had); a single outside file is just "Allow". The
+      # OUTSIDE-the-workdir warning below is what the user weighs here.
+      if is_dir
+        [
+          UI::Dialog::Option.new(
+            title: "Allow everything in #{shown}/ and below (whole tree)",
+            value: :recursive
+          ),
+          UI::Dialog::Option.new(
+            title: "Allow only the files directly in #{shown}/ (not subfolders)",
+            value: :flat
+          )
+        ]
+      else
+        [UI::Dialog::Option.new(title: "Allow", value: :flat)]
+      end
     end
 
     # Each note line states its KIND (issue #388): the purpose is context, the
@@ -436,6 +466,12 @@ class FileList
       add_file(path, mode)
       report.call(:ok, "#{shown}/ (dir itself only, #{mode_label(mode)})")
       :granted
+    when :workdir
+      # issue #384: the project-wide choice. Same tier as #seed_standing_grant
+      # uses, so a grant chosen here behaves exactly like the config default.
+      add_dir(@workdir, mode)
+      report.call(:ok, "the whole project (every file under #{@workdir}, #{mode_label(mode)})")
+      :granted
     when :file
       add_file(path, mode)
       report.call(:ok, "#{shown} (#{mode_label(mode)})")
@@ -443,7 +479,7 @@ class FileList
     when :flat
       if is_dir
         add_flat_dir(path, mode)
-        report.call(:ok, "#{shown}/ (dir only, #{mode_label(mode)})")
+        report.call(:ok, "#{shown}/ direct children only (#{mode_label(mode)})")
       else
         add_file(path, mode)
         report.call(:ok, "#{shown} (#{mode_label(mode)})")
@@ -451,15 +487,15 @@ class FileList
       :granted
     when :recursive
       add_dir(path, mode)
-      report.call(:ok, "#{shown}/ (recursive, #{mode_label(mode)})")
+      report.call(:ok, "#{shown}/ and below (#{mode_label(mode)})")
       :granted
     when :parent_flat
       add_flat_dir(parent, mode)
-      report.call(:ok, "#{parent_shown}/ (dir only, #{mode_label(mode)})")
+      report.call(:ok, "#{parent_shown}/ direct children only (#{mode_label(mode)})")
       :granted
     when :parent_recursive
       add_dir(parent, mode)
-      report.call(:ok, "#{parent_shown}/ (recursive, #{mode_label(mode)})")
+      report.call(:ok, "#{parent_shown}/ and below (#{mode_label(mode)})")
       :granted
     else
       if note_text

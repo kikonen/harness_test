@@ -22,7 +22,9 @@ RSpec.describe Tools::FileReadTool do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
       tool = described_class.new(list)
-      drive_dialog("4 put tests under lib, not spec\n")
+      # issue #384 ladder for a file at the project root: 1=project, 2=this
+      # file, 3=cancel. Cancel picked with a reason attached.
+      drive_dialog("3 put tests under lib, not spec\n")
 
       out = tool.execute('path' => 'secret.txt')
       expect(out).to start_with('error: access denied for')
@@ -34,7 +36,7 @@ RSpec.describe Tools::FileReadTool do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
       tool = described_class.new(list)
-      drive_dialog("4\n")
+      drive_dialog("3\n") # cancel (issue #384 ladder)
 
       out = tool.execute('path' => 'secret.txt')
       expect(out).to eq("error: access denied for 'secret.txt'")

@@ -131,6 +131,14 @@ not under `local/`, and `analysis/local/` is not either - only the named dir and
 its subtree are. An explicit `protected_dirs:` list replaces the default; an
 explicit empty list protects nothing.
 
+The standing grant (issue #384, `grant_workdir:`, default on) is the exception to
+"the dialog IS the protection" in the table above: it IS a human grant, on the
+working directory, so a normal run covers `local/` too - what it removes is the
+dialog, not the decision (the owner made that decision in their own config). The
+posture exemption stands exactly as written: a posture is not a grant, and
+`protected_dirs` still leaves these dirs asking under YOLO.
+`doc/standing_grant_design.md`.
+
 ## What the YOLO posture covers (issue #274)
 
 The owner's complaint was consent fatigue of a specific shape: "constantly stopped

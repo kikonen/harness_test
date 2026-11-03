@@ -56,7 +56,7 @@ RSpec.describe Tools::FileCopyTool do
   it 'asks for the read grant on the source and forwards the denial note' do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, 'a.txt'), "x\n")
-      drive_dialog(["4 not the source I wanted"])
+      drive_dialog(["3 not the source I wanted"])
 
       result = described_class.new(file_list(dir)).execute('src' => 'a.txt', 'dst' => 'b.txt')
       expect(result).to start_with("error: access denied for 'a.txt'")

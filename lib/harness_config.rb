@@ -102,6 +102,13 @@ require_relative "harness_error"
 #                     # (issue #298). Split into argv words, never run through a
 #                     # shell. Resolution order: --editor, $HARNESS_EDITOR, this
 #                     # key, $EDITOR, $VISUAL. Absent = the key is not taken.
+#   grant_workdir: true  # standing file-access grant on the working directory
+#                       # (issue #384, default true). The run starts covering
+#                       # every path inside the working directory for read,
+#                       # write and delete, so the model stops asking per file.
+#                       # Sensitive names (.git, .harness, .env*) stay blocked
+#                       # whatever this says - the guard is a NAME rule, not a
+#                       # path one. Set false to get per-file consent back.
 #                # explicit intent. The disaster denylist still applies.
 #
 class HarnessConfig
@@ -199,6 +206,13 @@ class HarnessConfig
     @web_fetch_allow_private = data[:web_fetch_allow_private] == true
     # issue #298: the editor command (nil = Ctrl+G is not taken at all).
     @editor = nonblank(data[:editor])
+    # issue #384: standing file-access grant on the working directory. Default
+    # ON (key absent = true): a run starts covering every path inside the
+    # working directory for read, write and delete, so per-file consent is no
+    # longer the default. Sensitive names (.git, .harness, .env*) stay blocked -
+    # FileList#sensitive? runs BEFORE any grant lookup, so a path grant on an
+    # ancestor never reaches them. Set false for the old per-file consent back.
+    @grant_workdir = data[:grant_workdir].nil? ? true : data[:grant_workdir]
     @compact = {
       recent_messages: int_or_nil(data.dig(:compact, :recent_messages)),
       auto_threshold:  float_or_nil(data.dig(:compact, :auto_threshold)),
@@ -373,6 +387,14 @@ class HarnessConfig
   # (possibly empty) when the config names one.
   def protected_dirs
     @protected_dirs
+  end
+
+  # True when the run starts with a standing grant on the working directory
+  # (issue #384). Decided here, in the user's config, so FileList keeps its own
+  # constructor default (no standing grant) and every caller that builds one
+  # directly - specs, tools, library users - is untouched by this key.
+  def grant_workdir?
+    @grant_workdir == true
   end
 
   # Rendered-output palette name (issue #303), or nil for the default one.

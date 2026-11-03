@@ -93,7 +93,9 @@ RSpec.describe Tools::FileRenameTool do
       list = file_list(dir)
       list.add_file('b.txt', :w)
 
-      drive_dialog(['4'])
+      # 'a.txt' is an existing file at the project root: 1=project, 2=this
+      # file, 3=cancel. Cancel the write grant on the source.
+      drive_dialog(['3'])
       result = described_class.new(list, session).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
 
       expect(result).to start_with("error: access denied for 'a.txt'")

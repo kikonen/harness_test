@@ -26,8 +26,9 @@ RSpec.describe FileList do
       Dir.mktmpdir do |dir|
         list = described_class.new(workdir: dir)
         @grant_args = ['secret.txt', :r]
-        # file prompt: 1=file, 2=parent flat, 3=parent recursive, 4=cancel
-        result, _out = drive_grant_dialog(list, "4\n")
+        # issue #384 ladder for a file at the project root:
+        # 1=whole project, 2=only this file, 3=cancel
+        result, _out = drive_grant_dialog(list, "3\n")
         expect(result).to eq({ status: :denied, note: nil })
       end
     end
@@ -36,18 +37,20 @@ RSpec.describe FileList do
       Dir.mktmpdir do |dir|
         list = described_class.new(workdir: dir)
         @grant_args = ['secret.txt', :r]
-        result, _out = drive_grant_dialog(list, "4 no, and because X\n")
+        result, _out = drive_grant_dialog(list, "3 no, and because X\n")
         expect(result).to eq({ status: :denied, note: 'no, and because X' })
       end
     end
 
-    it 'still returns :granted when the user allows' do
+    it 'still returns :granted when the user allows just this file' do
       Dir.mktmpdir do |dir|
         list = described_class.new(workdir: dir)
         @grant_args = ['secret.txt', :r]
-        # file prompt option 1 = allow this file only
-        result, _out = drive_grant_dialog(list, "1\n")
+        # ladder option 2 = allow only this file
+        result, _out = drive_grant_dialog(list, "2\n")
         expect(result).to eq(:granted)
+        # The narrow choice grants only the file, not a whole-directory grant.
+        expect(list.readable?('secret.txt')).to be(true)
       end
     end
   end
@@ -70,8 +73,9 @@ RSpec.describe FileList do
       Dir.mktmpdir do |dir|
         list = described_class.new(workdir: dir)
         @grant_args = ['newdir', :w]
-        # 1=target, 2=parent flat, 3=parent recursive
-        result, _out = drive_grant_dialog(list, "3\n")
+        # issue #384 ladder: 1=new dir only, 2=whole parent directory,
+        # 3=parent direct children only. Picking the whole-parent grant.
+        result, _out = drive_grant_dialog(list, "2\n")
         expect(result).to eq(:granted)
         expect(list.writable?('newdir')).to be(true)
         expect(list.writable?('sibling.txt')).to be(true)
