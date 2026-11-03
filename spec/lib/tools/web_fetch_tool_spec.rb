@@ -258,6 +258,23 @@ RSpec.describe Tools::WebFetchTool do
       end
     end
 
+    # issue #104: /clear hosts revokes the list the tool reads, and the tool
+    # instance built earlier in the run must ask again on its NEXT fetch.
+    it 'asks again once the host is revoked while the tool is alive' do
+      Dir.mktmpdir do |dir|
+        tool = granted_tool(dir)
+        fake = with_fetcher(tool, result)
+        expect(tool.execute('url' => 'https://example.com/a')).to include('line1')
+        expect(fake.fetched.size).to eq(1)
+
+        WebHostAllowlist.new(dir).clear
+
+        with_fetcher(tool, result(body: 'second'))
+        drive_dialog("3\n") # Cancel
+        expect(tool.execute('url' => 'https://example.com/b')).to start_with('error: user denied')
+      end
+    end
+
     it 'never lets a grant reach a different host' do
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, '.harness'))

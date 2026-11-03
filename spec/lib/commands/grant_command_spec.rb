@@ -150,4 +150,26 @@ RSpec.describe Commands::GrantCommand do
         .to be < out.lines.index { |l| l.include?('Posture (YOLO):') }
     end
   end
+
+  # issue #104: a list shown by /grant is a list the user can revoke, so the
+  # page names the /clear form that does it - a user should never have to know
+  # the .yml file names to undo a grant.
+  describe 'the revoke line (issue #104)' do
+    it 'names the form for each non-empty list and none for an empty one' do
+      CommandAllowlist.new(workdir).add('git log')
+      CommandAllowlist.new(workdir,
+                           file: CommandAllowlist::SHELL_FILENAME).add('ls')
+      WebHostAllowlist.new(workdir).add('api.example.com')
+
+      out = run_command
+
+      expect(out).to include('revoke with: /clear commands')
+      expect(out).to include('revoke with: /clear shell')
+      expect(out).to include('revoke with: /clear hosts')
+    end
+
+    it 'says nothing about revoking when there is nothing granted' do
+      expect(run_command).not_to include('revoke with:')
+    end
+  end
 end

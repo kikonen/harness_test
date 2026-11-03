@@ -249,4 +249,39 @@ RSpec.describe WebHostAllowlist do
       end
     end
   end
+
+  # issue #104: /clear hosts revokes the whole list, and a fetch tool built
+  # earlier in the run must see the revocation on its next fetch.
+  describe '#clear (issue #104)' do
+    it 'empties the list, reports the count and persists it' do
+      Dir.mktmpdir do |dir|
+        list = allowlist_in(dir)
+        list.add('api.example.com')
+        list.add('docs.example.org')
+
+        expect(list.clear).to eq(2)
+        expect(list.hosts).to eq([])
+        expect(list.allowed?('api.example.com')).to be false
+        expect(YAML.safe_load(File.read(path_in(dir)))).to eq([])
+      end
+    end
+
+    it 'reports 0 and writes no file when nothing was granted' do
+      Dir.mktmpdir do |dir|
+        expect(allowlist_in(dir).clear).to eq(0)
+        expect(File.exist?(path_in(dir))).to be false
+      end
+    end
+
+    it 'applies to an instance built before the clear' do
+      Dir.mktmpdir do |dir|
+        held = allowlist_in(dir)
+        held.add('api.example.com')
+        expect(held.allowed?('api.example.com')).to be true
+
+        allowlist_in(dir).clear
+        expect(held.allowed?('api.example.com')).to be false
+      end
+    end
+  end
 end

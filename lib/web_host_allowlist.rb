@@ -34,12 +34,19 @@ class WebHostAllowlist
     host = self.class.normalize(host)
     return false if host.empty?
 
+    reload!
     @hosts.include?(host)
   end
 
+  # Add one host. The stored state is re-read first so a host removed by
+  # /clear hosts during a run cannot be written back by the snapshot a
+  # long-lived tool instance still holds (issue #104).
   def add(host)
     host = self.class.normalize(host)
-    return if host.empty? || @hosts.include?(host)
+    return if host.empty?
+
+    reload!
+    return if @hosts.include?(host)
 
     @hosts << host
     save
@@ -65,6 +72,16 @@ class WebHostAllowlist
     @hosts.dup
   end
 
+  # Drop every stored host and persist the empty list (issue #104).
+  def clear
+    return 0 if @hosts.empty?
+
+    count = @hosts.size
+    @hosts = []
+    save
+    count
+  end
+
   # Display-only normalization shared by the grant, the lookup and the dialog, so
   # the host the user reads is the host that gets saved.
   def self.normalize(host)
@@ -86,6 +103,12 @@ class WebHostAllowlist
   end
 
   private
+
+  # Re-read the stored hosts so a host revoked by /clear, or hand-edited away,
+  # applies to the NEXT fetch of a run that already built its tool (issue #104).
+  def reload!
+    @hosts = load
+  end
 
   def load
     return [] unless File.file?(@path)

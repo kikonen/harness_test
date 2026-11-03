@@ -234,7 +234,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | Command | Description |
 |---|---|
 | `/grant` | Show all current grants (file/dir access + both command allowlists + web.fetch hosts) |
-| `/clear` | Remove all grants |
+| `/clear [access\|commands\|shell\|hosts\|all]` | Revoke grants: bare = file/dir access; commands / shell / hosts clear the command and host allowlists; all clears every list |
 | `/retry` | Re-send the chain after a failed request; tool work already done is kept, so the turn resumes from there |
 | `/session` | Show a summary of the current session |
 | `/session-clear` | Drop all conversation messages |
@@ -355,6 +355,12 @@ context), `test.echo` (test-only)
   to. `web_fetch_allow_private: true` is the only way to reach a local or
   internal endpoint, and it is a config key, so the model cannot set it
   (`doc/web_fetch_design.md`).
+- Every consent LIST is revocable from the CLI (issue #104): `/clear` (or
+  `clear access`) for file/dir grants, `clear commands` for the `run.command`
+  prefixes, `clear shell` for the `!` prefixes, `clear hosts` for web.fetch
+  hosts, `clear all` for all of them at once. A revoked entry applies to the
+  NEXT command or fetch of a run already in progress - no restart - and `/grant`
+  names the form that revokes each list it shows.
 - Every NON-default posture is labeled so you can see what a run will do
   before you type anything: the startup banner ("Command consent: MANUAL -
   ..."), the prompt line ("[model (effort)] [MANUAL] [STREAM] >") and the

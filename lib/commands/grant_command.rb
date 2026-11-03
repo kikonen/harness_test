@@ -77,6 +77,9 @@ module Commands
       unless hosts.empty?
         @ui.puts "Hosts for web.fetch (exact hosts only):"
         hosts.each { |host| @ui.puts "  - #{host}" }
+        # Every list shown here is revocable from the CLI (issue #104) - the
+        # footer names the form so a user never has to edit a .yml by hand.
+        @ui.puts "  revoke with: /clear hosts"
       end
 
       if tool_list.empty? && shell_list.empty?
@@ -87,10 +90,12 @@ module Commands
       unless tool_list.empty?
         @ui.puts "Commands for run.command:"
         tool_list.each { |p| @ui.puts "  - #{p}" }
+        @ui.puts "  revoke with: /clear commands"
       end
       unless shell_list.empty?
         @ui.puts "Commands for shell (!):"
         shell_list.each { |p| @ui.puts "  - #{p}" }
+        @ui.puts "  revoke with: /clear shell"
       end
     end
   end

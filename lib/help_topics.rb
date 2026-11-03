@@ -31,7 +31,13 @@ module HelpTopics
           "is its own mode - neither read nor write implies it. Sensitive paths " \
           "(.env*, .git/, .harness/) can never be granted, except a nested one " \
           "inside a scratch zone (tmp/scratch/<n>/, tmp/keep/<n>/), where it is " \
-          "a disposable clone rather than this project's own state."
+          "a disposable clone rather than this project's own state.",
+        "Every consent list is revocable: /clear (or clear access) drops the " \
+          "file/dir grants, clear commands the run.command prefixes, clear shell " \
+          "the shell (!) prefixes, clear hosts the web.fetch hosts, and clear " \
+          "all every one of them. A revocation takes effect on the next command " \
+          "or fetch of the run you are in - a stored grant never outlives the " \
+          "revocation you made of it."
       ],
       see_also: %w[grant clear]),
     "shell" => Topic.new(

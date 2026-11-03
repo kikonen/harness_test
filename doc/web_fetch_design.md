@@ -147,6 +147,15 @@ A grant says only whether a host may be asked for. `spec/lib/tools/web_fetch_too
 keeps that separation honest: an Always-allow on a host name that resolves to
 loopback saves the grant AND still refuses the address.
 
+## Revoking a host grant
+
+`/clear hosts` empties `.harness/allowed_hosts.yml` (issue #104 - the command
+allowlists had the same gap; a revoked entry used to require hand-editing the
+file). `WebHostAllowlist` re-reads the file on each `allowed?` / `add`, so the
+revocation reaches a tool instance built BEFORE the command was typed: the next
+fetch asks again, and a host the user just revoked is not written back by the
+snapshot that long-lived instance still held.
+
 ## Output budget
 
 A fetched page is model-supplied-size text going straight into the context

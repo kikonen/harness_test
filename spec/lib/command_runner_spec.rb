@@ -72,6 +72,24 @@ RSpec.describe CommandRunner do
     end
   end
 
+  # issue #104: the runner builds its allowlist once, but /clear commands can
+  # revoke it mid-run - the next command of the SAME runner must ask again.
+  it 'asks again once the prefix is revoked while the runner is alive' do
+    Dir.mktmpdir do |dir|
+      seed_allowlist(dir, 'echo hi')
+      runner = make_tool_runner(dir)
+      expect(runner.run('echo hi')).to start_with('exit code:')
+
+      CommandAllowlist.new(dir).clear
+
+      # Nothing typed: an opened dialog hits EOF and cancels, which is how a
+      # dialog proves it happened.
+      out = drive_dialog([])
+      expect(runner.run('echo hi')).to start_with('error: user denied')
+      expect(out.string).to include('[dialog]')
+    end
+  end
+
   it 'does NOT auto-approve from the local shell (!) list' do
     Dir.mktmpdir do |dir|
       # A grant saved for local bang syntax must not auto-approve a
