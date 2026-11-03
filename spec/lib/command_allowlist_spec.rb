@@ -705,6 +705,57 @@ RSpec.describe CommandAllowlist do
       end
     end
   end
+  # issue #104: /clear commands / /clear shell revoke a whole list, and the
+  # revocation must reach a runner that built its allowlist before the command
+  # was typed - the same immediacy a revoked file grant has.
+  describe '#clear (issue #104)' do
+    it 'empties the list and persists it' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(dir)
+        list.add('git status')
+        list.add('ls')
+
+        expect(list.clear).to eq(2)
+        expect(list.prefixes).to eq([])
+        expect(list.allowed?('ls')).to be false
+        expect(YAML.safe_load(File.read(File.join(dir, '.harness',
+                                                  described_class::FILENAME)))).to eq([])
+      end
+    end
+
+    it 'reports 0 and writes no file when the list was already empty' do
+      Dir.mktmpdir do |dir|
+        expect(described_class.new(dir).clear).to eq(0)
+        expect(File.exist?(File.join(dir, '.harness', described_class::FILENAME))).to be false
+      end
+    end
+
+    it 'applies to an instance built before the clear' do
+      Dir.mktmpdir do |dir|
+        held = described_class.new(dir)
+        held.add('echo hi')
+        expect(held.allowed?('echo hi')).to be true
+
+        described_class.new(dir).clear
+        expect(held.allowed?('echo hi')).to be false
+      end
+    end
+
+    it 'clears only the list the instance was opened with' do
+      Dir.mktmpdir do |dir|
+        tool  = described_class.new(dir)
+        shell = described_class.new(dir, file: described_class::SHELL_FILENAME)
+        tool.add('git log')
+        shell.add('ls -la')
+
+        shell.clear
+
+        expect(tool.prefixes).to eq(['git log'])
+        expect(described_class.new(dir, file: described_class::SHELL_FILENAME).prefixes).to eq([])
+      end
+    end
+  end
+
   # issue #221: the disaster denylist is the floor under EVERY consent
   # posture (stored grant, AUTO-APPROVE verdict, YOLO). The scan inspects
   # the RAW command (including unsafe constructs the allowlist path refuses

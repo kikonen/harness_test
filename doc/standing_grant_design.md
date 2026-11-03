@@ -45,6 +45,20 @@ The standing grant is deliberately the OTHER kind:
 | removable mid-run | only by `/yolo off` | by `/clear` |
 | reaches `local/` | no (`protected_dirs`, #385) | yes (owner's decision, 2026-11-03) |
 
+## Revoking a grant from the CLI
+
+`/clear` is the revocation path, and it is now a FORM command: bare (or
+`clear access`) is the file/dir access list - the standing grant included - while
+`clear commands`, `clear shell` and `clear hosts` revoke the other consent lists,
+which had no revocation path at all before issue #104 (a stored prefix or host
+could only be removed by hand-editing its `.yml`). The forms are independent:
+the default one has always left the command allowlists untouched (issue #129) and
+still does. Revocation is immediate for a run already in progress - see
+`CommandAllowlist#reload!` and `WebHostAllowlist#reload!`: both re-read their
+file before deciding, because a runner or tool instance lives for a whole run,
+and a snapshot taken at start would otherwise keep honouring - or even write
+back - a grant the user just revoked.
+
 The reason to keep both: a posture is a live *behaviour* a user flips at the
 prompt, so it must never persist into a resumed run's stored grants. A standing
 grant is a *property of the project* the owner wrote in their own config, so it

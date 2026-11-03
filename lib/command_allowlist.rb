@@ -630,7 +630,9 @@ class CommandAllowlist
 
   # True when every segment of the command matches a stored prefix.
   def allowed?(command)
+    reload!
     return false if @prefixes.empty?
+
     # issue #257: strip on byte-invalid UTF-8 raises, so normalize at this
     # public entry point (the caller may pass raw JSON-parsed text).
     command = TextNormalizer.normalize(command)
@@ -643,12 +645,15 @@ class CommandAllowlist
     segments.all? { |seg| segment_allowed?(seg) }
   end
 
-  # Add a new prefix (if not already present) and persist to disk.
+  # Add a new prefix (if not already present) and persist to disk. The stored
+  # state is re-read first: an instance lives for a whole run, so writing its
+  # own snapshot would resurrect prefixes that /clear removed mid-run (issue
+  # #104) - the merge is always with what is actually on disk.
   def add(prefix)
     prefix = prefix.to_s.strip
     return if prefix.empty?
+    reload!
     return if @prefixes.include?(prefix)
-
     @prefixes << prefix
     save
   end
@@ -733,7 +738,27 @@ class CommandAllowlist
     save if @prefixes.size != before.size
   end
 
+  # Drop every stored prefix and persist the empty list (issue #104). The file
+  # is kept: removing the file too would leave a hand-edited one in place for
+  # the next save to overwrite anyway, and an absent file already means empty.
+  def clear
+    return 0 if @prefixes.empty?
+
+    count = @prefixes.size
+    @prefixes = []
+    save
+    count
+  end
+
   private
+
+  # Re-read the stored prefixes (issue #104): a list revoked by /clear, or
+  # hand-edited, must apply to the NEXT command of a run that already built
+  # its runner - the same way a revoked file grant applies to the next tool
+  # call. The list is a handful of short strings, so the re-read is not a cost.
+  def reload!
+    @prefixes = load
+  end
 
   # A single segment is allowed when it is safe AND its leading tokens
   # match one of the stored prefixes (a stored DIRECTORY glob authorizes any
