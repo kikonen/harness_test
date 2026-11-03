@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 require "reline"
-require_relative "reline_esc_cancel"
+require_relative "esc_state"
 
 # Windows IOGate only: a bare Esc arrives as a virtual key, not a byte. Design:
 # doc/editor_input_design.md. Translated to EscState::ESC_MARKER, which
-# RelineEscCancel consumes in its input_key.
+# EscCancel consumes in its input_key.
 module UI
-  class Editor
+  module RelinePatch
     module WindowsEscHook
       VK_ESCAPE     = 0x1B
       MODIFIERS     = 0x1F  # Alt/Ctrl/Shift bits; a bare Esc has none set

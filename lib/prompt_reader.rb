@@ -33,9 +33,9 @@ class PromptReader
 
       # Ctrl+A toggled the consent mode while the prompt was open: ack it and
       # re-prompt (no command was typed); the next turn's badge shows the mode.
-      if UI::Editor::CtrlAState.fired
-        label = UI::Editor::CtrlAState.label
-        UI::Editor::CtrlAState.reset!
+      if UI::RelinePatch::CtrlAToggle.fired
+        label = UI::RelinePatch::CtrlAToggle.label
+        UI::RelinePatch::CtrlAToggle.reset!
         @ui.puts label.nil? ? "  (command mode toggle unavailable - safety check off)" \
                             : "  [mode is now #{label}]"
         next

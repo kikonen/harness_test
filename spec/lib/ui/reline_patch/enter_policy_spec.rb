@@ -33,13 +33,13 @@ class FakeEditor
   end
 end
 
-RSpec.describe UI::Editor::RelineEnterPolicy do
+RSpec.describe UI::RelinePatch::EnterPolicy do
   after do
-    UI::Editor::RelineEnterPolicy::PasteGuard.clear!
+    UI::RelinePatch::PasteGuard.clear!
     UI::Editor.submit_on_enter = false
   end
 
-  def ed(**opts) = FakeEditor.new(**opts).extend(UI::Editor::RelineEnterPolicy)
+  def ed(**opts) = FakeEditor.new(**opts).extend(UI::RelinePatch::EnterPolicy)
 
   it 'is off by default: Enter always falls through to Reline' do
     e = ed
@@ -87,16 +87,15 @@ RSpec.describe UI::Editor::RelineEnterPolicy do
     e.send(:ed_newline, nil)
     expect(e.finished).to be(false)
 
-    guard = UI::Editor::RelineEnterPolicy::PasteGuard
-    guard.mark
+    UI::RelinePatch::PasteGuard.mark
     e2 = ed(lines: ['a', ''], line_index: 1)
     e2.send(:ed_newline, nil)
     expect(e2.finished).to be(false)
   end
 
-  it 'is installed on Reline::LineEditor by install_esc!' do
-    UI::Editor.install_esc!
+  it 'is installed on Reline::LineEditor by install_reline_patches!' do
+    UI::Editor.install_reline_patches!
     expect(Reline::LineEditor.ancestors)
-      .to include(UI::Editor::RelineEnterPolicy)
+      .to include(UI::RelinePatch::EnterPolicy)
   end
 end

@@ -426,9 +426,9 @@ class Task
     result = task.note_editor.read_multiline(prefill: task.instance_variable_get(:@note_draft))
     # Ctrl+A toggled the command-consent mode while the editor was open:
     # ack it and return (no note was typed).
-    if UI::Editor::CtrlAState.fired
-      label = UI::Editor::CtrlAState.label
-      UI::Editor::CtrlAState.reset!
+    if UI::RelinePatch::CtrlAToggle.fired
+      label = UI::RelinePatch::CtrlAToggle.label
+      UI::RelinePatch::CtrlAToggle.reset!
       ack_command_mode(task, label)
       return
     end

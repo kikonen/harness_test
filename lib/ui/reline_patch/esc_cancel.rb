@@ -1,22 +1,14 @@
 # frozen_string_literal: true
 
 require "reline"
+require_relative "esc_state"
 
-# Esc-cancel LineEditor patch. Design: doc/editor_input_design.md.
+# A bare Esc marks the read cancelled; the buffer stays INTACT so the caller
+# can hand it back as a prefilled draft on the next read.
+# Design: doc/editor_input_design.md.
 module UI
-  class Editor
-    # Shared Esc-state between the LineEditor patch and the Windows key hook.
-    module EscState
-      ESC_MARKER = "\x1D"
-
-      class << self
-        attr_accessor :esc_pending
-      end
-    end
-
-    # A bare Esc marks the read cancelled; the buffer stays INTACT so the
-    # caller can hand it back as a prefilled draft on the next read.
-    module RelineEscCancel
+  module RelinePatch
+    module EscCancel
       def reset_variables(prompt = "")
         super
         @cancelled = false
