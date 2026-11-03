@@ -57,6 +57,10 @@ module UI
     # Taken by RelineCtrlGHandoff only when UI::Editor.external_editor is set;
     # otherwise the key keeps what Reline's own emacs mapping does with it.
     CTRL_G_BYTE = 7
+    # Ctrl+A is the byte this key arrives as - measured the same way: Reline
+    # hands it to #input_key as the one-character String "\u0001", not the
+    # Integer 1. Taken by RelineCtrlAToggle.
+    CTRL_A_BYTE = 1
     # The submit key: ESC then CR. The Windows IOGate maps Ctrl+Enter and
     # Shift+Enter to these bytes; Unix terminals produce them with
     # Alt+Enter (Ctrl/Shift+Enter there are indistinguishable from a plain
@@ -97,6 +101,18 @@ module UI
     # breaks are excluded (RelineEnterPolicy's paste guard) so pasted
     # blank lines cannot submit mid-paste. Only multiline reads are
     # affected; single-line reads and vi mode keep Reline's behaviour.
+
+    # Does this keypress carry the control key whose byte is `byte`?
+    # Reline hands a control key's char to #input_key as a one-character
+    # String (e.g. "\u0001" for Ctrl+A, "\a" for Ctrl+G), NOT an Integer; a
+    # pasted block arrives as a longer String whose first byte must not be
+    # mistaken for the key. Accepting an Integer too only lets a spec fake a
+    # key the real terminal never sends. Every intercepted control key shares
+    # this one rule rather than re-deriving the String-vs-Integer shape test.
+    def self.control_key?(char, byte)
+      char.is_a?(String) ? (char.size == 1 && char.ord == byte) \
+                         : char == byte
+    end
 
     # Ctrl+G hands the buffer being edited to an external editor (issue #298).
     # Process-global because it is a fact about how this run reads input, like
@@ -261,7 +277,7 @@ module UI
     # resolved the key is not taken at all and Reline's own behaviour stands.
     module RelineCtrlGHandoff
       def input_key(key)
-        return super unless ctrl_g?(key.char)
+        return super unless UI::Editor.control_key?(key.char, UI::Editor::CTRL_G_BYTE)
         # A single-line read has no buffer worth editing, and the whole
         # feature is opt-in: no editor resolved, no hand-off.
         return super unless @is_multiline && UI::Editor.external_editor
@@ -271,16 +287,6 @@ module UI
         CtrlGState.fire!(whole_buffer)
         finish
         false
-      end
-
-      private
-
-      # Reline delivers a control key's char as a one-character String ("\a"
-      # for Ctrl+G); a pasted block arrives as a longer String, whose first
-      # byte must not be mistaken for the key.
-      def ctrl_g?(char)
-        char.is_a?(String) ? (char.size == 1 && char.ord == UI::Editor::CTRL_G_BYTE) \
-                           : char == UI::Editor::CTRL_G_BYTE
       end
     end
 
@@ -293,12 +299,8 @@ module UI
     # hand back. A harness with no toggle (unit tests) makes the key a
     # no-op (label = nil) but still closes the read.
     module RelineCtrlAToggle
-      # Ctrl+A arrives as a single byte (char == 1) - distinct from a
-      # plain "a" (char == 97) and from ESC-prefixed keys.
-      CTRL_A_CHAR = 1
-
       def input_key(key)
-        if key.char == CTRL_A_CHAR
+        if UI::Editor.control_key?(key.char, UI::Editor::CTRL_A_BYTE)
           CtrlAState.fire!(run_mode_toggle)
           finish
           return false
