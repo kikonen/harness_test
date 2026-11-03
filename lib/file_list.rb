@@ -62,6 +62,12 @@ class FileList
   # Permission modes.
   MODES = %i[r w d rw].freeze
 
+  # Characters Dir.glob expands (braces, brackets, wildcards). A segment holding
+  # one is no longer a directory name, which is what glob_base_dir splits on.
+  GLOB_METACHARS = /[\[\]*?{}]/
+  # Both separators: an expanded path uses "/", a pattern may carry "\".
+  PATH_SEPARATORS = %r{[/\\]}
+
   # The YOLO posture reader (Harness#yolo?), wired by Harness#initialize the way
   # the command runner reads the same posture live. Read on EVERY check: a /yolo
   # typed at the idle prompt, or flipped mid-turn, applies to the very next tool
@@ -222,6 +228,24 @@ class FileList
   # True if a directory can be listed: read access to the directory itself.
   def can_list_dir?(dir)
     readable?(dir)
+  end
+
+  # The directory a glob pattern points at - what listing it needs READ on.
+  # Derived from the pattern's SEGMENTS, because only a plain wildcard is
+  # strippable from a string: a brace or bracket glob ('{lib,spec}/*') has no
+  # leading '*', so cutting at the first metacharacter asks for a directory
+  # that does not exist (issue #152, analysis/152/repro.rb). A pattern with no
+  # metacharacter at all is an ordinary path: a directory is its own base, a
+  # file needs its parent.
+  def glob_base_dir(pattern)
+    expanded = resolve(pattern.to_s)
+    segments = expanded.split(PATH_SEPARATORS)
+    literal  = segments.take_while { |segment| !GLOB_METACHARS.match?(segment) }
+
+    return expanded if literal.size == segments.size && File.directory?(expanded)
+    return File.dirname(expanded) if literal.size == segments.size
+
+    resolve(literal.join("/"))
   end
 
   # Summary of all grants, grouped by effective access. Each section is a

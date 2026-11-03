@@ -36,11 +36,7 @@ module Tools
 
       expanded = File.expand_path(pattern, @file_list.workdir)
 
-      # Listing a directory requires read access to that directory.
-      # If stripping the glob changed the path, the result is already a dir.
-      # Otherwise it's a file path and we need its parent.
-      stripped = expanded.sub(/\/\*\*?\/.*\z/, "").sub(/\/\*\*?\z/, "")
-      base_dir = (stripped != expanded) ? stripped : File.dirname(stripped)
+      base_dir = @file_list.glob_base_dir(pattern)
       unless @file_list.can_list_dir?(base_dir)
         purpose = "to list files matching '#{pattern}'"
         result  = @file_list.grant_access(base_dir, :r, purpose:)
