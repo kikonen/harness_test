@@ -99,4 +99,38 @@ RSpec.describe Tools::FileSearchTool do
       end
     end
   end
+
+  # issue #152: the directory a search asks READ on used to be cut out of the
+  # glob STRING at the first '*', so a brace glob named a directory that does
+  # not exist ('{README.md,lib/commands/*}' -> '{README.md,lib/commands').
+  describe 'the base directory of a brace glob (issue #152)' do
+    def build(dir)
+      FileUtils.mkdir_p(File.join(dir, 'lib/commands'))
+      File.write(File.join(dir, 'README.md'), "needle in readme\n")
+      File.write(File.join(dir, 'lib/commands/clear.rb'), "needle in command\n")
+    end
+
+    def title_of(out)
+      out[/Access requested \(read access\): (.*)$/, 1]
+    end
+
+    it 'asks for the working directory rather than a brace-shaped one' do
+      Dir.mktmpdir do |dir|
+        build(dir)
+        stdin  = StringIO.new("1\n")
+        stdout = StringIO.new
+        allow_any_instance_of(UI::Dialog).to receive(:show) do |dialog|
+          dialog.perform_direct(ui: UI::Console.new(stdout:, stdin:))
+        end
+
+        # 1 = the project-wide option of the #384 ladder.
+        out = described_class.new(FileList.new([], workdir: dir))
+                             .execute('pattern' => 'needle',
+                                      'glob' => '{README.md,lib/commands/*}')
+
+        expect(title_of(stdout.string)).to eq('.')
+        expect(out).to include('README.md:1: needle in readme')
+      end
+    end
+  end
 end

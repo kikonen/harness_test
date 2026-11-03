@@ -170,6 +170,40 @@ RSpec.describe Tools::FileListTool do
     end
   end
 
+  # issue #152: a brace/bracket glob has no leading '*', so the pre-fix string
+  # cut asked for a directory that does not exist. The ask must name a real one.
+  describe 'a brace or bracket glob (issue #152)' do
+    # Only the TITLE names the directory; the purpose line quotes the pattern
+    # itself, so the assertion is on the title line alone.
+    def asked_for(out)
+      out.string[/Access requested \(read access\): (.*)$/, 1]
+    end
+
+    it 'asks for the real directory of a brace glob, not a brace-named one' do
+      Dir.mktmpdir do |dir|
+        tree(dir)
+        out    = drive_dialog(['3']) # 'lib': direct children only
+        result = described_class.new(FileList.new([], workdir: dir))
+                                 .execute('pattern' => 'lib/{a.rb,tools/b.rb}')
+
+        expect(asked_for(out)).to eq('lib')
+        expect(result).to include('- lib/a.rb')
+      end
+    end
+
+    it 'asks for the real directory of a bracket glob' do
+      Dir.mktmpdir do |dir|
+        tree(dir)
+        out    = drive_dialog(['3'])
+        result = described_class.new(FileList.new([], workdir: dir))
+                                 .execute('pattern' => 'lib/[ab]*.rb')
+
+        expect(asked_for(out)).to eq('lib')
+        expect(result).to include('- lib/a.rb')
+      end
+    end
+  end
+
   describe 'MAX_RESULTS' do
     it 'caps the listing and names how many files were dropped' do
       Dir.mktmpdir do |dir|

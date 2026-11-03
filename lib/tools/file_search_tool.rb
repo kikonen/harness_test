@@ -53,11 +53,7 @@ module Tools
 
       expanded = File.expand_path(glob, @file_list.workdir)
 
-      # Determine the base directory that needs read permission.
-      # If stripping the glob changed the path, the result is already a dir.
-      # Otherwise it's a file path and we need its parent.
-      stripped = expanded.sub(/\/\*\*?\/.*\z/, "").sub(/\/\*\*?\z/, "")
-      base_dir = (stripped != expanded) ? stripped : File.dirname(stripped)
+      base_dir = @file_list.glob_base_dir(glob)
       unless @file_list.can_list_dir?(base_dir)
         purpose = "to search files matching glob '#{glob}'"
         result  = @file_list.grant_access(base_dir, :r, purpose:)

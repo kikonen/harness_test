@@ -55,6 +55,63 @@ RSpec.describe FileList do
     end
   end
 
+  # issue #152: the base directory a glob needs READ on used to be cut out of
+  # the pattern STRING at the first '*', so a brace or bracket glob named a
+  # directory that does not exist ('{README.md,lib/commands/*}' ->
+  # '{README.md,lib/commands'). analysis/152/repro.rb measures both derivations.
+  describe '#glob_base_dir (issue #152)' do
+    def tree(dir)
+      FileUtils.mkdir_p(File.join(dir, 'lib/commands'))
+      FileUtils.mkdir_p(File.join(dir, 'analysis/152'))
+      File.write(File.join(dir, 'README.md'), "x\n")
+      File.write(File.join(dir, 'lib/a.rb'), "x\n")
+      File.write(File.join(dir, 'lib/commands/clear.rb'), "x\n")
+      File.write(File.join(dir, 'analysis/152/repro.rb'), "x\n")
+    end
+
+    def base_for(pattern)
+      Dir.mktmpdir do |dir|
+        tree(dir)
+        described_class.new(workdir: dir).display_path(
+          described_class.new(workdir: dir).glob_base_dir(pattern)
+        )
+      end
+    end
+
+    it 'strips a plain wildcard glob to its directory' do
+      expect(base_for('lib/**/*.rb')).to eq('lib')
+      expect(base_for('lib/*.rb')).to eq('lib')
+      expect(base_for('**/*')).to eq('.')
+    end
+
+    it 'derives from the literal segments of a brace glob, not from its braces' do
+      expect(base_for('{README.md,lib/commands/*}')).to eq('.')
+      expect(base_for('lib/{a,b}/*.rb')).to eq('lib')
+      expect(base_for('lib/tools/{file_*,git_*}.rb')).to eq('lib/tools')
+    end
+
+    it 'derives from the literal segments of a bracket glob' do
+      expect(base_for('analysis/[0-9]*/repro.rb')).to eq('analysis')
+    end
+
+    it 'keeps a literal directory pattern as its own base' do
+      expect(base_for('lib')).to eq('lib')
+      expect(base_for('.')).to eq('.')
+    end
+
+    it 'takes the parent of a literal file path' do
+      expect(base_for('lib/a.rb')).to eq('lib')
+    end
+
+    it 'never leaves the workdir for a pattern inside it' do
+      Dir.mktmpdir do |dir|
+        tree(dir)
+        base = described_class.new(workdir: dir).glob_base_dir('**/*')
+        expect(described_class.new(workdir: dir).within_workdir?(base)).to be true
+      end
+    end
+  end
+
   describe '#grant_access for a new directory (issue #54)' do
     it 'offers the target directory itself as the first option' do
       Dir.mktmpdir do |dir|
