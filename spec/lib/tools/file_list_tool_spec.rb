@@ -90,7 +90,9 @@ RSpec.describe Tools::FileListTool do
     it 'returns a denial (with the user note) when the listing is refused' do
       Dir.mktmpdir do |dir|
         tree(dir)
-        drive_dialog(['3 not that tree'])
+        # issue #384 ladder for directory 'lib': 1=project, 2=whole tree,
+        # 3=direct children only, 4=cancel. Cancel picked with a reason.
+        drive_dialog(['4 not that tree'])
         result = described_class.new(FileList.new([], workdir: dir)).execute('pattern' => 'lib/**/*.rb')
 
         expect(result).to start_with("error: read access denied for directory 'lib'")

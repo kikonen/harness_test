@@ -18,10 +18,14 @@ module HelpTopics
         "Type any text that does not start with / to send it directly to the " \
           "model. It reaches files through file.read / file.write / file.patch " \
           "and friends.",
-        "When it attempts a path you have not granted, you are prompted for " \
-          "the access at the granularity you prefer: the single file, the " \
-          "directory only (direct children), or the directory recursively (all " \
-          "subdirs). There are no auto-grants.",
+        "By default the run starts with a standing grant on the working " \
+          "directory (config grant_workdir: true, issue #384), so files inside " \
+          "the project are read, written and deleted with no per-file dialog; " \
+          "grant_workdir: false brings per-path consent back. When a path is " \
+          "not covered you are prompted with plain, widest-first choices - " \
+          "grant the whole project, the containing directory and everything " \
+          "under it, or just this file (a new file or directory offers just-it " \
+          "first). Sensitive paths (.git/.harness/.env*) always ask.",
         "Read, write and delete are tracked separately. A read grant never " \
           "implies write; a write grant implies read on the same path; delete " \
           "is its own mode - neither read nor write implies it. Sensitive paths " \

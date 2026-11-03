@@ -11,9 +11,11 @@ scoped to a working directory you choose.
 - **Tool-calling loop** - the model iteratively calls tools until it
   produces a final answer, with loop detection that warns and then forces
   a stop.
-- **Fine-grained access control** - every file/directory access by the
-  model requires a grant you approve interactively: single file, directory
-  (direct children only), or directory tree (recursive). Read and write
+- **Fine-grained access control** - by default the run starts with one
+  standing grant on the working directory (issue #384), so files inside the
+  project are read, written and deleted with no per-file dialog;
+  `grant_workdir: false` brings the interactive per-path consent back (single
+  file, directory direct children, or directory tree recursively). Read and write
   are separate (a write grant implies read) and delete is its own mode.
   Sensitive paths (`.env*`, `.git/`, `.harness/`) are always blocked, except a
   nested one inside a scratch zone (`tmp/scratch/<n>/`, `tmp/keep/<n>/`).
@@ -310,9 +312,22 @@ context), `test.echo` (test-only)
   never implies write, and neither read nor write implies delete.
 - Directory grants come in two tiers: *dir only* (direct children) and
   *recursive* (whole tree).
-- When the model touches a path you have not granted, you are prompted
-  with numbered choices including the intended purpose - no stored grant is ever
-  made without you.
+- The run starts with a **standing grant on the working directory** (issue #384,
+  config `grant_workdir:`, default on): one recursive read+write+delete grant
+  covering every path inside the project, so the model stops asking per file.
+  It is a real stored grant - shown by `/grant` as "the working directory
+  (recursive)", saved with the session, and removable mid-run with `/clear`. It
+  is seeded before a session restore, so a resumed run ends with exactly the
+  grants its session file saved (a `/clear` before saving is not undone by the
+  resume). What still asks anyway: a path OUTSIDE the working directory, and a
+  sensitive NAME (`.git`, `.harness`, `.env*`) - the guard is a name rule, so a
+  grant on an ancestor never reaches it. Unlike the YOLO posture's coverage
+  (#274), this config-declared grant DOES cover the owner's space `local/` - it
+  is a decision you already made in your own config. `grant_workdir: false`
+  restores the interactive per-path consent.
+- When the model touches a path the standing grant does not cover, you are
+  prompted with numbered choices including the intended purpose - no stored
+  grant is ever made without you.
 - File and directory deletes need their own DELETE grant.
 - The YOLO posture covers file access too (issue #274): with it on, read, write
   and delete INSIDE the working directory run without a dialog. That coverage is

@@ -234,8 +234,9 @@ RSpec.describe Tools::DirDeleteTool do
       Dir.mktmpdir do |dir|
         tree = seed_tree(dir)
         list = FileList.new(workdir: dir)
-        # Dir prompt options: 1 = this directory only, 2 = recursive, 3 = cancel.
-        dialog_out = drive_dialog("2\n") # recursive grant (dir + subdirs)
+        # issue #384 ladder for a directory: 1 = whole project, 2 = this dir and
+        # all subdirs, 3 = direct children only, 4 = cancel. Pick the whole-tree grant.
+        dialog_out = drive_dialog("2\n") # 'this dir and below' grant (covers the tree)
 
         out = build(list).execute('path' => 'tree')
 
@@ -249,7 +250,9 @@ RSpec.describe Tools::DirDeleteTool do
       Dir.mktmpdir do |dir|
         tree = seed_tree(dir)
         list = FileList.new(workdir: dir)
-        drive_dialog("1\n") # 'this directory only' - does not cover the tree
+        # Option 3 = direct children only: grants 'tree' but not its subdirs, so
+        # the nested contents are NOT covered - the tool must refuse, not half-delete.
+        drive_dialog("3\n")
 
         out = build(list).execute('path' => 'tree')
 
@@ -264,7 +267,7 @@ RSpec.describe Tools::DirDeleteTool do
       Dir.mktmpdir do |dir|
         tree = seed_tree(dir)
         list = FileList.new(workdir: dir)
-        drive_dialog("3 nope, keep the scratch\n") # 3 = cancel + reason
+        drive_dialog("4 nope, keep the scratch\n") # 4 = cancel (ladder) + reason
 
         out = build(list).execute('path' => 'tree')
 

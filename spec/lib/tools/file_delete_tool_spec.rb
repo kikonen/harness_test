@@ -63,7 +63,7 @@ RSpec.describe Tools::FileDeleteTool do
       list = file_list(dir)
       list.add_file('a.txt', :rw)
 
-      out    = drive_dialog(['4 no deleting'])
+      out    = drive_dialog(['3 no deleting'])
       result = described_class.new(list).execute('path' => 'a.txt')
 
       expect(result).to start_with("error: access denied for 'a.txt'")

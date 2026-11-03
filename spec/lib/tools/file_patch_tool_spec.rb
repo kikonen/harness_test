@@ -142,7 +142,8 @@ RSpec.describe Tools::FilePatchTool do
         File.write(target, "line1\n")
         list   = FileList.new(workdir: dir)
         tool   = described_class.new(list)
-        drive_dialog("4\n")
+        # Existing file ladder: 1=project, 2=this file, 3=cancel. Cancel.
+        drive_dialog("3\n")
 
         out = tool.execute('path' => 'hello.txt', 'diff' => '@@ -1 +1 @@\n+new')
         expect(out).to eq("error: access denied for 'hello.txt'")

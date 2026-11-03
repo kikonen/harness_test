@@ -252,6 +252,11 @@ class CLI
     # model and the session - and the disaster floor is named with it so
     # YOLO ON is never mistaken for "nothing asks".
     ui.puts "Command consent: #{consent_posture_display}"
+    # issue #384: the same reasoning for file consent. A run that asks for no
+    # file inside the project must say so at startup, and name the opt-out -
+    # a standing grant that is invisible reads as a run that protects nothing.
+    ui.puts "File consent: #{file_access_display}"
+    @harness.logger.info "file consent: #{file_access_display}"
 
     # issue #303: same reasoning - which palette this run renders with is a
     # fact about the run, and /palette is the way to change it mid-session.
@@ -287,12 +292,48 @@ class CLI
   end
 
   # Each run owns its grant list: startup and a mid-run /resume build it the
-  # same way (one expression of the empty state a session file fills in).
+  # same way, so a mid-run resume is not a second kind of run.
+  #
+  # issue #384: the list starts with a STANDING grant on the working directory
+  # (config 'grant_workdir:', default on) - every path inside the project is
+  # covered for read, write and delete, so per-file consent is no longer the
+  # default. The guard survives it because the guard is a NAME rule and this is
+  # a path grant: .git, .harness and .env* under the workdir stay blocked, and
+  # a path outside the workdir still asks. It is a real stored grant (visible
+  # to /grant, saved with the session, removable mid-run with /clear), which is
+  # what separates it from the YOLO posture's live coverage (issue #274).
   def build_file_list
-    FileList.new(
+    file_list = FileList.new(
       [],
       workdir: @options[:workdir],
       protected_dirs: @options[:protected_dirs])
+    seed_standing_grant(file_list)
+    file_list
+  end
+
+  # Delete is seeded as its own tier because delete is its own mode (issue #92):
+  # a :rw grant would leave every file and directory delete still asking, which
+  # is half of the fatigue the key exists to end.
+  #
+  # Seeded BEFORE the Harness restores a session, so a resumed run ends up with
+  # exactly the grants its session file saved (Session#restore clears the list
+  # first) - a /clear before saving is not silently undone by the resume, the
+  # #105 rule that a grant must never come back from nowhere.
+  def seed_standing_grant(file_list)
+    return unless grant_workdir?
+
+    workdir = file_list.workdir
+    return if file_list.sensitive?(workdir)
+
+    file_list.add_dir(workdir, :rw)
+    file_list.add_dir(workdir, :d)
+  end
+
+  # The key is read from the parsed options (CLIOptions fills it from the
+  # config); a run built from a hand-made options hash (specs, library users)
+  # gets the same default as the config would: on.
+  def grant_workdir?
+    @options.fetch(:grant_workdir, true) != false
   end
 
   # issue #189: the log path relative to the workdir (absolute paths would
@@ -331,6 +372,20 @@ class CLI
 
     "#{base}; denylist + \"safe:\" also runs without asking " \
       "(command_safety_auto_approve: denylist)"
+  end
+
+  # issue #384: the run's starting file consent, in the same at-a-glance form
+  # as #consent_posture_display. Both branches name what STILL asks, because
+  # "no dialogs for your files" is a claim a user must be able to audit.
+  def file_access_display
+    unless grant_workdir?
+      return "per-path consent - every file and directory asks " \
+             "(grant_workdir: false)"
+    end
+
+    "standing grant on #{@file_list.workdir} - read, write and delete inside " \
+      "the project run without asking (.git/.harness/.env* and any path " \
+      "outside it still ask; /clear removes the grant, /grant shows it)"
   end
 
   # Auto-save the session on exit (best-effort). Returns the session id,

@@ -258,6 +258,12 @@ class CLIOptions
     # absent) = FileList's default (local/); an explicit list replaces it.
     opts[:protected_dirs] = config.protected_dirs
 
+    # issue #384: the standing grant on the working directory (default on).
+    # Config-only (no CLI flag): it is a persistent property of how this project
+    # is worked on, not a one-run toggle - and a run that starts with NO file
+    # consent dialogs must not be reachable by a mistyped flag.
+    opts[:grant_workdir] = config.grant_workdir?
+
     opts[:compact_recent] ||= config.compact_recent_messages
     opts[:compact_auto_threshold] = config.compact_auto_threshold
     opts[:compact_max_size] = config.compact_max_size

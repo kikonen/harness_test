@@ -158,6 +158,29 @@ RSpec.describe CLIOptions do
     end
   end
 
+  # issue #384: the standing grant on the working directory (config-only, no
+  # CLI flag - a run that starts with no file consent must not be reachable by
+  # a mistyped flag). The default is ON, so a config that says nothing still
+  # carries true.
+  describe 'grant_workdir (issue #384)' do
+    it 'is true when the config says nothing' do
+      opts = resolve(['-m', 'test-model', '-d', workdir,
+                      '-c', write_config('gw-config.yml', "model: test-model\n")])
+      expect(opts[:grant_workdir]).to be(true)
+    end
+
+    it 'carries an explicit false (the opt-out)' do
+      path = write_config('gw-config.yml', "model: test-model\ngrant_workdir: false\n")
+      opts = resolve(['-m', 'test-model', '-d', workdir, '-c', path])
+      expect(opts[:grant_workdir]).to be(false)
+    end
+
+    it 'has no CLI flag (it is a persistent project property, not a run toggle)' do
+      expect { resolve(['-m', 'test-model', '-d', workdir, '--grant-workdir']) }
+        .to raise_error(OptionParser::InvalidOption)
+    end
+  end
+
   describe 'model requirement' do
     it 'raises when neither -m nor a default model is set (and not listing)' do
       expect {

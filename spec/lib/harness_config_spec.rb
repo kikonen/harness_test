@@ -531,6 +531,35 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  # issue #384: the standing file-access grant on the working directory. The
+  # KEY default is on (a run stops asking per file); the getter keeps the same
+  # tri-state shape as auto_save - only an explicit false disables it.
+  describe '#grant_workdir? (issue #384)' do
+    it 'defaults to on when the key is absent' do
+      expect(described_class.new({}).grant_workdir?).to be(true)
+      expect(described_class.new(grant_workdir: nil).grant_workdir?).to be(true)
+    end
+
+    it 'honours an explicit true' do
+      expect(described_class.new(grant_workdir: true).grant_workdir?).to be(true)
+    end
+
+    it 'honours an explicit false (the opt-out back to per-file consent)' do
+      expect(described_class.new(grant_workdir: false).grant_workdir?).to be(false)
+    end
+
+    # Truthy junk does not enable it, and a value that is not exactly true does
+    # not stay on (the auto_save / bang_requires_confirmation coercion).
+    it 'treats a non-boolean value as disabled' do
+      expect(described_class.new(grant_workdir: 'yes').grant_workdir?).to be(false)
+      expect(described_class.new(grant_workdir: 'no').grant_workdir?).to be(false)
+    end
+
+    it 'mentions the key in the default template' do
+      expect(template).to include('grant_workdir')
+    end
+  end
+
   # issue #33: web.fetch may not connect to a private / loopback / link-local
   # address unless the USER asked for it. It is a user-side posture like yolo:
   # no tool argument reaches it.

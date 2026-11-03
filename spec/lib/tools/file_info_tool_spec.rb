@@ -129,7 +129,7 @@ RSpec.describe Tools::FileInfoTool do
     it 'asks for read access and forwards the denial note' do
       Dir.mktmpdir do |dir|
         File.binwrite(File.join(dir, 'a.txt'), "x\n")
-        drive_dialog(['4 I did not ask for that'])
+        drive_dialog(['3 I did not ask for that'])
 
         result = described_class.new(FileList.new([], workdir: dir)).execute('path' => 'a.txt')
         expect(result).to start_with("error: access denied for 'a.txt'")

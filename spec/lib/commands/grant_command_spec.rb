@@ -39,6 +39,22 @@ RSpec.describe Commands::GrantCommand do
     expect(out).to include('tmp/ (dir only)')
   end
 
+  # issue #384: the standing grant is on the working directory itself, whose
+  # display form is "." - a bare "./" would read as noise, so the entry names
+  # what it is. It shows up under read+write AND delete because delete is
+  # seeded as its own tier.
+  it 'names the working-directory grant instead of printing "./"' do
+    file_list.add_dir(workdir, :rw)
+    file_list.add_dir(workdir, :d)
+
+    out = run_command
+
+    expect(out).to include('Read + write:')
+    expect(out).to include('the working directory (recursive)')
+    expect(out).not_to include('./ (recursive)')
+    expect(out).to include('Delete:')
+  end
+
   it 'shows a placeholder when no file/dir grants exist' do
     out = run_command
 

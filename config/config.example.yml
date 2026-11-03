@@ -200,6 +200,19 @@ retry:
 #   - local
 #   - secrets
 
+# Standing file-access grant on the working directory (issue #384). Default ON:
+# the run starts with one recursive read+write+delete grant on the working
+# directory itself, so every path inside the project is covered and the model
+# stops asking per file. It is a real stored grant (visible to /grant, saved
+# with the session, removable mid-run with /clear), not a posture. What still
+# asks anyway: a path OUTSIDE the working directory, and a sensitive NAME
+# (.git, .harness, .env*) - the guard is a name rule, so a grant on an ancestor
+# never reaches it. The owner's space (local/) IS covered when the grant comes
+# from your own config (it is a decision you already made), unlike the YOLO
+# posture's coverage (#274), which never reaches it. Set false to get the old
+# per-file consent dialogs back.
+grant_workdir: true
+
 # The `! cmd` bang syntax keeps its confirmation dialog (default true).
 # Set false and a user-typed bang command runs immediately - the human's
 # own typing is already the consent. The disaster denylist still applies.
