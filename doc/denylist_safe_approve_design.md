@@ -40,6 +40,48 @@ the repro is identical on both trees. The word-based patterns
 the regex patterns (`/\bsudo\b/`, `/\bmkfs(\.|\s|$)/`, the git-push `-f` lookahead)
 deliberately do not, and stay as they are.
 
+## What the floor does NOT see (issue #392)
+
+`disaster?` is a text gate on the command STRING. Two consequences follow from
+the word-based POSIX patterns skipping quoted words, and both are measured in
+`analysis/392/repro.rb` (the repro only CLASSIFIES strings, it runs nothing). A
+reader must not conclude the floor catches a quoted wipe: it does not.
+
+**A POSIX payload inside a quoted argument is invisible to the floor.** The
+word scan reads unquoted words only, so the `rm` never appears as a token:
+
+| command | `disaster?` | why |
+| --- | --- | --- |
+| `sh -c "rm -fr ~/"` | NOT FLAGGED | `rm` is quoted, skipped; no marker |
+| `bash -c "rm -rf /home/kari"` | NOT FLAGGED | same |
+| `ruby -e "system(%q{rm -fr ~/})"` | NOT FLAGGED | same |
+| `sh -c "mkfs.ext4 /dev/sda1"` | FLAGGED | only because of the `mkfs` REGEX marker, not the payload |
+| `bash -c "sudo rm -rf /data"` | FLAGGED | only because of the `sudo` marker, not the `rm` |
+
+So a quoted shell payload is flagged ONLY when it happens to carry a marker word
+(`sudo`, `mkfs`) that the regex patterns scan in whole text; strip the marker and
+the same shape is unflagged. The Windows side is the deliberate opposite:
+`cmd //c "del /q /s C:\*"` and `powershell -Command "Remove-Item -Recurse -Force"`
+ARE flagged, because their patterns are whole-segment lookaheads that see inside
+the quotes. Both directions are pinned as INTENDED in
+`spec/lib/command_allowlist_spec.rb` ("does not flag a quoted message merely
+containing rm -rf" / "flags PowerShell Remove-Item ... also inside a quoted
+payload"). The asymmetry is a design choice, not a regression.
+
+**The two-step bypass defeats the floor entirely, and no pattern fixes it.**
+`file.write`/`file.patch` (WRITE grants, a consent axis the command denylist has
+no part in) create a script; then `ruby tmp/evil.rb`, `bash tmp/evil.sh`,
+`./tmp/evil`, `ruby -e "system(%q{rm -fr ~/})"` are each `disaster? == false`,
+because the wipe lives in the file, not on the command line. `SafetyCheck`
+receives only the command string, so the model judges "run a file" and cannot
+know what the file does. Worse, a STORED prefix auto-approves these silently: a
+`ruby` prefix (what a Ruby-project owner plausibly stores) makes
+`allowed?` true for `ruby tmp/evil.rb` and `ruby -e "system(%q{rm -fr ~/})"` -
+no dialog, no verdict, no `log_denylist_override` line. This is why #389's
+premise holds only while the payload stays on the command line, and why the
+text gate cannot be the answer to a filesystem wipe: the real mitigation is
+containment (container / read-only mounts / a dedicated user), not more patterns.
+
 ## What changed instead: the OUTCOME for a "safe:" verdict
 
 With the key armed, a real model `safe:` verdict may auto-approve a DENYLISTED
