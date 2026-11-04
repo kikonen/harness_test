@@ -21,6 +21,10 @@ require_relative "text_normalizer"
 # per prefix length of each segment (e.g. 'ruby', 'ruby -c') so the user
 # can grant exactly as much as they want - never more.
 #
+# SHELL RESERVED WORDS (issue #148): a tokenizer sees 'for', 'do', 'done',
+# 'if', ... as plain words, so they would otherwise be offered as
+# "Always allow" prefixes that authorize nothing real. They are never a grant.
+#
 # File format is a simple YAML array of strings:
 #   - ls
 #   - git status
@@ -94,6 +98,17 @@ class CommandAllowlist
   # with a letter. Distinguishes subcommands (status, log, exec) from
   # arguments (-la, --oneline, main, 68, spec/foo_spec.rb).
   SUBCOMMAND_TOKEN = /\A[a-z][a-z0-9]*\z/
+
+  # POSIX shell reserved words: control-flow keywords a tokenizer reads as
+  # plain words. They spell no program, so program_token? rejects them and a
+  # command run through the shell (a 'for ... do ... done' loop) is no longer
+  # exploded into meaningless 'done'/'do ruby' grants (issue #148). A PATH
+  # token whose basename matches one of these ('bin/done') is a real
+  # executable checked by path_program_token?, so the block is on the bare word.
+  SHELL_RESERVED_WORDS = %w[
+    ! { [[ ]] case do done elif else esac fi for function if
+    in select then time until while
+  ].freeze
 
   # The scope sentence an "Always allow" offer states (issue #96). A grant whose
   # saved words END with a program is flag-blind; a grant that already names a
@@ -316,7 +331,9 @@ class CommandAllowlist
   # segment may be a PATH program ('bin/rspec' - issue #417); later positions
   # must look like plain subcommands, so an argument that merely contains a
   # separator ('tmp/probe.rb', 'spec/foo_spec.rb') never joins the run.
+  # A shell reserved word is never a program (issue #148).
   def self.program_token?(token, index)
+    return false if SHELL_RESERVED_WORDS.include?(token.to_s)
     return true if SUBCOMMAND_TOKEN.match?(token)
     return false unless index.zero?
 
