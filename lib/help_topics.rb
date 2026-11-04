@@ -75,6 +75,11 @@ module HelpTopics
           "model first (\"does this look safe?\") and the verdict appears as an " \
           "advisory note in the consent dialog. Allowlisted commands skip the " \
           "check: it runs on exactly what the runner would otherwise ask about.",
+        "An \"Always allow\" grant covers the command's OPENING words token for " \
+          "token, and everything after them: 'git branch' stands for 'git branch " \
+          "-D main' too, while a grant that already names a flag or an argument " \
+          "('git log --oneline', 'cd C:/work/x') pins exactly those words. The " \
+          "option itself states which scope it is saving (issue #96).",
         "Every NON-default posture is labeled - in the startup banner (\"Command " \
           "consent: ...\"), in the prompt line (\"[model (effort)] [MANUAL] " \
           "[STREAM] >\") and as a badge at the END of the spinner line - so a " \

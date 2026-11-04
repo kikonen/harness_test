@@ -37,6 +37,14 @@ COVERED_TESTED = [
   "git branch -c x y"
 ].freeze
 
+# Each candidate SHAPE the dialog offers, and the scope sentence it states
+# (grant_scope_note). A run-shaped grant is flag-blind; a grant that names a
+# flag or argument is pinned to exactly those words.
+CANDIDATE_KINDS = [
+  "git", "git branch", "git branch -D", "git log --oneline",
+  "cd C:/work/x", "ruby -c", "bin/rspec", "bin/*"
+].freeze
+
 Dir.mktmpdir do |dir|
   puts "candidates offered per command (the grant the user is being asked to save):"
   CANDIDATE_COMMANDS.each do |cmd|
@@ -66,5 +74,12 @@ Dir.mktmpdir do |dir|
     %w[git checkout -b x git log --oneline git remote remove origin].each do |cmd|
       puts format("  %-34s allowed? %s", cmd, list.allowed?(cmd))
     end
+  end
+
+  puts
+  puts "the scope sentence each candidate shape states (grant_scope_note):"
+  CANDIDATE_KINDS.each do |kind|
+    note = CommandAllowlist.grant_scope_note(kind)
+    puts format("  %-20s %s", kind.inspect, note)
   end
 end

@@ -248,10 +248,10 @@ class CommandRunner
         # Unique per prefix so a multi-select answer maps back to the
         # exact prefixes chosen (issue #102).
         value: { always_allow: p },
-        # A DIRECTORY glob is the broadest offer the dialog makes, so its trust
-        # boundary is stated where it is chosen (issue #417). An exact prefix
-        # gets no description at all.
-        description: CommandAllowlist.glob_note(p)
+        # Every offer states the scope it is saving at the moment it is chosen:
+        # the DIRECTORY glob is the broadest one (issue #417), a run-shaped
+        # prefix covers whatever follows it (issue #96). No offer is unlabeled.
+        description: CommandAllowlist.grant_scope_note(p)
       )
     end
 

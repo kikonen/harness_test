@@ -236,14 +236,31 @@ RSpec.describe CommandRunner do
     end
   end
 
-  it 'states the trust boundary of a glob offer and nothing for an exact prefix' do
+  # issue #96: every offer states the scope it saves, at the moment it is chosen.
+  # Before this, only a DIRECTORY glob carried a description and an exact prefix
+  # carried none - which is how 'Always allow git branch' got saved blind to -D.
+  it 'states the scope of every offer: a run prefix and its directory glob' do
     Dir.mktmpdir do |dir|
       out = drive_dialog(['4']) # Allow(1), 'bin/rspec'(2), 'bin/*'(3), Cancel(4)
       make_tool_runner(dir).run('bin/rspec')
 
+      # The run-shaped offer says whatever follows the saved words is covered;
+      # the glob says every program of the directory. Two different sentences.
+      expect(out.string).to include('any command starting with these words')
       expect(out.string).to include('covers every program in that directory')
-      # Only the glob option carries the note: one such line for two offers.
+      # The glob sentence appears once: only the glob option claims that breadth.
       expect(out.string.scan('covers every program').size).to eq(1)
+      expect(out.string.scan('any command starting with these words').size).to eq(1)
+    end
+  end
+
+  it 'marks a flag-named offer as pinned to exactly those words' do
+    Dir.mktmpdir do |dir|
+      out = drive_dialog(['4'])
+      make_tool_runner(dir).run('git log --oneline -5')
+
+      expect(out.string).to include("Always allow 'git log --oneline'")
+      expect(out.string).to include('only commands starting with exactly these words')
     end
   end
 

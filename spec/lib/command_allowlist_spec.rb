@@ -1008,4 +1008,50 @@ RSpec.describe CommandAllowlist do
       expect(described_class.glob_note('bin')).to be_nil
     end
   end
+
+  # issue #96: every "Always allow" offer must state the scope it is saving.
+  # The two sentences name the two shapes the measured table shows: a grant
+  # ending in a program is flag-blind, a grant naming a flag or argument pins it.
+  describe '.grant_scope_note (issue #96)' do
+    def note_for(candidate)
+      described_class.grant_scope_note(candidate)
+    end
+
+    it 'marks a run-shaped grant as covering whatever follows its words' do
+      ['git', 'git branch', 'git log', 'bundle exec rspec', 'tail', 'bin/rspec'].each do |c|
+        expect(note_for(c)).to eq(described_class::SCOPE_RUN)
+      end
+    end
+
+    it 'marks a grant that names a flag or an argument as pinned to those words' do
+      ['git branch -D', 'git log --oneline', 'cd C:/work/x', 'ruby -c'].each do |c|
+        expect(note_for(c)).to eq(described_class::SCOPE_PIN)
+      end
+    end
+
+    it 'keeps the directory-glob note as the broadest sentence' do
+      expect(note_for('bin/*')).to include('every program in that directory')
+    end
+
+    it 'says nothing for a candidate that names no words at all' do
+      expect(note_for('')).to be_nil
+      expect(note_for('   ')).to be_nil
+      expect(note_for(nil)).to be_nil
+    end
+
+    # The sentence must match what matching actually does, so the claim is
+    # tested against allowed?, not only against the string.
+    it 'promises exactly what a stored grant then covers' do
+      Dir.mktmpdir do |dir|
+        pinned = CommandAllowlist.new(dir)
+        pinned.add('git log --oneline')
+        expect(pinned.allowed?('git log --oneline -5')).to be true
+        expect(pinned.allowed?('git log --graph')).to be false
+
+        blind = CommandAllowlist.new(dir)
+        blind.add('git branch')
+        expect(blind.allowed?('git branch -D main')).to be true
+      end
+    end
+  end
 end
