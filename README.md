@@ -348,6 +348,13 @@ context), `test.echo` (test-only)
   matches a recursive-force delete by BASENAME (`bin/rm -rf /` is `rm -rf /`).
   A relative current-directory or traversing path (`./tool`, `bin/../evil`) is
   never globbable.
+- A grant is a LEADING-WORDS rule (issue #96): it matches the command's opening
+  words token for token, and everything after them is free - `git branch`
+  stands for `git branch -D main`, and a verb grant (`rm`) stands for
+  `rm -f tmp/x.txt`. A grant that already names a flag or an argument
+  (`git log --oneline`, `cd C:/work/x`) pins exactly those words instead. Each
+  "Always allow" option states which scope it is saving, so the scope is read
+  at the moment the grant is made (`doc/command_grant_scope_design.md`).
 - A web fetch asks on a SEPARATE axis: an ungranted host reaches the dialog in
   every posture (a YOLO decision about `git status` says nothing about a URL),
   the grant is for one EXACT host, and it only decides whether that host may be

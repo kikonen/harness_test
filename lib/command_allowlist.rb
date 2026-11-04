@@ -55,6 +55,10 @@ require_relative "text_normalizer"
 #     because a DIRECTORY grant covers the program in that directory. A
 #     quoted PHRASE is never a verb (verb_text returns nil for it), so a
 #     commit message that merely names a path verb stays clean.
+#   GRANT SCOPE (issue #96): a stored grant matches the command's LEADING WORDS
+#     token for token, and everything after the saved words is free - `git
+#     branch` stands for `git branch -D main`. Each offer states its own scope
+#     as it is chosen (grant_scope_note); doc/command_grant_scope_design.md
 #   YOLO posture (issue #221): switched on by the user (/yolo), it skips
 #     the consent dialog for every run.command call - except denylisted
 #     disaster commands, which keep the dialog in every posture. It is the
@@ -90,6 +94,12 @@ class CommandAllowlist
   # with a letter. Distinguishes subcommands (status, log, exec) from
   # arguments (-la, --oneline, main, 68, spec/foo_spec.rb).
   SUBCOMMAND_TOKEN = /\A[a-z][a-z0-9]*\z/
+
+  # The scope sentence an "Always allow" offer states (issue #96). A grant whose
+  # saved words END with a program is flag-blind; a grant that already names a
+  # flag or an argument cannot drift past those words.
+  SCOPE_RUN = "any command starting with these words, whatever follows them"
+  SCOPE_PIN = "only commands starting with exactly these words"
 
   # Issue #417: a program invoked BY PATH ('bin/rspec', './script.sh',
   # 'C:\work\tool.exe') names the same verb as the bare word, and a grant for
@@ -358,6 +368,24 @@ class CommandAllowlist
     return nil unless GLOB_TOKEN.match?(candidate.to_s)
 
     "covers every program in that directory, including one written there later"
+  end
+
+  # What an "Always allow" offer actually authorizes, stated AT THE MOMENT IT IS
+  # CHOSEN (issue #96). One rule governs every grant - leading words token for
+  # token, everything after them free - but a grant that already names a flag or
+  # an argument cannot drift past those words, so the two shapes need different
+  # sentences. Measured table: doc/command_grant_scope_design.md.
+  def self.grant_scope_note(candidate)
+    glob = glob_note(candidate)
+    return glob if glob
+
+    tokens = candidate.to_s.strip.split(/\s+/).reject(&:empty?)
+    return nil if tokens.empty?
+
+    last = tokens.last
+    run_shape = SUBCOMMAND_TOKEN.match?(last) ||
+                (tokens.size == 1 && path_program_token?(last))
+    run_shape ? SCOPE_RUN : SCOPE_PIN
   end
 
   # cmd.exe / Windows recursive-force delete: `del /s /q C:\...`,
