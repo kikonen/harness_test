@@ -964,6 +964,45 @@ RSpec.describe CommandAllowlist do
     end
   end
 
+  describe '.extract_prefix_options with shell reserved words (issue #148)' do
+    it 'offers no grant for a control-flow command' do
+      # A 'for ... do ... done' loop used to be exploded into the 9 options
+      # 'for', 'for f', 'for f in', 'do', 'do ruby', 'do ruby -c', 'done', ...
+      # none of which authorizes anything real (issue #148). Now no segment
+      # leading with a reserved word yields a candidate.
+      cmd = 'for f in lib/a.rb lib/b.rb; do ruby -c "$f"; done'
+      expect(described_class.extract_prefix_options(cmd)).to eq([])
+      expect(described_class.extract_prefix_options('while read l; do echo $l; done'))
+        .to eq([])
+      expect(described_class.extract_prefix_options('if test -f x; then echo y; fi'))
+        .to eq([])
+      expect(described_class.extract_prefix_options('case $x in a) echo a;; esac'))
+        .to eq([])
+    end
+
+    it 'offers the real program but never the loop keyword in a mixed command' do
+      # The 'cd' segment is a genuine program; the 'for' segment is control
+      # flow. Only the real program is offered.
+      cmd = 'cd /x && for f in a b; do pwd; done'
+      expect(described_class.extract_prefix_options(cmd)).to eq(['cd', 'cd /x'])
+      expect(described_class.extract_prefix_options('ls && done')).to eq(['ls'])
+    end
+
+    it 'still offers a real program when a reserved word is its argument' do
+      # 'echo done' is the program 'echo' with the word 'done' as an argument -
+      # the reserved word does not block the program that precedes it.
+      expect(described_class.extract_prefix_options('echo done'))
+        .to eq(['echo', 'echo done'])
+    end
+
+    it 'still offers a PATH program whose basename names a reserved word' do
+      # A real executable named 'done'/'if' is checked as a path program, not
+      # blocked as a bare keyword (issue #417 path-program rule still holds).
+      expect(described_class.extract_prefix_options('bin/done x'))
+        .to eq(['bin/done', 'bin/done x', 'bin/*'])
+    end
+  end
+
   describe 'a stored DIRECTORY glob (issue #417)' do
     it 'authorizes every direct program of that directory' do
       Dir.mktmpdir do |dir|
