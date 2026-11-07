@@ -64,6 +64,27 @@ RSpec.describe Session do
     end
   end
 
+  # issue #449: an inlined image is the one thing most likely to overflow the
+  # window, so its base64 length must be COUNTED by the estimate - otherwise
+  # the compact trigger never fires for a megabyte data URI.
+  describe '#estimate_tokens counts inlined images (issue #449)' do
+    it 'counts image base64 beside the text content' do
+      text_only  = [{ role: 'tool', content: 'shot' }]
+      with_image = [{ role: 'tool', content: 'shot',
+                      images: [{ mime_type: 'image/png', base64: 'x' * 400 }] }]
+
+      expect(session.estimate_tokens(with_image))
+        .to eq(session.estimate_tokens(text_only) + 100)
+    end
+
+    it 'counts every image of a message' do
+      one = [{ images: [{ base64: 'x' * 400 }] }]
+      two = [{ images: [{ base64: 'x' * 400 }, { base64: 'x' * 400 }] }]
+
+      expect(session.estimate_tokens(two)).to eq(session.estimate_tokens(one) + 100)
+    end
+  end
+
   # issue #216: the live estimate is ANCHORED to the last server-reported
   # prompt-token count so the spinner shows numbers in the same ballpark as
   # the compact trigger (which uses prompt_tokens), not a wildly different
