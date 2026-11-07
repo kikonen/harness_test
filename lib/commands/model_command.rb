@@ -22,6 +22,11 @@ module Commands
         # backend is visible at a glance.
         @ui.puts "Current model: #{@harness.session_manager.active_model_name} " \
                  "(#{@harness.session_manager.target_display} @ #{@options[:base_url]})"
+        # issue #449: image support is a per-profile fact the parameter list
+        # does not cover (it is not a generation parameter).
+        images = @harness.session_manager.vision? ? "inlined to the model" \
+                                                  : "files only (no vision declared)"
+        @ui.puts "Tool-result images: #{images}"
         print_params
         @ui.puts "List models with /models, switch with /model <name>, " \
                  "adjust parameters with /param."
