@@ -17,7 +17,22 @@ class ToolResult
   # (a byte container, the same rule as a child-process pipe buffer).
   # server/tool ride along because the spill file is named after where the
   # image came from, and a result may hold images from one call only.
-  Image = Struct.new(:server, :tool, :mime_type, :bytes, keyword_init: true) do
+  #
+  # Two OPTIONAL fields carry a non-MCP image (issue #451):
+  #   reference - a workdir-relative path the model can already reach (a disk
+  #     file). When set, ImageDelivery points at the ORIGINAL instead of spilling
+  #     a duplicate copy: the bytes the model was given are the file it can open.
+  #   name_hint - a real artifact name to spill under (a downloaded file has no
+  #     original path, so it is still spilled, but the name should say what it is
+  #     rather than the MCP _<server>_<tool>_<n> shape). Ignored when reference is set.
+  Image = Struct.new(
+    :server,
+    :tool,
+    :mime_type,
+    :bytes,
+    :reference,
+    :name_hint,
+    keyword_init: true) do
     def byte_size
       bytes.to_s.bytesize
     end

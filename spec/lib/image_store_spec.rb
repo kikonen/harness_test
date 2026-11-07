@@ -148,4 +148,97 @@ RSpec.describe ImageStore do
       expect(described_class.new('/w').harness_state?('build/out/s_t_1.png')).to be(false)
     end
   end
+
+  def save_named(store, name: 'photo', mime: 'image/png', bytes: 'a'.b)
+    store.save_named(name: name, mime_type: mime, bytes: bytes)
+  end
+
+  describe '#save_named (a blob the caller already has a real name for)' do
+    it 'keeps the caller name and puts the mime extension after the index' do
+      store do |store, workdir|
+        relative = save_named(store)
+
+        # The <name>_<index>.<ext> shape: a file that ends in a real extension,
+        # not <name>.<ext>_<index> (which would leave the blob with a numeric
+        # extension a viewer cannot open).
+        expect(relative).to eq('.harness/content/photo_1.png')
+        expect(File.binread(File.join(workdir, relative))).to eq('a')
+      end
+    end
+
+    it 'strips an extension the caller name carried, so the mime decides the only one' do
+      store do |store, _workdir|
+        # A name that already said ".png" and a mime that also said .png: the
+        # extension must not double to photo.png_1.png.
+        expect(save_named(store, name: 'photo.png')).to end_with('_1.png')
+        expect(File.basename(save_named(store, name: 'photo.png')))
+          .to eq('photo_2.png')
+      end
+    end
+
+    it 'uses the MIME extension even when the name disagreed' do
+      store do |store, _workdir|
+        # The name claimed .png but the bytes are a JPEG; the stored file must
+        # say what the bytes actually are.
+        expect(save_named(store, name: 'photo.png', mime: 'image/jpeg'))
+          .to eq('.harness/content/photo_1.jpeg')
+      end
+    end
+
+    it 'falls back to .bin for a non-image mime, exactly like save' do
+      store do |store, _workdir|
+        expect(save_named(store, name: 'thing', mime: 'application/octet-stream'))
+          .to end_with('_1.bin')
+      end
+    end
+
+    it 'reduces a name carrying a path to its final safe component' do
+      store do |store, workdir|
+        relative = save_named(store, name: 'dir/../../evil.png')
+
+        # No ".." and no separator survives: the blob stays ONE component inside
+        # the store, never a write outside it.
+        expect(File.basename(relative)).to eq('evil_1.png')
+        expect(Dir.entries(File.join(workdir, '.harness/content')).sort)
+          .to eq(['.', '..', 'evil_1.png'])
+      end
+    end
+
+    it 'replaces a lost name with a fallback instead of an empty stem' do
+      store do |store, _workdir|
+        # ".png" is all extension, no stem; nil and blank must not yield "_1.png"
+        # (a nameless blob a session cannot reason about).
+        expect(File.basename(save_named(store, name: '.png'))).to eq('image_1.png')
+        expect(File.basename(save_named(store, name: nil))).to eq('image_2.png')
+      end
+    end
+
+    it 'truncates a very long name to the same budget save enforces' do
+      store do |store, _workdir|
+        expect(File.basename(save_named(store, name: 'x' * 200))).to eq("#{'x' * 40}_1.png")
+      end
+    end
+
+    it 'bumps past an index a resumed run already wrote (issue #276 rule)' do
+      Dir.mktmpdir do |workdir|
+        dir    = '.harness/content/sess-42'
+        before = described_class.new(workdir, dir: dir)
+        before.save_named(name: 'photo.png', mime_type: 'image/png', bytes: 'old'.b)
+
+        after = described_class.new(workdir, dir: dir)
+        relative = after.save_named(name: 'photo.png', mime_type: 'image/png', bytes: 'new'.b)
+
+        expect(relative).to eq("#{dir}/photo_2.png")
+        expect(File.binread(File.join(workdir, "#{dir}/photo_1.png"))).to eq('old')
+      end
+    end
+
+    it 'returns nil when the write fails' do
+      store do |store|
+        allow(File).to receive(:binwrite).and_raise(Errno::EACCES)
+
+        expect(save_named(store)).to be_nil
+      end
+    end
+  end
 end

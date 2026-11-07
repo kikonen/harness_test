@@ -2,8 +2,10 @@
 
 require_relative "../tool"
 require_relative "../ui/dialog"
+require_relative "../tool_result"
 require_relative "../web_fetcher"
 require_relative "../web_host_allowlist"
+require_relative "../image_sniffer"
 
 module Tools
   # Fetches a URL over http(s) and returns the response as text (issue #33).
@@ -200,6 +202,11 @@ module Tools
     def success(host, limit, result)
       detail = "#{result.status}, #{result.bytes} bytes#{redirect_note(result)}"
       status(:ok, "#{host} (#{detail})")
+
+      # An image body is not text (issue #451): hand it to the image path
+      # (spill + optional inline) rather than run it through the line budget.
+      return image_result(result) if image_response?(result)
+
       body, truncated = truncate_body(result.body, limit)
 
       [
@@ -214,6 +221,42 @@ module Tools
         body,
         truncated ? truncation_notice(limit) : nil
       ].compact.join("\n")
+    end
+
+    # An image response (issue #451): the body is a byte container, not text, so
+    # it returns a ToolResult the Harness routes through ImageDelivery (spill +
+    # optional inline) instead of being truncated as text. It carries a name_hint
+    # taken from the URL so the saved blob names the artifact; there is no
+    # original on-disk path for a download, so delivery spills the copy.
+    def image_result(result)
+      sniffed = ImageSniffer.sniff(result.body)
+      mime    = sniffed || result.content_type.to_s.split(";", 2).first.to_s.strip
+      ToolResult.new(
+        text: "fetched an image from #{result.final_url} (#{result.bytes} bytes)",
+        images: [
+          ToolResult::Image.new(
+            server: "web.fetch",
+            tool: "fetch",
+            mime_type: mime,
+            bytes: result.body.b,
+            name_hint: url_basename(result.final_url))
+        ])
+    end
+
+    def image_response?(result)
+      ImageSniffer.image_content?(result.content_type) ||
+        ImageSniffer.image_bytes?(result.body)
+    end
+
+    # A name for the spilled blob, from the URL path when it has one.
+    def url_basename(url)
+      path = URI.parse(url.to_s).path.to_s
+      name = File.basename(path)
+      return URI.parse(url.to_s).host.to_s if name.empty? || name == "/"
+
+      name
+    rescue URI::Error
+      "fetched-image"
     end
 
     def redirect_note(result)
