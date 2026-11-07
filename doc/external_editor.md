@@ -45,7 +45,7 @@ it may only start once the read is closed. Two halves, in this order:
 
 1. `RelinePatch::CtrlGHandoff#input_key` (prepended on `Reline::LineEditor`)
    snapshots `whole_buffer` into the module's own accessor and calls `finish` -
-   the same close Ctrl+A uses. It does not spawn anything: inside the key
+   the same close the Esc-cancel patch uses. It does not spawn anything: inside the key
    handler the terminal is still raw.
 2. The reader (`reline_read_multiline`) sees `CtrlGHandoff.fired` after
    `readmultiline` has returned, and only then runs `UI::ExternalEditor`. By
@@ -59,7 +59,7 @@ input_key`), not a fake.
 The patch checks the key in `#input_key` rather than adding a Reline key binding.
 A binding installed via `add_default_key_binding_by_keymap` only covers the
 editing-mode keymap; consulting the byte in `#input_key` is the same hook point
-Esc-cancel and Ctrl+A already use, and it works identically on the Windows IOGate
+Esc-cancel already uses, and it works identically on the Windows IOGate
 (this project's own terminal) and the ANSI one.
 
 `#input_key` is consulted for the whole feature's gate: it only takes the key when
@@ -68,7 +68,7 @@ Esc-cancel and Ctrl+A already use, and it works identically on the Windows IOGat
 alone and behaves as it always did - the feature is strictly opt-in.
 
 `key.char` for a control key arrives as a ONE-CHARACTER STRING (`"\a"` for
-Ctrl+G, `"\u0001"` for Ctrl+A) - `KeyStroke#expand` packs the matched bytes into
+Ctrl+G) - `KeyStroke#expand` packs the matched bytes into
 a String. It is NOT the integer byte. A pasted block arrives as a longer String,
 so the test is `char.size == 1 && char.ord == 7`: a paste whose first byte happens
 to be 7 must not fire the hand-off. Probed: a real Ctrl+G yields

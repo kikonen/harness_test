@@ -7,7 +7,6 @@ require_relative "reline_patch/esc_cancel"
 require_relative "reline_patch/paste_guard"
 require_relative "reline_patch/enter_policy"
 require_relative "reline_patch/lf_submit"
-require_relative "reline_patch/ctrl_a"
 require_relative "reline_patch/ctrl_g"
 require_relative "reline_patch/windows_esc_hook"
 
@@ -28,10 +27,9 @@ module UI
     # section 7 for why these are the portable choices).
     ESC_KEY_BYTE = 27
     CR_KEY_BYTE  = 13
-    # Ctrl+G (BEL) and Ctrl+A each arrive to #input_key as a one-character
-    # String ("\a", "\u0001"), not an Integer. See control_key?.
+    # Ctrl+G (BEL) arrives to #input_key as a one-character String ("\a"),
+    # not an Integer. See control_key?.
     CTRL_G_BYTE = 7
-    CTRL_A_BYTE = 1
     # The submit key ESC-then-CR. Platform split (Windows IOGate vs Unix Alt+Enter
     # vs remote-via-Windows-Terminal LF) is explained in
     # doc/reline_cursor_and_enter_handling.md section 7 and doc/editor_input_design.md.
@@ -54,7 +52,6 @@ module UI
       RelinePatch::EscCancel,
       RelinePatch::EnterPolicy,
       RelinePatch::LFSubmit,
-      RelinePatch::CtrlAToggle,
       RelinePatch::CtrlGHandoff
     ].freeze
 

@@ -430,7 +430,7 @@ class Harness
     @yolo ? "YOLO ON" : "YOLO OFF"
   end
 
-  # issue #389: the denylist-safe override (config-only, never Ctrl+A). It is NOT
+  # issue #389: the denylist-safe override (config-only, no live toggle). It is NOT
   # part of command_mode_label: it is not a third posture, it changes what a
   # "safe:" verdict may decide for a DENYLISTED command, and it is only
   # meaningful while the safety check is on. Rationale:
@@ -612,13 +612,6 @@ class Harness
   # previous one no longer describes anything this run will do.
   def forget_last_rate
     @last_rate = nil
-  end
-
-  def toggle_command_mode
-    return nil unless command_safety_check
-
-    @command_safety_auto_approve = !@command_safety_auto_approve
-    command_safety_auto_approve ? "AUTO-APPROVE" : "MANUAL"
   end
 
   # ONE check call per tool batch (never one per command). SafetyCheck

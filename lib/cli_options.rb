@@ -217,7 +217,7 @@ class CLIOptions
     opts[:command_safety_check] = config.command_safety_check_enabled
 
     # issue #224 follow-up: initial command consent posture for the safety
-    # check (MANUAL / AUTO-APPROVE; toggled live with Ctrl+A during a run).
+    # check (MANUAL / AUTO-APPROVE; config-derived for the whole run).
     # Only effective with command_safety_check on.
     opts[:command_safety_auto_approve] = config.command_safety_auto_approve_enabled
 

@@ -126,7 +126,7 @@ RSpec.describe Commands::HelpCommand do
       out = run('keys')
 
       expect(out).to include('Keys')
-      expect(out).to include('Ctrl+A')
+      expect(out).to include('Ctrl+G')
       expect(out).not_to include('Mid-turn steering notes')
     end
 
