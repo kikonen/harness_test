@@ -113,6 +113,8 @@ models:
     num_ctx: 65536
     temperature: 0.6
     top_p: 0.95
+    # vision: false            # true = THIS model can be sent tool-result images
+                               # (issue #449); absent/false = images are files only
 default_model: local
 compact:
   recent_messages: 6        # messages kept verbatim after /compact
@@ -215,6 +217,20 @@ The newest text is a fixed 60-character window: when older text was dropped it
 starts with a single `…`, which REPLACES whatever the cut left at that point
 instead of sitting in front of it (issue #364).
 Initial posture: config key `streaming` (or a model profile's own key).
+
+## Tool-result images (MCP)
+
+An MCP server may answer a tool call with an IMAGE (a Blender screenshot, a
+rendered view). Every such image is written as native bytes to the harness'
+blob store (`.harness/content/<session-id>/`) and the model is given the PATH -
+the form a text model can act on through the shell (`.harness/` is harness
+state, so the shell reaches it, not the file tools). A model whose profile
+declares `vision: true` is ADDITIONALLY sent the pixels inline, but only within
+the `mcp_images:` budget: base64 costs 4/3 the file size, and one large render
+measured ~410K tokens - more than six times a 65 536-token context window. A
+profile without `vision:` (and a raw `-m` id with no profiles configured) is
+text-only: the harness never guesses a model can see images. `/model` names
+which posture the active model has. Design: `doc/mcp_images_design.md` (issue #449).
 
 ## Regenerating the shell parser
 
@@ -432,6 +448,9 @@ All harness state lives in `.harness/` inside the working directory:
       session.json  # the saved session (conversation + access list)
       harness.log   # that session's request/tool log
       harness_history  # that session's prompt history (issue #119)
+  content/          # tool-result image blobs, native bytes (issue #449):
+    <id>/           # one dir per session id, so a saved session's named path
+                    # still resolves when that session is resumed
   skills/           # the project's own skills (issue #12) - the ONE part of
     <name>/SKILL.md # .harness/ that is git-tracked and grantable
   sandbox/          # the model-managed Ruby sandbox (issue #340): a seeded
