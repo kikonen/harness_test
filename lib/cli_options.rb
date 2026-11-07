@@ -173,8 +173,13 @@ class CLIOptions
       opts[:reasoning_effort] = profile[:reasoning_effort]
       opts[:temperature] = profile[:temperature]
       opts[:top_p] = profile[:top_p]
+      # issue #449: image support is a property of THIS model, declared in the
+      # profile. It travels into the backend options, which refuse to send an
+      # image payload to a profile that never declared it.
+      opts[:vision] = profile[:vision] == true
     else
       opts[:base_url] ||= DEFAULT_BASE_URL
+      opts[:vision] = false
     end
   end
 
@@ -253,6 +258,13 @@ class CLIOptions
     # declared, persistent setup, not a one-run toggle). An empty list means the
     # MCP code path never runs (the gem is not even loaded).
     opts[:mcp_servers] = config.mcp_servers
+
+    # issue #449: the tool-result image budget and the blob store dir.
+    # Config-only (no CLI flag): a megabyte-scale budget is a persistent policy
+    # of how this project is worked on, not something a single run should be
+    # able to raise by typing a flag.
+    opts[:mcp_image_limits] = config.mcp_image_limits
+    opts[:mcp_images_dir] = config.mcp_images_dir
 
     # issue #385: dirs the YOLO posture never auto-covers. Config-only. nil (key
     # absent) = FileList's default (local/); an explicit list replaces it.

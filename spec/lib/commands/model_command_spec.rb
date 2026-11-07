@@ -10,11 +10,14 @@ require 'commands/model_command'
 # switch_model, param_overrides), so a thin double exposing those is enough -
 # same approach as param_command_spec.
 RSpec.describe Commands::ModelCommand do
-  def session_manager(profiles, active, target: '/v1/chat/completions')
+  def session_manager(profiles, active, target: '/v1/chat/completions', vision: false)
     sm = Object.new
     sm.define_singleton_method(:model_profiles) { profiles }
     sm.define_singleton_method(:active_model_name) { active }
     sm.define_singleton_method(:target_display) { target }
+    # issue #449: image support is a session_manager fact (the active profile's
+    # 'vision:'), so /model reads it from there.
+    sm.define_singleton_method(:vision?) { vision }
     sm.define_singleton_method(:switch_model) { |name| profiles.find { |p| p[:name] == name } }
     po = Object.new
     po.define_singleton_method(:list_display) { ['  temperature: 0.7  (default)'] }
@@ -28,8 +31,9 @@ RSpec.describe Commands::ModelCommand do
     h
   end
 
-  def run_command(args = '', manager: nil, options: { base_url: 'http://srv:11434/v1' })
-    manager ||= session_manager([{ name: 'qwen', model: 'qwen3:8b' }], 'qwen')
+  def run_command(args = '', manager: nil, vision: false,
+                  options: { base_url: 'http://srv:11434/v1' })
+    manager ||= session_manager([{ name: 'qwen', model: 'qwen3:8b' }], 'qwen', vision: vision)
     stdout = StringIO.new
     described_class.new(harness: harness(manager), file_list: nil, options: options,
                         ui: UI::Console.new(stdout: stdout)).handle(args)
@@ -54,6 +58,16 @@ RSpec.describe Commands::ModelCommand do
       out = run_command
       expect(out).to include('List models with /models')
       expect(out).to include('adjust parameters with /param')
+    end
+
+    # issue #449: image support is per-profile and not a generation parameter,
+    # so the /param listing does not cover it - /model names it separately.
+    it 'names whether this model can be sent images' do
+      expect(run_command).to include('files only (no vision declared)')
+    end
+
+    it 'says the active profile inlines images when it declares vision' do
+      expect(run_command(vision: true)).to include('inlined to the model')
     end
   end
 

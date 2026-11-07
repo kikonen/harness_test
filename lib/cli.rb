@@ -225,6 +225,14 @@ class CLI
     # not just the base url - a profile switch can change the API type.
     ui.puts "Model: #{harness.session_manager.active_model_name} " \
             "(#{harness.session_manager.target_display} @ #{@options[:base_url]})"
+    # issue #449: name the image posture, but only when the run can actually
+    # receive one - MCP servers are the only source of tool-result images, so a
+    # run without them has nothing to say about it. The two cases behave
+    # completely differently (pixels to the model vs. a path to a file under
+    # .harness/content) and nothing else at startup says which one this is.
+    if Array(@options[:mcp_servers]).any?
+      ui.puts "Tool-result images: #{harness.vision? ? 'inlined to the model' : 'files only (no vision profile)'}"
+    end
     ui.puts "Working directory: #{@file_list.workdir}"
 
     # issue #189: show the session id at startup so the user knows WHERE
