@@ -4,6 +4,7 @@ require "yaml"
 require "fileutils"
 
 require_relative "harness_error"
+require_relative "image_store"
 
 # -- HarnessConfig --------------------------------------------------------
 #
@@ -29,6 +30,10 @@ require_relative "harness_error"
 #                               # ENV var as ${NAME} (issue #422) so the secret
 #                               # lives only in the environment, never in this
 #                               # file: token: ${OPENAI_TOKEN}.
+#       vision: false           # THIS MODEL CAN SEE IMAGES (issue #449). Only a
+#                               # profile that sets it true may be sent a
+#                               # tool-result image; every other profile gets the
+#                               # bytes spilled to a file and the path instead.
 #       num_predict: -1         # same, native ollama name - omit = server default
 #       num_ctx: 65536          # optional context window size (tokens)
 #       reasoning_effort: medium
@@ -60,6 +65,20 @@ require_relative "harness_error"
 #   markdown_max_width: 120     # column basis for markdown tables (issue #106).
 #                               # Omit = 80% of the detected terminal width. An
 #                               # explicit count is clamped to the terminal width.
+#   mcp_images:                 # tool-result images (issue #449). Consulted only
+#                               # when the active profile declares vision: - a
+#                               # vision model still has to be told HOW MUCH it may
+#                               # be sent, because base64 costs 4/3 the file size.
+#     inline_max_bytes: 1500000 # one image over this many DECODED bytes is
+#                               # spilled to a file instead of inlined.
+#     inline_max_images: 4      # images inlined per single tool result.
+#     inline_max_tokens: 40000  # worst-case token cost (base64 chars / 4) of the
+#                               # images inlined into ONE tool result.
+#     dir: .harness/content     # the harness' own blob store: a session names
+#                               # the artifact it was given, so the bytes have to
+#                               # live with harness state (tmp/ is per-machine
+#                               # scratch and gone in the next session). The model
+#                               # reaches these files via the shell, not file.*.
 #   mcp_servers:                # external MCP servers whose tools the model may
 #                               # call (issue #48). Opt-in: omit the key and no MCP
 #                               # code runs at all. Each entry names ONE server,
@@ -151,6 +170,16 @@ class HarnessConfig
   # eval / ERB, so a config value can never run code.
   ENV_REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/
 
+  # Tool-result image inline budget (issue #449): the built-in the harness
+  # enforces when neither the config nor a profile names one. A profile may
+  # override it (#normalize_models); a run with no vision profile simply never
+  # inlines anything, so these values are read whatever the active model is.
+  MCP_IMAGE_LIMIT_DEFAULTS = {
+    inline_max_bytes:  1_500_000,
+    inline_max_images: 4,
+    inline_max_tokens: 40_000
+  }.freeze
+
   attr_reader :models, :default_model, :system_prompt_file
 
   def initialize(data = {})
@@ -182,6 +211,11 @@ class HarnessConfig
     # External MCP servers (issue #48). Opt-in: an empty list means no MCP code
     # path runs at all. Each entry is normalized to { name:, command:, args:, env: }.
     @mcp_servers = normalize_mcp_servers(Array(data[:mcp_servers]))
+    # Tool-result image limits (issue #449). Read whether or not a vision profile
+    # exists: the values describe the rule, and a run with no vision profile
+    # simply never inlines anything. nil = the built-in default.
+    @mcp_image_limits = normalize_mcp_images(data[:mcp_images])
+    @mcp_images_dir   = nonblank(data.dig(:mcp_images, :dir)) || ImageStore::DEFAULT_DIR
     # Workdir-relative dirs the YOLO posture never auto-covers (issue #385).
     # nil (key absent) = FileList's default (the owner's space, local/); an
     # explicit list replaces it, and an explicit empty list protects nothing.
@@ -382,6 +416,17 @@ class HarnessConfig
     @mcp_servers
   end
 
+  # The tool-result image budget (issue #449): the three integers
+  # (inline_max_bytes / inline_max_images / inline_max_tokens) this run enforces.
+  def mcp_image_limits
+    @mcp_image_limits
+  end
+
+  # Workdir-relative dir the spilled tool-result images are written to.
+  def mcp_images_dir
+    @mcp_images_dir
+  end
+
   # Workdir-relative dirs the YOLO posture never auto-covers (issue #385). nil
   # when the key is absent (FileList applies its default, local/); an array
   # (possibly empty) when the config names one.
@@ -482,7 +527,13 @@ class HarnessConfig
         min_p:            float_or_nil(m[:min_p]),
         presence_penalty: float_or_nil(m[:presence_penalty]),
         repeat_penalty:   float_or_nil(m[:repeat_penalty]),
-        streaming:        bool_or_nil(m[:streaming])
+        streaming:        bool_or_nil(m[:streaming]),
+        vision:           m[:vision] == true,
+        # Tri-state like 'streaming': nil = this profile says nothing, so the
+        # global 'mcp_images' block decides; a block overrides it entirely.
+        # Filling the defaults here would shadow the global block for every
+        # profile that left the key out.
+        mcp_images:       m[:mcp_images].is_a?(Hash) ? normalize_mcp_images(m[:mcp_images]) : nil
       }
     end
   end
@@ -529,6 +580,27 @@ class HarnessConfig
         }
       end
     end
+  end
+
+  # The tool-result image limits (issue #449), as a hash of three integers.
+  # An absent key, a non-mapping, or an individual absent key all fall back to
+  # the built-in default - the limits are a budget the harness enforces, so a
+  # half-typed block must not silently mean "no budget".
+  def normalize_mcp_images(val)
+    val = {} unless val.is_a?(Hash)
+
+    MCP_IMAGE_LIMIT_DEFAULTS.to_h do |key, fallback|
+      value = val[key]
+      [key, value.nil? ? fallback : positive_int!(value)]
+    end
+  end
+
+  # A limit is a budget: 0 or a negative value is not "no budget", it is a typo.
+  def positive_int!(val)
+    n = int_or_nil(val)
+    raise HarnessError, "an mcp_images limit must be a positive integer, got: #{val.inspect}" unless n&.positive?
+
+    n
   end
 
   def require_name(entry)
