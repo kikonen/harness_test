@@ -24,6 +24,7 @@ require_relative "tools/notify_tool"
 require_relative "tools/dialog_tool"
 require_relative "tools/get_time_tool"
 require_relative "tools/file_read_tool"
+require_relative "tools/file_image_tool"
 require_relative "tools/file_write_tool"
 require_relative "tools/file_rename_tool"
 require_relative "tools/file_delete_tool"
@@ -292,6 +293,7 @@ class Harness
     registry.register(Tools::GetTimeTool.new)
     registry.register(Tools::FileListTool.new(@file_list))
     registry.register(Tools::FileReadTool.new(@file_list, @session))
+    registry.register(Tools::FileImageTool.new(@file_list))
     registry.register(Tools::FileWriteTool.new(@file_list, @session))
     registry.register(Tools::FileRenameTool.new(@file_list, @session))
     registry.register(Tools::FileDeleteTool.new(@file_list, @session))

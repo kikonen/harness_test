@@ -2708,6 +2708,18 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #451: file.image is the disk producer that feeds the SAME image spine
+  # web.fetch and the MCP adapter feed. It is wired over the run's own FileList
+  # (the read-grant rules file.read uses), not a copy.
+  describe 'file.image (issue #451)' do
+    it 'is registered over this run\'s FileList' do
+      h = build_harness
+      expect(h.tool_registry.get('file.image')).to be_a(Tools::FileImageTool)
+      expect(h.tool_registry.names).to include('file.image')
+      expect(h.tool_registry.get('file.image').instance_variable_get(:@file_list)).to equal(h.file_list)
+    end
+  end
+
   # issue #48: MCP client wiring. Opt-in (no mcp_servers: = no MCP code path),
   # a failed server degrades to a status note, a tool name that collides with a
   # built-in is skipped, and the connections are closed on shutdown. The real

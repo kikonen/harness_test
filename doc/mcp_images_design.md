@@ -1,7 +1,9 @@
-# Tool-result images (issue #449)
+# Tool-result images (issue #449, extended by issue #451)
 
 An MCP server may answer a `tools/call` with **image content blocks** (a
-Blender screenshot, a rendered view). The harness' message chain is text-only,
+Blender screenshot, a rendered view), and (since issue #451) a built-in tool
+may produce an image too: `file.image` reads an image off disk and `web.fetch`
+fetches one over http. The harness' message chain is text-only,
 so the question is what the model is actually given when a tool returns
 pixels. This document owns the decision; `ImageDelivery` is the single place
 that makes it, and the MCP adapter, `Harness` and the LLM backends may not
@@ -35,7 +37,11 @@ Every built-in tool returns a String and the chain is text-only, so an image
 needs a value that says "here is the text, and here are bytes that are NOT
 text". `ToolResult` (lib/tool_result.rb) carries `text` plus `images`;
 `ToolResult::Image` carries `server`, `tool`, `mime_type` and the DECODED
-`bytes`.
+`bytes`, plus two OPTIONAL fields the non-MCP producers fill (issue #451):
+`reference` (a workdir-relative path the model can already reach, so delivery
+points at the original instead of copying) and `name_hint` (a real artifact name
+to spill a downloaded copy under, rather than the MCP `<server>_<tool>_<n>`
+shape).
 
 INVARIANT: image bytes never enter the message chain, the session JSON or
 `TextNormalizer`. They are a **byte container**, not text in some encoding -
@@ -123,6 +129,40 @@ its fate. Never a bare `[image: ...]` - the model must be able to tell "the
 server sent nothing usable" from "this model cannot see images", and must be
 told where the bytes are when it cannot see them.
 
+## Producers beyond MCP (issue #451)
+
+The delivery spine above was built for MCP, but it is source-agnostic: any tool
+that returns a `ToolResult` with images flows through the same inline/spill/
+drop decision. Issue #451 added the two built-in producers, and the only real
+additions are on the PRODUCER side:
+
+- **`file.image`** (lib/tools/file_image_tool.rb) reads an image already on
+  disk. `file.read` runs every body through `TextNormalizer` - correct for text,
+  mojibake for a PNG - so there was no tool whose argument is a path and whose
+  result is an image; a disk screenshot could only be seen by loading it into an
+  MCP server and screenshotting THAT. `file.image` resolves the path through the
+  SAME `FileList` read-grant rules `file.read` uses, sniffs the real type from
+  the magic bytes (`lib/image_sniffer.rb`, not the extension - a PNG renamed
+  `.txt` is still a PNG), and returns a `ToolResult` whose Image carries
+  `reference` (the model's own workdir path). Delivery then **points at the
+  original instead of spilling a duplicate** of bytes the model can already
+  open; the text says "at <path>", not "stored as <path>".
+- **`web.fetch`** (lib/web_fetcher.rb + the tool) keeps an image body as a raw
+  byte container (the content-type OR the magic bytes decide - a server that
+  mislabels a PNG as `text/plain` is still an image) instead of running it
+  through `TextNormalizer`. The tool returns a `ToolResult` whose Image carries
+  `name_hint` (a name taken from the URL), so the download is spilled under its
+  artifact name rather than the MCP `<server>_<tool>_<n>` shape. There is no
+  original on disk for a download, so it is still spilled.
+
+`ImageStore#save_named` is the store half of the `name_hint` case: it keeps the
+caller's name but applies the SAME guards as `save` - `safe_stem` reduces the
+name to ONE safe segment (a `dir/../../evil.png` collapses to `evil`, so no
+separator or `..` escapes the store), the caller's extension is stripped so the
+mime extension never doubles and lands AFTER the index (`photo.png` + a JPEG
+mime -> `photo_1.jpeg`, a file a viewer can actually open), and the index is
+bumped past a taken path (issue #276's resume rule).
+
 ## Base64 lives only in the live working chain
 
 `Harness#call_llm` attaches the inlined payloads to the tool message as
@@ -156,11 +196,14 @@ profile gets the payload removed entirely, not forwarded.
 ## Config
 
 Per-profile `vision:` (the model can see images) and either a global or a
-per-profile `mcp_images:` block (how much it may be sent). A profile that omits
-the block leaves it nil - like `streaming:` - so it inherits the global block
-instead of shadowing it with the built-in defaults. A limit of 0 or a negative
-value is a config error: a budget is not "no budget", it is a typo, and a silent
-"inline nothing" would read as a broken MCP image path.
+per-profile `mcp_images:` block (how much it may be sent). The key name predates
+issue #451 and was kept for config compatibility: it now governs EVERY
+tool-result image - from MCP, from `file.image`, or from `web.fetch` - because
+they share one `ImageDelivery` and one budget. A profile that omits the block
+leaves it nil - like `streaming:` - so it inherits the global block instead of
+shadowing it with the built-in defaults. A limit of 0 or a negative value is a
+config error: a budget is not "no budget", it is a typo, and a silent "inline
+nothing" would read as a broken image path.
 
 ## What a text model can still do
 

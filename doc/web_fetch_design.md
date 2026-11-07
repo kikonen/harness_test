@@ -166,3 +166,15 @@ conversation. A failure returns the fetcher's own error string unchanged (the
 model must see WHY, so it does not retry blindly) and is logged to harness.log -
 a failure must leave a trace even when the returned string carries none
 (issue #185's rule).
+
+## An image body is not text (issue #451)
+
+`TextNormalizer` on a PNG produced mojibake with no warning, so `web.fetch` no
+longer treats every body as text. `WebFetcher#fetch` keeps the raw bytes when
+either the Content-Type says image (`ImageSniffer.image_content?`) OR the magic
+bytes say so (`image_bytes?` - a server that mislabels a PNG as `text/plain` is
+still a PNG). `WebFetchTool#success` then hands that body to the image path: a
+`ToolResult` the harness routes through `ImageDelivery` (spill + optional inline,
+named for the URL basename via a `name_hint`), instead of running it through the
+line budget. A text page is unaffected and keeps the truncation rules above.
+Design: `doc/mcp_images_design.md`, section "Producers beyond MCP".

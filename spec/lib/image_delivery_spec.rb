@@ -23,6 +23,18 @@ class FakeStore
     ".harness/content/#{name}"
   end
 
+  # The caller-named spill (issue #451): the name the tool supplied is kept,
+  # with the index after it, so a spec can assert the artifact was spilled under
+  # a REAL name rather than the MCP <server>_<tool>_<n> shape.
+  def save_named(name:, mime_type:, **_rest)
+    return nil unless @writeable
+
+    stem = name.to_s.sub(/\.[^.]*\z/, '')
+    saved_name = "#{stem}_#{@saved.size + 1}.#{mime_type.to_s.split('/').last}"
+    @saved << saved_name
+    ".harness/content/#{saved_name}"
+  end
+
   def harness_state?(path)
     path.to_s.start_with?('.harness/')
   end
@@ -30,8 +42,12 @@ end
 
 RSpec.describe ImageDelivery do
   def image(bytes: 'x' * 3000, mime: 'image/png', server: 'blender', tool: 'shot')
-    ToolResult::Image.new(server: server, tool: tool, mime_type: mime,
-                          bytes: bytes.b)
+    ToolResult::Image.new(server: server, tool: tool, mime_type: mime, bytes: bytes.b)
+  end
+
+  def disk_image(path: 'build/shot.png', bytes: 'x' * 3000)
+    ToolResult::Image.new(server: 'file.image', tool: 'image', mime_type: 'image/png',
+                          bytes: bytes.b, reference: path)
   end
 
   def delivery(vision: true, store: FakeStore.new, bytes: 10_000,
@@ -152,6 +168,43 @@ RSpec.describe ImageDelivery do
 
       expect(decisions.first.mode).to eq(:drop)
       expect(decisions.first.path).to be_nil
+    end
+  end
+
+  # issue #451: the two non-MCP producers (file.image -> reference; web.fetch ->
+  # name_hint) ride the same delivery spine. A reference must NOT spill a copy
+  # (the model already has the bytes at that path); a name_hint must spill under
+  # the real name rather than the <server>_<tool>_<n> shape.
+  describe 'a disk reference (file.image)' do
+    it 'points at the original and never spills a duplicate' do
+      store = FakeStore.new
+      decisions = plan_for(delivery(vision: false, store: store), disk_image)
+
+      expect(decisions.first.mode).to eq(:file)
+      expect(decisions.first.path).to eq('build/shot.png')
+      expect(store.saved).to eq([])
+    end
+
+    it 'says where the file already is - "at", not "stored as"' do
+      d    = delivery(vision: false)
+      text = d.describe(plan_for(d, disk_image))
+
+      expect(text).to include('at build/shot.png')
+      expect(text).not_to include('stored as')
+      expect(text).not_to include('harness state')
+    end
+  end
+
+  describe 'a name_hint spill (web.fetch)' do
+    it 'spills the download under its artifact name' do
+      store = FakeStore.new
+      img   = ToolResult::Image.new(server: 'web.fetch', tool: 'fetch',
+                                    mime_type: 'image/png', bytes: 'x'.b,
+                                    name_hint: 'logo.png')
+      decisions = plan_for(delivery(vision: false, store: store), img)
+
+      expect(store.saved).to eq(['logo_1.png'])
+      expect(decisions.first.path).to eq('.harness/content/logo_1.png')
     end
   end
 
