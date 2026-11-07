@@ -70,6 +70,20 @@ RSpec.describe Commands::ModelsCommand do
     expect(run_command(sm)).to include('Switch with: /model <name>   (current: qwen)')
   end
 
+  # issue #449: vision is per-profile, so /models says which model a tool-result
+  # image could actually be sent to (and stays silent for one that cannot).
+  it 'tags a vision profile and leaves a text profile untagged' do
+    sm = session_manager(
+      [{ name: 'eyes', model: 'vis', vision: true },
+       { name: 'plain', model: 'qwen', vision: false }],
+      'plain'
+    )
+    out = run_command(sm)
+
+    expect(out.lines.find { |l| l.include?('eyes') }).to include('[vision]')
+    expect(out.lines.find { |l| l.include?('plain') }).not_to include('[vision]')
+  end
+
   # A profile with no url falls back to the CLI default endpoint rather than
   # printing an empty host.
   it 'falls back to CLIOptions::DEFAULT_BASE_URL when a profile has no url' do

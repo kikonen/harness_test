@@ -419,6 +419,85 @@ RSpec.describe CLI do
     end
   end
 
+  # issue #449: MCP servers are the only source of tool-result images, so the
+  # banner names the image posture ONLY when servers are declared - and it says
+  # which of the two behaviours this run has (pixels to the model vs. a path to
+  # a file under .harness/content). The real gem/subprocess is never touched:
+  # ServerConnection is stubbed, as in the harness MCP specs.
+  describe 'startup banner - tool-result images (issue #449)' do
+    def fake_connection
+      conn = instance_double('Mcp::ServerConnection')
+      allow(conn).to receive(:connect).and_return([])
+      allow(conn).to receive(:close)
+      conn
+    end
+
+    def mcp_options(extra = {})
+      options.merge(
+        mcp_servers: [{ name: 'fs', command: 'ruby', args: [], env: {} }],
+        **extra
+      )
+    end
+
+    it 'says files-only when servers are declared and no profile has vision' do
+      allow(Mcp::ServerConnection).to receive(:new).and_return(fake_connection)
+      cli = described_class.new(mcp_options, ui)
+      stub_prompt_reader
+
+      expect(ui).to receive(:puts)
+        .with('Tool-result images: files only (no vision profile)')
+        .ordered
+      expect(ui).to receive(:puts).at_least(:once)
+
+      cli.run
+    end
+
+    it 'says inlined when the active profile declares vision' do
+      allow(Mcp::ServerConnection).to receive(:new).and_return(fake_connection)
+      cli = described_class.new(
+        mcp_options(model: 'sees',
+                    model_profiles: [{ name: 'sees', model: 'vision-model',
+                                       vision: true }]), ui)
+      stub_prompt_reader
+
+      expect(ui).to receive(:puts)
+        .with('Tool-result images: inlined to the model')
+        .ordered
+      expect(ui).to receive(:puts).at_least(:once)
+
+      cli.run
+    end
+
+    # The gate is the config, not a live connection: a declared server that
+    # could not start still has images in its protocol, and the run still has
+    # to say what it would do with one.
+    it 'states the posture even when the declared server failed to start' do
+      conn = instance_double('Mcp::ServerConnection')
+      allow(conn).to receive(:connect).and_raise(Errno::ENOENT, 'no such server')
+      allow(conn).to receive(:close)
+      allow(Mcp::ServerConnection).to receive(:new).and_return(conn)
+      cli = described_class.new(mcp_options, ui)
+      stub_prompt_reader
+
+      expect(ui).to receive(:puts)
+        .with('Tool-result images: files only (no vision profile)')
+        .ordered
+      expect(ui).to receive(:puts).at_least(:once)
+
+      cli.run
+    end
+
+    it 'says nothing about images when no MCP servers are declared' do
+      cli = build_cli
+      allow(ui).to receive(:puts)
+      stub_prompt_reader
+
+      cli.run
+
+      expect(ui).not_to have_received(:puts).with(/^Tool-result images:/)
+    end
+  end
+
   # issue #384: the run starts with a STANDING grant on the working directory,
   # so the model no longer asks per file. The grant is seeded at the CLI layer
   # only (FileList's own constructor default is unchanged), so the guard rules

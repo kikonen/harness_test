@@ -35,7 +35,11 @@ module Commands
         # issue #217: tag the API type so it is obvious which endpoint a
         # profile hits (openai -> /v1-compatible, ollama -> native /api/chat).
         api = p[:api] || "openai"
-        @ui.puts "  #{name}  ->  #{p[:model]} @ #{p[:url] || CLIOptions::DEFAULT_BASE_URL} (#{api})#{suffix}"
+        # issue #449: vision is a per-profile fact, so the listing says which
+        # models a tool-result image could actually be sent to.
+        url  = p[:url] || CLIOptions::DEFAULT_BASE_URL
+        tags = p[:vision] ? " (#{api}) [vision]" : " (#{api})"
+        @ui.puts "  #{name}  ->  #{p[:model]} @ #{url}#{tags}#{suffix}"
       end
       @ui.puts
       @ui.puts "Switch with: /model <name>   (current: #{current})"
