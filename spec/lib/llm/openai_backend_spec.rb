@@ -88,6 +88,50 @@ RSpec.describe LLM::OpenAIBackend do
     end
   end
 
+  # issue #449: a tool result that carried images rides to an OpenAI-compatible
+  # endpoint as a content ARRAY (text part + one image_url data URI per image),
+  # and only for a profile that declared 'vision:'. The canonical images: key is
+  # the harness chain shape - it must never appear in the body unconverted.
+  describe 'image payloads (issue #449)' do
+    def tool_msg
+      { role: 'tool', tool_call_id: 'c1', content: 'shot',
+        images: [{ mime_type: 'image/png', base64: 'aGk=' }] }
+    end
+
+    def serialized(msg)
+      backend.send(:serialize_messages, [msg]).first
+    end
+
+    it 'converts the content into a text + image_url part array' do
+      options[:vision] = true
+
+      expect(serialized(tool_msg)[:content]).to eq([
+        { type: 'text', text: 'shot' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,aGk=' } }
+      ])
+    end
+
+    it 'drops the canonical images: key from the wire message' do
+      options[:vision] = true
+
+      expect(serialized(tool_msg)).not_to have_key(:images)
+    end
+
+    it 'strips images: even for a profile that did not declare vision' do
+      out = serialized(tool_msg)
+
+      expect(out).not_to have_key(:images)
+      expect(out[:content]).to eq('shot')
+    end
+
+    it 'leaves a message without images as-is' do
+      options[:vision] = true
+      m = { role: 'user', content: 'hi' }
+
+      expect(serialized(m)).to eq(m)
+    end
+  end
+
     it 'includes tools when provided' do
       tools = [{ type: 'function', function: { name: 't', parameters: {} } }]
       expect(body([{}], tools: tools)[:tools]).to eq(tools)

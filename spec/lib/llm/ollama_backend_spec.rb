@@ -130,6 +130,50 @@ RSpec.describe LLM::OllamaBackend do
     end
   end
 
+  # issue #449: the native shape carries a tool result's images as a top-level
+  # `images` list of BARE base64 strings (Ollama's own multimodal field), and
+  # only for a profile that declared 'vision:'.
+  describe 'image payloads (issue #449)' do
+    def tool_msg
+      { role: 'tool', tool_call_id: 'c1', content: 'shot',
+        images: [{ mime_type: 'image/png', base64: 'aGk=' }] }
+    end
+
+    it 'merges the bare base64 list into the message' do
+      options[:vision] = true
+      out = backend.send(:serialize_messages, [tool_msg])
+
+      expect(out.first[:images]).to eq(['aGk='])
+      expect(out.first[:content]).to eq('shot')
+      expect(out.first[:mime_type]).to be_nil
+    end
+
+    it 'sends nothing to a profile that did not declare vision' do
+      out = backend.send(:serialize_messages, [tool_msg])
+
+      expect(out.first).not_to have_key(:images)
+      expect(out.first[:content]).to eq('shot')
+    end
+
+    it 'leaves a message without images untouched' do
+      options[:vision] = true
+      m = [{ role: 'user', content: 'hi' }]
+
+      expect(backend.send(:serialize_messages, m)).to eq(m)
+    end
+
+    it 'combines with the tool-call argument conversion' do
+      options[:vision] = true
+      msg = tool_msg.merge(role: 'assistant', tool_calls: [
+        { id: 'c1', function: { name: 'f', arguments: '{"a":1}' } }
+      ])
+      out = backend.send(:serialize_messages, [msg])
+
+      expect(out.first[:tool_calls].first[:function][:arguments]).to eq({ 'a' => 1 })
+      expect(out.first[:images]).to eq(['aGk='])
+    end
+  end
+
     it 'honours profile overrides for sampling parameters' do
       options[:temperature] = 0.9
       options[:top_k]       = 40

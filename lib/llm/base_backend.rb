@@ -316,6 +316,39 @@ module LLM
     # Subclasses: raw parsed JSON -> the normalized response shape.
     def parse_response(_json) = raise NotImplementedError
 
+    # -- Tool-result images on the wire (issue #449) -------------------------
+    #
+    # The canonical chain shape carries them as
+    #   images: [{ mime_type:, base64: }]
+    # beside the text content. Each endpoint wants a DIFFERENT wire shape for
+    # them (OpenAI: a content array of text + image_url parts; native
+    # /api/chat: a top-level `images` list of bare base64 strings), so the
+    # conversion happens here and the chain stays backend-agnostic.
+    #
+    # `vision:` gates it: a profile that does not declare image support never
+    # receives an image payload at all, even if one somehow reached the chain.
+    # That is defense in depth - ImageDelivery already only inlines for a
+    # vision profile - and it is what keeps a stray payload from being sent to
+    # a text model as a megabyte of data URI.
+    def images_supported?
+      @options[:vision] == true
+    end
+
+    # The image payloads of one message, normalized and filtered, or nil when
+    # the message has none or this backend may not send them.
+    def image_payloads(message)
+      return nil unless images_supported?
+
+      payloads = Array(message[:images]).filter_map do |img|
+        base64 = img[:base64] || img["base64"]
+        next if base64.nil? || base64.to_s.empty?
+
+        { mime_type: (img[:mime_type] || img["mime_type"] || "image/png").to_s,
+          base64: base64.to_s }
+      end
+      payloads.empty? ? nil : payloads
+    end
+
     # A config-owned option value. Returns nil when unset: the caller
     # OMITS the key from the request so the server's own default applies
     # (issue #215: no hidden code-side defaults).

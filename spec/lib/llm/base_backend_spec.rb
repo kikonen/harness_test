@@ -231,4 +231,38 @@ RSpec.describe LLM::BaseBackend do
       expect(backend.send(:format_seconds, 125.7)).to eq('125.70')
     end
   end
+
+  # issue #449: the shared gate both backends rely on. A profile that does not
+  # declare vision never receives an image payload, even if one somehow reached
+  # the chain - defense in depth behind ImageDelivery.
+  describe 'image payload gating (issue #449)' do
+    def message_with_image
+      { role: 'tool', content: 'shot',
+        images: [{ mime_type: 'image/png', base64: 'aGk=' }] }
+    end
+
+    it 'sends nothing when the profile did not declare vision' do
+      expect(backend.send(:image_payloads, message_with_image)).to be_nil
+    end
+
+    it 'normalizes the payload for a vision profile' do
+      options[:vision] = true
+
+      expect(backend.send(:image_payloads, message_with_image))
+        .to eq([{ mime_type: 'image/png', base64: 'aGk=' }])
+    end
+
+    it 'defaults the mime type and skips an empty payload' do
+      options[:vision] = true
+      msg = { images: [{ base64: 'aGk=' }, { base64: '' }] }
+
+      expect(backend.send(:image_payloads, msg)).to eq([{ mime_type: 'image/png', base64: 'aGk=' }])
+    end
+
+    it 'returns nil for a message with no images' do
+      options[:vision] = true
+
+      expect(backend.send(:image_payloads, { role: 'user', content: 'hi' })).to be_nil
+    end
+  end
 end
