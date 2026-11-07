@@ -123,7 +123,18 @@ class ImageDelivery
   end
 
   def spill_path(image)
+    # A disk image already has a path the model can open (issue #451): naming a
+    # copy under .harness/ would duplicate bytes the model could read directly,
+    # so the reference IS the answer. A downloaded file has no original path, so
+    # it is spilled, but named for the artifact (save_named) rather than the MCP
+    # <server>_<tool>_<n> shape. Otherwise the MCP path stands.
+    return image.reference.to_s if image.reference
+
     return nil if @store.nil?
+    if image.name_hint
+      return @store.save_named(
+        name: image.name_hint, mime_type: image.mime_type, bytes: image.bytes)
+    end
 
     @store.save(
       server: image.server,
@@ -135,13 +146,23 @@ class ImageDelivery
   def describe_one(decision)
     image = decision.image
     head  = "[image: #{image.mime_type}, #{image.byte_size} bytes"
-    where = decision.path ? " stored as #{decision.path}#{state_note(decision.path)}" : ""
+    where = location_note(decision)
 
     case decision.mode
     when :inline then "#{head} attached to this result#{where}]"
     when :file   then "#{head}#{where} - #{decision.reason}]"
     else "#{head} dropped: #{decision.reason}#{store_note}]"
     end
+  end
+
+  # Where the bytes live, in words the model can act on. A disk reference is the
+  # file the model already has (issue #451), so it says "at", not "stored as";
+  # a spilled blob names the store and whether the file tools can open it.
+  def location_note(decision)
+    return "" unless decision.path
+    return " at #{decision.path}" if decision.image.reference
+
+    " stored as #{decision.path}#{state_note(decision.path)}"
   end
 
   # The model must be told where the bytes are AND that the file tools will not

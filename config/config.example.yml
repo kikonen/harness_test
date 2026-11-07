@@ -43,7 +43,8 @@ models:
     #                      # never guesses that an unconfigured model can see.
     # mcp_images:          # per-profile override of the global 'mcp_images'
     #                      # block below (the inline budget a vision model may
-    #                      # be given). Absent = the global block decides.
+    #                      # be given - MCP, file.image or web.fetch alike).
+    #                      # Absent = the global block decides.
 
 # Model used when -m is not given on the command line.
 default_model: local
@@ -112,15 +113,18 @@ auto_save: true
 # whatever this says. The flag --markdown-width N overrides it.
 # markdown_max_width: 120
 
-# Tool-result images (issue #449): what an MCP server (like Blender) sends as an
-# image content block. Consulted only when the ACTIVE model profile declares
-# vision: - a vision model still has to be told HOW MUCH it may be sent, because
-# base64 costs 4/3 the decoded file size (~1 token per 4 base64 chars, so one
-# real 1.2 MB Blender render is ~410K estimated tokens - more than six times a
-# 65536-token context window). Every image is ALWAYS spilled to 'dir' as native
-# bytes; inlining (base64 into the request the model sees) is the ADDITION a
-# budget allows, never the default. A limit of 0 or a negative value is a config
-# error: a budget is not "no budget", it is a typo.
+# Tool-result images (issue #449, producers extended by #451). The key name
+# predates #451 and was kept for config compatibility; it governs EVERY tool-
+# result image - from an MCP server (a Blender screenshot), from file.image (an
+# image read off disk), or from web.fetch (an image fetched over http) - because
+# they share one delivery path and one budget. Consulted only when the ACTIVE
+# model profile declares vision: - a vision model still has to be told HOW MUCH
+# it may be sent, because base64 costs 4/3 the decoded file size (~1 token per
+# 4 base64 chars, so one real 1.2 MB Blender render is ~410K estimated tokens -
+# more than six times a 65536-token context window). Every image is ALWAYS
+# spilled to 'dir' as native bytes; inlining (base64 into the request the model
+# sees) is the ADDITION a budget allows, never the default. A limit of 0 or a
+# negative value is a config error: a budget is not "no budget", it is a typo.
 # mcp_images:
 #   inline_max_bytes: 1500000 # one image over this many DECODED bytes is spilled
 #                               # to a file instead of inlined.

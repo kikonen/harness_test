@@ -7,6 +7,7 @@ require "stringio"
 require "uri"
 require "zlib"
 
+require_relative "image_sniffer"
 require_relative "address_guard"
 require_relative "text_normalizer"
 
@@ -67,10 +68,17 @@ class WebFetcher
 
       response, chunks = outcome
       unless redirect?(response)
-        body = TextNormalizer.normalize(decode(response, chunks))
+        # A non-text body (issue #451): an image (or any body whose magic bytes
+        # say image) stays a RAW byte container. TextNormalizer on a PNG was
+        # mojibake with no warning (doc/encoding_design.md's rule pointed at
+        # binary data). Text bodies keep the normalization the chain needs.
+        raw    = decode(response, chunks)
+        ctype  = response["content-type"].to_s
+        binary = ImageSniffer.image_content?(ctype) || ImageSniffer.image_bytes?(raw)
+        body   = binary ? raw.b : TextNormalizer.normalize(raw)
         return Result.new(
           status: response.code.to_i,
-          content_type: response["content-type"].to_s,
+          content_type: ctype,
           body:,
           final_url: uri.to_s,
           bytes: body.bytesize,

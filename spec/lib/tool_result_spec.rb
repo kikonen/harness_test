@@ -71,4 +71,45 @@ RSpec.describe ToolResult do
       expect(described_class.new(text: 'hello').summary).to eq('text 5 chars')
     end
   end
+
+  # issue #451: the two OPTIONAL fields a non-MCP producer fills. A disk image
+  # carries a reference (a path the model can already open); a download carries
+  # a name_hint (spill it under a real name). ImageDelivery owns the behaviour
+  # each one triggers - this only checks they are CARRIED.
+  describe 'ToolResult::Image reference / name_hint (issue #451)' do
+    it 'defaults both to nil (an MCP image fills neither)' do
+      expect(image.reference).to be_nil
+      expect(image.name_hint).to be_nil
+    end
+
+    it 'carries a disk reference' do
+      disk = ToolResult::Image.new(server: 'file.image', tool: 'image',
+                                   mime_type: 'image/png', bytes: 'x'.b,
+                                   reference: 'build/shot.png')
+
+      expect(disk.reference).to eq('build/shot.png')
+      expect(disk.name_hint).to be_nil
+    end
+
+    it 'carries a name_hint for a download' do
+      fetched = ToolResult::Image.new(server: 'web.fetch', tool: 'fetch',
+                                      mime_type: 'image/png', bytes: 'x'.b,
+                                      name_hint: 'logo.png')
+
+      expect(fetched.name_hint).to eq('logo.png')
+      expect(fetched.reference).to be_nil
+    end
+  end
+
+  # NOT Array(images): Image is a Struct, and Array() on a Struct returns its
+  # MEMBERS, so a lone image would silently become a list of Strings.
+  describe 'a single Image (not an array)' do
+    it 'stays an Image, not its members' do
+      result = described_class.new(images: image)
+
+      expect(result.images.size).to eq(1)
+      expect(result.images.first).to be_a(ToolResult::Image)
+      expect(result.images.first.bytes).to eq("\x89PNG".b)
+    end
+  end
 end

@@ -62,6 +62,34 @@ class ImageStore
     nil
   end
 
+  # Write one blob the CALLER already has a real name for (a workdir image, a
+  # downloaded file) - issue #451. The MCP form derives the name from a remote
+  # server's tool list; a disk artifact has a genuine name the model should see,
+  # so the name the caller supplies is what should appear. `safe_stem` reduces
+  # it to ONE safe segment (no separator or ".." can escape the store) and
+  # strips any extension it carried, so the canonical mime extension is the
+  # only one and never doubles. The result is <stem>_<count>.<ext> - the same
+  # shape as `save` - with the bump placed BEFORE the extension so the file
+  # still ends in a real image extension. Returns the workdir-relative path, or
+  # nil when the write failed.
+  def save_named(name:, mime_type:, bytes:)
+    stem = safe_stem(name)
+    ext  = extension(mime_type)
+    @count += 1
+    path   = File.join(@workdir, @dir, "#{stem}_#{@count}#{ext}")
+    FileUtils.mkdir_p(File.dirname(path))
+    # A taken index is bumped (issue #276's rule): a new blob must never clobber
+    # a path a saved session already names.
+    while File.exist?(path)
+      @count += 1
+      path = File.join(@workdir, @dir, "#{stem}_#{@count}#{ext}")
+    end
+    File.binwrite(path, bytes.to_s)
+    relative_path(path)
+  rescue StandardError
+    nil
+  end
+
   # True when a stored path is harness state the file tools will not open. The
   # caller uses it to say so in the text the model reads, instead of letting it
   # discover a denial it cannot explain.
@@ -79,6 +107,17 @@ class ImageStore
 
   def sanitize(text)
     text.to_s.gsub(NAME_CHARS, "_")[0, 40]
+  end
+
+  # A caller-supplied name becomes one safe store segment. Split off any path so
+  # only the final segment is kept (a "dir/../../evil.png" collapses to its last
+  # component, then sanitize strips ".." and separators), the extension is left
+  # for the caller to manage via `extension`, and the result is length-capped.
+  def safe_stem(name)
+    base = File.basename(name.to_s).sub(/\.[^.]*\z/, "")
+    base = base.gsub(NAME_CHARS, "_")
+    base = base[0, 40]
+    base.empty? ? "image" : base
   end
 
   # ".png" for "image/png". Anything that is not a plain image subtype gets

@@ -65,10 +65,13 @@ require_relative "image_store"
 #   markdown_max_width: 120     # column basis for markdown tables (issue #106).
 #                               # Omit = 80% of the detected terminal width. An
 #                               # explicit count is clamped to the terminal width.
-#   mcp_images:                 # tool-result images (issue #449). Consulted only
-#                               # when the active profile declares vision: - a
-#                               # vision model still has to be told HOW MUCH it may
-#                               # be sent, because base64 costs 4/3 the file size.
+#   mcp_images:                 # tool-result images (issue #449; producers
+#                               # extended to file.image and web.fetch by #451,
+#                               # the key name kept for config compatibility).
+#                               # Consulted only when the active profile declares
+#                               # vision: - a vision model still has to be told
+#                               # HOW MUCH it may be sent, because base64 costs
+#                               # 4/3 the file size.
 #     inline_max_bytes: 1500000 # one image over this many DECODED bytes is
 #                               # spilled to a file instead of inlined.
 #     inline_max_images: 4      # images inlined per single tool result.

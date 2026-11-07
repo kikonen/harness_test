@@ -333,6 +333,39 @@ RSpec.describe WebFetcher do
         server.close
       end
     end
+
+    # issue #451: an image body must stay a raw byte container. Normalizing a
+    # PNG produced mojibake with no warning, so the fetch keeps it untouched.
+    it 'keeps an image body RAW when the content-type says image' do
+      png = "\x89PNG\r\n\x1A\n".b + [0xC3, 0x28].pack('C*') # valid PNG head + bytes invalid as UTF-8
+      server = ScriptedHTTPServer.new(
+        ScriptedHTTPServer.response(headers: { 'Content-Type' => 'image/png' }, body: png)
+      )
+      begin
+        result = local_fetcher.fetch(server.url)
+        # The bytes survive EXACTLY (no TextNormalizer pass): the invalid-as-UTF-8
+        # pair is still two bytes, not a replacement character.
+        expect(result.body).to eq(png)
+        expect(result.body.bytesize).to eq(png.bytesize)
+      ensure
+        server.close
+      end
+    end
+
+    # The magic bytes override a lying header: a PNG the server called text/plain
+    # is still a PNG, so it is not normalized into mojibake.
+    it 'keeps an image body RAW when only the magic bytes say image' do
+      png = "\x89PNG\r\n\x1A\n".b + [0xFF, 0xFE, 0xFF].pack('C*')
+      server = ScriptedHTTPServer.new(
+        ScriptedHTTPServer.response(headers: { 'Content-Type' => 'text/plain' }, body: png)
+      )
+      begin
+        result = local_fetcher.fetch(server.url)
+        expect(result.body).to eq(png)
+      ensure
+        server.close
+      end
+    end
   end
 
   describe 'the byte cap' do

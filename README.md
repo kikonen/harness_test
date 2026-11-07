@@ -218,19 +218,23 @@ starts with a single `…`, which REPLACES whatever the cut left at that point
 instead of sitting in front of it (issue #364).
 Initial posture: config key `streaming` (or a model profile's own key).
 
-## Tool-result images (MCP)
+## Tool-result images
 
-An MCP server may answer a tool call with an IMAGE (a Blender screenshot, a
-rendered view). Every such image is written as native bytes to the harness'
-blob store (`.harness/content/<session-id>/`) and the model is given the PATH -
-the form a text model can act on through the shell (`.harness/` is harness
-state, so the shell reaches it, not the file tools). A model whose profile
-declares `vision: true` is ADDITIONALLY sent the pixels inline, but only within
-the `mcp_images:` budget: base64 costs 4/3 the file size, and one large render
-measured ~410K tokens - more than six times a 65 536-token context window. A
-profile without `vision:` (and a raw `-m` id with no profiles configured) is
-text-only: the harness never guesses a model can see images. `/model` names
-which posture the active model has. Design: `doc/mcp_images_design.md` (issue #449).
+A tool may return an IMAGE: an MCP server (a Blender screenshot, a rendered
+view), `file.image` (an image read off disk), or `web.fetch` (an image fetched
+over http). Every such image is written as native bytes to the harness' blob
+store (`.harness/content/<session-id>/`) and the model is given the PATH - the
+form a text model can act on through the shell (`.harness/` is harness state,
+so the shell reaches it, not the file tools). A disk image is pointed at by its
+own path instead of copying the bytes the model can already open. A model whose
+profile declares `vision: true` is ADDITIONALLY sent the pixels inline, but only
+within the `mcp_images:` budget (the key governs every tool-result image, not
+MCP alone): base64 costs 4/3 the file size, and one large render measured
+~410K tokens - more than six times a 65 536-token context window. A profile
+without `vision:` (and a raw `-m` id with no profiles configured) is text-only:
+the harness never guesses a model can see images. `/model` names which posture
+the active model has. Design: `doc/mcp_images_design.md` (issue #449, extended
+by #451).
 
 ## Regenerating the shell parser
 
@@ -283,7 +287,10 @@ The model has access to these tools:
 
 **Files** - `file.read`, `file.write`, `file.patch` (unified diff),
 `file.search` (regex grep), `file.list` (glob), `file.info` (metadata),
-`file.copy`, `file.rename`, `file.delete` (needs a DELETE grant)
+`file.copy`, `file.rename`, `file.delete` (needs a DELETE grant),
+`file.image` (returns a disk image to the model as pixels, or as a reachable
+path for a text model; type sniffed from the bytes, same read grants as
+`file.read`)
 
 **Directories** - `dir.create`, `dir.delete` (a whole tree, validated up
 front and logged path by path; needs one DELETE grant - so `rm -rf` through
@@ -310,6 +317,8 @@ YOLO does not cover a URL. A saved grant covers that EXACT host only (never a
 subdomain or a look-alike). Guards the model cannot configure: loopback,
 private, link-local and multicast addresses are refused, redirects are
 re-checked hop by hop, and a body larger than the fetch cap stops the download.
+An image body (by Content-Type or magic bytes) is handed to the image path like
+any other tool-result image, not dumped as text.
 Design: `doc/web_fetch_design.md`)
 
 **Meta** - `tools.list`, `tools.search`, `time.now`, `ui.notify` (progress

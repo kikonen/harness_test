@@ -445,4 +445,71 @@ RSpec.describe Tools::WebFetchTool do
       end
     end
   end
+
+  # issue #451: an image body is NOT text. web.fetch must hand it to the image
+  # path (a ToolResult routed through ImageDelivery) instead of running it
+  # through the line budget, which would be mojibake (doc/encoding_design.md).
+  describe 'an image response (issue #451)' do
+    # A PNG body, no on-disk original (it came from a URL): delivery spills a
+    # copy named for the artifact, so the Image carries a name_hint, not a
+    # reference.
+    it 'returns a ToolResult with a name_hint when the content-type is an image' do
+      Dir.mktmpdir do |dir|
+        tool = granted_tool(dir)
+        png  = ("\x89PNG\r\n\x1A\n".b + 'payload'.b)
+        with_fetcher(tool, result(body: png, type: 'image/png',
+                                  url: 'https://example.com/logo.png'))
+
+        out = tool.execute('url' => 'https://example.com/logo.png')
+
+        expect(out).to be_a(ToolResult)
+        expect(out.text).to include('fetched an image')
+        image = out.images.first
+        expect(image.mime_type).to eq('image/png')
+        expect(image.name_hint).to eq('logo.png')
+        expect(image.reference).to be_nil
+      end
+    end
+
+    # A server that mislabels a PNG as text/plain is still an image: the magic
+    # bytes decide, so it is not dumped into the body as mojibake.
+    it 'detects an image by its magic bytes even when the header lied' do
+      Dir.mktmpdir do |dir|
+        tool = granted_tool(dir)
+        png  = "\x89PNG\r\n\x1A\n".b + 'payload'.b
+        with_fetcher(tool, result(body: png, type: 'text/plain'))
+
+        out = tool.execute('url' => 'https://example.com/thing')
+
+        expect(out).to be_a(ToolResult)
+        expect(out.images.first.mime_type).to eq('image/png')
+      end
+    end
+
+    it 'names the blob for the URL host when the path carries no basename' do
+      Dir.mktmpdir do |dir|
+        tool = granted_tool(dir)
+        with_fetcher(tool, result(body: "\xFF\xD8\xFF".b, type: 'image/jpeg',
+                                  url: 'https://example.com/'))
+
+        out = tool.execute('url' => 'https://example.com/')
+
+        expect(out.images.first.name_hint).to eq('example.com')
+      end
+    end
+
+    # A text page that happens to contain the bytes 'image' in its body stays a
+    # text result: only a real image signature or content-type switches the path.
+    it 'keeps a text body on the text path' do
+      Dir.mktmpdir do |dir|
+        tool = granted_tool(dir)
+        with_fetcher(tool, result(body: 'this page mentions image.png', type: 'text/html'))
+
+        out = tool.execute('url' => 'https://example.com/')
+
+        expect(out).to be_a(String)
+        expect(out).to include('--- body ---')
+      end
+    end
+  end
 end
