@@ -88,6 +88,13 @@ workdir-relative path. `ImageStore#save` sanitizes the name (it comes from a
 remote server's tool list) so no separator or `..` can turn a spill into a
 write outside the store.
 
+`save` names each blob `<server>_<tool>_<index>`, where the index is bumped
+past any file already in the dir. A resumed run reuses its session's dir with a
+fresh counter, so its first spill would otherwise land on a blob the earlier
+run wrote (issue #276); skipping taken indexes means a new spill never clobbers
+a path a saved session already names. Uniqueness is checked against the
+filesystem, not the in-memory counter (which is per-run and resets on resume).
+
 ## The delivery decision (ImageDelivery)
 
 ONE `ImageDelivery` object per turn. Every image is **always spilled** when the

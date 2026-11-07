@@ -45,9 +45,17 @@ class ImageStore
   # image as dropped, which is the truth).
   def save(server:, tool:, mime_type:, bytes:)
     @count += 1
-    name = "#{sanitize(server)}_#{sanitize(tool)}_#{@count}#{extension(mime_type)}"
-    path = File.join(@workdir, @dir, name)
+    stem = "#{sanitize(server)}_#{sanitize(tool)}"
+    ext  = extension(mime_type)
+    path = File.join(@workdir, @dir, "#{stem}_#{@count}#{ext}")
     FileUtils.mkdir_p(File.dirname(path))
+    # A resumed run reuses this session's dir with @count back at 0, so its
+    # first spill would land on a blob from the earlier run (issue #276); skip
+    # any taken index so a new spill never clobbers a path a saved session names.
+    while File.exist?(path)
+      @count += 1
+      path = File.join(@workdir, @dir, "#{stem}_#{@count}#{ext}")
+    end
     File.binwrite(path, bytes.to_s)
     relative_path(path)
   rescue StandardError
