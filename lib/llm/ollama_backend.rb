@@ -20,8 +20,22 @@ module LLM
     # OBJECTS (ToolCallFunctionArguments unmarshals into an ordered map),
     # not the OpenAI string form. Convert the session's string args on the
     # wire; the stored history keeps the canonical string shape.
+    #
+    # issue #449: the native shape carries images as a top-level `images`
+    # list of BARE base64 strings on the message (no data URI, no content
+    # array) - Ollama's own multimodal field. Only for a profile that
+    # declares `vision:`.
     def serialize_messages(messages)
-      messages.map { |m| m[:tool_calls] ? (m.merge(tool_calls: tool_call_args(m))) : m }
+      messages.map do |m|
+        # The canonical `images:` key is this harness' chain shape, not a
+        # wire field: it must never reach the body unconverted.
+        out = m.reject { |key, _| key == :images }
+        out = out.merge(tool_calls: tool_call_args(out)) if out[:tool_calls]
+        payloads = image_payloads(m)
+        next out if payloads.nil?
+
+        out.merge(images: payloads.map { |p| p[:base64] })
+      end
     end
 
     def serialize_args(args)

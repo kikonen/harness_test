@@ -22,6 +22,30 @@ module LLM
 
     private
 
+    # issue #449: a tool result that carried images rides to an
+    # OpenAI-compatible endpoint as a content ARRAY - the schema the
+    # multimodal spec defines for a tool turn (text part plus one
+    # image_url part per image, the data-URI form so no separate upload
+    # endpoint is involved). Only for a profile that declares `vision:`.
+    def serialize_messages(messages)
+      messages.map do |m|
+        payloads = image_payloads(m)
+        # The canonical `images:` key is this harness' chain shape, not a wire
+        # field: it must never reach the body unconverted.
+        out = m.reject { |key, _| key == :images }
+        next out if payloads.nil?
+
+        parts = [{ type: "text", text: m[:content].to_s }]
+        payloads.each do |p|
+          parts << {
+            type: "image_url",
+            image_url: { url: "data:#{p[:mime_type]};base64,#{p[:base64]}" }
+          }
+        end
+        out.merge(content: parts)
+      end
+    end
+
     def build_body(messages, tools, stream: false)
       body = { model: @options[:model], messages: }
 
