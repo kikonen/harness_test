@@ -35,6 +35,15 @@ models:
     #                      # this profile out of a global true (a server or a
     #                      # proxy that mishandles a streamed response).
     #                      # Absent = the global key decides.
+    # vision: false        # THIS MODEL CAN SEE IMAGES (issue #449). Only a
+    #                      # profile that sets it true may be sent a tool-result
+    #                      # image (from an MCP server like Blender); every other
+    #                      # profile gets the bytes spilled to a file and the path
+    #                      # named in text instead. Default false: the harness
+    #                      # never guesses that an unconfigured model can see.
+    # mcp_images:          # per-profile override of the global 'mcp_images'
+    #                      # block below (the inline budget a vision model may
+    #                      # be given). Absent = the global block decides.
 
 # Model used when -m is not given on the command line.
 default_model: local
@@ -102,6 +111,28 @@ auto_save: true
 # fixed 80. The boundary rules (the "---- model ----" line) stay a fixed 80
 # whatever this says. The flag --markdown-width N overrides it.
 # markdown_max_width: 120
+
+# Tool-result images (issue #449): what an MCP server (like Blender) sends as an
+# image content block. Consulted only when the ACTIVE model profile declares
+# vision: - a vision model still has to be told HOW MUCH it may be sent, because
+# base64 costs 4/3 the decoded file size (~1 token per 4 base64 chars, so one
+# real 1.2 MB Blender render is ~410K estimated tokens - more than six times a
+# 65536-token context window). Every image is ALWAYS spilled to 'dir' as native
+# bytes; inlining (base64 into the request the model sees) is the ADDITION a
+# budget allows, never the default. A limit of 0 or a negative value is a config
+# error: a budget is not "no budget", it is a typo.
+# mcp_images:
+#   inline_max_bytes: 1500000 # one image over this many DECODED bytes is spilled
+#                               # to a file instead of inlined.
+#   inline_max_images: 4      # images inlined per single tool result.
+#   inline_max_tokens: 40000  # worst-case token cost of the images inlined into
+#                               # ONE tool result (a TURN budget across its results).
+#   dir: .harness/content     # the harness' own blob store: a saved session names
+#                               # the artifact it was given, so the bytes live with
+#                               # harness state and survive a resume (tmp/ is
+#                               # per-machine scratch, gone in the next session).
+#                               # The model reaches these files with the shell, not
+#                               # the file tools (.harness/ is harness state).
 
 # External MCP servers whose tools the model may call (issue #48, HTTP transport
 # issue #402). Opt-in: omit the key (or leave it empty) and no MCP code runs at

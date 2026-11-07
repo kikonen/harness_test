@@ -348,6 +348,96 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  # issue #449: vision is a property of ONE model, declared in its profile.
+  # The harness never guesses that an unconfigured model can see images, so a
+  # profile that does not say so is text-only.
+  describe 'profile vision key (issue #449)' do
+    it 'defaults a profile to not-declared (false, not nil)' do
+      cfg = described_class.new(models: [{ name: 'plain' }])
+
+      expect(cfg.models.first[:vision]).to be(false)
+    end
+
+    it 'reads an explicit true' do
+      cfg = described_class.new(models: [{ name: 'v', vision: true }])
+
+      expect(cfg.models.first[:vision]).to be(true)
+    end
+
+    it 'treats truthy junk as not declared (the same coercion as every posture)' do
+      cfg = described_class.new(models: [{ name: 'a', vision: 'yes' }])
+
+      expect(cfg.models.first[:vision]).to be(false)
+    end
+
+    it 'mentions the key in the default template (commented out)' do
+      expect(template).to include('vision')
+    end
+  end
+
+  # issue #449: the inline budget a vision model may be given. Half of it is
+  # per-profile so a small-window vision model can be given a smaller budget
+  # than a large one.
+  describe '#mcp_image_limits (issue #449)' do
+    it 'fills every limit with the built-in default when the key is absent' do
+      expect(described_class.new({}).mcp_image_limits)
+        .to eq(described_class::MCP_IMAGE_LIMIT_DEFAULTS)
+    end
+
+    it 'reads the global block, filling only the keys it leaves out' do
+      cfg = described_class.new(mcp_images: { inline_max_images: 2 })
+
+      expect(cfg.mcp_image_limits).to eq(
+        inline_max_bytes:  1_500_000,
+        inline_max_images: 2,
+        inline_max_tokens: 40_000
+      )
+    end
+
+    it 'reads the blob store dir, defaulting to the harness content dir' do
+      expect(described_class.new({}).mcp_images_dir).to eq('.harness/content')
+      expect(described_class.new(mcp_images: { dir: 'build/images' }).mcp_images_dir)
+        .to eq('build/images')
+      expect(described_class.new(mcp_images: { dir: '   ' }).mcp_images_dir)
+        .to eq('.harness/content')
+    end
+
+    it 'mentions the block in the default template (commented out)' do
+      expect(template).to include('mcp_images')
+      expect(template).to include('inline_max_tokens')
+    end
+
+    # A limit is a budget: 0 is not "no images", it is a half-typed block, and a
+    # silent fallback to "inline nothing" would read as a broken MCP image path.
+    it 'refuses a zero or negative limit' do
+      expect { described_class.new(mcp_images: { inline_max_bytes: 0 }) }
+        .to raise_error(HarnessError, /positive integer/)
+      expect { described_class.new(mcp_images: { inline_max_images: -3 }) }
+        .to raise_error(HarnessError, /positive integer/)
+    end
+
+    it 'refuses a non-numeric limit' do
+      expect { described_class.new(mcp_images: { inline_max_images: 'many' }) }
+        .to raise_error(HarnessError, /integer/)
+    end
+
+    # Tri-state like 'streaming': a profile that says nothing must NOT shadow the
+    # global block with the built-in defaults.
+    it 'leaves the profile block nil when absent, and normalizes it when given' do
+      cfg = described_class.new(
+        mcp_images: { inline_max_images: 9 },
+        models: [
+          { name: 'inherited' },
+          { name: 'small', mcp_images: { inline_max_tokens: 2000 } }
+        ])
+
+      expect(cfg.models.first[:mcp_images]).to be_nil
+      expect(cfg.models.last[:mcp_images]).to eq(
+        inline_max_bytes: 1_500_000, inline_max_images: 4, inline_max_tokens: 2000)
+      expect(cfg.mcp_image_limits[:inline_max_images]).to eq(9)
+    end
+  end
+
   # issue #106: markdown rendering of the assistant answer. Opt-in (default OFF):
   # a run with no config keeps the plain verbatim :response.
   describe '#markdown_enabled? (issue #106)' do
