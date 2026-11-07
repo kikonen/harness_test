@@ -650,7 +650,11 @@ class SessionManager
     # model may be given. Read per turn, so a /model switch between a vision and
     # a text profile changes what the next tool result does with its image.
     opts[:vision]           = profile[:vision] == true
-    opts[:mcp_image_limits] = profile[:mcp_images]
+    # A profile with no 'mcp_images:' block says nothing (normalize_models
+    # leaves it nil), so it must inherit the config-level budget rather than
+    # clobber it with nil - #image_limits already prefers the profile's own
+    # block, so only a profile that declares one needs to reach options here.
+    opts[:mcp_image_limits] = profile[:mcp_images] if profile[:mcp_images]
 
     # issue #219: a profile change resets the parameter values above - re-
     # apply any session-level overrides so they keep winning (a /model

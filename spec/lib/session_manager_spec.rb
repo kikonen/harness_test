@@ -1286,4 +1286,26 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
     expect(mgr.vision?).to be(true)
     expect(mgr.image_limits[:inline_max_images]).to eq(3)
   end
+
+  # Resume / /model switch of a profile that declares NO 'mcp_images:' block
+  # (a strata profile inheriting the global budget). apply_profile used to
+  # write profile[:mcp_images] (nil) straight into options, clobbering the
+  # config-level block loaded at startup; image_limits then fell through to
+  # the built-in 40000 default instead of the configured value.
+  it 'apply_profile preserves the config-level budget for a profile with no block' do
+    global = { inline_max_bytes: 1_500_000, inline_max_images: 4, inline_max_tokens: 80_000 }
+    mgr = manager_with(
+      model: 'qwen', active_model: 'plain',
+      mcp_image_limits: global,
+      model_profiles: [
+        { name: 'plain', model: 'qwen' },
+        { name: 'strata', model: 'strata', vision: true, mcp_images: nil }])
+    target = mgr.send(:find_profile, 'strata')
+    mgr.send(:apply_profile, target)
+
+    # The backend reads options[:vision]; ImageDelivery reads image_limits,
+    # whose profile term is now nil and must fall back to the preserved global.
+    expect(mgr.vision?).to be(true)
+    expect(mgr.image_limits[:inline_max_tokens]).to eq(80_000)
+  end
 end
