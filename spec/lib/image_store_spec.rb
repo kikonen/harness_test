@@ -49,6 +49,25 @@ RSpec.describe ImageStore do
       end
     end
 
+    it 'does not clobber a blob from a resumed run that reused the session dir' do
+      # A resume rebuilds the store (fresh @count = 0) but keeps the same dir,
+      # so its first spill would otherwise reuse the earlier run's _1 name.
+      Dir.mktmpdir do |workdir|
+        dir    = '.harness/content/sess-42'
+        before = described_class.new(workdir, dir: dir)
+        before.save(server: 'blender', tool: 'get_screenshot',
+                    mime_type: 'image/png', bytes: 'old'.b)
+
+        after = described_class.new(workdir, dir: dir)
+        relative = after.save(server: 'blender', tool: 'get_screenshot',
+                              mime_type: 'image/png', bytes: 'new'.b)
+
+        expect(relative).to eq("#{dir}/blender_get_screenshot_2.png")
+        expect(File.binread(File.join(workdir, "#{dir}/blender_get_screenshot_1.png")))
+          .to eq('old')
+      end
+    end
+
     it 'creates the store directory when it does not exist yet' do
       store do |store, workdir|
         save(store)
