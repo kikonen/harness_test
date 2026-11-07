@@ -82,9 +82,6 @@ install-idempotency and key-binding specs pin it.
   accessor (set via `Editor.submit_on_enter=`).
 - `LFSubmit` - Ctrl+Enter arriving as LF (byte 10) on a remote host seen
   through Windows Terminal; guarded by the same `PasteGuard`.
-- `CtrlAToggle` - toggles the command-consent MODE on Ctrl+A; the fired flag and
-  new label ride on the module's own accessor for the reader to ack (see
-  `doc/safety_check_design.md` for the MODE itself).
 - `CtrlGHandoff` - Ctrl+G hands the buffer to an external editor; the snapshot
   rides on the module's own accessor, and the READER (not the key patch) spawns
   the editor because Reline must have left raw mode first. Full design:
@@ -95,7 +92,7 @@ install-idempotency and key-binding specs pin it.
 ## Control-key detection
 
 Reline hands a control key's char to `#input_key` as a **one-character String**
-(`"\u0001"` for Ctrl+A, `"\a"` for Ctrl+G), not an Integer; a pasted block
+(`"\a"` for Ctrl+G), not an Integer; a pasted block
 arrives as a longer String whose first byte must not be mistaken for the key.
 `UI::Editor.control_key?(char, byte)` is the ONE rule every intercepted control
 key shares - a new control key costs a byte constant plus one call, not another

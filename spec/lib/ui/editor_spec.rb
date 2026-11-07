@@ -133,25 +133,24 @@ RSpec.describe UI::Editor do
 
   describe 'control_key? (shared rule for every intercepted control key)' do
     it 'matches a one-character String by its byte' do
-      expect(described_class.control_key?("\u0001", UI::Editor::CTRL_A_BYTE)).to be(true)
       expect(described_class.control_key?("\a", UI::Editor::CTRL_G_BYTE)).to be(true)
     end
 
     it 'does NOT match a plain letter String' do
-      expect(described_class.control_key?('a', UI::Editor::CTRL_A_BYTE)).to be(false)
+      expect(described_class.control_key?('g', UI::Editor::CTRL_G_BYTE)).to be(false)
     end
 
     # A pasted block arrives as a String longer than one character whose first
     # byte may happen to be the key's byte; it must not be mistaken for the key.
     it 'does NOT match a multi-character pasted String' do
-      expect(described_class.control_key?("\u0001abc", UI::Editor::CTRL_A_BYTE)).to be(false)
+      expect(described_class.control_key?("\aabc", UI::Editor::CTRL_G_BYTE)).to be(false)
     end
 
     # Accepting an Integer too only lets a spec fake a key the real terminal
     # never sends; the real path is the String above.
     it 'matches an Integer byte (spec-only shape)' do
-      expect(described_class.control_key?(1, UI::Editor::CTRL_A_BYTE)).to be(true)
-      expect(described_class.control_key?(97, UI::Editor::CTRL_A_BYTE)).to be(false)
+      expect(described_class.control_key?(7, UI::Editor::CTRL_G_BYTE)).to be(true)
+      expect(described_class.control_key?(97, UI::Editor::CTRL_G_BYTE)).to be(false)
     end
   end
 end

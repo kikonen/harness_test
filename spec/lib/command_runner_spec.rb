@@ -591,7 +591,7 @@ RSpec.describe CommandRunner do
     end
   end
 
-  # issue #224 follow-up: AUTO-APPROVE mode (live toggle, Ctrl+A). With
+  # issue #224 follow-up: AUTO-APPROVE mode (config-derived). With
   # the posture effective, a verdict of "safe:" skips the consent dialog;
   # "dangerous:" verdicts and missing verdicts still ask.
   context 'auto-approve mode (issue #224 follow-up)' do

@@ -66,7 +66,7 @@ module HelpTopics
         "* MANUAL - every unapproved command asks (the default).",
         "* AUTO-APPROVE - commands the model verdicts \"safe:\" run without " \
           "the dialog (initial posture from config " \
-          "'command_safety_auto_approve'; toggled LIVE with Ctrl+A). A " \
+          "'command_safety_auto_approve', config-derived for the run). A " \
           "\"dangerous:\" verdict or a missing verdict still asks.",
         "* YOLO (/yolo) - every run.command call runs with no dialog and no " \
           "model safety check; each run prints a status line and is logged. " \
@@ -96,7 +96,7 @@ module HelpTopics
           "inert inside a quoted string stops costing a dialog. A config-only opt-in " \
           "('command_safety_auto_approve: denylist' or 'safe_denylist', or the " \
           "separate 'command_safety_denylist_safe_approve: true') - no live toggle, " \
-          "not a Ctrl+A posture, fires only on a real \"safe:\" verdict, and every " \
+          "fires only on a real \"safe:\" verdict, and every " \
           "override is logged naming the verdict."
       ],
       see_also: %w[yolo grant palette]),
@@ -228,10 +228,6 @@ module HelpTopics
           "draft, prefilled at the next prompt (the submit key sends it). In " \
           "the note editor it keeps the text as a draft for the next time the " \
           "editor opens.",
-        "* Ctrl+A - toggle the command consent mode (MANUAL / AUTO-APPROVE) " \
-          "while the safety check is on; works at the idle prompt and inside " \
-          "the note editor (the read closes, an ack line prints, the spinner " \
-          "badge shows the new mode).",
         "* Ctrl+C - cancel the current input, or interrupt a running request.",
         "* Ctrl+D - quit on an empty prompt; inside a note editor it aborts " \
           "the RUNNING turn like Ctrl+C (a note committed before it is still " \

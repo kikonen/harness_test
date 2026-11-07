@@ -20,8 +20,8 @@ class PromptReader
   end
 
   # Returns the submitted command, or nil when the user quits (Ctrl-D on an
-  # empty buffer). Re-prompts on Esc / Ctrl+G / bare Enter / Ctrl+A instead of
-  # returning, so the run loop only ever sees a submitted command or nil.
+  # empty buffer). Re-prompts on Esc / Ctrl+G / bare Enter instead of returning,
+  # so the run loop only ever sees a submitted command or nil.
   def read
     loop do
       harness = @harness.call
@@ -30,16 +30,6 @@ class PromptReader
       result = UI::Editor
         .new(@ui.stdin)
         .read_multiline(prompt: "  ", prefill: @draft)
-
-      # Ctrl+A toggled the consent mode while the prompt was open: ack it and
-      # re-prompt (no command was typed); the next turn's badge shows the mode.
-      if UI::RelinePatch::CtrlAToggle.fired
-        label = UI::RelinePatch::CtrlAToggle.label
-        UI::RelinePatch::CtrlAToggle.reset!
-        @ui.puts label.nil? ? "  (command mode toggle unavailable - safety check off)" \
-                            : "  [mode is now #{label}]"
-        next
-      end
 
       case result.status
       when :eof

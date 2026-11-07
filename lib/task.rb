@@ -372,7 +372,7 @@ class Task
     detail  = task.spinner_detail || {}
     spinner = UI::Spinner.new(detail[:message] || DEFAULT_SPINNER_MESSAGE,
                               detail[:suffix], ui: task.ui)
-    # A live badge so a mid-turn /yolo or Ctrl+A toggle is visible at once.
+    # A live badge so a mid-turn /yolo toggle is visible at once.
     harness = task.harness
     if harness.respond_to?(:command_mode_label) || harness.respond_to?(:stream_mode_label) ||
         harness.respond_to?(:plan_mode_label)
@@ -387,7 +387,7 @@ class Task
 
   # The spinner's posture tags: one bracket per NON-default posture (the command
   # consent mode, the streaming mode, the planning mode). Re-read every frame, so
-  # a mid-turn /yolo, Ctrl+A, /stream or /plan toggle shows at once.
+  # a mid-turn /yolo, /stream or /plan toggle shows at once.
   def self.mode_badge(harness)
     tags = []
     label = harness.command_mode_label if harness.respond_to?(:command_mode_label)
@@ -424,14 +424,6 @@ class Task
     task.clear_all_spinners
 
     result = task.note_editor.read_multiline(prefill: task.instance_variable_get(:@note_draft))
-    # Ctrl+A toggled the command-consent mode while the editor was open:
-    # ack it and return (no note was typed).
-    if UI::RelinePatch::CtrlAToggle.fired
-      label = UI::RelinePatch::CtrlAToggle.label
-      UI::RelinePatch::CtrlAToggle.reset!
-      ack_command_mode(task, label)
-      return
-    end
     case result.status
     when :submitted
       task.instance_variable_set(:@note_draft, nil)
@@ -490,14 +482,6 @@ class Task
     # which is falsy - returning it would make "/yolo" look like "no
     # gesture" and inject the command into the conversation chain.
     m[1] ? m[1].downcase.to_sym : :toggle
-  end
-
-  def self.ack_command_mode(task, label)
-    ui = task.ui
-    line = label.nil? ? "  [mode toggle unavailable]" \
-                      : "  [mode is now #{label}]"
-    ui.puts(line)
-    task.buffer.put(type: :text, origin: :user_note, content: line)
   end
 
   def self.handle_request(task, msg)

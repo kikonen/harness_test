@@ -56,7 +56,7 @@ mishandles a streamed response needs no config at all.
 
 `request_chain` reads `stream?` inside the tool loop, once per request, so a
 mid-turn `/stream` toggle applies to the NEXT request, not the one already in
-flight. The same rule as the Ctrl+A / `/yolo` badges: state is re-read every
+flight. The same rule as the `/yolo` badges: state is re-read every
 frame / every request, never cached for the duration of a turn.
 
 The live tail belongs to ONE request. `@stream_preview` is set at the start of

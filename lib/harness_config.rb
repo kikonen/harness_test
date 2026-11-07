@@ -105,10 +105,10 @@ require_relative "image_store"
 #                                       # an enum: manual | safe | denylist |
 #                                       # safe_denylist (a legacy true/false reads
 #                                       # as safe/manual). safe: a "safe:" verdict
-#                                       # skips the dialog (toggled live with Ctrl+A,
-#                                       # issue #224 follow-up). denylist: a "safe:"
+#                                       # skips the dialog (config-only, issue #224
+#                                       # follow-up). denylist: a "safe:"
 #                                       # verdict may also auto-approve a DENYLISTED
-#                                       # command - config-only, never Ctrl+A
+#                                       # command - config-only, no live toggle
 #                                       # (issue #389).
 #   command_safety_denylist_safe_approve: true  # that same half on its own, if you
 #                                       # prefer two boolean keys (ORed into the enum)
@@ -351,8 +351,8 @@ class HarnessConfig
   end
 
   # issue #224 follow-up: the initial command consent posture for the
-  # safety check (MANUAL or AUTO-APPROVE; toggled live with Ctrl+A during
-  # a session). Only meaningful with command_safety_check on.
+  # safety check (MANUAL or AUTO-APPROVE; config-derived for the whole run).
+  # Only meaningful with command_safety_check on.
   def command_safety_auto_approve_enabled
     @command_safety_auto_approve == true
   end

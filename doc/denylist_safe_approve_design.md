@@ -139,11 +139,10 @@ how an unflagged command is handled. The startup banner does name it
 for the same reason it names the floor next to YOLO: a relaxed run must never be
 mistaken for a normal one.
 
-It is CONFIG-ONLY, unlike `yolo` and the Ctrl+A mode:
+It is CONFIG-ONLY, unlike `yolo`:
 
-- no slash command and no Ctrl+A path. Ctrl+A toggles one posture between two
-  states; a floor relaxation reachable from a keystroke is the failure mode the
-  floor exists to prevent;
+- no live toggle at all; a floor relaxation reachable from a keystroke is the
+  failure mode the floor exists to prevent;
 - no session persistence and no resume restore, so a resumed session cannot be
   more permissive than the config the operator wrote;
 - `CommandRunner#denylist_safe_override?` reads `@options` only, so the value

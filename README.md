@@ -25,7 +25,7 @@ scoped to a working directory you choose.
   full command before running it and requires an explicit "Allow" every
   single time, unless its prefix is already in the allowlist or the
   consent posture you picked accepts it: AUTO-APPROVE (a model "safe:"
-  verdict, `Ctrl+A`) or YOLO (no consent at all, `/yolo`, issue #221). In
+  verdict, config `command_safety_auto_approve`) or YOLO (no consent at all, `/yolo`, issue #221). In
   EVERY posture a well-known disaster command (`rm -rf`, `sudo`,
   `git push -f`, `curl | sh`, `format C:`, ...) is refused auto-approval and
   always asks - the denylist is the floor under all three postures. The one
@@ -190,8 +190,7 @@ command's accepted forms and `/help <topic>` one topic (keys, consent postures,
 multiline input, sessions, ...) - the help text is generated from the command
 registry (`doc/command_help_design.md`).
 Multiline input: paste a block; the submit key sends it (Enter adds a newline).
-Keys: `Ctrl+C` cancel/interrupt, `Ctrl+D` quit (empty prompt), `Ctrl+A`
-toggle the command consent mode (MANUAL / AUTO-APPROVE, issue #224),
+Keys: `Ctrl+C` cancel/interrupt, `Ctrl+D` quit (empty prompt),
 `Ctrl+G` write the buffer you are typing out to the external editor and take it
 back as the draft (issue #298; `editor:` in the config, `--editor`, or
 `$HARNESS_EDITOR`/`$EDITOR` - `doc/external_editor.md`),

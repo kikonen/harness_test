@@ -12,7 +12,7 @@ RSpec.describe UI::RelinePatch::EscCancel do
       .to include(UI::RelinePatch::EscCancel)
   end
 
-  # Feeds bytes through Reline's own expansion, like the Ctrl+A/Ctrl+G specs do,
+  # Feeds bytes through Reline's own expansion, like the Ctrl+G specs do,
   # and reports what the patch left behind.
   def esc_feed(bytes, pending: false)
     UI::Editor.install_reline_patches!

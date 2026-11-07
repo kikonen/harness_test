@@ -399,7 +399,7 @@ class CommandRunner
     verdict && verdict[command]
   end
 
-  # issue #224 follow-up: AUTO-APPROVE MODE (toggled live with Ctrl+A).
+  # issue #224 follow-up: AUTO-APPROVE MODE (config-derived, no live toggle).
   # ON only when the harness has BOTH the safety check enabled and the
   # session's consent posture set to auto-approve (see
   # Harness#command_safety_auto_approve_effective?). No harness (specs
