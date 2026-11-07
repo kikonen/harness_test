@@ -8,28 +8,20 @@ require 'mcp/server_connection'
 require 'mcp'
 
 RSpec.describe Mcp::ServerConnection do
-  describe '.content_to_text (tools/call result flattening)' do
+  describe '.content_to_result (tools/call result flattening)' do
     it 'joins text content blocks with newlines' do
       response = { 'result' => { 'content' => [
         { 'type' => 'text', 'text' => 'line one' },
         { 'type' => 'text', 'text' => 'line two' }
       ] } }
 
-      expect(described_class.content_to_text(response)).to eq("line one\nline two")
+      expect(described_class.content_to_result(response, server_name: 'srv', tool_name: 't')).to eq("line one\nline two")
     end
 
     it 'accepts a bare result (no JSON-RPC envelope wrapper)' do
       response = { 'content' => [{ 'type' => 'text', 'text' => 'direct' }] }
 
-      expect(described_class.content_to_text(response)).to eq('direct')
-    end
-
-    it 'names an image block instead of dumping base64 into the chain' do
-      response = { 'result' => { 'content' => [
-        { 'type' => 'image', 'mimeType' => 'image/png', 'data' => 'base64...' }
-      ] } }
-
-      expect(described_class.content_to_text(response)).to eq('[image: image/png]')
+      expect(described_class.content_to_result(response, server_name: 'srv', tool_name: 't')).to eq('direct')
     end
 
     it 'inlines a resource block with text, or names it by uri when it has none' do
@@ -40,8 +32,8 @@ RSpec.describe Mcp::ServerConnection do
         { 'type' => 'resource', 'resource' => { 'uri' => 'file:/b' } }
       ] } }
 
-      expect(described_class.content_to_text(with_text)).to eq('body')
-      expect(described_class.content_to_text(without_text)).to eq('[resource: file:/b]')
+      expect(described_class.content_to_result(with_text, server_name: 'srv', tool_name: 't')).to eq('body')
+      expect(described_class.content_to_result(without_text, server_name: 'srv', tool_name: 't')).to eq('[resource: file:/b]')
     end
 
     it 'compacts an unknown block type to JSON' do
@@ -49,30 +41,85 @@ RSpec.describe Mcp::ServerConnection do
         { 'type' => 'audio', 'data' => 'x' }
       ] } }
 
-      expect(described_class.content_to_text(response)).to eq('{"type":"audio","data":"x"}')
+      expect(described_class.content_to_result(response, server_name: 'srv', tool_name: 't')).to eq('{"type":"audio","data":"x"}')
     end
 
     it 'reports the server\'s own error text when isError is set' do
       response = { 'result' => { 'content' => [{ 'type' => 'text', 'text' => 'boom' }],
                                  'isError' => true } }
 
-      expect(described_class.content_to_text(response)).to eq('error: boom')
+      expect(described_class.content_to_result(response, server_name: 'srv', tool_name: 't')).to eq('error: boom')
     end
 
     it 'reports a generic error when isError is set with no text' do
       response = { 'result' => { 'content' => [], 'isError' => true } }
 
-      expect(described_class.content_to_text(response)).to eq('error: MCP tool reported an error')
+      expect(described_class.content_to_result(response, server_name: 'srv', tool_name: 't')).to eq('error: MCP tool reported an error')
     end
 
     it 'reports an error when the result is nil' do
-      expect(described_class.content_to_text(nil)).to eq('error: MCP tool returned no result')
+      expect(described_class.content_to_result(nil, server_name: 'srv', tool_name: 't')).to eq('error: MCP tool returned no result')
     end
 
     it 'returns an empty string for a successful call with no content' do
       response = { 'result' => { 'content' => [] } }
 
-      expect(described_class.content_to_text(response)).to eq('')
+      expect(described_class.content_to_result(response, server_name: 'srv', tool_name: 't')).to eq('')
+    end
+
+    # issue #449: an image block must reach the harness as BYTES, not as a
+    # label. Collapsing it here is what made every Blender screenshot read as
+    # "[image: image/png]" with no pixels.
+    describe 'image blocks' do
+      def png_data
+        Base64.strict_encode64("\x89PNG\r\n\x1a\n".b)
+      end
+
+      def with_image(mime_key)
+        { 'result' => { 'content' => [
+          { 'type' => 'text', 'text' => 'shot' },
+          { 'type' => 'image', mime_key => 'image/png', 'data' => png_data }
+        ] } }
+      end
+
+      it 'returns a ToolResult carrying the decoded bytes beside the text' do
+        result = described_class.content_to_result(
+          with_image('mimeType'), server_name: 'blender', tool_name: 'screenshot')
+
+        expect(result).to be_a(ToolResult)
+        expect(result.text).to eq('shot')
+        expect(result.images.size).to eq(1)
+        image = result.images.first
+        expect(image.server).to eq('blender')
+        expect(image.tool).to eq('screenshot')
+        expect(image.mime_type).to eq('image/png')
+        expect(image.bytes).to eq("\x89PNG\r\n\x1a\n".b)
+      end
+
+      # mcp 1.8.2 hands the client the gem's keyword spelling, not the wire's.
+      it 'reads the snake_case mime key the mcp gem hands the client' do
+        result = described_class.content_to_result(
+          with_image('mime_type'), server_name: 'srv', tool_name: 't')
+
+        expect(result.images.first.mime_type).to eq('image/png')
+      end
+
+      it 'names an image whose data will not decode instead of dropping it' do
+        response = { 'result' => { 'content' => [
+          { 'type' => 'image', 'mimeType' => 'image/png', 'data' => '!!!not base64!!!' }
+        ] } }
+
+        result = described_class.content_to_result(response, server_name: 'srv', tool_name: 't')
+
+        expect(result).to eq('[image: image/png - its data did not decode]')
+      end
+
+      it 'names an image block that arrived with no data at all' do
+        response = { 'result' => { 'content' => [{ 'type' => 'image', 'mimeType' => 'image/png' }] } }
+
+        expect(described_class.content_to_result(response, server_name: 'srv', tool_name: 't'))
+          .to eq('[image: image/png - its data did not decode]')
+      end
     end
   end
 
