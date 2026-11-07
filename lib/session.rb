@@ -302,9 +302,23 @@ class Session
   # included). Used by the live spinner indicator, which may need to measure
   # a local working chain that is not yet part of this session (issue #126,
   # in-loop compaction). Returns an integer token count.
+  #
+  # A message may carry `images:` - base64 payloads a vision request will send
+  # (issue #449). They are counted as their base64 length, not ignored: an
+  # uncounted 1.6 MB data URI is four times a 65536-token window and the
+  # compact trigger would never fire for the one thing that overflows it.
   def estimate_tokens(messages)
-    chars = messages.sum { |m| m[:content].to_s.length }
+    chars = messages.sum do |m|
+      m[:content].to_s.length + image_chars(m)
+    end
     (chars / EST_CHARS_PER_TOKEN).ceil
+  end
+
+  # Base64 characters one message's images cost on the wire.
+  def image_chars(message)
+    Array(message[:images]).sum do |img|
+      (img[:base64] || img["base64"]).to_s.length
+    end
   end
 
   # Token estimate for an explicit chain, ANCHORED to the last

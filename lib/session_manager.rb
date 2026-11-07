@@ -7,6 +7,7 @@ require_relative "harness_error"
 require_relative "session_locator"
 require_relative "param_overrides"
 require_relative "error_text"
+require_relative "harness_config"
 
 # Manages all session-related logic: prompt flow, compaction, rules file,
 # model switching, and persistence (save/resume/list).
@@ -554,6 +555,28 @@ class SessionManager
     Array(@harness.options[:model_profiles])
   end
 
+  # The profile the active model resolved to (nil when no profiles are
+  # configured, or the model was set by -m to a raw id). issue #449.
+  def active_profile
+    find_profile(active_model_name)
+  end
+
+  # True when the ACTIVE model can be sent images: only a profile that declares
+  # 'vision: true' in the config. No profiles configured = a raw model id the
+  # harness knows nothing about = text-only (the safe reading of an unknown).
+  def vision?
+    active_profile&.fetch(:vision, false) == true
+  end
+
+  # The image inline budget in force for this run: the active profile's own
+  # 'mcp_images:' block, else the config-level one, else the built-in defaults
+  # (HarnessConfig#normalize_mcp_images fills every key).
+  def image_limits
+    (active_profile&.dig(:mcp_images)) ||
+      @harness.options[:mcp_image_limits] ||
+      HarnessConfig::MCP_IMAGE_LIMIT_DEFAULTS
+  end
+
   # Name (or id) of the configured default model, or nil.
   def default_model_name
     @harness.options[:default_model]
@@ -623,6 +646,11 @@ class SessionManager
     opts[:presence_penalty] = profile[:presence_penalty]
     opts[:repeat_penalty]   = profile[:repeat_penalty]
     opts[:active_model]     = profile[:name] || profile[:model]
+    # issue #449: whether THIS model can see images, and the budget a vision
+    # model may be given. Read per turn, so a /model switch between a vision and
+    # a text profile changes what the next tool result does with its image.
+    opts[:vision]           = profile[:vision] == true
+    opts[:mcp_image_limits] = profile[:mcp_images]
 
     # issue #219: a profile change resets the parameter values above - re-
     # apply any session-level overrides so they keep winning (a /model

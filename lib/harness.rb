@@ -66,6 +66,9 @@ require_relative "text_normalizer"
 require_relative "error_text"
 require_relative "mcp/manager"
 require_relative "sandbox_gemfile"
+require_relative "tool_result"
+require_relative "image_store"
+require_relative "image_delivery"
 
 # -- Harness --------------------------------------------------------------
 
@@ -104,6 +107,8 @@ class Harness
   # startup notes (issue #48). The MCP machinery lives there, not in Harness.
   # sandbox_gemfile: the harness-seeded, model-managed project Ruby sandbox
   # (issue #340). doc/sandbox_gemfile_design.md.
+  # image_store: the harness' own blob store for tool-result images
+  # (issue #449). doc/mcp_images_design.md.
   attr_reader :options,
     :logger,
     :sandbox_gemfile,
@@ -116,7 +121,8 @@ class Harness
     :memories,
     :plans,
     :rules_repair_note,
-    :mcp
+    :mcp,
+    :image_store
 
   attr_accessor :history
 
@@ -229,6 +235,12 @@ class Harness
     # gates nothing. The initial value comes from the config like streaming;
     # /plan switches it live.
     @plan = options[:plan] == true
+
+    # The blob store for tool-result images (issue #449): the harness' own
+    # content dir under THIS session's id, so a path a saved session names still
+    # resolves when that session is resumed.
+    @image_store = ImageStore.new(
+      @file_list.workdir, dir: image_content_dir(@session.session_id))
 
     # The rate of the request that last completed, for the spinner's "recent"
     # segment (issue #285). nil until a request of THIS process has finished;
@@ -505,6 +517,35 @@ class Harness
     @plan ? "PLAN" : nil
   end
 
+  # -- Tool-result images (issue #449) --------------------------------------
+  #
+  # Built per TURN: the inline budget it carries is turn-scoped and must not
+  # leak into the next turn. Whether the model may see images at all is a
+  # PROFILE fact (SessionManager#vision?), so a /model switch between a vision
+  # profile and a text profile changes what the NEXT tool result does with its
+  # image - the harness never guesses that an unconfigured model can see.
+  def image_delivery
+    limits = @session_manager.image_limits
+    ImageDelivery.new(
+      vision: vision?,
+      store: @image_store,
+      max_inline_bytes: limits[:inline_max_bytes],
+      max_inline_images: limits[:inline_max_images],
+      max_inline_tokens: limits[:inline_max_tokens])
+  end
+
+  # True when the ACTIVE model may be sent images (startup banner, /model,
+  # the delivery decision).
+  def vision?
+    @session_manager.vision?
+  end
+
+  # Workdir-relative blob dir for one session id.
+  def image_content_dir(session_id)
+    base = options[:mcp_images_dir] || ImageStore::DEFAULT_DIR
+    File.join(base, session_id.to_s)
+  end
+
   # The live tail of the answer currently streaming, for the spinner suffix.
   # nil when nothing has arrived yet (prefill) or when not streaming - the
   # caller then shows the waiting line (context + the last request's rate,
@@ -713,6 +754,12 @@ class Harness
     loop_hard_break = false
     total_usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
 
+    # One ImageDelivery per turn: its inline budget is turn-scoped (issue #449).
+    # Tool results that carried images append base64 to the WORKING chain only
+    # - the token estimate and the compact trigger must see the cost - and the
+    # payload is stripped as soon as a request has carried it (see #sent_images).
+    delivery = image_delivery
+
     # The LAST call's prompt_tokens is the context size: each call already
     # carries the history, so summing over counts.
     last_prompt_tokens = 0
@@ -747,6 +794,12 @@ class Harness
 
       data    = request_chain(messages, tools)
       message = data[:choices][0][:message]
+
+      # The image payloads this request carried have been SEEN by the model.
+      # Keeping them would re-send the same megabytes in every later request of
+      # the turn (issue #449); the text beside them - which names the stored
+      # file - is what survives.
+      strip_image_payloads(messages)
 
       print_step_display(iteration, message) if message[:tool_calls]
 
@@ -804,13 +857,10 @@ class Harness
         # Single run.command calls check themselves inside CommandRunner.
         precheck_batch_safety(message[:tool_calls])
         message[:tool_calls].each do |tc|
-          result = execute_tool_call(tc, truncated:)
-          record_note(tc, result)
-          messages << {
-            role: "tool",
-            tool_call_id: tc[:id],
-            content: result
-          }
+          raw = execute_tool_call(tc, truncated:)
+          tool_msg = tool_result_message(tc, raw, delivery)
+          record_note(tc, tool_msg[:content])
+          messages << tool_msg
         end
 
         # The model cannot see this harness' token budget, so the cut is named
@@ -861,6 +911,9 @@ class Harness
       @session.flush_notes
       @session.record_stats(stats)
       @session.record_reasoning(message[:reasoning])
+      # A committed chain is text state: no base64 belongs in it or in a
+      # session file (issue #449).
+      strip_image_payloads(messages)
 
       return {
         reasoning: message[:reasoning],
@@ -868,6 +921,50 @@ class Harness
         stats:
       }
     end
+  end
+
+  # Turn a tool's raw result into the message that goes into the chain
+  # (issue #449). A String result is the ordinary case and passes through
+  # untouched. A ToolResult (an MCP server returned image blocks) is handed to
+  # this turn's ImageDelivery, which names each image's fate in the text and
+  # returns the base64 payloads a vision request may carry.
+  def tool_result_message(tool_call, raw, delivery)
+    msg = { role: "tool", tool_call_id: tool_call[:id], content: raw.to_s }
+    return msg unless raw.is_a?(ToolResult)
+
+    decisions = delivery.plan(raw)
+    msg[:content] = append_image_notes(msg[:content], delivery.describe(decisions))
+    payloads = delivery.inlineable?(decisions).map do |decision|
+      {
+        mime_type: decision.image.mime_type,
+        base64: ImageDelivery.base64_of(decision)
+      }
+    end
+    msg[:images] = payloads unless payloads.empty?
+    log_image_decision(tool_call[:function][:name], decisions)
+    msg
+  end
+
+  def append_image_notes(text, notes)
+    return text if notes.to_s.empty?
+    return notes if text.to_s.empty?
+
+    "#{text}\n#{notes}"
+  end
+
+  # Every image decision is logged - inline or not - because "the model cannot
+  # see it" is a fact the user needs when the answer looks blind to a screenshot.
+  def log_image_decision(tool_name, decisions)
+    decisions.each do |d|
+      detail = d.inline? ? "inlined" : "#{d.mode} (#{d.reason})"
+      logger.info "tool #{tool_name} image: #{d.image.mime_type} #{d.image.byte_size}B -> #{detail}"
+    end
+  end
+
+  # Drop the base64 payloads from a chain once they have been sent (or the turn
+  # has committed). The text that names the stored file stays.
+  def strip_image_payloads(messages)
+    messages.each { |m| m.delete(:images) }
   end
 
   # Buffer the note fact so it survives the transient tool result and reaches
@@ -1157,7 +1254,10 @@ class Harness
       logger.info "tool #{func_name} → #{result}"
       # A byte invalid in UTF-8 would make the NEXT JSON.generate raise -
       # including the save that should record the failure.
-      TextNormalizer.normalize(result)
+      # A ToolResult is normalized where its text is built (ToolResult#new) and
+      # carries raw image bytes beside it - normalizing the OBJECT would flatten
+      # it to its #to_s and lose the images (issue #449).
+      result.is_a?(ToolResult) ? result : TextNormalizer.normalize(result)
     rescue => e
       logger.error ErrorText.detailed(e, "tool #{func_name} failed")
       "error: #{ErrorText.label(e)}"

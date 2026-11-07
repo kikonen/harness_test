@@ -1194,3 +1194,96 @@ RSpec.describe SessionManager, '#retry (issue #208)' do
     expect(harness.discarded).to be_nil
   end
 end
+
+# issue #449: image support is a property of the ACTIVE model profile, read per
+# turn, so a /model switch between a vision and a text profile changes what the
+# next tool result does with its image. No profiles configured = a raw model id
+# the harness knows nothing about = text-only (the safe reading of an unknown).
+RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
+  let(:session) { Session.new('system prompt') }
+  let(:file_list) { FileList.new([], workdir: Dir.pwd) }
+  let(:backend) { double('backend', api_type: :openai, endpoint_path: '/chat/completions') }
+  let(:client) { double('client', chat: nil, backend: backend) }
+
+  def manager_with(options)
+    harness = Class.new do
+      attr_reader :options, :logger, :session, :client, :history
+      def initialize(session, client, options)
+        @session = session
+        @client  = client
+        @options = options
+        @logger  = Logger.new(File::NULL)
+        @history = nil
+      end
+      def forget_last_rate; end
+    end.new(session, client, options)
+    described_class.new(harness, file_list)
+  end
+
+  it 'is text-only when no profiles are configured (a raw -m id)' do
+    mgr = manager_with(model: 'some-model', active_model: nil)
+
+    expect(mgr.active_profile).to be_nil
+    expect(mgr.vision?).to be(false)
+  end
+
+  it 'is text-only for a profile that did not declare vision' do
+    mgr = manager_with(
+      model: 'qwen', active_model: 'local',
+      model_profiles: [{ name: 'local', model: 'qwen', vision: false }])
+
+    expect(mgr.vision?).to be(false)
+  end
+
+  it 'reports vision for the active profile that declared it' do
+    mgr = manager_with(
+      model: 'vision', active_model: 'v',
+      model_profiles: [{ name: 'v', model: 'vis', vision: true }])
+
+    expect(mgr.vision?).to be(true)
+  end
+
+  it 'takes the image limits from the active profile when it declares its own' do
+    mgr = manager_with(
+      model: 'vis', active_model: 'v',
+      model_profiles: [
+        { name: 'v', model: 'vis', vision: true,
+          mcp_images: { inline_max_bytes: 900, inline_max_images: 1, inline_max_tokens: 200 } }])
+
+    expect(mgr.image_limits).to eq(
+      inline_max_bytes: 900, inline_max_images: 1, inline_max_tokens: 200)
+  end
+
+  it 'falls back to the config-level limits when the profile says nothing' do
+    mgr = manager_with(
+      model: 'vis', active_model: 'v',
+      mcp_image_limits: { inline_max_bytes: 500, inline_max_images: 2, inline_max_tokens: 100 },
+      model_profiles: [{ name: 'v', model: 'vis', vision: true, mcp_images: nil }])
+
+    expect(mgr.image_limits).to eq(
+      inline_max_bytes: 500, inline_max_images: 2, inline_max_tokens: 100)
+  end
+
+  it 'falls back to the built-in defaults when neither names a budget' do
+    mgr = manager_with(model: 'vis', active_model: 'v',
+                       model_profiles: [{ name: 'v', model: 'vis', vision: true }])
+
+    expect(mgr.image_limits).to eq(HarnessConfig::MCP_IMAGE_LIMIT_DEFAULTS)
+  end
+
+  # A /model switch propagates the profile's vision flag and budget into the
+  # shared options hash so the backend and the per-turn ImageDelivery see them.
+  it 'apply_profile propagates vision and the image budget' do
+    mgr = manager_with(model: 'qwen', active_model: 'plain',
+                       model_profiles: [
+                         { name: 'plain', model: 'qwen' },
+                         { name: 'eyes', model: 'vis', vision: true,
+                           mcp_images: { inline_max_images: 3 } }])
+    target = mgr.send(:find_profile, 'eyes')
+    mgr.send(:apply_profile, target)
+
+    # The backend reads options[:vision]; ImageDelivery reads image_limits.
+    expect(mgr.vision?).to be(true)
+    expect(mgr.image_limits[:inline_max_images]).to eq(3)
+  end
+end
