@@ -138,7 +138,8 @@ remote server are worth naming:
 
 - its `tools/list` answers with **arbitrary tool schemas** that go straight into
   `tools_payload`, and its `tools/call` answers with **arbitrary result text**
-  that goes straight into the model chain (only base64 images are withheld).
+  that goes straight into the model chain (an image block never does: its bytes
+  go to the blob store and the model gets their path - doc/mcp_images_design.md).
   Nothing validates either side.
 - an MCP url is **not** a `web.fetch` host. The two consent axes stay separate:
   `web.fetch`'s `allowed_hosts.yml` grant and its address guards (loopback /
@@ -154,10 +155,12 @@ not apply to the call itself; nothing here weakens that denylist.
 A server-returned error (which the gem raises as `MCP::Client::ServerError`) and
 any transport failure both become an `"error: ..."` string out of
 `ServerConnection#call_tool` - never a raise out of `execute`, so one bad server
-cannot break the turn. `content_to_text` flattens a `tools/call` result: text
-blocks are joined, an image block is named (base64 in the chain is huge and
-useless to the model), a resource block is inlined or named by uri, an unknown
-block is compacted to JSON, and `isError` answers with the server's own text.
+cannot break the turn. `content_to_result` flattens a `tools/call` result: text
+blocks are joined, a resource block is inlined or named by uri, an unknown block
+is compacted to JSON, and `isError` answers with the server's own text. An IMAGE
+block is decoded into a `ToolResult` instead of being collapsed to a label - it
+is not this method's decision what the model is then given (issue #449,
+doc/mcp_images_design.md).
 
 ## What MCP tools never touch
 
