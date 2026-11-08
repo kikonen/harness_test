@@ -201,6 +201,9 @@ class CommandHandler
   # renders everything on the main thread - including spinner frames.
   # The shared wrapper lives in TaskRunner (issue #235: /retry reuses it).
   def run_direct_prompt(text)
+    # The user's own line is one side of the exchange the resume replay
+    # redraws; the harness records it in the run OutputBuffer (issue #458).
+    @harness.record_user_prompt(text) if @harness.respond_to?(:record_user_prompt)
     run_on_task do |_t|
       @harness.session_manager.run_prompt(text)
     end

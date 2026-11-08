@@ -63,6 +63,33 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  # issue #458: how many OutputBuffer entries a RESUMED run redraws at startup.
+  # nil (key absent) = the built-in default (Harness::DEFAULT_RESUME_REPLAY_ENTRIES);
+  # 0 is a legitimate value that disables the redraw, so it must survive as 0.
+  describe '#resume_replay_entries (issue #458)' do
+    it 'defaults to nil when the key is absent (the built-in default applies)' do
+      expect(described_class.new({}).resume_replay_entries).to be_nil
+      expect(described_class.new(resume: {}).resume_replay_entries).to be_nil
+    end
+
+    it 'reads the resume.replay_entries key' do
+      expect(described_class.new(resume: { replay_entries: 12 }).resume_replay_entries).to eq(12)
+    end
+
+    it 'keeps 0 (an explicit disable), distinct from nil' do
+      expect(described_class.new(resume: { replay_entries: 0 }).resume_replay_entries).to eq(0)
+    end
+
+    it 'raises on a non-integer value' do
+      expect { described_class.new(resume: { replay_entries: 'many' }) }
+        .to raise_error(HarnessError, /expected an integer/)
+    end
+
+    it 'mentions the key in the default template (commented out)' do
+      expect(template).to include('replay_entries')
+    end
+  end
+
   describe '#max_tool_iterations (issue #226)' do
     it 'defaults to nil when the key is absent (built-in default applies)' do
       expect(described_class.new({}).max_tool_iterations).to be_nil

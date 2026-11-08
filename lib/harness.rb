@@ -13,6 +13,7 @@ require_relative "tool"
 require_relative "llm_client"
 require_relative "file_list"
 require_relative "session"
+require_relative "output_buffer"
 require_relative "memories"
 require_relative "session_locator"
 require_relative "plans"
@@ -82,6 +83,11 @@ class Harness
   # After this many consecutive tool-call iterations, force-break and return whatever we have
   TOOL_LOOP_HARD_LIMIT = 20
 
+  # How many entries of the run's OutputBuffer tail are saved with a session
+  # and redrawn when that session is resumed (issue #458). 0 disables the
+  # replay entirely. Overridden by the config 'resume: replay_entries:' key.
+  DEFAULT_RESUME_REPLAY_ENTRIES = 30
+
   # The two NORMAL ends of an answer; every other value a server reports
   # ('length', 'content_filter', one this harness has never seen) gets a line.
   # What each endpoint reports: doc/truncation_design.md.
@@ -127,6 +133,13 @@ class Harness
 
   attr_accessor :history
 
+  # The single record of everything this run shows the user (issue #458): the
+  # model/tool side harvested from each turn's Task buffer plus the user's own
+  # submitted lines. It is the durable, re-renderable log #146 wants - replay
+  # at resume is just a redraw of its tail through UI::Renderer. Main-thread
+  # only, like OutputBuffer itself.
+  attr_reader :output_log
+
   # Only one note is in flight: a new assignment replaces the note that has
   # not been injected yet - the latest line wins.
   def user_note_text=(text)
@@ -171,6 +184,13 @@ class Harness
     # by plan.* and /plans so the two sides cannot drift apart.
     @plans         = Plans.new(file_list.workdir)
 
+    # The run's single record of everything shown to the user (issue #458):
+    # harvested from each turn's Task buffer plus the user's own submitted
+    # lines. A resumed run seeds its tail from the saved session so the banner
+    # can redraw the last topic. Main-thread only, like OutputBuffer itself.
+    @replay_limit  = resume_replay_entries
+    @output_log    = OutputBuffer.new
+
     if resume_data
       saved_id = resume_data[:session_id]
       if saved_id && saved_id != session_id
@@ -178,6 +198,7 @@ class Harness
           "session file says id #{saved_id} but it is stored under #{session_id}"
       end
       @session.restore(resume_data, @file_list)
+      @output_log.restore(resume_data[:replay_tail]) if @replay_limit.positive?
     end
 
     @user_note     = nil
@@ -1081,7 +1102,47 @@ class Harness
     @mcp.connected_summary
   end
 
+  # -- Run OutputBuffer (issue #458) ----------------------------------------
+  #
+  # The buffer is the record, not a mechanism: a user line is just another
+  # entry, and replay is a redraw of the tail. Main-thread only.
+
+  # Record the user's own submitted line in the run's OutputBuffer. It is a
+  # first-class ROLE (type :user, not a plain :text) so UI::Renderer labels it
+  # 'user:' on the replay redraw - the both-sides record #146 asks for.
+  def record_user_prompt(text)
+    return if @replay_limit.zero?
+
+    @output_log.put(type: :user, origin: :user, content: text.to_s)
+    @output_log.keep_tail(@replay_limit)
+  end
+
+  # After a turn finishes, harvest its Task buffer's replayable tail into the
+  # run OutputBuffer (the model/tool side). :spinner_detail is skipped - it
+  # animates, it is never a rendered line.
+  def absorb_turn(task)
+    return if @replay_limit.zero? || task.nil?
+
+    task.buffer.replay_tail(@replay_limit).each do |entry|
+      @output_log.put(type: entry.type, origin: entry.origin, content: entry.content)
+    end
+    @output_log.keep_tail(@replay_limit)
+  end
+
+  # The saved form of the tail (Entry#to_h hashes), written to the session JSON
+  # so a resumed run can redraw the last topic.
+  def replay_tail_for_save
+    @output_log.replay_tail(@replay_limit).map(&:to_h)
+  end
+
   private
+
+  # The configured replay size (config 'resume: replay_entries:'); nil falls
+  # back to the built-in default. 0 disables the run OutputBuffer entirely.
+  def resume_replay_entries
+    n = options[:resume_replay_entries]
+    n.nil? ? DEFAULT_RESUME_REPLAY_ENTRIES : n.to_i
+  end
 
   # One LLM request. The streaming posture applies to THIS request only, so a
   # streamed turn publishes its live tail for the spinner. The preview is

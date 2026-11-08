@@ -50,6 +50,11 @@ require_relative "image_store"
 #     max_size: 500             # max length (words) of the compaction summary
 #     reserved_tokens: 8192     # absolute headroom (tokens) kept free before auto-compact (issue #151)
 #   auto_save: true             # auto-save the session at every prompt boundary (issue #107)
+#   resume:
+#     replay_entries: 30        # redrawn at startup when a session is resumed (issue #458):
+#                               # how many OutputBuffer entries the resumed run redraws. The
+#                               # record is what the user SAW (their prompts plus the model/tool
+#                               # lines), so the last topic is visible. 0 disables the redraw.
 #   max_tool_iterations: 200    # max tool-loop iterations for one turn (issue #226)
 #   max_memories: 50            # max memory notes one store may hold (issue #435).
 #                               # Omit = the built-in default. A note cap is the
@@ -255,6 +260,9 @@ class HarnessConfig
       auto_threshold:  float_or_nil(data.dig(:compact, :auto_threshold)),
       max_size:        int_or_nil(data.dig(:compact, :max_size)),
       reserved_tokens: int_or_nil(data.dig(:compact, :reserved_tokens))
+    }
+    @resume = {
+      replay_entries: int_or_nil(data.dig(:resume, :replay_entries))
     }
     @retry = {
       count: int_or_nil(data.dig(:retry, :count)),
@@ -475,6 +483,12 @@ class HarnessConfig
   # before auto-compact fires (or nil; the built-in default then applies).
   def compact_reserved_tokens
     @compact[:reserved_tokens]
+  end
+
+  # How many OutputBuffer entries a resumed session redraws at startup
+  # (issue #458). nil = the built-in default; 0 disables the replay.
+  def resume_replay_entries
+    @resume[:replay_entries]
   end
 
   # Total retry attempts for transient network errors (or nil).

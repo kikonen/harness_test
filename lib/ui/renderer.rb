@@ -14,6 +14,7 @@ module UI
       interstitial: "say:   ",
       tool_plan: "tools: ",
       response: "model: ",
+      user: "user:  ",
       warn: "warn:  ",
       error: "error: "
     }.freeze

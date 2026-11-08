@@ -2817,6 +2817,110 @@ RSpec.describe Harness do
       expect(File.read(prompt_path)).to eq(before)
     end
   end
+
+  # issue #458: the harness' run-level OutputBuffer is the durable record a
+  # resumed session redraws. The user's own line is one side of it (role :user),
+  # a finished turn's task buffer the other (absorb_turn), and both are capped
+  # to the configured window. 0 disables the whole path.
+  describe 'run OutputBuffer / resume replay (issue #458)' do
+    it 'records a user prompt as a :user/:user entry (the renderer labels it)' do
+      harness = build_harness
+      harness.record_user_prompt('fix the parser')
+
+      tail = harness.output_log.replay_tail
+      expect(tail.map { |e| [e.type, e.origin, e.content] }).to eq(
+        [[:user, :user, 'fix the parser']]
+      )
+    end
+
+    it 'caps the window at replay_entries (oldest prompts drop)' do
+      harness = build_harness(resume_replay_entries: 2)
+      harness.record_user_prompt('one')
+      harness.record_user_prompt('two')
+      harness.record_user_prompt('three')
+
+      expect(harness.output_log.replay_tail.map(&:content)).to eq(['two', 'three'])
+    end
+
+    # absorb_turn harvests the model/tool side from a finished turn's task
+    # buffer; :spinner_detail is skipped (it is animated, never a line).
+    it 'harvests a turn task buffer tail, skipping the spinner' do
+      harness = build_harness
+      task = Task.new { }
+      task.buffer.put(type: :response, origin: :session_manager, content: 'the answer')
+      task.buffer.put(type: :spinner_detail, origin: :harness, content: { message: 'Working' })
+      task.buffer.put(type: :status_ok, origin: 'file.read', content: 'ok')
+
+      harness.absorb_turn(task)
+
+      expect(harness.output_log.replay_tail.map(&:type)).to eq(%i[response status_ok])
+    end
+
+    it 'is a no-op for a nil task (a turn that never produced one)' do
+      harness = build_harness
+      expect { harness.absorb_turn(nil) }.not_to raise_error
+      expect(harness.output_log.replay_tail).to be_empty
+    end
+
+    it 'replay_tail_for_save is the Entry#to_h form of the window' do
+      harness = build_harness
+      harness.record_user_prompt('do the thing')
+
+      expect(harness.replay_tail_for_save).to eq(
+        [{ type: :user, origin: :user, content: 'do the thing' }]
+      )
+    end
+
+    it 'records nothing when replay_entries is 0 (the disable)' do
+      harness = build_harness(resume_replay_entries: 0)
+      harness.record_user_prompt('ignored')
+      task = Task.new { }
+      task.buffer.put(type: :response, origin: :session_manager, content: 'ignored too')
+      harness.absorb_turn(task)
+
+      expect(harness.output_log.replay_tail).to be_empty
+    end
+
+    # A resumed run seeds its run OutputBuffer from the saved tail so the banner
+    # redraws the previous topic; restore() normalizes the JSON's string
+    # type/origin back to symbols.
+    it 'seeds the run OutputBuffer from a saved replay_tail on resume' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
+      File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate({
+        session_id: id, created_at: Time.now.iso8601, system_prompt: 'saved prompt',
+        messages: [{ role: 'system', content: 'saved prompt' },
+                   { role: 'user', content: 'earlier' }],
+        replay_tail: [{ type: 'user', origin: 'user', content: 'do the thing' },
+                      { type: 'response', origin: 'session_manager', content: 'done' }]
+      }))
+      data = JSON.parse(File.read(session_path(id, SessionLocator::SESSION_FILE)),
+                        symbolize_names: true)
+
+      harness = build_harness(session_id: id, resume_data: data)
+
+      expect(harness.output_log.replay_tail.map { |e| [e.type, e.origin, e.content] }).to eq(
+        [[:user, :user, 'do the thing'], [:response, :session_manager, 'done']]
+      )
+    end
+
+    # replay_entries: 0 must also skip the resume seed (a saved tail is not drawn).
+    it 'does not seed the run OutputBuffer when replay_entries is 0' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
+      File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate({
+        session_id: id, created_at: Time.now.iso8601, system_prompt: 'saved prompt',
+        messages: [{ role: 'system', content: 'saved prompt' }],
+        replay_tail: [{ type: 'user', origin: 'user', content: 'should not appear' }]
+      }))
+      data = JSON.parse(File.read(session_path(id, SessionLocator::SESSION_FILE)),
+                        symbolize_names: true)
+
+      harness = build_harness(session_id: id, resume_data: data, resume_replay_entries: 0)
+
+      expect(harness.output_log.replay_tail).to be_empty
+    end
+  end
 end
 
 # issue #449: the harness half of the tool-result image path. A ToolResult (an

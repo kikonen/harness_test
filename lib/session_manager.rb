@@ -781,6 +781,12 @@ class SessionManager
     # reached, and a session file must not read like a config override.
     data[:mcp_connected] = @harness.mcp_connected_summary
 
+    # issue #458: the tail of the run's OutputBuffer (the both-sides record of
+    # what the user saw - their prompts as :user entries plus the model/tool
+    # side). A resumed run redraws it at startup so the last topic is visible.
+    # A harness-side record (like mcp_connected), not conversation state.
+    data[:replay_tail] = @harness.replay_tail_for_save if @harness.respond_to?(:replay_tail_for_save)
+
     json = JSON.generate(data)
 
     File.write(path, json)

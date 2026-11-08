@@ -255,6 +255,10 @@ class CLI
       ui.puts "  (resumed conversation and file list - see /session)"
     end
 
+    # issue #458: redraw the tail of what the user SAW in the previous run so
+    # the last topic is visible at a glance, not just the raw conversation.
+    print_resume_replay if resumed_run?
+
     # issue #221 review (bug 2): the shell consent posture is a fact about
     # how this run behaves, so it belongs in the startup banner next to the
     # model and the session - and the disaster floor is named with it so
@@ -356,6 +360,26 @@ class CLI
   # banner has to say so (there is no separate resume call left to report it).
   def resumed_run?
     !!@options[:continue] || !@options[:resume].to_s.strip.empty?
+  end
+
+  # issue #458: redraw the saved OutputBuffer tail of the previous run. The
+  # buffer is the record of everything that was SHOWN (the user's own lines as
+  # :user entries plus the model/tool side), so replaying it through
+  # UI::Renderer restores what the last topic looked like - not just the raw
+  # conversation a resumed chain would otherwise show. An empty tail (a
+  # session saved by an older build, or replay_entries: 0) prints nothing.
+  def print_resume_replay
+    tail = harness.output_log.replay_tail
+    return if tail.empty?
+
+    renderer = UI::Renderer.new(
+      palette: harness.output_palette,
+      markdown: harness.markdown?,
+      markdown_max_width: harness.markdown_max_width)
+    ui.puts "Resumed output (the last exchange of the previous session):"
+    tail.each do |entry|
+      ui.puts renderer.line(type: entry.type, content: entry.content, origin: entry.origin)
+    end
   end
 
   # issue #221 review (bug 2): one-line description of the shell consent
