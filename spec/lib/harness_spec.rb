@@ -775,6 +775,32 @@ RSpec.describe Harness do
     end
   end
 
+  # Some models wrap a call's arguments in an extra top-level "arguments" key,
+  # so the tool reads its own parameters as missing (e.g. run.command gets
+  # {"arguments": {"command": ...}} and 'command' is nil). execute_tool_call
+  # unwraps that envelope through Tool#normalize_arguments before dispatch.
+  describe '#execute_tool_call wrapped arguments envelope' do
+    it 'runs a call whose arguments arrived wrapped in an extra arguments key' do
+      h = build_harness
+      wrapped = { 'arguments' => { 'text' => 'echoed' } }
+      call = { id: 'c1', function: { name: 'test.echo',
+                                     arguments: JSON.generate(wrapped) } }
+
+      expect(h.send(:execute_tool_call, call)).to eq('echoed')
+      expect(File.read(h.session_log_path))
+        .to include("tool test.echo arguments arrived wrapped in an extra 'arguments' key")
+    end
+
+    it 'leaves a normal call untouched (no unwrap log line)' do
+      h = build_harness
+      call = { id: 'c1', function: { name: 'test.echo', arguments: '{"text":"plain"}' } }
+
+      expect(h.send(:execute_tool_call, call)).to eq('plain')
+      expect(File.read(h.session_log_path))
+        .not_to include("arrived wrapped in an extra 'arguments' key")
+    end
+  end
+
   describe '#record_note (issue #138)' do
     def note_call(text)
       { id: 'c1', function: { name: 'ui.note', arguments: JSON.dump(text: text) } }
@@ -1793,8 +1819,9 @@ RSpec.describe Harness do
   # issue #461: a model (qwen) sometimes writes a tool call as TEXT instead of a
   # structured tool_calls array. The harness parses that text and runs it
   # (lenient), but only for a name that maps to a registered tool.
-  # The model's pseudo-XML is built from tag fragments (TAG/END) so the literal
-  # pseudo-tags never sit as a contiguous token in this file.
+  # Parsing itself is covered by spec/lib/text_tool_call_parser_spec.rb; this
+  # block is the call_llm wiring. Pseudo-XML is built from tag fragments so the
+  # literal pseudo-tags never sit as a contiguous token in this file.
   describe '#call_llm text-shaped tool call (issue #461)' do
     TAG = ->(name) { '<' + name + '>' }
     END_TAG = ->(name) { '</' + name + '>' }
@@ -1828,14 +1855,13 @@ RSpec.describe Harness do
       task
     end
 
-    it 'parses a text-shaped call into a synthetic tool_calls array' do
+    it 'wires a parser built over this run\'s registry' do
       h = build_harness
-      calls = h.parse_text_tool_calls(qwen_call('test.echo', 'text' => 'hi'))
+      parser = h.text_tool_call_parser
 
-      expect(calls.size).to eq(1)
-      expect(calls[0][:id]).to eq('text_call_1')
-      expect(calls[0][:function][:name]).to eq('test.echo')
-      expect(JSON.parse(calls[0][:function][:arguments])).to eq('text' => 'hi')
+      expect(parser).to be_a(TextToolCallParser)
+      expect(parser.parse(qwen_call('echo', 'text' => 'hi'))[0][:function][:name])
+        .to eq('test.echo')
     end
 
     it 'gives each recovered round a distinct id (no tool_call_id collision)' do
@@ -1870,13 +1896,6 @@ RSpec.describe Harness do
         .to include('tool call arrived as text/XML (issue #461), not JSON - parsed and running')
     end
 
-    it 'resolves a short name to its qualified tool (echo -> test.echo)' do
-      h = build_harness
-      calls = h.parse_text_tool_calls(qwen_call('echo', 'text' => 'README.md'))
-
-      expect(calls[0][:function][:name]).to eq('test.echo')
-    end
-
     it 'does NOT run prose that merely quotes a call (name matches no tool)' do
       quoted = "the broken format looks like #{qwen_call('bogus_tool', 'path' => 'x')} here"
       h = build_harness_with_responses([text_round(quoted), { content: 'the real answer' }])
@@ -1894,32 +1913,6 @@ RSpec.describe Harness do
       end
       expect(line[:content]).to include('could not run')
       expect(line[:content]).to include('NOT run')
-    end
-
-    it 'leaves an ambiguous short name unresolved (list is 5 different tools)' do
-      h = build_harness
-
-      expect(h.parse_text_tool_calls(qwen_call('list', 'pattern' => 'x'))).to eq([])
-    end
-
-    # The qwen dialect is deliberately malformed XML, so a plain parse would
-    # lose it; Nokogiri recovery + the '='-header rewrite is what recovers these.
-    it 'recovers a bare function block with no tool_call wrapper' do
-      h = build_harness
-      bare = TAG.call('function=echo') + TAG.call('parameter=text') + 'hi' \
-             + END_TAG.call('parameter') + END_TAG.call('function')
-
-      calls = h.parse_text_tool_calls(bare)
-      expect(calls[0][:function][:name]).to eq('test.echo')
-      expect(JSON.parse(calls[0][:function][:arguments])).to eq('text' => 'hi')
-    end
-
-    it 'parses a multi-line value verbatim (no whitespace mangling)' do
-      h = build_harness
-      multi = qwen_call('file.write', 'path' => 'tmp/x.txt', 'content' => "a\nb")
-
-      args = JSON.parse(h.parse_text_tool_calls(multi)[0][:function][:arguments])
-      expect(args['content']).to eq("a\nb")
     end
   end
 

@@ -39,6 +39,24 @@ class Tool
     raise NotImplementedError, "#{self.class}#execute not implemented"
   end
 
+  # Some models wrap a call's arguments in an extra top-level "arguments" key,
+  # so the tool receives {"arguments": {...}} and its own parameters read as
+  # missing. Unwrap that envelope UNLESS this tool declares an "arguments"
+  # parameter of its own (then it is a real argument, not a wrapper).
+  def normalize_arguments(args)
+    inner = args.is_a?(Hash) ? args["arguments"] : nil
+    return args unless inner.is_a?(Hash)
+    return args if declares_argument?("arguments")
+
+    inner
+  end
+
+  # True when this tool's own parameters declare the named top-level property.
+  def declares_argument?(name)
+    properties = @parameters[:properties] || @parameters["properties"] || {}
+    properties.key?(name.to_sym) || properties.key?(name.to_s)
+  end
+
   def self.status_type(verdict)
     STATUS_TYPES.fetch(verdict) do
       raise ArgumentError,
