@@ -383,6 +383,20 @@ RSpec.describe Harness do
       expect(harness.stream_mode_label).to eq('STREAM')
     end
 
+    # THE regression (#464): a resumed run must follow the CURRENT rules, not the
+    # prompt captured at save time. Edit harness.md AFTER the save.
+    it 'rebuilds the system prompt on resume, not the saved one' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(id)
+      File.write(File.join(workdir, 'harness.md'), "rule added after the save\n")
+
+      harness = build_harness(session_id: id, resume_data: saved_data(id))
+
+      expect(harness.session.system_prompt).to include('rule added after the save')
+      expect(harness.session.system_prompt).not_to include('saved prompt')
+      expect(harness.session.messages.first[:content]).to include('rule added after the save')
+    end
+
     # A session saved BEFORE streaming existed has no key at all: that is not
     # an error, it is the buffered default.
     it 'treats a session with no streaming key as buffered' do

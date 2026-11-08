@@ -419,15 +419,16 @@ class Session
   # Serialize the session (including the file list) into a plain hash that
   # can be JSON-encoded. The file list is part of the session state, so it
   # is saved/restored together with the conversation.
+  # The system prompt is NOT saved: it is derived harness state (rebuilt every
+  # run from the base file + harness.md), not conversation content. See #restore.
   def to_h(file_list)
     {
       version:       1,
       session_id:    @session_id,
       created_at:    created_at.iso8601,
-      system_prompt: @system_prompt,
       user_prompts:  @user_prompts,
       last_stats:    @last_stats,
-      messages:      @messages,
+      messages:      @messages[1..],
       # issue #170: the file digest cache is session state - a resumed
       # session must keep knowing what it last read so write/patch can
       # still detect external changes (and only those).
@@ -450,13 +451,20 @@ class Session
   # Restore the session from a hash (as produced by #to_h, after a JSON
   # round trip with symbolized names). Also restores the given file list:
   # it is cleared and re-populated from the saved file list.
+  # The chain is rebuilt from the system message THIS session was constructed
+  # with (the current build_system_prompt), not the saved one, so a resumed
+  # run follows the rules as they are now - not as they were at save time.
   def restore(data, file_list)
-    @system_prompt = data[:system_prompt]
     @created_at    = Time.parse(data[:created_at])
     @session_id    = data[:session_id] if data[:session_id]
     @user_prompts  = data[:user_prompts] || 0
     @last_stats    = data[:last_stats]
-    @messages      = data[:messages] || [system_message]
+    conversation   = data[:messages] || []
+    # A legacy file stored the prompt twice (a system_prompt key AND a leading
+    # system message); drop that stored message so the built prompt wins.
+    conversation   = conversation.drop(1) if data.key?(:system_prompt) &&
+                                             conversation.first&.fetch(:role, nil) == "system"
+    @messages      = [system_message] + conversation
     @notes         = [] # pending notes are per-process; saved ones are already in the chain
     # issue #170: restore the digest cache. The JSON round trip stringifies
     # symbol keys, so both key forms are checked; a missing key means the

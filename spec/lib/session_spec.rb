@@ -348,6 +348,46 @@ RSpec.describe Session do
     end
   end
 
+  # issue #464: the system prompt is derived harness state (rebuilt every run),
+  # not conversation content, so it is not persisted and a resume rebuilds it.
+  describe '#to_h / #restore (issue #464)' do
+    def round_trip(saved_from, new_prompt)
+      saved = JSON.parse(JSON.generate(saved_from.to_h(FileList.new([], workdir: '.'))),
+                         symbolize_names: true)
+      [saved, described_class.new(new_prompt).restore(saved, FileList.new([], workdir: '.'))]
+    end
+
+    it 'does not store the system prompt in the serialized session' do
+      session.add_user('hi')
+      session.add_assistant('yo')
+      saved, = round_trip(session, 'x')
+
+      expect(saved).not_to have_key(:system_prompt)
+      expect(saved[:messages].map { |m| m[:role] }).not_to include('system')
+    end
+
+    it 'a resumed chain starts with the rebuilt prompt, not the saved one' do
+      session.add_user('hi')
+      session.add_assistant('yo')
+      _saved, restored = round_trip(session, 'rebuilt prompt')
+
+      expect(restored.system_prompt).to eq('rebuilt prompt')
+      expect(restored.messages.first).to eq({ role: 'system', content: 'rebuilt prompt' })
+      expect(restored.messages.map { |m| m[:role] }).to eq(%w[system user assistant])
+    end
+
+    it 'ignores a legacy stored prompt (a pre-#464 file carrying system_prompt)' do
+      legacy = { created_at: Time.now.iso8601, system_prompt: 'OLD',
+                 messages: [{ role: 'system', content: 'OLD' },
+                            { role: 'user', content: 'a' }] }
+      restored = described_class.new('rebuilt prompt')
+                                .restore(legacy, FileList.new([], workdir: '.'))
+
+      expect(restored.system_prompt).to eq('rebuilt prompt')
+      expect(restored.messages.map { |m| m[:content] }).to eq(['rebuilt prompt', 'a'])
+    end
+  end
+
   # issue #208: the session is the working chain, so a turn that died
   # mid-loop ends on a `tool` result or on an assistant message with
   # unanswered tool_calls. /retry must be able to resume from all of those
