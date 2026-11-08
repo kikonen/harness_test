@@ -10,6 +10,13 @@ gem "fiddle"
 
 gem "racc"
 
+# XML parser for a text-shaped tool call (issue #461): some models (qwen) write
+# a tool call as malformed pseudo-XML instead of a structured tool_calls array.
+# Nokogiri's recovery mode parses those unclosed/truncated shapes; rexml (stdlib)
+# measured to raise on a truncated call and silently drop it, so recovery is
+# the deciding property. See doc/text_tool_call_design.md.
+gem "nokogiri", "~> 1.19"
+
 gem "debug"
 
 # Nicer object inspection for debugging: `ap` prints with indentation and

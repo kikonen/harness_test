@@ -1790,6 +1790,139 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #461: a model (qwen) sometimes writes a tool call as TEXT instead of a
+  # structured tool_calls array. The harness parses that text and runs it
+  # (lenient), but only for a name that maps to a registered tool.
+  # The model's pseudo-XML is built from tag fragments (TAG/END) so the literal
+  # pseudo-tags never sit as a contiguous token in this file.
+  describe '#call_llm text-shaped tool call (issue #461)' do
+    TAG = ->(name) { '<' + name + '>' }
+    END_TAG = ->(name) { '</' + name + '>' }
+
+    # qwen dialect: the name is glued to the tag with '='.
+    def qwen_call(func, params)
+      body = params.map { |k, v| TAG.call("parameter=#{k}") + v + END_TAG.call('parameter') }
+      TAG.call('tool_call') + TAG.call("function=#{func}") + body.join +
+        END_TAG.call('function') + END_TAG.call('tool_call')
+    end
+
+    def text_round(content)
+      { content: content, reasoning: nil }
+    end
+
+    def drained_status(task)
+      events = []
+      loop { m = task.poll(0); break unless m; events << m }
+      events.select { |m| m[:type].to_s.start_with?('status_') }
+    end
+
+    def with_task
+      task = Task.new { }
+      old = Thread.current[:harness_task]
+      Thread.current[:harness_task] = task
+      begin
+        yield task
+      ensure
+        Thread.current[:harness_task] = old
+      end
+      task
+    end
+
+    it 'parses a text-shaped call into a synthetic tool_calls array' do
+      h = build_harness
+      calls = h.parse_text_tool_calls(qwen_call('test.echo', 'text' => 'hi'))
+
+      expect(calls.size).to eq(1)
+      expect(calls[0][:id]).to eq('text_call_1')
+      expect(calls[0][:function][:name]).to eq('test.echo')
+      expect(JSON.parse(calls[0][:function][:arguments])).to eq('text' => 'hi')
+    end
+
+    it 'gives each recovered round a distinct id (no tool_call_id collision)' do
+      h = build_harness_with_responses([
+        text_round(qwen_call('test.echo', 'text' => 'a')),
+        text_round(qwen_call('test.echo', 'text' => 'b')),
+        { content: 'done' }
+      ])
+      h.session.add_user('go')
+
+      h.call_llm
+
+      ids = h.session.messages.filter_map { |m| m[:tool_calls]&.map { |tc| tc[:id] } }.flatten
+      expect(ids).to eq(%w[text_call_1 text_call_2])
+    end
+
+    it 'runs a recovered call in the tool loop and names it (issue #461)' do
+      h = build_harness_with_responses([
+        text_round(qwen_call('test.echo', 'text' => 'recovered')), { content: 'done' }
+      ])
+      h.session.add_user('go')
+
+      task = with_task { h.call_llm }
+
+      # The tool actually ran: its result committed into the session chain.
+      expect(h.session.messages.find { |m| m[:role] == 'tool' }[:content]).to eq('recovered')
+      line = drained_status(task).find { |m| m[:origin] == 'text_call' }
+      expect(line).not_to be_nil
+      expect(line[:content]).to include('arrived as text/XML, not JSON')
+      expect(line[:content]).to include('parsed and running')
+      expect(File.read(h.session_log_path))
+        .to include('tool call arrived as text/XML (issue #461), not JSON - parsed and running')
+    end
+
+    it 'resolves a short name to its qualified tool (echo -> test.echo)' do
+      h = build_harness
+      calls = h.parse_text_tool_calls(qwen_call('echo', 'text' => 'README.md'))
+
+      expect(calls[0][:function][:name]).to eq('test.echo')
+    end
+
+    it 'does NOT run prose that merely quotes a call (name matches no tool)' do
+      quoted = "the broken format looks like #{qwen_call('bogus_tool', 'path' => 'x')} here"
+      h = build_harness_with_responses([text_round(quoted), { content: 'the real answer' }])
+      h.session.add_user('go')
+
+      task = with_task { h.call_llm }
+
+      # Nothing was executed - no tool message entered the chain.
+      expect(h.session.messages.map { |m| m[:role] }).not_to include('tool')
+      # The honest report is a :warn event (origin :harness), not a status line.
+      events = []
+      loop { m = task.poll(0); break unless m; events << m }
+      line = events.find do |m|
+        m[:type] == :warn && m[:origin] == :harness && m[:content].to_s.include?('could not run')
+      end
+      expect(line[:content]).to include('could not run')
+      expect(line[:content]).to include('NOT run')
+    end
+
+    it 'leaves an ambiguous short name unresolved (list is 5 different tools)' do
+      h = build_harness
+
+      expect(h.parse_text_tool_calls(qwen_call('list', 'pattern' => 'x'))).to eq([])
+    end
+
+    # The qwen dialect is deliberately malformed XML, so a plain parse would
+    # lose it; Nokogiri recovery + the '='-header rewrite is what recovers these.
+    it 'recovers a bare function block with no tool_call wrapper' do
+      h = build_harness
+      bare = TAG.call('function=echo') + TAG.call('parameter=text') + 'hi' \
+             + END_TAG.call('parameter') + END_TAG.call('function')
+
+      calls = h.parse_text_tool_calls(bare)
+      expect(calls[0][:function][:name]).to eq('test.echo')
+      expect(JSON.parse(calls[0][:function][:arguments])).to eq('text' => 'hi')
+    end
+
+    it 'parses a multi-line value verbatim (no whitespace mangling)' do
+      h = build_harness
+      multi = qwen_call('file.write', 'path' => 'tmp/x.txt', 'content' => "a\nb")
+
+      args = JSON.parse(h.parse_text_tool_calls(multi)[0][:function][:arguments])
+      expect(args['content']).to eq("a\nb")
+    end
+  end
+
   # issue #224: a tool batch with SEVERAL run.command calls is checked with
   # ONE forked LLM call (one verdict line per command) BEFORE the first
   # consent dialog. Advisory only; errors degrade to a verdict-less flow.
