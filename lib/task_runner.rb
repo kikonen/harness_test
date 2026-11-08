@@ -73,6 +73,6 @@ module TaskRunner
   end
 
   def main_thread_renderer
-    UI::Renderer.new(palette: UI::Renderer.palette_for(ui: ui, harness: harness))
+    UI::Renderer.new(palette: UI::Renderer.palette_for(ui:, harness:))
   end
 end

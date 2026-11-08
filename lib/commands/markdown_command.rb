@@ -39,11 +39,11 @@ module Commands
 
     def report
       if @harness.markdown?
-        @ui.puts "  [markdown: ON]"
+        emit_role(:ack, "markdown: ON")
         @ui.puts "  The assistant's answer is rendered as markdown: headings, " \
           "bold/italic, inline code and tables get ANSI styling."
       else
-        @ui.puts "  [markdown: OFF]"
+        emit_role(:ack, "markdown: OFF")
         @ui.puts "  The assistant's answer is shown verbatim (raw markdown)."
       end
       @ui.puts "  Colors are seeded from the output palette; palette 'none' " \

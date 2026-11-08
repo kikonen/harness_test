@@ -32,6 +32,19 @@ module UI
     }.freeze
     STATUS_TYPES = STATUS_GLYPHS.keys.freeze
 
+    # The bracketed one-word badge a command prints as its ack (/yolo ->
+    # [YOLO ON], /markdown -> [markdown: ON], /stream -> [BUFFERED]). The
+    # bracket shape is the RENDERER's, not baked into the emitted string
+    # (#146). Deliberately UNPAINTED: these acks are printed with the
+    # terminal's own color today, so coloring them would change terminal
+    # bytes - the role exists to move the shape out of the emitter, and a
+    # front-end adds its own styling (the palette entry stays nil).
+    # :kind is the same bracket shape with a message after it ([LLM error] msg,
+    # [palette: default] (unchanged)) - the bracket names a KIND, not a verdict.
+    ACK = :ack
+    KIND = :kind
+    ACK_TYPES = [ACK, KIND].freeze
+
     # The emitter still owns these lines' shape. :spinner_detail is listed
     # because the drain loop animates it - it must never produce a line.
     VERBATIM = %i[system text stats compact spinner_detail].freeze
@@ -61,17 +74,20 @@ module UI
 
     # The palette a line written TO A GIVEN SINK should render with (#466,
     # issue #388 direction): the sink that receives the line owns its color.
-    # A UI::Console carries a palette (the CLI wires the live harness palette
-    # into it, cli.rb); a non-terminal sink (a browser console seam) answers no
-    # palette, so its lines render PLAIN - it never receives terminal SGR it
-    # cannot interpret. Only when the sink cannot answer one does the harness
-    # palette apply, and only then does a terminal keep its colors. This keeps
-    # terminal output byte-identical (the CLI console's palette IS the harness
-    # palette) while making "paint nothing" the automatic behavior of a sink
-    # that has no palette, instead of a per-caller choice.
+    # A sink that cannot answer a palette AT ALL (a browser console seam, which
+    # deliberately has no #palette method) paints NOTHING: handing it a terminal
+    # palette would bake SGR it has no terminal to interpret, so the escape
+    # bytes show up as literal "[38;5;240m" text in the browser. A palette-AWARE
+    # sink (a UI::Console) keeps the run's colors: its own palette wins (the CLI
+    # wires the live harness palette into it, cli.rb), and when it answers nil
+    # the harness palette applies - that is how a terminal built before a
+    # Harness exists still honors a mid-session /palette switch. Terminal output
+    # stays byte-identical (the CLI console's palette IS the harness palette)
+    # and "paint nothing" is the automatic behavior of a non-paintable sink.
     def self.palette_for(ui:, harness: nil)
-      return ui.palette if ui.respond_to?(:palette) && ui.palette
-      harness.respond_to?(:output_palette) ? harness.output_palette : nil
+      return nil unless ui.respond_to?(:palette)
+
+      ui.palette || (harness.respond_to?(:output_palette) ? harness.output_palette : nil)
     end
 
     attr_reader :palette
@@ -96,6 +112,7 @@ module UI
       text = content.to_s
 
       return status_line(type, text, origin) if STATUS_GLYPHS.key?(type)
+      return ack_line(type, text, origin) if ACK_TYPES.include?(type)
       return boundary_line(type, text) if BOUNDARY_ROLES.include?(type)
       return labeled_markdown_line(type, text) if markdown_role?(type)
 
@@ -105,11 +122,22 @@ module UI
     def labeled?(type)
       type = type.to_sym
       return true if STATUS_GLYPHS.key?(type)
+      return true if ACK_TYPES.include?(type)
 
       !VERBATIM.include?(type) && LABELS.key?(type)
     end
 
     private
+
+    # A bracketed ack: the content IS the badge word, the renderer wraps it.
+    # [YOLO ON] / [markdown: ON] / [BUFFERED]. Unpainted (see ACK_TYPES).
+    def ack_line(type, badge, origin)
+      return "#{INDENT}[#{badge}]" if type == ACK
+
+      # :kind - the bracket names a KIND (origin), the message follows it.
+      # [LLM error] message / [palette: default] (unchanged). Unpainted.
+      "#{INDENT}[#{origin || badge}] #{badge}"
+    end
 
     # A multi-line message (a pasted multiline script is the everyday case)
     # renders as several lines with a gutter and a closing rule, so its END is

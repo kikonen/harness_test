@@ -11,6 +11,38 @@ RSpec.describe UI::Renderer do
     line.gsub(/\e\[[0-9;]*m/, '')
   end
 
+  # The sink-owns-color rule (#466): who a line paints with depends on the SINK,
+  # not on the caller. A colored UI::Palette is the stand-in for "the terminal's
+  # colors"; "paints nothing" is proven by the returned palette being nil.
+  describe '.palette_for (the sink owns the color, issue #466)' do
+    let(:colored) { UI::Palette.fetch('default') }
+    # A palette-AWARE sink (a UI::Console): answers #palette (nil when it has none).
+    def console_sink(palette) = Object.new.tap { |o| o.define_singleton_method(:palette) { palette } }
+    # A non-paintable sink (a browser console seam): NO #palette method at all.
+    def plain_sink = Object.new
+    def harness(palette) = Object.new.tap { |o| o.define_singleton_method(:output_palette) { palette } }
+
+    it 'a non-paintable sink paints NOTHING even when the harness is colored' do
+      # The whole point: a browser sink borrows no terminal palette, so its
+      # lines never carry SGR the browser would show as literal text.
+      expect(described_class.palette_for(ui: plain_sink, harness: harness(colored))).to be_nil
+    end
+
+    it 'a non-paintable sink paints nothing with no harness either' do
+      expect(described_class.palette_for(ui: plain_sink, harness: nil)).to be_nil
+    end
+
+    it 'a palette-aware sink with its own palette wins over the harness' do
+      expect(described_class.palette_for(ui: console_sink(colored),
+                                         harness: harness(nil))).to equal(colored)
+    end
+
+    it 'a palette-aware sink with no palette falls back to the harness (terminal keeps colors)' do
+      expect(described_class.palette_for(ui: console_sink(nil),
+                                         harness: harness(colored))).to equal(colored)
+    end
+  end
+
   describe '#line (labeled roles)' do
     it 'labels a role with its pattern' do
       expect(renderer.line(type: :plan, content: 'read the tool first')).to eq(
@@ -235,6 +267,36 @@ RSpec.describe UI::Renderer do
     end
   end
 
+  # The bracketed ack and kind roles: the RENDERER owns the [ ... ] shape so
+  # the emitter stops baking it into the string (#146). Unpainted - the badge
+  # and the kind keep the terminal's own color (see ACK_TYPES in the renderer).
+  describe '#line (:ack / :kind) - bracketed acks (issue #466)' do
+    it 'wraps a badge in brackets from the content alone (:ack)' do
+      expect(renderer.line(type: :ack, content: 'YOLO ON')).to eq('  [YOLO ON]')
+      expect(renderer.line(type: :ack, content: 'markdown: ON')).to eq('  [markdown: ON]')
+      expect(renderer.line(type: :ack, content: 'BUFFERED')).to eq('  [BUFFERED]')
+    end
+
+    it 'names a KIND in brackets and puts the message after it (:kind)' do
+      expect(renderer.line(type: :kind, origin: 'LLM error', content: 'rate limited')).to eq(
+        '  [LLM error] rate limited'
+      )
+      expect(renderer.line(type: :kind, origin: 'palette: default',
+                           content: '(unchanged)')).to eq('  [palette: default] (unchanged)')
+    end
+
+    it 'falls back to the content as the bracket name when no origin is given' do
+      expect(renderer.line(type: :kind, content: 'no origin')).to eq('  [no origin] no origin')
+    end
+
+    it 'leaves both roles unpainted with a palette (terminal color, not SGR)' do
+      painted = described_class.new(palette: UI::Palette.fetch('default'))
+
+      expect(painted.line(type: :ack, content: 'YOLO ON')).to eq('  [YOLO ON]')
+      expect(painted.line(type: :kind, origin: 'tool loop', content: 'x')).to eq('  [tool loop] x')
+    end
+  end
+
   describe '#labeled?' do
     it 'is true for a role the renderer patterns' do
       expect(renderer.labeled?(:plan)).to eq(true)
@@ -243,6 +305,11 @@ RSpec.describe UI::Renderer do
 
     it 'is true for the status types (the renderer owns their bracket)' do
       expect(described_class::STATUS_TYPES).to all(satisfy { |t| renderer.labeled?(t) })
+    end
+
+    it 'is true for the ack roles (the renderer owns their bracket too)' do
+      expect(renderer.labeled?(:ack)).to eq(true)
+      expect(renderer.labeled?(:kind)).to eq(true)
     end
 
     it 'is false for verbatim types and for the spinner' do
