@@ -60,7 +60,7 @@ module Commands
       # Same shape as /yolo: the bare bracketed label is the ack.
       changed = current.name != previous
       label   = changed ? "(was #{previous || 'none'})" : "(unchanged)"
-      @ui.puts "  [palette: #{current.name}] #{label}"
+      emit_role(:kind, label, origin: "palette: #{current.name}")
       @ui.puts "  Effective from the next turn (this turn's Task already chose)."
       print_roles(current)
       print_sample(current)

@@ -42,7 +42,7 @@ module Commands
     # label defaults to the CURRENT state (used by /plan status). A nil label
     # means the posture is off - the badge only names a non-default.
     def report(label = @harness.plan_mode_label)
-      @ui.puts "  [#{label || 'PLANNING OFF'}]"
+      emit_role(:ack, label || "PLANNING OFF")
       if @harness.plan?
         @ui.puts "  Planning mode is on: draft and iterate a plan with plan.add " \
           "before modifying code, and keep it in the durable store."

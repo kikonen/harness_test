@@ -65,7 +65,7 @@ module Commands
       on = @harness.yolo?
       # The bare bracketed label is the ack - a "cmd:" prefix says nothing
       # the brackets do not already say (issue #221 review).
-      @ui.puts "  [#{label}]"
+      emit_role(:ack, label)
       @ui.puts on ? "  Shell consent for run.command is OFF - commands run " \
                   "without asking." \
                  : "  Shell consent is ON - unapproved commands ask as before."

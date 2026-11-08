@@ -38,7 +38,7 @@ module Commands
     # label defaults to the CURRENT state (used by /stream status). A nil
     # label means the posture is off - the badge only names a non-default.
     def report(label = @harness.stream_mode_label)
-      @ui.puts "  [#{label || 'BUFFERED'}]"
+      emit_role(:ack, label || "BUFFERED")
       if @harness.stream?
         @ui.puts "  Responses stream in: the spinner shows the answer as it " \
           "arrives with the rate it is arriving at, and [STREAM] is tagged " \
