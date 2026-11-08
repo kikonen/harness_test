@@ -962,6 +962,9 @@ RSpec.describe Harness do
       expect(late.first[:type]).to eq(:status_warn)
       expect(late.first[:content]).to include('arrived too late to steer this answer')
       expect(late.first[:content]).to include('NOT sent to the model')
+      # issue #450: the console line must name WHICH note, not only why it
+      # was dropped - the log line already carried the text, the console did not.
+      expect(late.first[:content]).to include('use ruby instead')
       # The note itself is named, so the user knows which one the line refers to.
       expect(File.read(harness.session_log_path))
         .to include('user mid-turn note discarded (late): use ruby instead')
@@ -1035,6 +1038,8 @@ RSpec.describe Harness do
 
         line = drained_status_events(task).first[:content]
         expect(line).to include('left over from your previous turn')
+        # issue #450: the leftover line names WHICH note too.
+        expect(line).to include('stale steering')
         expect(File.read(harness.session_log_path))
           .to include('user mid-turn note discarded (leftover): stale steering')
       end

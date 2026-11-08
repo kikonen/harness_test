@@ -163,7 +163,10 @@ class Harness
     Tool.push_status(
       label: "note",
       verdict: :warn,
-      message: NOTE_DISCARD_MESSAGES.fetch(kind)
+      # The console line names WHY it was dropped; it must also name WHICH
+      # note, or the user cannot tell which of their steering lines to resend
+      # (issue #450 - the log line already had the text, the console did not).
+      message: "#{NOTE_DISCARD_MESSAGES.fetch(kind)} The note was: #{note}"
     )
     note
   end
