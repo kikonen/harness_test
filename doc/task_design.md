@@ -127,7 +127,8 @@ it at the final-answer return (it could no longer steer that answer, kind
 `:late`) and `SessionManager#run_prompt` discards anything left over from a turn
 that died mid-loop before a NEW prompt starts (kind `:leftover`), each via
 `Harness#discard_pending_user_note` with a `#note` warn line naming the case
-(issue #430). `/retry` deliberately keeps a pending note - it continues the
+AND the note text, so the user knows WHICH steering line to resend (issue
+#430; #450). `/retry` deliberately keeps a pending note - it continues the
 same turn. A note is therefore scoped to its own turn: the
 user re-sends it with the next prompt if they still mean it.
 
