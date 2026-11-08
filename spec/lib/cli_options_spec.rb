@@ -181,6 +181,36 @@ RSpec.describe CLIOptions do
     end
   end
 
+  # issue #458: how many OutputBuffer entries a resumed run redraws at startup.
+  # Config-only (no CLI flag). nil (key absent) = Harness' built-in default;
+  # 0 is carried as 0 (an explicit disable), distinct from nil.
+  describe 'resume.replay_entries (issue #458)' do
+    def resolve_config(body)
+      resolve(['-m', 'test-model', '-d', workdir,
+               '-c', write_config('resume-config.yml', body)])
+    end
+
+    it 'is nil when the config says nothing (Harness applies its default)' do
+      opts = resolve_config("model: test-model\n")
+      expect(opts[:resume_replay_entries]).to be_nil
+    end
+
+    it 'carries the configured count' do
+      opts = resolve_config("model: test-model\nresume:\n  replay_entries: 12\n")
+      expect(opts[:resume_replay_entries]).to eq(12)
+    end
+
+    it 'carries 0 as 0 (the disable), not as nil' do
+      opts = resolve_config("model: test-model\nresume:\n  replay_entries: 0\n")
+      expect(opts[:resume_replay_entries]).to eq(0)
+    end
+
+    it 'has no CLI flag (it is a display preference, not a run toggle)' do
+      expect { resolve(['-m', 'test-model', '-d', workdir, '--resume-replay-entries', '5']) }
+        .to raise_error(OptionParser::InvalidOption)
+    end
+  end
+
   describe 'model requirement' do
     it 'raises when neither -m nor a default model is set (and not listing)' do
       expect {

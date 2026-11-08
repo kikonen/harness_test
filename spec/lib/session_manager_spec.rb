@@ -572,6 +572,49 @@ RSpec.describe SessionManager do
     end
   end
 
+  # issue #458: the run OutputBuffer tail (what the user SAW - their prompts as
+  # :user entries plus the model/tool side) travels with the session so a resumed
+  # run can redraw it. It is written only when the harness answers
+  # replay_tail_for_save (a harness-side record, like mcp_connected), and a
+  # harness double that does not answer it must not break the save.
+  describe 'resume replay tail round trip (issue #458)' do
+    def save_with_replay(dir, tail)
+      harness_double = Class.new do
+        attr_reader :options, :logger, :session
+        def initialize(session)
+          @session = session
+          @options = { num_ctx: 65_536, auto_save: false }
+          @logger  = Logger.new(File::NULL)
+        end
+        def replay_tail_for_save = @tail || []
+        def tail=(v); @tail = v; end
+        def output_palette = UI::Palette.fetch(nil)
+        def mcp_connected_summary = []
+        def yolo? = false
+        def stream? = false
+        def markdown? = false
+      end.new(session)
+      harness_double.tail = tail
+      manager = described_class.new(harness_double, FileList.new([], workdir: dir))
+      session.add_user('hello')
+      manager.save_session
+      JSON.parse(File.read(manager.session_file_path(session.session_id)), symbolize_names: true)
+    end
+
+    it 'writes the saved tail as a replay_tail array' do
+      tail = [{ type: :user, origin: :user, content: 'fix the parser' },
+              { type: :response, origin: :session_manager, content: 'done' }]
+      Dir.mktmpdir do |dir|
+        data = save_with_replay(dir, tail)
+        # JSON round trip keeps the keys symbol (symbolize_names) but the
+        # type/origin values come back as strings; Harness#restore re-symbols them.
+        expect(data[:replay_tail]).to eq(
+          tail.map { |e| e.merge(type: e[:type].to_s, origin: e[:origin].to_s) }
+        )
+      end
+    end
+  end
+
   # issue #28: the streaming posture travels with the session save too (same
   # treatment as yolo - harness posture, not conversation state), as a plain
   # boolean so a session saved before the feature simply has no key. The

@@ -56,6 +56,17 @@ compact:
   max_size: 500            # max length (words) of the compaction summary
   reserved_tokens: 8192    # absolute headroom (tokens) kept free before auto-compact (issue #151)
 
+# Resume replay (issue #458): when a session is resumed (--resume / --continue
+# or a mid-run /resume), the harness redraws the tail of what the user actually
+# SAW in that session - their own prompts plus the model/tool lines - at
+# startup, so the last topic is visible at a glance instead of only the raw
+# conversation. The saved record is the run's OutputBuffer (#146: every shown
+# line is one entry); animated spinner lines are never replayed. Set 0 to turn
+# the redraw off. Config-only (no CLI flag): a display preference of the
+# project, not a per-run toggle. Omit the key for the built-in default (30).
+# resume:
+#   replay_entries: 30
+
 # Auto-save the session at every prompt boundary (crash-proof, issue #107).
 auto_save: true
 

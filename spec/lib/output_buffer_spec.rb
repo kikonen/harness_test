@@ -182,4 +182,126 @@ RSpec.describe OutputBuffer do
       expect(buffer.drain).to be_empty # waterline advanced past everything
     end
   end
+
+  # issue #458: the buffer is the durable record a resumed run redraws. Only
+  # entries that actually became a console line are replayable - the spinner is
+  # animated, never rendered, so it is excluded (NON_REPLAY).
+  describe '#replay_tail (issue #458)' do
+    it 'skips the animated :spinner_detail entries' do
+      buffer = described_class.new
+      buffer.put(type: :response, origin: :session_manager, content: 'answer')
+      buffer.put(type: :spinner_detail, origin: :harness, content: { message: 'Working' })
+      buffer.put(type: :status_ok, origin: 'file.read', content: 'ok')
+
+      expect(buffer.replay_tail.map(&:type)).to eq(%i[response status_ok])
+    end
+
+    it 'returns the last n replayable entries in append order' do
+      buffer = described_class.new
+      4.times { |i| buffer.put(type: :text, origin: :user, content: "line #{i}") }
+
+      expect(buffer.replay_tail(2).map(&:content)).to eq(['line 2', 'line 3'])
+    end
+
+    it 'returns every replayable entry when n is nil or larger than the tail' do
+      buffer = described_class.new
+      3.times { |i| buffer.put(type: :text, origin: :user, content: "line #{i}") }
+
+      expect(buffer.replay_tail.map(&:content)).to eq(['line 0', 'line 1', 'line 2'])
+      expect(buffer.replay_tail(99).size).to eq(3)
+    end
+
+    it 'returns an empty tail for n = 0' do
+      buffer = described_class.new
+      buffer.put(type: :text, origin: :user, content: 'x')
+
+      expect(buffer.replay_tail(0)).to eq([])
+    end
+
+    it 'is unaffected by a trim of the consumed front' do
+      buffer = described_class.new
+      described_class::TRIM_AT.times { |i| buffer.put(type: :text, origin: :o, content: "old #{i}") }
+      buffer.drain
+      buffer.put(type: :text, origin: :user, content: 'kept a')
+      buffer.put(type: :spinner_detail, origin: :harness, content: { message: 'x' })
+      buffer.put(type: :text, origin: :session_manager, content: 'kept b')
+
+      expect(buffer.replay_tail.map(&:content)).to eq(['kept a', 'kept b'])
+    end
+  end
+
+  describe '#keep_tail (issue #458 - the record is a window)' do
+    it 'drops the oldest entries and keeps the last n' do
+      buffer = described_class.new
+      5.times { |i| buffer.put(type: :text, origin: :o, content: "e#{i}") }
+
+      buffer.keep_tail(2)
+
+      expect(buffer.size).to eq(2)
+      expect(buffer.replay_tail.map(&:content)).to eq(['e3', 'e4'])
+    end
+
+    it 'is a no-op when the buffer already holds at most n' do
+      buffer = described_class.new
+      buffer.put(type: :text, origin: :o, content: 'only')
+
+      buffer.keep_tail(10)
+
+      expect(buffer.size).to eq(1)
+    end
+
+    it 'keeps the waterline consistent so a later drain still yields what remains' do
+      buffer = described_class.new
+      6.times { |i| buffer.put(type: :text, origin: :o, content: "e#{i}") }
+      buffer.drain # waterline now past all six entries
+      buffer.keep_tail(3)
+
+      # The dropped three were already consumed; the three kept are pulled back
+      # into the readable window, so the drain sees exactly them.
+      expect(buffer.drain.map(&:content)).to eq(['e3', 'e4', 'e5'])
+    end
+  end
+
+  describe '#restore (issue #458 - rehydrating a saved tail)' do
+    # The saved form is Entry#to_h through JSON: type/origin come back as
+    # strings, and SessionLocator parses with symbolize_names so the keys are
+    # symbols. put normalizes them back to symbols on restore.
+    def json_round_trip(buffer)
+      JSON.parse(JSON.generate(buffer.replay_tail.map(&:to_h)), symbolize_names: true)
+    end
+
+    it 'rebuilds Entry objects from saved hashes, normalizing string type/origin' do
+      source = described_class.new
+      source.put(type: :text, origin: :user, content: 'do the thing')
+      source.put(type: :response, origin: :session_manager, content: 'done')
+      saved = json_round_trip(source)
+      target = described_class.new
+
+      target.restore(saved)
+
+      tail = target.replay_tail
+      expect(tail.map { |e| [e.type, e.origin, e.content] }).to eq(
+        [[:text, :user, 'do the thing'], [:response, :session_manager, 'done']]
+      )
+    end
+
+    it 'round-trips a spinner-free tail losslessly through JSON' do
+      source = described_class.new
+      source.put(type: :text, origin: :user, content: 'a')
+      source.put(type: :status_ok, origin: 'file.read', content: 'b')
+      source.put(type: :spinner_detail, origin: :harness, content: { message: 'ignored' })
+      target = described_class.new
+
+      target.restore(json_round_trip(source))
+
+      expect(target.replay_tail.map(&:content)).to eq(['a', 'b'])
+    end
+
+    it 'ignores non-hash entries (a malformed saved entry never breaks restore)' do
+      target = described_class.new
+
+      expect { target.restore([{ type: 'text', origin: 'user', content: 'ok' }, 'junk', nil]) }.not_to raise_error
+      expect(target.replay_tail.map(&:content)).to eq(['ok'])
+    end
+  end
 end

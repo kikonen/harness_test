@@ -15,7 +15,10 @@ require_relative "task"
 module TaskRunner
   def run_on_task
     ui.puts
-    error, _task = Task.run(harness:, ui:) { |_t| yield }
+    error, task = Task.run(harness:, ui:) { |_t| yield }
+    # Feed the turn's buffer tail into the harness' run OutputBuffer (the
+    # durable both-sides record) so a later resume can redraw it (issue #458).
+    harness.absorb_turn(task) if harness.respond_to?(:absorb_turn)
     ui.puts "  [task error] #{error}" if error
     ui.puts
   end

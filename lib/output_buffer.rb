@@ -21,6 +21,10 @@ class OutputBuffer
   # accumulate unbounded history in memory.
   TRIM_AT = 4_096
 
+  # Entry types the drain loop animates rather than renders: they produce no
+  # console line, so they are not part of the durable record a replay redraws.
+  NON_REPLAY = %i[spinner_detail].freeze
+
   def initialize
     @entries    = []
     @read_index = 0
@@ -75,6 +79,38 @@ class OutputBuffer
   # Number of entries stored in total (consumed or not). Useful for tests.
   def size
     @entries.size
+  end
+
+  # The last N replayable entries (Entry objects, in append order), for the
+  # resume replay redraw and its saved tail. Trimming only drops the consumed
+  # FRONT, so the tail is always intact in @entries. nil count = every entry.
+  def replay_tail(count = nil)
+    replayable = @entries.reject { |e| NON_REPLAY.include?(e.type) }
+    return replayable if count.nil? || count >= replayable.size
+
+    replayable.last(count)
+  end
+
+  # Rehydrate saved entries (the JSON form of Entry#to_h: type/origin come
+  # back as strings, content as whatever it was) back into immutable Entries
+  # and append them. Used only at resume, before the drain loop first runs.
+  def restore(entries)
+    Array(entries).each do |h|
+      next unless h.is_a?(Hash)
+
+      put(type: h[:type], origin: h[:origin], content: h[:content])
+    end
+  end
+
+  # Keep only the last count entries (drop older ones) - the run's durable record
+  # is a window, not the whole session. The read waterline is kept consistent:
+  # after dropping the front the waterline resets to 0 so a later drain still
+  # sees everything that remains.
+  def keep_tail(count)
+    return if @entries.size <= count
+
+    @entries = @entries.last(count)
+    @read_index = 0
   end
 
   # Drop EVERYTHING (consumed and pending) and reset the waterline to zero.
