@@ -44,7 +44,8 @@ RSpec.describe Commands::ResumeCommand do
 
     command.handle('f7931611')
 
-    expect(io.string).to include('[error] resume is not available in this run')
+    # #466: role emitted, label from the renderer (not a baked "  [error] ").
+    expect(io.string).to include('error: resume is not available in this run')
   end
 
   it 'calls the setup action with the id and reports the id of the harness IT built' do

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "task"
+require_relative "tool"
 
 # Shared wrapper for running an LLM round on a Task thread (the
 # single-thread I/O rule, issue #40): the block runs on a task thread and
@@ -36,5 +37,42 @@ module TaskRunner
     else
       ui.puts(text.to_s)
     end
+  end
+
+  # Main-thread counterpart to Tool.push_status. A command runs on the main
+  # thread with no active Task, so there is no outbox to carry a typed event:
+  # the role is rendered to the console directly through the SAME UI::Renderer
+  # the drain loop and CommandRunner use, painted with the palette the SINK owns
+  # (#466 - the emitter states the role, never the label or a color). Inside a
+  # task it defers to Tool.push_status so the line lands on the outbox and the
+  # OutputBuffer record stays pattern-free (issue #146).
+  def emit_status(label:, verdict:, message:)
+    status_event(Tool.status_type(verdict), message, label)
+  end
+
+  # Emit a plain labeled role (:warn, :error, :system ...). The renderer adds
+  # the label; the emitter states only the role and content (#146).
+  def emit_role(role, content, origin: nil)
+    status_event(role, content, origin)
+  end
+
+  private
+
+  # Route a typed role to the right sink: a live Task carries it as an event
+  # (rendered by the drain loop with the harness palette), the main thread
+  # renders it with the SINK palette so a non-terminal sink stays plain.
+  def status_event(role, content, origin)
+    type = role.to_sym
+    task = defined?(Task) ? Task.current : nil
+    if task
+      task.push_event(type:, origin: origin&.to_s, content: content.to_s)
+    else
+      line = main_thread_renderer.line(type:, content: content.to_s, origin:)
+      ui.puts(line)
+    end
+  end
+
+  def main_thread_renderer
+    UI::Renderer.new(palette: UI::Renderer.palette_for(ui: ui, harness: harness))
   end
 end

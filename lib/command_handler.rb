@@ -186,7 +186,9 @@ class CommandHandler
     if result.start_with?("error: user denied")
       # The runner already printed the denial status line.
     elsif result.start_with?("error:")
-      ui.puts "  [error] #{result.delete_prefix('error: ')}"
+      # State the :error role; UI::Renderer adds the label (#146 / #466),
+      # and the sink decides its color. No hand-written "  [error] " prefix.
+      emit_role(:error, result.delete_prefix("error: "))
     else
       ui.puts result
     end

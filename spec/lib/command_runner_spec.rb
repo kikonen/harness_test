@@ -924,6 +924,29 @@ RSpec.describe CommandRunner do
         expect(colored).to include("\e[32m ✓ echo two")
       end
     end
+
+    # issue #466: the SINK owns the palette. When the console the line is
+    # written to carries a palette, it wins over the harness's - a browser /
+    # non-terminal sink (no palette) then renders plain instead of being handed
+    # terminal SGR it cannot interpret. Here the console is colored but the
+    # harness palette is 'none', so a colored line proves the sink won.
+    it 'paints with the console (sink) palette when the sink carries one' do
+      Dir.mktmpdir do |dir|
+        stdin  = StringIO.new
+        stdout = StringIO.new
+        console = UI::Console.new(stdout: stdout, stdin: stdin,
+                                  palette: UI::Palette.fetch('default'))
+        runner = described_class.new(FileList.new([], workdir: dir), {},
+                                     label: 'shell', list: :shell,
+                                     auto_approve_all: true, ui: console,
+                                     harness: double('harness',
+                                                    output_palette: UI::Palette.fetch('none'),
+                                                    logger: nil))
+        runner.run('echo sink')
+        # The sink's default palette colored it even though the harness said 'none'.
+        expect(stdout.string).to include("\e[32m ✓ echo sink")
+      end
+    end
   end
 
   # issue #221: the YOLO posture (Harness#yolo? / /yolo). Every run.command
