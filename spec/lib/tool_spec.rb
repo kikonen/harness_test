@@ -120,6 +120,41 @@ RSpec.describe Tool do
     end
   end
 
+  describe '#normalize_arguments' do
+    # Some models wrap a call's arguments in an extra top-level "arguments" key,
+    # so the tool reads its own parameters as missing.
+    it 'unwraps a single extra arguments envelope' do
+      tool = ProbeTool.new
+      wrapped = { 'arguments' => { 'command' => 'ls' } }
+      expect(tool.normalize_arguments(wrapped)).to eq('command' => 'ls')
+    end
+
+    it 'leaves normal arguments untouched' do
+      tool = ProbeTool.new
+
+      expect(tool.normalize_arguments('command' => 'ls')).to eq('command' => 'ls')
+    end
+
+    # A tool that genuinely declares an "arguments" property keeps it as a real
+    # argument instead of unwrapping it.
+    it 'does not unwrap when the tool itself declares an arguments parameter' do
+      tool = described_class.new(
+        name: 'wrap.takes', description: 'd',
+        parameters: { type: 'object',
+                      properties: { arguments: { type: 'string' } } }
+      )
+
+      wrapped = { 'arguments' => 'value' }
+      expect(tool.normalize_arguments(wrapped)).to eq('arguments' => 'value')
+    end
+
+    it 'is a no-op for a non-hash arguments payload' do
+      tool = ProbeTool.new
+
+      expect(tool.normalize_arguments('not a hash')).to eq('not a hash')
+    end
+  end
+
   describe '#to_openai' do
     it 'wraps the tool metadata in the function shape the API expects' do
       tool = ProbeTool.new

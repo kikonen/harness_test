@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "json"
-require "nokogiri"
 require "logger"
 require "time"
 require "thread"
@@ -73,6 +72,7 @@ require_relative "tool_result"
 require_relative "image_store"
 require_relative "image_delivery"
 
+require_relative "text_tool_call_parser"
 # -- Harness --------------------------------------------------------------
 
 class Harness
@@ -93,21 +93,6 @@ class Harness
   # ('length', 'content_filter', one this harness has never seen) gets a line.
   # What each endpoint reports: doc/truncation_design.md.
   FINISH_EXPECTED = %w[stop tool_calls].freeze
-
-  # issue #461: a model (observed with qwen) sometimes writes a tool call as
-  # TEXT instead of a structured tool_calls array. The harness parses that text
-  # into a real call and runs it (lenient), but only for a name that resolves
-  # to a registered tool - so prose that merely QUOTES a call is never run.
-  # Both an opening and a closing marker are required for the same reason.
-  TEXT_TOOL_CALL_OPEN  = /<tool_call\b|<function[=\s]/i
-  TEXT_TOOL_CALL_CLOSE = %r{</tool_call>|</function>}i
-  # The qwen dialect glues the name to the tag with '=' (<function=read>,
-  # <parameter=path>), which is not legal XML. Nokogiri parses the call only
-  # after this is rewritten into the '<function name="read">' attribute form.
-  TEXT_EQ_HEADER = %r{<(function|parameter)=([A-Za-z0-9_.]+)>}
-  # Pulls the number back out of a committed synthetic id (text_call_N) so a
-  # later recovered round continues the numbering instead of reusing an id.
-  TEXT_CALL_ID = /^text_call_(\d+)$/
 
   HARNESS_DIR = ".harness"
 
@@ -145,7 +130,8 @@ class Harness
     :plans,
     :rules_repair_note,
     :mcp,
-    :image_store
+    :image_store,
+    :text_tool_call_parser
 
   attr_accessor :history
 
@@ -243,7 +229,10 @@ class Harness
     # asks it to connect the declared servers and register their tools.
     @mcp = Mcp::Manager.new(@logger)
     @tool_registry = build_tool_registry
-    @client        = LLMClient.new(options, @logger)
+    # issue #461: recovers a tool call a model wrote as text instead of a
+    # structured tool_calls array (see doc/text_tool_call_design.md).
+    @text_tool_call_parser = TextToolCallParser.new(@tool_registry)
+    @client = LLMClient.new(options, @logger)
     @session_manager = SessionManager.new(self, file_list)
     @command_safety_auto_approve = options[:command_safety_auto_approve] == true
     @yolo = options[:yolo] == true
@@ -715,6 +704,8 @@ class Harness
           "this command is NOT safety pre-checked"
         next
       end
+      tool = tool_registry.get("run.command")
+      args = tool ? tool.normalize_arguments(args) : args
       args["command"].to_s
     end.reject(&:empty?)
   end
@@ -771,84 +762,13 @@ class Harness
     parts.join(", ")
   end
 
-  # True when the response content carries a text-shaped tool call (issue
-  # #461) the structured path did not produce: BOTH an opening and a closing
-  # marker, so a line of prose about XML is not mistaken for a call.
-  def text_tool_call?(content)
-    return false if content.nil?
-
-    content =~ TEXT_TOOL_CALL_OPEN && content =~ TEXT_TOOL_CALL_CLOSE
-  end
-
-  # Parse a text-shaped tool call into the synthetic tool_calls array the tool
-  # loop already consumes (issue #461). Returns [] when nothing resolves to a
-  # registered tool - the guard that keeps prose merely QUOTING a call from
-  # being run. Nokogiri with recovery mode is used because the qwen dialect is
-  # deliberately malformed XML (unclosed / mismatched tags, truncated calls).
-  # start: offsets the synthetic ids so two recovered rounds of one turn cannot
-  # emit the same tool_call_id into the chain (qwen re-emits these every round).
-  def parse_text_tool_calls(content, start: 1)
-    return [] unless text_tool_call?(content)
-
-    doc = Nokogiri::XML("<toolcall>#{normalized_text_call(content)}</toolcall>") do |cfg|
-      cfg.recover
-    end
-    doc.css("function").filter_map.with_index(start) do |node, index|
-      name = resolve_text_tool_name(node["name"] || node.name.split("=", 2)[1])
-      next unless name
-
-      {
-        id: "text_call_#{index}",
-        function: { name:, arguments: JSON.generate(text_parameters(node)) }
-      }
-    end
-  end
-
-  # The qwen '<function=name>' / '<parameter=name>' dialect is illegal XML;
-  # rewrite it into the parseable '<function name="name">' attribute form.
-  def normalized_text_call(content)
-    content.gsub(TEXT_EQ_HEADER) { "<#{$1} name=\"#{$2}\">" }
-  end
-
-  # The next free synthetic id number: one more than the highest text_call_N
-  # already committed in the session chain. A recovered call's id must not
-  # collide with an earlier one - qwen re-emits these every round, and a
-  # duplicate tool_call_id would corrupt the round-trip the tool results key on.
-  def next_text_call_index
-    committed = @session.messages.filter_map do |m|
-      m[:tool_calls]&.map { |tc| tc[:id].to_s[TEXT_CALL_ID, 1] }
-    end.flatten.compact
-    committed.map(&:to_i).max.to_i + 1
-  end
-
-  # A parsed name only runs when it maps to a registered tool: exact name first,
-  # then an unambiguous short name (qwen writes 'read' for 'file.read'). An
-  # ambiguous or unknown name maps to nothing, so it falls through to the honest
-  # 'NOT executed' report instead of guessing the wrong tool.
-  def resolve_text_tool_name(name)
-    return nil if name.nil? || name.empty?
-    return name if tool_registry.get(name)
-
-    matches = tool_registry.sorted_tools.select { |t| t.short_name == name }
-    matches.size == 1 ? matches.first.name : nil
-  end
-
-  # Each <parameter>value</parameter> becomes an argument keyed by its name.
-  def text_parameters(function_node)
-    function_node.css("parameter").filter_map do |node|
-      key = node["name"] || node.name.split("=", 2)[1]
-      next unless key
-
-      [key, node.text]
-    end.to_h
-  end
-
   # Name a text-shaped tool call the harness could NOT recover on the console +
-  # log (issue #461). A recoverable one is parsed and run before this is reached;
-  # this fires only for markers with no resolvable name, so the user sees the
-  # model tried to act and can re-prompt.
+  # log (issue #461). The parsing lives in TextToolCallParser; a recoverable call
+  # is parsed and run in call_llm before this is reached, so this fires only for
+  # markers with no resolvable name - the user then sees the model tried to act
+  # and can re-prompt.
   def report_unresolved_text_tool_call(content)
-    return unless text_tool_call?(content)
+    return unless @text_tool_call_parser.text_call?(content)
 
     msg = "the model wrote a tool call as text the harness could not run " \
           "(no structured tool call was returned and its name matched no tool) " \
@@ -926,8 +846,9 @@ class Harness
       # issue #461: no structured tool_calls, but the model may have written one
       # as text. Parse and run it (lenient) so the turn does not silently break;
       # a name that matches no tool stays prose and the round ends as an answer.
-      if !message[:tool_calls] && text_tool_call?(message[:content])
-        recovered = parse_text_tool_calls(message[:content], start: next_text_call_index)
+      if !message[:tool_calls] && @text_tool_call_parser.text_call?(message[:content])
+        committed = messages.filter_map { |m| m[:tool_calls] }.flatten
+        recovered = @text_tool_call_parser.parse(message[:content], committed:)
         if recovered.any?
           message[:tool_calls] = recovered
           logger.warn "tool call arrived as text/XML (issue #461), not JSON - parsed and running"
@@ -1430,6 +1351,12 @@ class Harness
     unless tool
       return "error: unknown tool '#{func_name}'"
     end
+
+    unwrapped = tool.normalize_arguments(args)
+    if unwrapped != args
+      logger.info "tool #{func_name} arguments arrived wrapped in an extra 'arguments' key - unwrapped"
+    end
+    args = unwrapped
 
     announce_tool_call(func_name)
 

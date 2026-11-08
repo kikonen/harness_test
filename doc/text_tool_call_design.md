@@ -17,16 +17,22 @@ tool call (issue #461)` examples in `spec/lib/harness_spec.rb`.
 ## The lenient recovery and its one guard
 
 The owner's steer was: *if it looks like XML, parse it and run it, but say out
-loud it was not JSON.* So a response with no `tool_calls` but with both a
-`TEXT_TOOL_CALL_OPEN` and a `TEXT_TOOL_CALL_CLOSE` marker is parsed by
-`Harness#parse_text_tool_calls` into the same synthetic
-`[{ id:, function: { name:, arguments: } }]` shape the tool loop already
-consumes, and the existing loop then runs it through `execute_tool_call` (so
-FileList grants and the CommandRunner consent floor are unchanged).
+loud it was not JSON.* So a response with no `tool_calls` but carrying an
+`TextToolCallParser::OPEN` marker is parsed by `TextToolCallParser#parse` into
+the same synthetic `[{ id:, function: { name:, arguments: } }]` shape the tool
+loop already consumes, and the existing loop then runs it through
+`execute_tool_call` (so FileList grants and the CommandRunner consent floor are
+unchanged). Harness holds one `TextToolCallParser` per run (built over its tool
+registry) and `call_llm` calls it; only the *reporting* of an unrecovered call
+stays in Harness (`report_unresolved_text_tool_call`).
+
+Only an OPEN marker gates the attempt: the safety is name resolution, not the
+closing tags, because a truncated call (issue #332) has no closing tags yet is
+still worth running.
 
 The single guard against running prose that merely **quotes** a call: a parsed
 name only becomes a call when it maps to a registered tool
-(`Harness#resolve_text_tool_name`):
+(`TextToolCallParser#resolve_name`):
 
 - exact registered name (`file.read`) wins first;
 - else a **short name** that is unambiguous across the registry (`echo` ->
@@ -46,9 +52,9 @@ re-prompt. Prose quoting a bogus name is therefore reported, not executed.
 The qwen dialect is deliberately **malformed XML**: `<function=NAME>` glues the
 name to the tag with `=`, which is not a legal tag name, and real calls arrive
 truncated or with unclosed/mismatched tags (issue #332 saw truncated calls). A
-small header rewrite (`Harness#normalized_text_call`, `TEXT_EQ_HEADER`) turns
+small header rewrite (`TextToolCallParser#normalized`, `EQ_HEADER`) turns
 `<function=NAME>` / `<parameter=NAME>` into the parseable `<function name="NAME">`
-attribute form, then a real XML parser does the structural work.
+attribute form, then XML does the structural work.
 
 Which parser was decided on a probe (issue #461), not on taste. Against the same
 normalized input:
@@ -65,9 +71,8 @@ normalized input:
 rexml is sufficient only for well-formed documents; recovery is the deciding
 property here, and recovery is what Nokogiri has and rexml does not. That is why
 the fix commits a native dependency. Nokogiri is required at the top of
-`lib/harness.rb` (the same place kramdown-ansi is required), not lazily - a
-text-shaped call is rare but the parse must never itself be the thing that
-fails.
+`lib/text_tool_call_parser.rb`, not lazily - a text-shaped call is rare but the
+parse must never itself be the thing that fails.
 
 ---
 
@@ -76,7 +81,24 @@ fails.
 `qwen` re-emits a text call on **every** round of a turn, so recovered calls
 accumulate in the committed session chain. Their synthetic ids (`text_call_N`)
 must not collide, because a tool result is matched back to its call by
-`tool_call_id`. `Harness#next_text_call_index` reads the highest
-`text_call_N` already committed in the chain (`TEXT_CALL_ID`) and continues from
+`tool_call_id`. `TextToolCallParser#next_index` reads the highest
+`text_call_N` already committed in the chain (`ID_PATTERN`) and continues from
 one past it, so numbering survives a later round of the same turn, an earlier
 turn, and a resumed session.
+
+---
+
+## A second malformation: arguments wrapped in an extra "arguments" key
+
+Separate from the text/XML shape: some models emit a *structured* call whose
+arguments arrive wrapped in an extra top-level `"arguments"` key, so the tool
+receives `{"arguments": {"command": ...}}` and its own parameters read as
+missing (observed as `run.command` answering "command must be a non-empty shell
+command" though the command was there). `Tool#normalize_arguments` unwraps that
+envelope unless the tool itself declares an `arguments` parameter - no shipped
+tool does (grep-confirmed), so the unwrap is safe. `execute_tool_call` applies
+it before dispatch and logs one neutral `logger.info` line when it unwrapped
+(no backtrace, no issue attribution); `run_command_batch_commands` applies it
+too, so the safety pre-check sees the same command string the runner will
+execute.
+
