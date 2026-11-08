@@ -93,8 +93,10 @@ RSpec.describe CommandHandler do
         handler, stdout = drive_bang(dir)
         handler.handle('! echo hi')
 
+        # #466: the role is emitted, the renderer adds the label (not a
+        # hand-written "  [error] " prefix baked into the content).
         expect(stdout.string)
-          .to include("[error] directory 'missing' does not exist")
+          .to include("error: directory 'missing' does not exist")
       end
     end
 

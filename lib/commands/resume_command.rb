@@ -28,7 +28,7 @@ module Commands
       end
 
       unless @on_resume
-        @ui.puts "  [error] resume is not available in this run"
+        emit_role(:error, "resume is not available in this run")
         return
       end
 

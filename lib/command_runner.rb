@@ -343,7 +343,8 @@ class CommandRunner
   # NOT memoized: the main thread has no turn boundary, so the palette is
   # re-read per line and a /palette switch shows up in the next bang command.
   def renderer
-    palette = @harness.respond_to?(:output_palette) ? @harness.output_palette : nil
+    # The SINK decides color (#466): the shared rule lives in UI::Renderer.
+    palette = UI::Renderer.palette_for(ui: @ui, harness: @harness)
     UI::Renderer.new(palette:)
   end
 

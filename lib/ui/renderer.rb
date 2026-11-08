@@ -59,6 +59,21 @@ module UI
       LABELS.fetch(type.to_sym).sub(/:\s+\z/, "")
     end
 
+    # The palette a line written TO A GIVEN SINK should render with (#466,
+    # issue #388 direction): the sink that receives the line owns its color.
+    # A UI::Console carries a palette (the CLI wires the live harness palette
+    # into it, cli.rb); a non-terminal sink (a browser console seam) answers no
+    # palette, so its lines render PLAIN - it never receives terminal SGR it
+    # cannot interpret. Only when the sink cannot answer one does the harness
+    # palette apply, and only then does a terminal keep its colors. This keeps
+    # terminal output byte-identical (the CLI console's palette IS the harness
+    # palette) while making "paint nothing" the automatic behavior of a sink
+    # that has no palette, instead of a per-caller choice.
+    def self.palette_for(ui:, harness: nil)
+      return ui.palette if ui.respond_to?(:palette) && ui.palette
+      harness.respond_to?(:output_palette) ? harness.output_palette : nil
+    end
+
     attr_reader :palette
 
     # palette: a UI::Palette, or nil to render without color (a Task with no
