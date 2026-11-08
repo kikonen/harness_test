@@ -376,13 +376,19 @@ class CLI
       palette: harness.output_palette,
       markdown: harness.markdown?,
       markdown_max_width: harness.markdown_max_width)
+    # The replay sits between this run's startup facts on BOTH sides, so a
+    # block-width rule on each side (the same width the render loop uses for a
+    # block boundary, and wider than the 40-dash prompt-loop separator) keeps
+    # the previous session's exchange a distinct block.
+    rule = "-" * UI::Renderer::RULE_WIDTH
+    ui.puts
+    ui.puts rule
     ui.puts "Resumed output (the last exchange of the previous session):"
     tail.each do |entry|
       ui.puts renderer.line(type: entry.type, content: entry.content, origin: entry.origin)
     end
-    # The replay is the previous session's content, not this run's startup
-    # facts; a separator keeps the two from reading as one block.
-    ui.puts "-" * 40
+    ui.puts rule
+    ui.puts
   end
 
   # issue #221 review (bug 2): one-line description of the shell consent
