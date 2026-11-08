@@ -380,6 +380,9 @@ class CLI
     tail.each do |entry|
       ui.puts renderer.line(type: entry.type, content: entry.content, origin: entry.origin)
     end
+    # The replay is the previous session's content, not this run's startup
+    # facts; a separator keeps the two from reading as one block.
+    ui.puts "-" * 40
   end
 
   # issue #221 review (bug 2): one-line description of the shell consent
