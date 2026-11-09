@@ -122,7 +122,12 @@ terminal width - the same reason `RULE_WIDTH` is fixed: a paragraph that re-wrap
 on every resize is as unlocatable as a boundary that moves. A word wider than the
 wrap gets its own line rather than being split mid-word (a command name or URL is
 one token). Only genuine paragraphs use `:note`: an aligned block (a usage list, a
-denylist column) stays verbatim, because word-wrap would destroy its alignment.
+denylist column) stays verbatim, because word-wrap would destroy its alignment, and
+a `Heading: value` label row stays verbatim too - word-wrapping it would bury the
+label mid-paragraph. A `:note` is a full natural-language sentence (what, why, how);
+a `Heading: value` row is a table row and belongs with the structured `:list` output
+(issue #474), not prose. When one line fuses a sentence with a label row (a report
+tail like "Saved with the session ... Startup choice: ..."), the row wins: verbatim.
 
 The `OutputBuffer` stores the RAW paragraph, not the wrapped lines - so a browser
 can re-wrap it in CSS (issue #146 / the #324 remote client) instead of inheriting

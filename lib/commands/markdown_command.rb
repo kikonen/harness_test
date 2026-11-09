@@ -52,26 +52,24 @@ module Commands
         :note,
         "Colors are seeded from the output palette; palette " \
           "'none' (--no-color) renders plain text with no ANSI.")
-      emit_role(:note, width_basis_line)
+      # A labeled reference row (heading: value), not prose: kept verbatim.
+      @ui.puts width_basis_line
       emit_role(:note, "Effective from the next turn (this turn's Task already chose).")
-      emit_role(
-        :note,
-        "Saved with the session (resume keeps it). Startup " \
-          "choice: --markdown or 'markdown:' in the config.")
+      @ui.puts "  Saved with the session (resume keeps it). Startup choice: " \
+        "--markdown or 'markdown:' in the config."
     end
 
     # The table-width basis line: an explicit column count when configured, else
-    # the renderer's default (80% of the terminal). Content only - the :note role
-    # adds the indent. A harness double in a spec may not answer
-    # #markdown_max_width, so it reads as the default.
+    # the renderer's default (80% of the terminal). A harness double in a spec may
+    # not answer #markdown_max_width, so it reads as the default.
     def width_basis_line
       width = if @harness.respond_to?(:markdown_max_width)
                 @harness.markdown_max_width
               end
-      return "Table width basis: 80% of the terminal width " \
+      return "  Table width basis: 80% of the terminal width " \
         "(set it with --markdown-width N or 'markdown_max_width:')." if width.nil?
 
-      "Table width basis: #{width} columns " \
+      "  Table width basis: #{width} columns " \
         "(--markdown-width / 'markdown_max_width:')."
     end
 
