@@ -70,6 +70,37 @@ RSpec.describe Tools::DialogTool do
       expect(tool.execute(base_args.merge('options' => 'just words'))).to include('not a JSON array')
     end
 
+    # issue #468: the model double-encodes the options array as a string AND
+    # fuses the sibling title/note keys onto it, so the whole string is not
+    # valid JSON. Salvage the balanced leading array; the outer arguments still
+    # carry the real title/note, so the fused text is discarded.
+    it 'salvages a leading array from a double-encoded, sibling-fused options string' do
+      fused = '[{"title": "A", "value": "a"}, {"title": "B", "value": "b"}], ' \
+              '"title": "swallowed", "note": "swallowed"}]'
+      out, kwargs = run_tool(base_args.merge('options' => fused), 'b')
+      expect(out).to eq("selected: \"b\"")
+      expect(kwargs[:options].size).to eq(2)
+      expect(kwargs[:options].map(&:value)).to eq(%w[a b])
+      # title/note come from the OUTER args, not the fused junk.
+      expect(kwargs[:title]).to eq(base_args['title'])
+      # base_args carries no note, so the fused "note" text must NOT leak in.
+      expect(kwargs[:note]).to be_nil
+    end
+
+    it 'a salvaged array keeps a ] that sits inside an option string' do
+      # A ] inside a quoted option title must not close the array early.
+      fused = '[{"title": "A] B", "value": "a"}, {"title": "C", "value": "c"}], junk]'
+      _out, kwargs = run_tool(base_args.merge('options' => fused), 'a')
+      expect(kwargs[:options].size).to eq(2)
+      expect(kwargs[:options][0].title).to eq('A] B')
+    end
+
+    it 'names the shape when a string holds no salvageable array' do
+      out = tool.execute(base_args.merge('options' => '{"title": "A", "value": "a"}'))
+      expect(out).to include('not a JSON array of options')
+      expect(out).to include('separate parameters')
+    end
+
     it 'parses a single option that arrived as a JSON object string' do
       one_opt = JSON.generate({ 'title' => 'A', 'value' => 'a' })
       out, kwargs = run_tool(base_args.merge('options' => [one_opt]), 'a')
