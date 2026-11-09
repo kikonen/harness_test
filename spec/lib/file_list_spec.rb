@@ -520,6 +520,8 @@ RSpec.describe FileList do
     # dialog on a console WITH a palette, so the paint is observable.
     def drive_colored_grant(list, answer, purpose: nil)
       stdout = StringIO.new
+      # Pin the terminal width so the dialog wraps the WARNING to a known 2-line split.
+      allow(Tins::Terminal).to receive(:columns).and_return(100)
       allow_any_instance_of(UI::Dialog).to receive(:show) do |dialog|
         dialog.perform_direct(
           ui: UI::Console.new(stdout:, stdin: StringIO.new(answer),

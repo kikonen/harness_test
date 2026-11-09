@@ -648,37 +648,65 @@ RSpec.describe UI::Dialog do
       end
     end
   end
-  # issue #476: a long note or option description re-wraps to a fixed content
-  # width so it reads as a paragraph instead of one line running off the
-  # terminal. A note/description that already fits is the exact old single line,
-  # so a short dialog is byte-identical to the pre-#476 contract.
-  describe 'long text wraps to the fixed dialog width (issue #476)' do
-    def render_lines(note: nil, description: nil)
+  # issue #476: a long note, option description or option title re-wraps to a
+  # PERCENTAGE of the detected terminal width (the plan/say markdown basis,
+  # not a fixed column count). A wide terminal fills its room; a narrow one
+  # stays inside itself (no terminal-side mid-word hard-wrap). A line that
+  # already fits is the exact old single line, so a short dialog is byte-identical.
+  describe 'prose wraps to a percentage of the terminal width (issue #476)' do
+    # Stub the terminal so the wrap width is deterministic on any machine.
+    def render_lines(note: nil, description: nil, title: 't', columns:)
       out = StringIO.new
       opts = [described_class::Option.new(title: 'Opt', value: :o, description: description)]
-      described_class.new(title: 't', options: opts, note: note)
+      allow(Tins::Terminal).to receive(:columns).and_return(columns)
+      described_class.new(title: title, options: opts, note: note)
                    .perform_direct(ui: UI::Console.new(stdout: out, stdin: StringIO.new("\n")))
       out.string.lines.map(&:chomp)
     end
 
-    it 'keeps a fitting note as the exact old single line' do
-      expect(render_lines(note: 'a short note fits')).to include('                a short note fits')
+    def content_lines(lines)
+      lines.select { |l| l.start_with?('                ') }
     end
 
-    it 're-wraps a long note and indents every continuation line' do
-      lines = render_lines(note: 'one ' * 40)
-      note_lines = lines.select { |l| l.start_with?('                ') }
+    it 'keeps a fitting note as the exact old single line' do
+      expect(render_lines(note: 'a short note fits', columns: 100))
+        .to include('                a short note fits')
+    end
+
+    it 'wraps a long note within the percentage width, not a fixed 80' do
+      lines = render_lines(note: 'one ' * 60, columns: 100)
+      note_lines = content_lines(lines)
 
       expect(note_lines.size).to be > 1
-      expect(note_lines.all? { |l| l.length <= 80 }).to be(true)
+      expect(note_lines.map(&:length).max).to be <= 100
     end
 
-    it 'wraps a long option description under its option line' do
-      lines = render_lines(description: 'word ' * 40)
-      desc_lines = lines.select { |l| l.start_with?('                ') }
+    it 'a long option description wraps under its option line within the width' do
+      lines = render_lines(description: 'word ' * 60, columns: 100)
+      desc_lines = content_lines(lines)
 
       expect(desc_lines.size).to be > 1
-      expect(desc_lines.all? { |l| l.length <= 80 }).to be(true)
+      expect(desc_lines.map(&:length).max).to be <= 100
+    end
+
+    it 'a long option TITLE wraps too, never overflowing the terminal' do
+      long = 'alpha ' * 30
+      allow(Tins::Terminal).to receive(:columns).and_return(100)
+      out = StringIO.new
+      opts = [described_class::Option.new(title: long, value: :o)]
+      described_class.new(title: 't', options: opts)
+                   .perform_direct(ui: UI::Console.new(stdout: out, stdin: StringIO.new("\n")))
+      title_lines = out.string.lines.map(&:chomp).select { |l| l.include?('alpha') }
+
+      expect(title_lines.size).to be > 1
+      expect(title_lines.map(&:length).max).to be <= 100
+    end
+
+    it 'stays inside a narrow terminal (no mid-word hard-wrap past the width)' do
+      lines = render_lines(note: 'one ' * 40, columns: 60)
+      note_lines = content_lines(lines)
+
+      expect(note_lines.map(&:length).max).to be <= 60
     end
   end
 end
