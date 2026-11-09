@@ -19,125 +19,6 @@ require_relative "image_store"
 # are OWNED BY THE CONFIG: a missing key is NOT sent to the API, so the
 # server's own default applies (issue #215).
 #
-#   models:                     # one or more named model profiles
-#     - name: local             # selection key (used by -m / default_model)
-#       url: http://localhost:11434/v1
-#       api: openai             # endpoint type: openai (default) | ollama (issue #197).
-#                               # url is the base for the endpoint's path:
-#                               # openai -> .../v1, ollama -> server root.
-#       model: qwen2.5-coder:32b
-#       token: sk-...           # optional bearer token. A value may reference an
-#                               # ENV var as ${NAME} (issue #422) so the secret
-#                               # lives only in the environment, never in this
-#                               # file: token: ${OPENAI_TOKEN}.
-#       vision: false           # THIS MODEL CAN SEE IMAGES (issue #449). Only a
-#                               # profile that sets it true may be sent a
-#                               # tool-result image; every other profile gets the
-#                               # bytes spilled to a file and the path instead.
-#       num_predict: -1         # same, native ollama name - omit = server default
-#       num_ctx: 65536          # optional context window size (tokens)
-#       reasoning_effort: medium
-#       temperature: 0.6
-#       top_p: 0.95
-#       top_k: 20
-#       min_p: 0
-#       presence_penalty: 1.0
-#       repeat_penalty: 1.05
-#   default_model: local        # model used when -m is not given
-#   compact:
-#     recent_messages: 6        # messages retained verbatim after /compact
-#     auto_threshold: 88        # auto-compact when context usage reaches this % of the window
-#     max_size: 500             # max length (words) of the compaction summary
-#     reserved_tokens: 8192     # absolute headroom (tokens) kept free before auto-compact (issue #151)
-#   auto_save: true             # auto-save the session at every prompt boundary (issue #107)
-#   resume:
-#     replay_entries: 30        # redrawn at startup when a session is resumed (issue #458):
-#                               # how many OutputBuffer entries the resumed run redraws. The
-#                               # record is what the user SAW (their prompts plus the model/tool
-#                               # lines), so the last topic is visible. 0 disables the redraw.
-#   max_tool_iterations: 200    # max tool-loop iterations for one turn (issue #226)
-#   max_memories: 50            # max memory notes one store may hold (issue #435).
-#                               # Omit = the built-in default. A note cap is the
-#                               # store's own limit (doc/memory_design.md).
-#   retry:
-#     count: 3                  # total attempts for transient network errors
-#     delay: 2                  # base delay (seconds) between retries
-#   streaming: false            # consume the LLM response chunk by chunk and
-#                               # show each part as it arrives (default off).
-#                               # A model profile's own key overrides this one.
-#   markdown: false             # render the assistant's answer as markdown with
-#                               # ANSI styling (issue #106, default off).
-#   markdown_max_width: 120     # column basis for markdown tables (issue #106).
-#                               # Omit = 80% of the detected terminal width. An
-#                               # explicit count is clamped to the terminal width.
-#   mcp_images:                 # tool-result images (issue #449; producers
-#                               # extended to file.image and web.fetch by #451,
-#                               # the key name kept for config compatibility).
-#                               # Consulted only when the active profile declares
-#                               # vision: - a vision model still has to be told
-#                               # HOW MUCH it may be sent, because base64 costs
-#                               # 4/3 the file size.
-#     inline_max_bytes: 1500000 # one image over this many DECODED bytes is
-#                               # spilled to a file instead of inlined.
-#     inline_max_images: 4      # images inlined per single tool result.
-#     inline_max_tokens: 40000  # worst-case token cost (base64 chars / 4) of the
-#                               # images inlined into ONE tool result.
-#     dir: .harness/content     # the harness' own blob store: a session names
-#                               # the artifact it was given, so the bytes have to
-#                               # live with harness state (tmp/ is per-machine
-#                               # scratch and gone in the next session). The model
-#                               # reaches these files via the shell, not file.*.
-#   mcp_servers:                # external MCP servers whose tools the model may
-#                               # call (issue #48). Opt-in: omit the key and no MCP
-#                               # code runs at all. Each entry names ONE server,
-#                               # reached either as a spawned subprocess (command)
-#                               # or as a remote endpoint (url, issue #402):
-#     - name: filesystem        # namespace prefix for its tools ("<name>.<tool>")
-#       command: npx            # program to spawn
-#       args: ["-y", "@modelcontextprotocol/server-filesystem", "C:/path"]
-#       env: { KEY: value }     # optional extra environment for the server. A
-#                               # value may reference ENV as ${NAME} (issue #422).
-#     - name: remote            # HTTP/SSE transport instead of a subprocess
-#       url: https://example.com/mcp
-#       headers: { Authorization: "Bearer ..." }   # optional request headers. A
-#                               # value may embed ENV as "Bearer ${API_KEY}" (#422).
-#   double_enter_submit: false # Enter on an empty last line submits the multiline buffer (issue #198)
-#   system_prompt_file: prompts/my.txt  # file with the full system prompt (issue #223)
-#                                       # overrides the built-in config/system_prompt.txt
-#   command_safety_check: true  # model self-check for unapproved shell commands
-#                                       # (advisory note in the consent dialog, issue #224)
-#   command_safety_auto_approve: safe  # with the check on, the consent posture as
-#                                       # an enum: manual | safe | denylist |
-#                                       # safe_denylist (a legacy true/false reads
-#                                       # as safe/manual). safe: a "safe:" verdict
-#                                       # skips the dialog (config-only, issue #224
-#                                       # follow-up). denylist: a "safe:"
-#                                       # verdict may also auto-approve a DENYLISTED
-#                                       # command - config-only, no live toggle
-#                                       # (issue #389).
-#   command_safety_denylist_safe_approve: true  # that same half on its own, if you
-#                                       # prefer two boolean keys (ORed into the enum)
-#   yolo: false  # shell consent OFF for the run.command tool: every command
-#                # runs without a dialog and with no model safety check
-#                # (issue #221). Toggled live with /yolo and persisted with the
-#                # session. Well-known disaster commands (rm -rf, format C:,
-#                # sudo, git push -f, curl|sh, ...) ALWAYS keep the dialog.
-#   bang_requires_confirmation: true  # the `! cmd` bang syntax also asks for
-#                # confirmation (default, issue #221). Set false and a
-#                # user-typed bang command runs immediately - it is already
-#   editor: nvim -R   # command Ctrl+G hands the buffer being typed to
-#                     # (issue #298). Split into argv words, never run through a
-#                     # shell. Resolution order: --editor, $HARNESS_EDITOR, this
-#                     # key, $EDITOR, $VISUAL. Absent = the key is not taken.
-#   grant_workdir: true  # standing file-access grant on the working directory
-#                       # (issue #384, default true). The run starts covering
-#                       # every path inside the working directory for read,
-#                       # write and delete, so the model stops asking per file.
-#                       # Sensitive names (.git, .harness, .env*) stay blocked
-#                       # whatever this says - the guard is a NAME rule, not a
-#                       # path one. Set false to get per-file consent back.
-#                # explicit intent. The disaster denylist still applies.
-#
 class HarnessConfig
   HARNESS_DIR = ".harness"
 
@@ -198,32 +79,41 @@ class HarnessConfig
     @system_prompt_file = nonblank(data[:system_prompt_file])
     @auto_save = data[:auto_save].nil? ? true : data[:auto_save]
     @command_safety_check = data[:command_safety_check] == true
+
     # issue #389: the two safety relaxations fold into ONE enum key; the separate
     # denylist boolean ORs in when both keys are given. Rationale:
     # doc/denylist_safe_approve_design.md.
     mode = command_safety_mode(data[:command_safety_auto_approve])
+
     @command_safety_auto_approve = mode[:approve]
     @command_safety_denylist_safe_approve =
       mode[:denylist] || data[:command_safety_denylist_safe_approve] == true
+
     @double_enter_submit = data[:double_enter_submit] == true
     @max_tool_iterations = int_or_nil(data[:max_tool_iterations])
     @max_memories = int_or_nil(data[:max_memories])
+
     # Opt-in streamed LLM responses (default off: a profile or global key
     # that does not ask for it gets the buffered request unchanged).
     @streaming = data[:streaming] == true
+
     # Opt-in markdown rendering of the assistant answer (issue #106, default off).
     @markdown = data[:markdown] == true
+
     # Table-width basis for markdown rendering (issue #106). nil = the renderer's
     # default (80% of the detected terminal); an explicit integer is used as-is.
     @markdown_max_width = int_or_nil(data[:markdown_max_width])
+
     # External MCP servers (issue #48). Opt-in: an empty list means no MCP code
     # path runs at all. Each entry is normalized to { name:, command:, args:, env: }.
     @mcp_servers = normalize_mcp_servers(Array(data[:mcp_servers]))
+
     # Tool-result image limits (issue #449). Read whether or not a vision profile
     # exists: the values describe the rule, and a run with no vision profile
     # simply never inlines anything. nil = the built-in default.
     @mcp_image_limits = normalize_mcp_images(data[:mcp_images])
     @mcp_images_dir   = nonblank(data.dig(:mcp_images, :dir)) || ImageStore::DEFAULT_DIR
+
     # Workdir-relative dirs the YOLO posture never auto-covers (issue #385).
     # nil (key absent) = FileList's default (the owner's space, local/); an
     # explicit list replaces it, and an explicit empty list protects nothing.
@@ -231,23 +121,31 @@ class HarnessConfig
       if data.key?(:protected_dirs)
         normalize_protected_dirs(Array(data[:protected_dirs]))
       end
+
     # issue #303: rendered-output palette name (nil = the default palette).
     # Validated by UI::Palette.validate! in the CLI, not here: this class does
     # not know the palette list and must not start requiring the UI layer.
     @output_palette = nonblank(data[:output_palette])
+
     # issue #221: YOLO is opt-in (default off) - the harness never assumes
     # the user wants consent removed. Bang confirmation defaults to ON
     # (today's behavior): the user has to explicitly turn it off.
     @yolo = data[:yolo] == true
-    @bang_requires_confirmation = data[:bang_requires_confirmation].nil? ?
-                                  true : data[:bang_requires_confirmation] == true
+
+    @bang_requires_confirmation =
+      data[:bang_requires_confirmation].nil? ?
+      true :
+      data[:bang_requires_confirmation] == true
+
     # issue #33: web.fetch private-address opt-in. Default OFF: fetching a
     # loopback / private / link-local address is the SSRF-shaped case, so it is
     # never allowed unless the user asked for it. Like yolo, a USER-side
     # posture: the model cannot set it.
     @web_fetch_allow_private = data[:web_fetch_allow_private] == true
+
     # issue #298: the editor command (nil = Ctrl+G is not taken at all).
     @editor = nonblank(data[:editor])
+
     # issue #384: standing file-access grant on the working directory. Default
     # ON (key absent = true): a run starts covering every path inside the
     # working directory for read, write and delete, so per-file consent is no
@@ -255,15 +153,18 @@ class HarnessConfig
     # FileList#sensitive? runs BEFORE any grant lookup, so a path grant on an
     # ancestor never reaches them. Set false for the old per-file consent back.
     @grant_workdir = data[:grant_workdir].nil? ? true : data[:grant_workdir]
+
     @compact = {
       recent_messages: int_or_nil(data.dig(:compact, :recent_messages)),
       auto_threshold:  float_or_nil(data.dig(:compact, :auto_threshold)),
       max_size:        int_or_nil(data.dig(:compact, :max_size)),
       reserved_tokens: int_or_nil(data.dig(:compact, :reserved_tokens))
     }
+
     @resume = {
       replay_entries: int_or_nil(data.dig(:resume, :replay_entries))
     }
+
     @retry = {
       count: int_or_nil(data.dig(:retry, :count)),
       delay: float_or_nil(data.dig(:retry, :delay))

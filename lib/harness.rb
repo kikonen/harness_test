@@ -768,13 +768,18 @@ class Harness
   # markers with no resolvable name - the user then sees the model tried to act
   # and can re-prompt.
   def report_unresolved_text_tool_call(content)
+    #logger.info "-----text_tool_call-----\n#{content}\n----------------"
+
     return unless @text_tool_call_parser.text_call?(content)
 
     msg = "the model wrote a tool call as text the harness could not run " \
           "(no structured tool call was returned and its name matched no tool) " \
           "- it was NOT run. Re-send the request; the model may need the " \
           "call asked differently."
-    logger.warn "text-shaped tool call in response (issue #461) - NOT executed"
+
+    logger.warn "text-shaped tool call in response (issue #461) - NOT executed\n" \
+      "-----text_tool_call-----\n#{content}\n----------------"
+
     Task.emit(:warn, origin: :harness, content: msg)
   end
 
@@ -976,6 +981,7 @@ class Harness
       @session.flush_notes
       @session.record_stats(stats)
       @session.record_reasoning(message[:reasoning])
+
       # A committed chain is text state: no base64 belongs in it or in a
       # session file (issue #449).
       strip_image_payloads(messages)
