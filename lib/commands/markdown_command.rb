@@ -15,7 +15,13 @@ module Commands
         "bold/italic, code and tables get ANSI styling (saved with the session)",
       group: :output,
       forms: ["markdown", "markdown on", "markdown off", "markdown status"],
-      see_also: %w[palette])
+      see_also: %w[palette],
+      form_notes: {
+        "markdown" => "toggle markdown rendering (on/off)",
+        "markdown on" => "set it explicitly",
+        "markdown off" => "set it explicitly",
+        "markdown status" => "show the current posture"
+      })
 
     def handle(args)
       case args.to_s.strip.downcase
@@ -31,7 +37,7 @@ module Commands
         @harness.toggle_markdown
         report
       else
-        usage
+        render_usage
       end
     end
 
@@ -76,12 +82,6 @@ module Commands
 
       "Table width basis: #{width} columns " \
         "(--markdown-width / 'markdown_max_width:')."
-    end
-
-    def usage
-      @ui.puts "  usage: /markdown           toggle markdown rendering (on/off)"
-      @ui.puts "           /markdown on|off  set it explicitly"
-      @ui.puts "           /markdown status  show the current posture"
     end
   end
 end

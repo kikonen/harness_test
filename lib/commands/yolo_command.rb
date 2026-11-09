@@ -35,7 +35,13 @@ module Commands
                "denylist, sensitive paths and local/ keep asking",
       group: :access,
       forms: ["yolo", "yolo on", "yolo off", "yolo status"],
-      see_also: %w[consent shell grant])
+      see_also: %w[consent shell grant],
+      form_notes: {
+        "yolo" => "toggle YOLO (on/off)",
+        "yolo on" => "set it explicitly",
+        "yolo off" => "set it explicitly",
+        "yolo status" => "show the current posture"
+      })
 
     def handle(args)
       case args.to_s.strip.downcase
@@ -49,7 +55,7 @@ module Commands
         label = @harness.toggle_yolo
         report(label)
       else
-        usage
+        render_usage
       end
     end
 
@@ -89,12 +95,6 @@ module Commands
                   "dd of=/dev/...", "Remove-Item -Recurse -Force <path>"]
       @ui.puts "  Disaster commands keep the dialog in EVERY posture:"
       examples.each { |ex| @ui.puts "    - #{ex}" }
-    end
-
-    def usage
-      @ui.puts "  usage: /yolo          toggle YOLO (on/off)"
-      @ui.puts "         /yolo on|off   set it explicitly"
-      @ui.puts "         /yolo status   show the current posture"
     end
   end
 end

@@ -16,13 +16,17 @@ class CommandHelp
     general: "General"
   }.freeze
 
-  attr_reader :usage, :forms, :summary, :group, :see_also
+  attr_reader :usage, :forms, :summary, :group, :see_also, :form_notes
 
   # usage:  the canonical form shown in the /help table ("param [key [value]]")
   # forms:  every accepted form, listed by /help <command> (defaults to usage)
+  # form_notes: optional Hash {form => short description} shown beside a form in
+  #             the compact inline usage a bad-argument path prints (issue #471).
+  #             Keys must be a subset of forms; it never changes what /help
+  #             <command> lists (that path prints forms alone).
   # group:  a GROUPS key. An unknown one raises AT LOAD TIME: help that belongs
   # to no group silently disappears from the table.
-  def initialize(usage:, summary:, group:, forms: [], see_also: [])
+  def initialize(usage:, summary:, group:, forms: [], see_also: [], form_notes: {})
     if usage.to_s.strip.empty? || summary.to_s.strip.empty?
       raise HarnessError, "CommandHelp needs a usage and a summary"
     end
@@ -36,6 +40,7 @@ class CommandHelp
     @group    = group
     @forms    = forms.empty? ? [usage] : forms
     @see_also = see_also
+    @form_notes = form_notes
   end
 
   def group_label
