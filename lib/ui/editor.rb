@@ -157,13 +157,16 @@ module UI
     # Enter never submits; the SUBMIT_KEY_SEQ key commits the buffer. The
     # readmultiline block returns false so a plain Enter always inserts a
     # newline. A cancelled Esc returns the buffer intact (the CLI keeps it as a
-    # draft). Design in doc/editor_input_design.md.
+    # draft. Do NOT pass rprompt to readmultiline: Reline paints rprompt
+    # right-aligned on the first visible row, so a rprompt equal to the left
+    # prompt glues a stray copy of 'note> ' to the right edge of the terminal
+    # (issue #481). Design in doc/editor_input_design.md.
     def reline_read_multiline(prompt, prefill)
       self.class.install_reline_patches!
       install_prefill(prefill)
-      text = Reline.readmultiline(
-        prompt, false, rprompt: prompt
-      ) { |_buf| false } # Enter always inserts a newline; submit is the key
+      text = Reline.readmultiline(prompt, false) do |_buf|
+        false # Enter always inserts a newline; submit is the key
+      end
       if RelinePatch::CtrlGHandoff.fired
         snapshot = RelinePatch::CtrlGHandoff.text.to_s
         RelinePatch::CtrlGHandoff.reset!
