@@ -45,7 +45,7 @@ module Commands
     def list_plans
       all = plans.all
       if all.empty?
-        @ui.puts "No plans stored (#{plans.dir})."
+        emit_role(:note, "No plans stored (#{plans.dir}).")
         emit_role(
           :note,
           "The model saves one with plan.add(name:, text:); " \

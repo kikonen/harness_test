@@ -35,7 +35,7 @@ module Commands
     def list_memories
       all = memories.all
       if all.empty?
-        @ui.puts "No memories stored (#{memories.dir})."
+        emit_role(:note, "No memories stored (#{memories.dir}).")
         emit_role(
           :note,
           "The model saves one with memory.add(name:, text:); " \

@@ -30,8 +30,11 @@ module Commands
     def list_skills(skills)
       all = skills.all
       if all.empty?
-        @ui.puts "No skills defined (#{skills.dir})."
-        @ui.puts "Add one at #{Skills::DIR}/<name>/SKILL.md - a written-down procedure."
+        emit_role(:note, "No skills defined (#{skills.dir}).")
+        emit_role(
+          :note,
+          "Add one at #{Skills::DIR}/<name>/SKILL.md " \
+            "- a written-down procedure.")
         return
       end
 
