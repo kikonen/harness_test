@@ -2,6 +2,7 @@
 
 require_relative "editor"
 require_relative "text_wrap"
+require "tins"
 
 # -- UI::Dialog ---------------------------------------------------------------
 #
@@ -124,13 +125,15 @@ module UI
     TITLE_INDENT = "             "
     NOTE_INDENT  = "                "
 
-    # A dialog is a fixed-width block, like a :note paragraph (issue #470): a
-    # note or an option description re-wraps to a constant content width so a
-    # long sentence reads as a paragraph instead of one line running off the
-    # terminal (issue #476). A line that already fits is printed verbatim, so a
-    # short dialog is byte-identical to before. Fixed, not the terminal width.
-    DIALOG_WIDTH = 80
-    NOTE_CONTENT_WIDTH = DIALOG_WIDTH - NOTE_INDENT.length
+    # A dialog wraps its prose (title, notes, option titles and descriptions)
+    # to the SAME basis the plan/say markdown path uses (issue #476): a fixed
+    # PERCENTAGE of the detected terminal width, not a fixed column count: a
+    # wide terminal fills its room, a narrow one stays inside itself (no
+    # terminal-side mid-word hard-wrap). 80 mirrors AUTO_WIDTH_PERCENT in
+    # UI::MarkdownRenderer; the floor keeps a very narrow terminal readable.
+    # A line that already fits is printed verbatim.
+    DIALOG_WIDTH_PERCENT = 80
+    MIN_DIALOG_WIDTH = 40
 
     # One note line + its kind. A plain String note is kind context, so every
     # existing caller (ui.dialog's free-form note, web.fetch) is unchanged.
@@ -266,17 +269,16 @@ module UI
       # own color), and each note line carries the KIND its emitter stated
       # (issue #388) - no caller names a color for any of them.
       ui.puts dialog_head(ui, title_lines.first)
-      title_lines[1..].each { |line| ui.puts "#{TITLE_INDENT}#{line}" }
+      # A long title body re-wraps to the same percentage basis (issue #476).
+      dialog_wrap(title_lines[1..].join("\n"), TITLE_INDENT).each { |line| ui.puts line }
 
       @notes.each { |note| paint_note(ui, note).each { |line| ui.puts line } }
 
       @options.each_with_index do |opt, i|
-        ui.puts option_line(ui, i, opt)
+        option_lines(ui, i, opt).each { |line| ui.puts line }
         if opt.description && !opt.description.strip.empty?
-          # A long description reads as a wrapped paragraph at the note indent
-          # (issue #476); a fitting one is the old single line verbatim.
-          TextWrap.line(opt.description, NOTE_CONTENT_WIDTH)
-            .each { |seg| ui.puts "#{NOTE_INDENT}#{seg}" }
+          # dialog_wrap already prefixes each line with the indent.
+          dialog_wrap(opt.description, NOTE_INDENT).each { |line| ui.puts line }
         end
       end
 
@@ -356,7 +358,7 @@ module UI
     # every physical line, not just the first. A fitting note is one line - the
     # exact pre-#476 bytes.
     def paint_note(ui, note)
-      TextWrap.line(note.text, NOTE_CONTENT_WIDTH).map do |seg|
+      TextWrap.line(note.text, content_width(NOTE_INDENT)).map do |seg|
         "#{NOTE_INDENT}#{paint(ui, note.role, seg)}"
       end
     end
@@ -364,8 +366,33 @@ module UI
     # The NUMBER is the anchor the choice line names, so it gets a visible hue of
     # its own (not the marker gray: invisible in a list the eye scans for a
     # number); the option's own words are content the user must read.
-    def option_line(ui, index, opt)
-      "#{TITLE_INDENT}#{paint(ui, :dialog_option, "#{index + 1})")} #{opt.title}"
+    # A long option TITLE wraps too (issue #476): the first line keeps the
+    # painted number, continuation lines pad to align under the title text, so
+    # the option still reads as one entry. A fitting title is the old single
+    # line verbatim.
+    def option_lines(ui, index, opt)
+      number = "#{index + 1})"
+      pad    = " " * (TITLE_INDENT.length + number.length + 1)
+      segs   = TextWrap.line(opt.title, content_width(pad))
+      segs   = [""] if segs.empty?
+      out    = ["#{TITLE_INDENT}#{paint(ui, :dialog_option, number)} #{segs.first}"]
+      segs[1..].each { |seg| out << (pad + seg) }
+      out
+    end
+
+    # Total wrap width: a fixed PERCENTAGE of the detected terminal, floored so
+    # a very narrow terminal is still readable. This is the same basis the
+    # plan/say markdown path uses (UI::MarkdownRenderer::AUTO_WIDTH_PERCENT).
+    def content_width(indent)
+      cols  = (Tins::Terminal.columns rescue MIN_DIALOG_WIDTH)
+      total = [(cols * DIALOG_WIDTH_PERCENT / 100.0).floor, MIN_DIALOG_WIDTH].max
+      [total - indent.to_s.length, 1].max
+    end
+
+    # Wrap a block to its indent's content width and prefix every line with the
+    # indent (descriptions; notes are painted per line in #paint_note).
+    def dialog_wrap(text, indent)
+      TextWrap.line(text, content_width(indent)).map { |seg| "#{indent}#{seg}" }
     end
 
     # A console answers #paint when it has a palette to paint with (issue #388);
