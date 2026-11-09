@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "editor"
+require_relative "text_wrap"
 
 # -- UI::Dialog ---------------------------------------------------------------
 #
@@ -122,6 +123,14 @@ module UI
     HEAD_INDENT  = "  "
     TITLE_INDENT = "             "
     NOTE_INDENT  = "                "
+
+    # A dialog is a fixed-width block, like a :note paragraph (issue #470): a
+    # note or an option description re-wraps to a constant content width so a
+    # long sentence reads as a paragraph instead of one line running off the
+    # terminal (issue #476). A line that already fits is printed verbatim, so a
+    # short dialog is byte-identical to before. Fixed, not the terminal width.
+    DIALOG_WIDTH = 80
+    NOTE_CONTENT_WIDTH = DIALOG_WIDTH - NOTE_INDENT.length
 
     # One note line + its kind. A plain String note is kind context, so every
     # existing caller (ui.dialog's free-form note, web.fetch) is unchanged.
@@ -259,12 +268,15 @@ module UI
       ui.puts dialog_head(ui, title_lines.first)
       title_lines[1..].each { |line| ui.puts "#{TITLE_INDENT}#{line}" }
 
-      @notes.each { |note| ui.puts paint_note(ui, note) }
+      @notes.each { |note| paint_note(ui, note).each { |line| ui.puts line } }
 
       @options.each_with_index do |opt, i|
         ui.puts option_line(ui, i, opt)
         if opt.description && !opt.description.strip.empty?
-          ui.puts "#{NOTE_INDENT}#{opt.description}"
+          # A long description reads as a wrapped paragraph at the note indent
+          # (issue #476); a fitting one is the old single line verbatim.
+          TextWrap.line(opt.description, NOTE_CONTENT_WIDTH)
+            .each { |seg| ui.puts "#{NOTE_INDENT}#{seg}" }
         end
       end
 
@@ -339,8 +351,14 @@ module UI
       "#{paint(ui, :marker, "#{HEAD_INDENT}[dialog] ⚠  ")}#{title_line}"
     end
 
+    # A note line wrapped to the content width, each continuation carrying the
+    # note indent; the role is painted per rendered line so the palette covers
+    # every physical line, not just the first. A fitting note is one line - the
+    # exact pre-#476 bytes.
     def paint_note(ui, note)
-      "#{NOTE_INDENT}#{paint(ui, note.role, note.text)}"
+      TextWrap.line(note.text, NOTE_CONTENT_WIDTH).map do |seg|
+        "#{NOTE_INDENT}#{paint(ui, note.role, seg)}"
+      end
     end
 
     # The NUMBER is the anchor the choice line names, so it gets a visible hue of

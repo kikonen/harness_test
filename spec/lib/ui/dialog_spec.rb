@@ -648,4 +648,37 @@ RSpec.describe UI::Dialog do
       end
     end
   end
+  # issue #476: a long note or option description re-wraps to a fixed content
+  # width so it reads as a paragraph instead of one line running off the
+  # terminal. A note/description that already fits is the exact old single line,
+  # so a short dialog is byte-identical to the pre-#476 contract.
+  describe 'long text wraps to the fixed dialog width (issue #476)' do
+    def render_lines(note: nil, description: nil)
+      out = StringIO.new
+      opts = [described_class::Option.new(title: 'Opt', value: :o, description: description)]
+      described_class.new(title: 't', options: opts, note: note)
+                   .perform_direct(ui: UI::Console.new(stdout: out, stdin: StringIO.new("\n")))
+      out.string.lines.map(&:chomp)
+    end
+
+    it 'keeps a fitting note as the exact old single line' do
+      expect(render_lines(note: 'a short note fits')).to include('                a short note fits')
+    end
+
+    it 're-wraps a long note and indents every continuation line' do
+      lines = render_lines(note: 'one ' * 40)
+      note_lines = lines.select { |l| l.start_with?('                ') }
+
+      expect(note_lines.size).to be > 1
+      expect(note_lines.all? { |l| l.length <= 80 }).to be(true)
+    end
+
+    it 'wraps a long option description under its option line' do
+      lines = render_lines(description: 'word ' * 40)
+      desc_lines = lines.select { |l| l.start_with?('                ') }
+
+      expect(desc_lines.size).to be > 1
+      expect(desc_lines.all? { |l| l.length <= 80 }).to be(true)
+    end
+  end
 end

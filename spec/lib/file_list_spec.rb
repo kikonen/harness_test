@@ -536,9 +536,18 @@ RSpec.describe FileList do
         @grant_args = ['../outside.txt', :r]
         out = drive_colored_grant(list, "2\n", purpose: 'to read the config')
 
+        # issue #476: a long note wraps to the dialog width, so the WARNING is
+        # the alert color on EVERY wrapped line (the whole text survives, each
+        # physical line is painted, not just the first).
         expect(out).to include(
-          "\e[38;5;130mWARNING: this path is OUTSIDE the working directory" \
-          " - granting access may be a sandbox escape.\e[0m"
+          "\e[38;5;130mWARNING: this path is OUTSIDE the working directory - granting\e[0m"
+        )
+        expect(out).to include(
+          "\e[38;5;130maccess may be a sandbox escape.\e[0m"
+        )
+        # No line carries the full un-wrapped run (it was re-wrapped).
+        expect(out).not_to include(
+          "\e[38;5;130mWARNING: this path is OUTSIDE the working directory - granting access may be a sandbox escape.\e[0m"
         )
         # CONTEXT is content to read, not chrome: no escape bytes around it.
         expect(out).to include("\n                to read the config\n")
