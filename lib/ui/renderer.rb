@@ -45,6 +45,17 @@ module UI
     KIND = :kind
     ACK_TYPES = [ACK, KIND].freeze
 
+    # A paragraph of harness EXPLANATORY PROSE (a command report's body). The
+    # emitter states ONE unwrapped paragraph with no leading indent; the renderer
+    # owns the indent AND the wrap (#470 - #466's theme from the other side: the
+    # line-break was the emitter's, baked into source \ continuations, so it read
+    # ragged and a remote client could not re-lay it out). UNPAINTED: only the
+    # wrap/indent move, no color changes. The wrap width is a FIXED column
+    # count, not the terminal width - a paragraph that re-wraps on every resize
+    # is as unlocatable as a boundary that moves (see RULE_WIDTH). The raw
+    # paragraph is what lands in the OutputBuffer, so a browser re-wraps it in CSS.
+    NOTE = :note
+
     # The emitter still owns these lines' shape. :spinner_detail is listed
     # because the drain loop animates it - it must never produce a line.
     VERBATIM = %i[system text stats compact spinner_detail].freeze
@@ -55,6 +66,9 @@ module UI
     # Fixed width, NOT the terminal width: a boundary that depends on a
     # terminal setting is a boundary that moves.
     RULE_WIDTH = 80
+    # :note content columns: RULE_WIDTH minus the indent. One fixed value so a
+    # rendered paragraph is identical from a 60-col or a 176-col terminal.
+    NOTE_WIDTH = RULE_WIDTH - INDENT.length
 
     # The start of an iteration and the start of the final answer are the two
     # BLOCK boundaries, and both get the same fused rule. plan / say / tools /
@@ -114,6 +128,7 @@ module UI
       return status_line(type, text, origin) if STATUS_GLYPHS.key?(type)
       return ack_line(type, text, origin) if ACK_TYPES.include?(type)
       return boundary_line(type, text) if BOUNDARY_ROLES.include?(type)
+      return note_line(text) if type == NOTE
       return labeled_markdown_line(type, text) if markdown_role?(type)
 
       paint(type, labeled(type, text))
@@ -123,6 +138,7 @@ module UI
       type = type.to_sym
       return true if STATUS_GLYPHS.key?(type)
       return true if ACK_TYPES.include?(type)
+      return true if type == NOTE
 
       !VERBATIM.include?(type) && LABELS.key?(type)
     end
@@ -137,6 +153,42 @@ module UI
       # :kind - the bracket names a KIND (origin), the message follows it.
       # [LLM error] message / [palette: default] (unchanged). Unpainted.
       "#{INDENT}[#{origin || badge}] #{badge}"
+    end
+
+    # A paragraph of harness prose: indent every wrapped line and re-wrap the
+    # text to the fixed NOTE_WIDTH, so the paragraph is a function of the
+    # renderer, not of where the emitter happened to break the source string
+    # (#470). Unpainted - only the wrap/indent move. A continuation line is the
+    # INDENT alone (a paragraph line, not a status gutter).
+    def note_line(paragraph)
+      lines = paragraph.to_s.split("\n")
+      out = []
+      lines.each do |raw|
+        wrapped = wrap_words(raw, NOTE_WIDTH)
+        wrapped = [""] if wrapped.empty?
+        wrapped.each { |seg| out << (seg.empty? ? INDENT : INDENT + seg) }
+      end
+      out.join("\n")
+    end
+
+    # Greedy word wrap. A word longer than width gets its own line (never split
+    # mid-word): a command name or a URL is one token the reader has to keep whole.
+    def wrap_words(text, width)
+      words = text.split(/\s+/).reject(&:empty?)
+      lines = []
+      cur = +""
+      words.each do |word|
+        if cur.empty?
+          cur = word
+        elsif cur.length + 1 + word.length <= width
+          cur << " " << word
+        else
+          lines << cur
+          cur = word
+        end
+      end
+      lines << cur unless cur.empty?
+      lines
     end
 
     # A multi-line message (a pasted multiline script is the everyday case)

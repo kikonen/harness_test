@@ -44,15 +44,22 @@ module Commands
     def report(label = @harness.plan_mode_label)
       emit_role(:ack, label || "PLANNING OFF")
       if @harness.plan?
-        @ui.puts "  Planning mode is on: draft and iterate a plan with plan.add " \
-          "before modifying code, and keep it in the durable store."
-        @ui.puts "  [PLAN] is tagged wherever the postures are shown: the spinner " \
-          "badge AND the idle prompt line (the same builder #387 unified)."
+        emit_role(
+          :note,
+          "Planning mode is on: draft and iterate a plan with " \
+            "plan.add before modifying code, and keep it in the durable store.")
+        emit_role(
+          :note,
+          "[PLAN] is tagged wherever the postures are shown: " \
+            "the spinner badge AND the idle prompt line (the same builder #387 " \
+            "unified).")
       else
-        @ui.puts "  Planning mode is off: no planning expectation is stated."
+        emit_role(:note, "Planning mode is off: no planning expectation is stated.")
       end
-      @ui.puts "  Advisory mode: no tool is refused. Enforcement strength: " \
-        "doc/planning_mode_design.md."
+      emit_role(
+        :note,
+        "Advisory mode: no tool is refused. Enforcement " \
+          "strength: doc/planning_mode_design.md.")
     end
 
     def usage

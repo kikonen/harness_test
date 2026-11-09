@@ -32,9 +32,11 @@ module Commands
 
     def nothing_declared
       @ui.puts "No MCP servers declared: no MCP code ran and the gem was never loaded."
-      @ui.puts "  Declare one under 'mcp_servers:' in the config (.harness/config.yml or"
-      @ui.puts "  the user-home config): 'command' to spawn a server, or 'url' to connect"
-      @ui.puts "  to one (issue #402). Runnable examples of both: examples/mcp/."
+      emit_role(
+        :note,
+        "Declare one under 'mcp_servers:' in the config (.harness/config.yml " \
+          "or the user-home config): 'command' to spawn a server, or 'url' to " \
+          "connect to one (issue #402). Runnable examples of both: examples/mcp/.")
     end
 
     def report(states)
@@ -46,12 +48,18 @@ module Commands
       states.each { |state| report_server(state) }
       report_collisions
 
-      @ui.puts "  A server's tools are namespaced '<server>.<tool>'; /tools lists them"
-      @ui.puts "  together with the built-ins."
-      @ui.puts "  No live toggle: a server comes from the config and its tool definitions"
-      @ui.puts "  are sent with every request, so they stay fixed for the run."
-      @ui.puts "  What connected is saved with the session; a resumed run names a saved"
-      @ui.puts "  server it can no longer reach."
+      emit_role(
+        :note,
+        "A server's tools are namespaced '<server>.<tool>'; /tools lists them " \
+          "together with the built-ins.")
+      emit_role(
+        :note,
+        "No live toggle: a server comes from the config and its tool " \
+          "definitions are sent with every request, so they stay fixed for the run.")
+      emit_role(
+        :note,
+        "What connected is saved with the session; a resumed run names a saved " \
+          "server it can no longer reach.")
     end
 
     def report_server(state)

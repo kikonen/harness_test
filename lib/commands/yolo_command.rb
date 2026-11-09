@@ -66,15 +66,19 @@ module Commands
       # The bare bracketed label is the ack - a "cmd:" prefix says nothing
       # the brackets do not already say (issue #221 review).
       emit_role(:ack, label)
-      @ui.puts on ? "  Shell consent for run.command is OFF - commands run " \
-                  "without asking." \
-                 : "  Shell consent is ON - unapproved commands ask as before."
+      emit_role(
+        :note,
+        on ? "Shell consent for run.command is OFF - commands " \
+                          "run without asking." \
+                         : "Shell consent is ON - unapproved commands ask as before.")
       if on
-        @ui.puts "  File access in the working directory is covered too " \
-                 "(never sensitive paths, local/ or paths outside it)."
+        emit_role(
+          :note,
+          "File access in the working directory is covered too " \
+                           "(never sensitive paths, local/ or paths outside it).")
       end
       print_denylist_note
-      @ui.puts "  The posture is saved with the session (resume keeps it)."
+      emit_role(:note, "The posture is saved with the session (resume keeps it).")
     end
 
     # YOLO is only safe to switch on casually because the denylist stays.

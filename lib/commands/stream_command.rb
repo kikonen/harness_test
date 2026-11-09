@@ -40,21 +40,30 @@ module Commands
     def report(label = @harness.stream_mode_label)
       emit_role(:ack, label || "BUFFERED")
       if @harness.stream?
-        @ui.puts "  Responses stream in: the spinner shows the answer as it " \
-          "arrives with the rate it is arriving at, and [STREAM] is tagged " \
-          "wherever the postures are shown: the spinner badge AND the idle " \
-          "prompt line (issue #387)."
-        @ui.puts "  A streamed request is retried only until the first part " \
-          "arrives - after that a lost stream fails the turn instead of " \
-          "re-sending."
+        emit_role(
+          :note,
+          "Responses stream in: the spinner shows the answer " \
+            "as it arrives with the rate it is arriving at, and [STREAM] is " \
+            "tagged wherever the postures are shown: the spinner badge AND the " \
+            "idle prompt line (issue #387).")
+        emit_role(
+          :note,
+          "A streamed request is retried only until the first " \
+            "part arrives - after that a lost stream fails the turn instead of " \
+            "re-sending.")
       else
-        @ui.puts "  Responses are buffered: the whole answer arrives before " \
-          "it is printed (the full retry policy applies)."
+        emit_role(
+          :note,
+          "Responses are buffered: the whole answer arrives " \
+            "before it is printed (the full retry policy applies).")
       end
-      @ui.puts "  The spinner also shows a tok/s rate: the live rate while an " \
-        "answer streams, else the rate of the request that last completed " \
-        "(issue #285); '~' marks one the harness estimated, not the server."
-      @ui.puts "  Saved with the session (resume keeps it)."
+      emit_role(
+        :note,
+        "The spinner also shows a tok/s rate: the live rate " \
+          "while an answer streams, else the rate of the request that last " \
+          "completed (issue #285); '~' marks one the harness estimated, not the " \
+          "server.")
+      emit_role(:note, "Saved with the session (resume keeps it).")
     end
 
     def usage
