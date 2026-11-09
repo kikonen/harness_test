@@ -61,7 +61,7 @@ module Commands
       changed = current.name != previous
       label   = changed ? "(was #{previous || 'none'})" : "(unchanged)"
       emit_role(:kind, label, origin: "palette: #{current.name}")
-      @ui.puts "  Effective from the next turn (this turn's Task already chose)."
+      emit_role(:note, "Effective from the next turn (this turn's Task already chose).")
       print_roles(current)
       print_sample(current)
       @ui.puts "  Saved with the session (resume keeps it). Startup choice:"
@@ -73,8 +73,8 @@ module Commands
       @ui.puts "Output palette: #{current ? current.name : 'none'}"
       print_roles(current)
       print_sample(current)
-      @ui.puts "Switch with /palette <name>; available: " \
-        "#{UI::Palette.names.join(', ')}"
+      available = UI::Palette.names.join(", ")
+      emit_role(:note, "Switch with /palette <name>; available: #{available}")
       @ui.puts "  basic16 - codes stay inside 30..37 (a 16-color-only terminal)"
       @ui.puts "  none    - no color at all (what --no-color selects)"
     end

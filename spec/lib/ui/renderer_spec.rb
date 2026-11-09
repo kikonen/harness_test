@@ -297,6 +297,42 @@ RSpec.describe UI::Renderer do
     end
   end
 
+  # Harness explanatory prose (a command report body): the renderer re-wraps a
+  # single unwrapped paragraph to a FIXED width and indents every line, so the
+  # wrap is the renderer's, not baked into the emitted string (#470). Unpainted.
+  describe '#line (:note) - wrapped prose paragraphs (issue #470)' do
+    it 'indents a short paragraph onto one line' do
+      expect(renderer.line(type: :note, content: 'Saved with the session (resume keeps it).')).to eq(
+        '  Saved with the session (resume keeps it).'
+      )
+    end
+
+    it 're-wraps a long paragraph and indents every continuation line' do
+      out = renderer.line(type: :note,
+                          content: 'Responses are buffered: the whole answer arrives before it is printed (the full retry policy applies).')
+      lines = out.split("\n")
+
+      expect(lines).to eq(
+        ['  Responses are buffered: the whole answer arrives before it is printed (the',
+         '  full retry policy applies).']
+      )
+      # No rendered line exceeds the fixed RULE_WIDTH whatever the terminal is.
+      expect(lines).to all(satisfy { |l| l.length <= described_class::RULE_WIDTH })
+    end
+
+    it 'gives a word wider than the wrap its own line (never split mid-word)' do
+      long = 'short wordssupercalifragilisticexpialidociousandthensome more text here'
+      out = renderer.line(type: :note, content: long)
+      expect(out).to eq('  ' + long)
+    end
+
+    it 'leaves the paragraph unpainted with a palette (only the wrap moves)' do
+      painted = described_class.new(palette: UI::Palette.fetch('default'))
+
+      expect(painted.line(type: :note, content: 'Saved with the session.')).to eq('  Saved with the session.')
+    end
+  end
+
   describe '#labeled?' do
     it 'is true for a role the renderer patterns' do
       expect(renderer.labeled?(:plan)).to eq(true)
@@ -310,6 +346,10 @@ RSpec.describe UI::Renderer do
     it 'is true for the ack roles (the renderer owns their bracket too)' do
       expect(renderer.labeled?(:ack)).to eq(true)
       expect(renderer.labeled?(:kind)).to eq(true)
+    end
+
+    it 'is true for the note role (the renderer owns its wrap and indent)' do
+      expect(renderer.labeled?(:note)).to eq(true)
     end
 
     it 'is false for verbatim types and for the spinner' do

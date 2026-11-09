@@ -47,6 +47,9 @@ decoration that a renderer can produce itself.
 | `:warn` | a recovered failure | `warn:  auto-save failed: EACCES` |
 | `:error` | a real error | `error: hunk did not apply` |
 | `:status_ok` ... `:status_info` | the verdict's message | `  [label] ✓ message` (see below) |
+| `:ack` | the badge word | `  [YOLO ON]` (bracketed ack, unpainted; issue #466) |
+| `:kind` | the message after the kind | `  [LLM error] rate limited` (bracket names a kind, unpainted; #466) |
+| `:note` | ONE unwrapped paragraph | re-wrapped to a fixed width, indented (harness prose, unpainted; #470) |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
 | `:spinner_detail` | the spinner payload | no line at all (animated) |
 
@@ -76,6 +79,10 @@ They are now typed by VERDICT and the label travels in the event's ORIGIN:
 | `:same` | `:status_same` | `=` | `  [dir.create] = tmp/ (already exists)` |
 | `:info` | `:status_info` | none | `  [tools.list] 12 tool(s)` |
 
+The verdict column feeds `Tool.status_type` (verdict `:note` becomes the TYPE
+`:status_note`); it is NOT the `:note` ROLE of the table above. A verdict always
+carries the bracket + glyph; the `:note` role is a wrapped paragraph with neither.
+
 `Tool#status(verdict, message)` is the emitter API (the bracket label is the
 tool's own name); `Tool.push_status(label:, verdict:, message:)` is the same
 thing for the emitters that are NOT tools - the shell runner (`run.command` /
@@ -92,6 +99,35 @@ holds the single plain message.
 
 The main-thread bang path renders the SAME pattern itself (`CommandRunner#renderer`,
 asking the harness for the palette) so `! cmd` and the tool path look identical.
+
+## Harness prose: the wrap is the renderer's too (issue #470)
+
+Command report bodies were the last pattern an EMITTER owned after #466 - not the
+label, but the LINE BREAK. A posture command wrote its prose as Ruby source
+continuations:
+
+    @ui.puts "  Responses stream in: the spinner shows the answer as it " \
+      "arrives with the rate ... the idle " \
+      "prompt line (issue #387)."
+
+The break column is then whatever the author happened to type, so the paragraph
+reads ragged and, worse, a remote/browser client receives a string already chopped
+at a column it cannot change. `:note` moves the wrap here too: the emitter states
+ONE unwrapped paragraph with NO leading indent, and `#note_line` re-wraps it to a
+fixed width and indents every line. UNPAINTED (`NOTE` has no palette entry): only
+the wrap/indent move, so no line changes color.
+
+The wrap width is the constant `NOTE_WIDTH` (= `RULE_WIDTH - INDENT`), NOT the
+terminal width - the same reason `RULE_WIDTH` is fixed: a paragraph that re-wraps
+on every resize is as unlocatable as a boundary that moves. A word wider than the
+wrap gets its own line rather than being split mid-word (a command name or URL is
+one token). Only genuine paragraphs use `:note`: an aligned block (a usage list, a
+denylist column) stays verbatim, because word-wrap would destroy its alignment.
+
+The `OutputBuffer` stores the RAW paragraph, not the wrapped lines - so a browser
+can re-wrap it in CSS (issue #146 / the #324 remote client) instead of inheriting
+this terminal's column choice. `spec/lib/ui/renderer_spec.rb` pins the wrap width
+and the unpainted-ness.
 
 ## What is deliberately NOT moved yet
 
