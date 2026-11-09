@@ -22,10 +22,12 @@ class TextToolCallParser
   # like a call: the safety is name resolution, not the closing tags, because a
   # truncated call (issue #332) has no closing tags yet is still worth running.
   OPEN = /<tool_call\b|<function[=\s]/i
+
   # The qwen dialect glues the name to the tag with '=' (<function=read>,
   # <parameter=path>), which is not legal XML. Nokogiri parses the call only
   # after this is rewritten into the '<function name="read">' attribute form.
   EQ_HEADER = %r{<(function|parameter)=([A-Za-z0-9_.]+)>}
+
   # Pulls the number back out of a synthetic id (text_call_N) so a later
   # recovered round continues the numbering instead of reusing an id.
   ID_PREFIX = "text_call_"
