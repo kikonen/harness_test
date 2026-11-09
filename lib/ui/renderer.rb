@@ -2,6 +2,7 @@
 
 require_relative "palette"
 require_relative "markdown_renderer"
+require_relative "text_wrap"
 
 # Renders one output entry to a console line: the PATTERN (label, status
 # bracket and glyph, gutter, color) belongs here, never in the emitted string.
@@ -164,31 +165,11 @@ module UI
       lines = paragraph.to_s.split("\n")
       out = []
       lines.each do |raw|
-        wrapped = wrap_words(raw, NOTE_WIDTH)
+        wrapped = TextWrap.words(raw, NOTE_WIDTH)
         wrapped = [""] if wrapped.empty?
         wrapped.each { |seg| out << (seg.empty? ? INDENT : INDENT + seg) }
       end
       out.join("\n")
-    end
-
-    # Greedy word wrap. A word longer than width gets its own line (never split
-    # mid-word): a command name or a URL is one token the reader has to keep whole.
-    def wrap_words(text, width)
-      words = text.split(/\s+/).reject(&:empty?)
-      lines = []
-      cur = +""
-      words.each do |word|
-        if cur.empty?
-          cur = word
-        elsif cur.length + 1 + word.length <= width
-          cur << " " << word
-        else
-          lines << cur
-          cur = word
-        end
-      end
-      lines << cur unless cur.empty?
-      lines
     end
 
     # A multi-line message (a pasted multiline script is the everyday case)
