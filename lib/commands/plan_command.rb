@@ -43,23 +43,24 @@ module Commands
     # means the posture is off - the badge only names a non-default.
     def report(label = @harness.plan_mode_label)
       emit_role(:ack, label || "PLANNING OFF")
-      if @harness.plan?
-        emit_role(
-          :note,
-          "Planning mode is on: draft and iterate a plan with " \
-            "plan.add before modifying code, and keep it in the durable store.")
-        emit_role(
-          :note,
-          "[PLAN] is tagged wherever the postures are shown: " \
-            "the spinner badge AND the idle prompt line (the same builder #387 " \
-            "unified).")
-      else
-        emit_role(:note, "Planning mode is off: no planning expectation is stated.")
-      end
-      emit_role(
-        :note,
-        "Advisory mode: no tool is refused. Enforcement " \
-          "strength: doc/planning_mode_design.md.")
+      # The whole body is contiguous prose -> ONE note call, one paragraph per
+      # array entry. No aligned-column block here to keep verbatim.
+      paras = if @harness.plan?
+                [
+                  "Planning mode is on: draft and iterate a plan with " \
+                    "plan.add before modifying code, and keep it in the durable store.",
+                  "[PLAN] is tagged wherever the postures are shown: " \
+                    "the spinner badge AND the idle prompt line (the same builder " \
+                    "#387 unified)."
+                ]
+              else
+                [
+                  "Planning mode is off: no planning expectation is stated."
+                ]
+              end
+      paras << "Advisory mode: no tool is refused. Enforcement " \
+        "strength: doc/planning_mode_design.md."
+      emit_role(:note, paras)
     end
 
     def usage

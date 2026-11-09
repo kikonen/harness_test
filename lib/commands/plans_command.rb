@@ -45,11 +45,14 @@ module Commands
     def list_plans
       all = plans.all
       if all.empty?
-        emit_role(:note, "No plans stored (#{plans.dir}).")
+        # The empty-state guidance is contiguous prose -> ONE note call.
         emit_role(
           :note,
-          "The model saves one with plan.add(name:, text:); " \
-            "the file is #{Plans::DIR}/<name>.md.")
+          [
+            "No plans stored (#{plans.dir}).",
+            "The model saves one with plan.add(name:, text:); " \
+              "the file is #{Plans::DIR}/<name>.md."
+          ])
         return
       end
 

@@ -66,17 +66,16 @@ module Commands
       # The bare bracketed label is the ack - a "cmd:" prefix says nothing
       # the brackets do not already say (issue #221 review).
       emit_role(:ack, label)
-      emit_role(
-        :note,
-        on ? "Shell consent for run.command is OFF - commands " \
-                          "run without asking." \
-                         : "Shell consent is ON - unapproved commands ask as before.")
+      # Contiguous prose before the denylist block -> ONE note call. The
+      # file-access paragraph only exists when the posture is ON.
+      paras = [on ? "Shell consent for run.command is OFF - commands " \
+                    "run without asking." \
+                  : "Shell consent is ON - unapproved commands ask as before."]
       if on
-        emit_role(
-          :note,
-          "File access in the working directory is covered too " \
-                           "(never sensitive paths, local/ or paths outside it).")
+        paras << "File access in the working directory is covered too " \
+          "(never sensitive paths, local/ or paths outside it)."
       end
+      emit_role(:note, paras)
       print_denylist_note
       emit_role(:note, "The posture is saved with the session (resume keeps it).")
     end

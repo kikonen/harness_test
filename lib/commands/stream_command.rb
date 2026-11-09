@@ -39,31 +39,32 @@ module Commands
     # label means the posture is off - the badge only names a non-default.
     def report(label = @harness.stream_mode_label)
       emit_role(:ack, label || "BUFFERED")
-      if @harness.stream?
-        emit_role(
-          :note,
-          "Responses stream in: the spinner shows the answer " \
-            "as it arrives with the rate it is arriving at, and [STREAM] is " \
-            "tagged wherever the postures are shown: the spinner badge AND the " \
-            "idle prompt line (issue #387).")
-        emit_role(
-          :note,
-          "A streamed request is retried only until the first " \
-            "part arrives - after that a lost stream fails the turn instead of " \
-            "re-sending.")
-      else
-        emit_role(
-          :note,
-          "Responses are buffered: the whole answer arrives " \
-            "before it is printed (the full retry policy applies).")
-      end
-      emit_role(
-        :note,
+      # The whole report body is contiguous prose -> ONE note call, one paragraph
+      # per array entry. No aligned-column block here to keep verbatim.
+      paras = if @harness.stream?
+                [
+                  "Responses stream in: the spinner shows the answer " \
+                    "as it arrives with the rate it is arriving at, and [STREAM] " \
+                    "is tagged wherever the postures are shown: the spinner badge " \
+                    "AND the idle prompt line (issue #387).",
+                  "A streamed request is retried only until the first part " \
+                    "arrives - after that a lost stream fails the turn instead " \
+                    "of re-sending."
+                ]
+              else
+                [
+                  "Responses are buffered: the whole answer arrives " \
+                    "before it is printed (the full retry policy applies)."
+                ]
+              end
+      paras += [
         "The spinner also shows a tok/s rate: the live rate " \
           "while an answer streams, else the rate of the request that last " \
           "completed (issue #285); '~' marks one the harness estimated, not the " \
-          "server.")
-      emit_role(:note, "Saved with the session (resume keeps it).")
+          "server.",
+        "Saved with the session (resume keeps it)."
+      ]
+      emit_role(:note, paras)
     end
 
     def usage
