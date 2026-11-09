@@ -161,8 +161,11 @@ module Tools
     private
 
     # The model sometimes re-encodes the options array as a JSON string; parse
-    # that form instead of rejecting it, and name any other non-array by its
-    # actual shape so the model fixes the real field instead of its title.
+    # that form instead of rejecting it. A string that is not one clean JSON
+    # value may still hold a valid array at its head, with the model's sibling
+    # keys fused after it (issue #468): salvage the leading balanced array so
+    # the intended choices still show, and only when nothing salvageable is
+    # found name the actual shape so the model fixes the real field.
     def normalize_options(raw_options)
       return raw_options if raw_options.is_a?(Array)
 
@@ -170,12 +173,61 @@ module Tools
         begin
           parsed = JSON.parse(raw_options)
         rescue JSON::ParserError
-          return "error: 'options' was sent as a string that is not a JSON array"
+          parsed = nil
         end
         return parsed if parsed.is_a?(Array)
+
+        salvaged = salvage_leading_array(raw_options)
+        return salvaged if salvaged.is_a?(Array)
+
+        return "error: 'options' is a string that is not a JSON array of options " \
+               "- send options as a JSON array and keep title and note as separate parameters"
       end
 
       "error: 'options' must be a non-empty array"
+    end
+
+    # Recover the leading JSON array from a fused string like
+    #   [ {...}, {...} ], "title": "...", "note": "..."}]
+    # by scanning bracket depth (honouring quoted strings so a ] inside a
+    # string does not close the array) and parsing the balanced prefix. Returns
+    # nil when no balanced array is found at the head. The leftover fused text
+    # (the sibling keys the model dragged in) is discarded - the outer
+    # arguments already carry title/note as their own parameters.
+    def salvage_leading_array(str)
+      start = str.index("[")
+      return nil unless start
+
+      depth = 0
+      in_str = false
+      escaped = false
+      (start..(str.length - 1)).each do |i|
+        ch = str[i]
+        if in_str
+          if escaped
+            escaped = false
+          elsif ch == "\\"
+            escaped = true
+          elsif ch == '"'
+            in_str = false
+          end
+          next
+        end
+        case ch
+        when '"' then in_str = true
+        when "[" then depth += 1
+        when "]"
+          depth -= 1
+          next if depth.positive?
+
+          begin
+            return JSON.parse(str[start..i]) if depth.zero?
+          rescue JSON::ParserError
+            return nil
+          end
+        end
+      end
+      nil
     end
 
     # An option that arrived double-encoded as a JSON object string is parsed
