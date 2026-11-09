@@ -464,8 +464,16 @@ class Task
 
     task.harness.user_note_text = note
     ui = task.ui
-    ui.puts("  [note] got it - #{note}")
-    task.buffer.put(type: :text, origin: :user_note, content: "note received: #{note}")
+    # The ack and the note are two roles, not one baked string (the #466/#470
+    # theme). "[note] got it" is a bracketed ack the RENDERER owns; the note
+    # body is a :note paragraph the renderer wraps + indents, so a multi-line
+    # note no longer spills past the prompt. The buffer stores the RAW note as
+    # :note (not a baked :text line) so the resume replay redraws it wrapped too.
+    ack  = task.renderer&.line(type: :kind, content: "got it", origin: "note")
+    body = task.renderer&.line(type: :note, content: note)
+    ui.puts(ack || "  [note] got it")
+    ui.puts(body || "  #{note}")
+    task.buffer.put(type: :note, origin: :user_note, content: note)
   end
 
   # HACK (see commit_note): recognize the single special-cased /yolo
