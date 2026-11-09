@@ -10,6 +10,9 @@ RSpec.describe Tools::FileListTool do
   def drive_dialog(lines)
     stdin  = StringIO.new(lines.join("\n"))
     stdout = StringIO.new
+    # Pin the dialog wrap width so a warning phrase asserted contiguously does
+    # not split differently on a terminal of another width (issue #476).
+    allow(Tins::Terminal).to receive(:columns).and_return(100)
     allow_any_instance_of(UI::Dialog).to receive(:show) do |dialog|
       dialog.perform_direct(ui: UI::Console.new(stdout: stdout, stdin: stdin))
     end
