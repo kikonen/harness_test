@@ -51,7 +51,10 @@ module TaskRunner
   end
 
   # Emit a plain labeled role (:warn, :error, :system ...). The renderer adds
-  # the label; the emitter states only the role and content (#146).
+  # the label; the emitter states only the role and content (#146). A :note may
+  # take an ARRAY of paragraphs: they become ONE event whose content is the
+  # paragraphs newline-joined, so a contiguous run of report prose is a single
+  # note block the renderer lays out as a whole.
   def emit_role(role, content, origin: nil)
     status_event(role, content, origin)
   end
@@ -63,11 +66,12 @@ module TaskRunner
   # renders it with the SINK palette so a non-terminal sink stays plain.
   def status_event(role, content, origin)
     type = role.to_sym
+    text = content.is_a?(Array) ? content.join("\n") : content.to_s
     task = defined?(Task) ? Task.current : nil
     if task
-      task.push_event(type:, origin: origin&.to_s, content: content.to_s)
+      task.push_event(type:, origin: origin&.to_s, content: text)
     else
-      line = main_thread_renderer.line(type:, content: content.to_s, origin:)
+      line = main_thread_renderer.line(type:, content: text, origin:)
       ui.puts(line)
     end
   end

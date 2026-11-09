@@ -64,13 +64,18 @@ module Commands
       emit_role(:note, "Effective from the next turn (this turn's Task already chose).")
       print_roles(current)
       print_sample(current)
-      @ui.puts "  Saved with the session (resume keeps it). Startup choice:"
-      @ui.puts "  -p/--palette NAME or 'output_palette:' in the config."
+      # Contiguous prose -> ONE note call, two paragraphs (not one fused line).
+      emit_role(
+        :note,
+        [
+          "Saved with the session (resume keeps it).",
+          "Startup choice: -p/--palette NAME or 'output_palette:' in the config."
+        ])
     end
 
     def report
       current = @harness.output_palette
-      @ui.puts "Output palette: #{current ? current.name : 'none'}"
+      emit_role(:note, "Output palette: #{current ? current.name : 'none'}")
       print_roles(current)
       print_sample(current)
       available = UI::Palette.names.join(", ")

@@ -95,4 +95,39 @@ RSpec.describe TaskRunner do
     expect(io.string).to eq("\n\n") # only run_on_task's blank lines
     expect(events).to eq([{ type: :text, origin: :command, content: 'hello' }])
   end
+
+  # emit_role takes an ARRAY of paragraphs: a contiguous report-prose body is
+  # ONE :note block, not several calls. Main thread: the renderer lays out every
+  # paragraph of the joined content (each wrapped and indented), on one line.
+  it 'renders a :note array as ONE wrapped note block on the main thread' do
+    setup_host
+    allow(Task).to receive(:current).and_return(nil)
+    host.emit_role(:note, ['first paragraph here', 'second paragraph here'])
+
+    lines = io.string.split("\n")
+    expect(lines).to eq(['  first paragraph here', '  second paragraph here'])
+  end
+
+  it 'carries a :note array as ONE event whose content is the joined paragraphs' do
+    setup_host
+    events = []
+    fake_task = Class.new do
+      define_method(:push_event) do |type:, origin: nil, content: nil|
+        events << { type: type, origin: origin, content: content }
+      end
+    end.new
+    allow(Task).to receive(:current).and_return(fake_task)
+
+    host.emit_role(:note, ['first paragraph', 'second paragraph'], origin: 'report')
+
+    expect(events).to eq([{ type: :note, origin: 'report', content: "first paragraph\nsecond paragraph" }])
+  end
+
+  it 'leaves a single :note string as one paragraph (array support is additive)' do
+    setup_host
+    allow(Task).to receive(:current).and_return(nil)
+    host.emit_role(:note, 'just one paragraph')
+
+    expect(io.string).to eq("  just one paragraph\n")
+  end
 end

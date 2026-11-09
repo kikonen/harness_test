@@ -49,7 +49,7 @@ decoration that a renderer can produce itself.
 | `:status_ok` ... `:status_info` | the verdict's message | `  [label] ✓ message` (see below) |
 | `:ack` | the badge word | `  [YOLO ON]` (bracketed ack, unpainted; issue #466) |
 | `:kind` | the message after the kind | `  [LLM error] rate limited` (bracket names a kind, unpainted; #466) |
-| `:note` | ONE unwrapped paragraph | re-wrapped to a fixed width, indented (harness prose, unpainted; #470) |
+| `:note` | ONE or MORE unwrapped paragraphs | each re-wrapped to a fixed width, indented (harness prose, unpainted; #470) |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
 | `:spinner_detail` | the spinner payload | no line at all (animated) |
 
@@ -113,26 +113,42 @@ continuations:
 The break column is then whatever the author happened to type, so the paragraph
 reads ragged and, worse, a remote/browser client receives a string already chopped
 at a column it cannot change. `:note` moves the wrap here too: the emitter states
-ONE unwrapped paragraph with NO leading indent, and `#note_line` re-wraps it to a
-fixed width and indents every line. UNPAINTED (`NOTE` has no palette entry): only
-the wrap/indent move, so no line changes color.
+ONE or MORE unwrapped paragraphs with NO leading indent, and `#note_line` re-wraps
+each to a fixed width and indents every line. UNPAINTED (`NOTE` has no palette
+entry): only the wrap/indent move, so no line changes color.
 
 The wrap width is the constant `NOTE_WIDTH` (= `RULE_WIDTH - INDENT`), NOT the
 terminal width - the same reason `RULE_WIDTH` is fixed: a paragraph that re-wraps
 on every resize is as unlocatable as a boundary that moves. A word wider than the
 wrap gets its own line rather than being split mid-word (a command name or URL is
-one token). Only genuine paragraphs use `:note`: an aligned block (a usage list, a
-denylist column) stays verbatim, because word-wrap would destroy its alignment, and
-a `Heading: value` label row stays verbatim too - word-wrapping it would bury the
-label mid-paragraph. A `:note` is a full natural-language sentence (what, why, how);
-a `Heading: value` row is a table row and belongs with the structured `:list` output
-(issue #474), not prose. When one line fuses a sentence with a label row (a report
-tail like "Saved with the session ... Startup choice: ..."), the row wins: verbatim.
+one token).
+
+**A whole report body is ONE note call.** `emit_role(:note, ...)` accepts an ARRAY
+of paragraphs; `TaskRunner#status_event` newline-joins them into ONE event, and
+`#note_line` lays out every paragraph of it. So a contiguous run of a report's
+prose (what / why / how, an imperative pointer, and a standalone labeled sentence
+like `Current model: ...`, `Table width basis: ...`, or the `Saved with the session
+... / Startup choice: ...` tail) is a single `:note` block, NOT a `:note` line
+beside an `@ui.puts` line. A report split across the two mechanisms is what makes
+classification indefensible: an adjacent sentence and label become different
+mechanisms for an arbitrary reason (whether a string was concatenated), and the
+same sentence classifies differently across commands. Folding a contiguous run
+into one array removes that arbitrariness.
+
+The only thing a block stays verbatim `@ui.puts` for is when **its value IS its
+column alignment**: a multi-row aligned block (role groups `plan=34 warn=38`,
+legends, numbered store lists, `name - desc` rows, denylist bullet lists, usage
+columns, server/param tables). Word-wrap would destroy that alignment, so those
+are the note array's boundaries. A `Heading: value` line with NO columns to align
+is not such a block - it is prose, and folds into the array. (A structured
+`:list` role for genuinely tabular output remains future work, issue #474; that
+is about multi-column tables, not a single labeled sentence.)
 
 The `OutputBuffer` stores the RAW paragraph, not the wrapped lines - so a browser
 can re-wrap it in CSS (issue #146 / the #324 remote client) instead of inheriting
 this terminal's column choice. `spec/lib/ui/renderer_spec.rb` pins the wrap width
-and the unpainted-ness.
+and the unpainted-ness; `spec/lib/task_runner_spec.rb` pins that an array is ONE
+joined note block.
 
 ## What is deliberately NOT moved yet
 

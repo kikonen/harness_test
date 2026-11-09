@@ -30,11 +30,14 @@ module Commands
     def list_skills(skills)
       all = skills.all
       if all.empty?
-        emit_role(:note, "No skills defined (#{skills.dir}).")
+        # The empty-state guidance is contiguous prose -> ONE note call.
         emit_role(
           :note,
-          "Add one at #{Skills::DIR}/<name>/SKILL.md " \
-            "- a written-down procedure.")
+          [
+            "No skills defined (#{skills.dir}).",
+            "Add one at #{Skills::DIR}/<name>/SKILL.md " \
+              "- a written-down procedure."
+          ])
         return
       end
 

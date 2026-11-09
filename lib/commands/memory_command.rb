@@ -35,11 +35,14 @@ module Commands
     def list_memories
       all = memories.all
       if all.empty?
-        emit_role(:note, "No memories stored (#{memories.dir}).")
+        # The empty-state guidance is contiguous prose -> ONE note call.
         emit_role(
           :note,
-          "The model saves one with memory.add(name:, text:); " \
-            "the file is #{Memories::DIR}/<name>.md.")
+          [
+            "No memories stored (#{memories.dir}).",
+            "The model saves one with memory.add(name:, text:); " \
+              "the file is #{Memories::DIR}/<name>.md."
+          ])
         return
       end
 
