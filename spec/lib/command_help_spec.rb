@@ -19,6 +19,19 @@ RSpec.describe CommandHelp do
       expect(help.forms).to eq(['param', 'param <key> <value>'])
     end
 
+    # issue #471: form_notes is a separate, optional field so forms stay a plain
+    # string array (every /help consumer and the drift spec depend on that).
+    it 'defaults form_notes to empty and keeps forms unchanged' do
+      expect(build.form_notes).to eq({})
+
+      with_notes = build(
+        forms: ['ctx', 'ctx full'],
+        form_notes: { 'ctx full' => 'the verbose form' }
+      )
+      expect(with_notes.forms).to eq(['ctx', 'ctx full'])
+      expect(with_notes.form_notes).to eq('ctx full' => 'the verbose form')
+    end
+
     it 'names its group heading from GROUPS' do
       expect(build(group: :access).group_label).to eq('Access and consent')
     end

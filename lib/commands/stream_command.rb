@@ -14,7 +14,13 @@ module Commands
         "(saved with the session)",
       group: :model,
       forms: ["stream", "stream on", "stream off", "stream status"],
-      see_also: %w[model param ctx])
+      see_also: %w[model param ctx],
+      form_notes: {
+        "stream" => "toggle streaming (on/off)",
+        "stream on" => "set it explicitly",
+        "stream off" => "set it explicitly",
+        "stream status" => "show the current posture"
+      })
 
     def handle(args)
       case args.to_s.strip.downcase
@@ -29,7 +35,7 @@ module Commands
       when "", "toggle"
         report(@harness.toggle_stream)
       else
-        usage
+        render_usage
       end
     end
 
@@ -65,12 +71,6 @@ module Commands
         "Saved with the session (resume keeps it)."
       ]
       emit_role(:note, paras)
-    end
-
-    def usage
-      @ui.puts "  usage: /stream           toggle streaming (on/off)"
-      @ui.puts "         /stream on|off    set it explicitly"
-      @ui.puts "         /stream status    show the current posture"
     end
   end
 end

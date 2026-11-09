@@ -92,6 +92,21 @@ class HelpRenderer
     CommandHelp.suggestions(name, @registry.keys)
   end
 
+  # The compact usage a command prints when it gets a bad argument (issue #471).
+  # One source of truth: it renders the SAME help a command declares (usage +
+  # forms + form_notes) instead of a hand-aligned block a command keeps by hand.
+  # Registry-independent (takes the help object), so a command can render its own
+  # usage without a full /help registry.
+  def render_inline(help)
+    prefix = "#{INDENT}usage: "
+    col    = [help.forms.map { |f| "/#{f}".length }.max.to_i + 1, MIN_COLUMN].max
+    body   = help.forms.map do |form|
+      "#{"/#{form}".ljust(col)}#{help.form_notes[form]}".rstrip
+    end
+    continuation = " " * prefix.length
+    ["#{prefix}#{body.first}", *body[1..].map { |line| "#{continuation}#{line}" }]
+  end
+
   private
 
   def help_entries

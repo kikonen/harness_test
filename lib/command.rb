@@ -3,6 +3,7 @@
 require_relative "ui"
 require_relative "command_help"
 require_relative "task_runner"
+require_relative "help_renderer"
 
 # Shared base for the slash-command classes in lib/commands/.
 #
@@ -42,5 +43,15 @@ class Command
     @on_resume  = on_resume
     # Only /help renders it; every other command ignores it.
     @help_renderer = help_renderer
+  end
+
+  # Print this command's usage on a bad argument (issue #471) from its own HELP
+  # (usage + forms + form_notes), NOT a hand-aligned block. Replaces each
+  # command's old private #usage. Falls back to a registry-less HelpRenderer when
+  # none was injected (a command built in a spec): render_inline is registry-
+  # independent, so it still emits the same lines.
+  def render_usage
+    renderer = @help_renderer || HelpRenderer.new(registry: {})
+    renderer.render_inline(self.class.help).each { |line| @ui.puts line }
   end
 end

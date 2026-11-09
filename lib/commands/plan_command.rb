@@ -18,7 +18,13 @@ module Commands
         "editing code",
       group: :session,
       forms: ["plan", "plan on", "plan off", "plan status"],
-      see_also: %w[plans memory stream])
+      see_also: %w[plans memory stream],
+      form_notes: {
+        "plan" => "toggle planning mode (on/off)",
+        "plan on" => "set it explicitly",
+        "plan off" => "set it explicitly",
+        "plan status" => "show the current posture"
+      })
 
     def handle(args)
       case args.to_s.strip.downcase
@@ -33,7 +39,7 @@ module Commands
       when "", "toggle"
         report(@harness.toggle_plan)
       else
-        usage
+        render_usage
       end
     end
 
@@ -61,12 +67,6 @@ module Commands
       paras << "Advisory mode: no tool is refused. Enforcement " \
         "strength: doc/planning_mode_design.md."
       emit_role(:note, paras)
-    end
-
-    def usage
-      @ui.puts "  usage: /plan           toggle planning mode (on/off)"
-      @ui.puts "         /plan on|off    set it explicitly"
-      @ui.puts "         /plan status    show the current posture"
     end
   end
 end

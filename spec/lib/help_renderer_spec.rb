@@ -47,6 +47,37 @@ RSpec.describe HelpRenderer do
 
   subject(:renderer) { described_class.new(registry:, topics:) }
 
+  # issue #471: the compact bad-argument usage a command prints, rendered from
+  # the SAME help the command declares (usage + forms + form_notes) - the
+  # drift-killer replaces each command's hand-aligned def usage.
+  describe '#render_inline' do
+    let(:help) do
+      CommandHelp.new(
+        usage: 'demo [thing]', summary: 'Demo', group: :general,
+        forms: ['demo', 'demo <thing>'],
+        form_notes: { 'demo' => 'run it', 'demo <thing>' => 'with an argument' }
+      )
+    end
+
+    it 'prints a usage line and one aligned line per form' do
+      lines = renderer.render_inline(help)
+
+      expect(lines.first).to start_with('  usage: /demo')
+      expect(lines.grep(/\/demo </).first).to include('with an argument')
+    end
+
+    it 'aligns every form column from the longest form (no hand padding)' do
+      lines = renderer.render_inline(help)
+      # The description column is fixed at prefix length + (longest form + 1),
+      # so it never depends on hand padding: every line starts its text there.
+      col = HelpRenderer::INDENT.length + 'usage: '.length + '/demo <thing>'.length + 1
+      expect(lines[0][col - 1]).to eq(' ')
+      expect(lines[1][col - 1]).to eq(' ')
+      expect(lines[0][col..]).to eq('run it')
+      expect(lines[1][col..]).to eq('with an argument')
+    end
+  end
+
   describe '#overview' do
     it 'groups the command table under the GROUPS headings' do
       lines = renderer.overview

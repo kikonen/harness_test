@@ -25,7 +25,13 @@ module Commands
         "param <key> <value>",
         "param <key> default"
       ],
-      see_also: %w[model models])
+      see_also: %w[model models],
+      form_notes: {
+        "param" => "list every parameter",
+        "param <key>" => "show one parameter",
+        "param <key> <value>" => 'set a session override (value: a number/word, "off", or "default")',
+        "param <key> default" => "reset one to the profile value"
+      })
 
     def handle(args)
       args  = args.strip
@@ -36,7 +42,7 @@ module Commands
       when 1 then show_one(words[0])
       when 2 then set_one(words[0], words[1])
       else
-        usage
+        render_usage
       end
     end
 
@@ -59,10 +65,6 @@ module Commands
 
     def set_one(key, value)
       @ui.puts param.set(key, value)
-    end
-
-    def usage
-      @ui.puts 'usage: /param [<key> <value>]   (value: a number/word, "off", or "default")'
     end
 
     # The shared override object (SessionManager owns the single instance).
