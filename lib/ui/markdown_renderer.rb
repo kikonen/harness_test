@@ -50,6 +50,17 @@ module UI
     # instead of the old fixed 80 (which wasted the width of a wide terminal).
     AUTO_WIDTH_PERCENT = 80
 
+    # #475: a model answer quoting a tool call / XML / HTML (any text kramdown
+    # reads as a raw <element>) is DROPPED, because kramdown-ansi has no ANSI
+    # converter for an unknown html_element and the surrounding text is lost
+    # with it. Escaping '<' to &lt; outside code stops kramdown opening an HTML
+    # element at all (an element needs '<'), so the text survives. '>' is left
+    # alone so blockquotes still render.
+    # CODE_SPAN covers a fenced block and an inline code span (a fence is a
+    # longer backtick run); AUTOLINK protects <scheme:...> so a link stays a link.
+    CODE_SPAN = /(?<!`)(`+)(?:(?!\1).)+?\1/m
+    AUTOLINK  = %r{<[a-zA-Z][a-zA-Z0-9+.\-]*:[^>\s]*>}
+
     # max_width: the column basis for the render (nil = AUTO_WIDTH_PERCENT of the
     # detected terminal). An explicit value is clamped to the terminal width.
     def initialize(palette: nil, max_width: nil)
@@ -63,13 +74,35 @@ module UI
       text = text.to_s
       return text if @palette.nil?
 
-      styled = with_capped_width { Kramdown::ANSI.parse(text, ansi_styles:) }
+      styled = with_capped_width { Kramdown::ANSI.parse(escape_angle(text), ansi_styles:) }
       strip? ? Kramdown::ANSI::Width.remove_ansi_escapes(styled) : styled
     rescue StandardError
       text
     end
 
     private
+
+    # Neutralise a raw HTML element by escaping '<' to &lt; in the prose parts of
+    # the answer. Code spans and fenced blocks (CODE_SPAN covers both) and real
+    # autolinks pass through untouched, so code stays literal and <scheme:...>
+    # stays a clickable link. '>' is never escaped so a blockquote still renders.
+    def escape_angle(text)
+      out = +""
+      i = 0
+      n = text.length
+      while i < n
+        span = text.match(CODE_SPAN, i)
+        span = text.match(AUTOLINK, i) unless span&.begin(0) == i
+        if span&.begin(0) == i
+          out << span[0]
+          i = span.end(0)
+        else
+          out << (text[i] == "<" ? "&lt;" : text[i])
+          i += 1
+        end
+      end
+      out
+    end
 
     # The 'none' palette has no colors at all: emit no ANSI (the gem would still
     # apply its own defaults, so the escape codes are stripped after parsing).

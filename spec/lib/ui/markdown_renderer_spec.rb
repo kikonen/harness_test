@@ -47,6 +47,60 @@ RSpec.describe UI::MarkdownRenderer do
     end
   end
 
+  # issue #475: an answer that quotes a tool call / XML / HTML (text kramdown
+  # reads as a raw <element>) used to be DROPPED on the console because
+  # kramdown-ansi has no ANSI converter for an unknown html_element. Escaping
+  # '<' outside code (never '>') makes the text survive while real markdown
+  # - autolinks, blockquotes, code - keeps its meaning.
+  describe 'angle-bracket content is NOT dropped (issue #475)' do
+    subject(:renderer) { described_class.new(palette: UI::Palette.fetch('default')) }
+
+    it 'keeps a tool-call block whole' do
+      out = renderer.render("a\n\n<tool_call>\nclose\n<function=read_file>x</function>\n</tool_call>\nb\n")
+
+      expect(out).to include('<tool_call>')
+      expect(out).to include('<function=read_file>x</function>')
+      expect(out).to include('close')
+      expect(out).to include('a')
+      expect(out).to include('b')
+    end
+
+    it 'keeps an inline tag AND the text that follows it' do
+      out = renderer.render('a <tool_call> x b')
+
+      expect(out).to include('<tool_call>') # the tag itself survives
+      expect(out).to include('x b') # and so does the text kramdown used to swallow
+    end
+
+    it 'keeps real markdown: autolink, blockquote and inline code with brackets' do
+      out = renderer.render("> quote\n\nlink <https://example.com> here\n\n`inline <b>` code\n")
+
+      expect(out).to include('quote')          # blockquote survives ('>' untouched)
+      expect(out).to include(']8;;https://example.com') # autolink is still a link
+      expect(out).to include('<b>')            # code text is literal, not escaped
+      expect(out).to include('here')
+    end
+
+    it 'leaves fenced code literal (not escaped)' do
+      out = renderer.render("```\n<tool_call>\n<function>x</function>\n```\n")
+
+      expect(out).to include('<tool_call>')
+      expect(out).to include('<function>x</function>')
+    end
+  end
+
+  describe 'angle-bracket content under the none palette (issue #475)' do
+    subject(:renderer) { described_class.new(palette: UI::Palette.fetch('none')) }
+
+    it 'keeps a tool-call block and emits no ANSI' do
+      out = renderer.render("a\n\n<tool_call>\nclose\n</tool_call>\nb\n")
+
+      expect(out).not_to include("\e[")
+      expect(out).to include('<tool_call>')
+      expect(out).to include('close')
+    end
+  end
+
   # The gem sizes tables from Tins::Terminal.columns (90% of it). We feed it a
   # BASIS: an explicit max_width (clamped to the terminal) or, by default, 80% of
   # the detected columns. The override must restore the real width afterwards.
