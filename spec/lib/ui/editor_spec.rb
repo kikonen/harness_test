@@ -64,6 +64,26 @@ RSpec.describe UI::Editor do
                     .read_multiline.status).to eq(:eof)
     end
   end
+  # issue #481: readmultiline must NOT pass rprompt. Reline paints rprompt
+  # right-aligned on the first visible row, so a rprompt equal to the left
+  # prompt glues a stray copy of 'note> ' to the right edge of the terminal.
+  describe 'tty readmultiline (issue #481): no rprompt' do
+    it 'calls Reline.readmultiline without a rprompt keyword' do
+      ed = described_class.new(StringIO.new)
+      seen = nil
+      allow(described_class).to receive(:is_real_tty_stdin?).and_return(true)
+      allow(Reline).to receive(:readmultiline) do |*_args, **kwargs|
+        seen = kwargs
+        "typed note"
+      end
+      allow(described_class).to receive(:last_read_cancelled?).and_return(false)
+
+      r = ed.read_multiline
+      expect(result_status(r)).to eq(:submitted)
+      expect(result_text(r)).to eq('typed note')
+      expect(seen).not_to have_key(:rprompt)
+    end
+  end
 
   describe 'streams without tty? (pipes)' do
     it 'takes the dumb path (pipes have no tty? method behavior we rely on)' do
