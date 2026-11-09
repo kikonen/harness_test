@@ -121,6 +121,14 @@ gets one line per read (a pipe has no submit key). The note is acked and stored
 on the harness (`Harness#user_note_text=`), where `Harness#call_llm` injects it
 into the chain before the next LLM call.
 
+`input_pending?` is a core `io/console` peek that only reports a keypress once
+the tty hands bytes over one at a time. A cooked tty (measured on Linux/KDE;
+issue #473) buffers a whole line, so a lone keypress never fired the peek and no
+editor opened. `Task.run` therefore holds a real-tty stdin in raw mode for the
+wait (`raw!(intr: true)`, restored by `cooked!` in its `ensure`); the hold is
+guarded to a stream answering both `#raw` and a true `#tty?`, so a redirected
+stdin and every spec stdin (StringIO, pipe, plain Object) never see it.
+
 The commit-time ack cannot know whether the note will still be in time, so a
 note still pending when a turn ENDS is dropped, not carried: `call_llm` discards
 it at the final-answer return (it could no longer steer that answer, kind

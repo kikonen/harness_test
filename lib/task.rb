@@ -3,6 +3,7 @@
 # Task: runs the turn block on a background thread and owns ALL console I/O
 # for it (single-thread I/O rule); design and protocol: doc/task_design.md
 
+require "io/console"
 require_relative "output_buffer"
 require_relative "ui/renderer"
 require_relative "ui/editor"
@@ -284,6 +285,7 @@ class Task
     task.note_editor = UI::Editor.new(ui.stdin) if ui.stdin && harness
     error_msg   = nil
     old_trap    = trap("INT") { raise Interrupt }
+    raw_stdin   = hold_raw_stdin(task)
 
     begin
       task.start
@@ -359,7 +361,30 @@ class Task
       # Clean up the spinner and restore the pre-existing SIGINT handler.
       task.clear_all_spinners
       trap("INT", old_trap)
+      raw_stdin&.cooked!
     end
+  end
+
+  # issue #473: a lone keypress during the spinner only opens the note editor
+  # if the drain-loop peek (stdin.input_pending?) can SEE the key. On a cooked
+  # tty (Linux/KDE) the tty line-buffers until Enter, so input_pending? stays
+  # false and the editor never opens. Holding a real-tty stdin in raw mode for
+  # the wait makes input_pending? report a single keypress. Guarded to a real
+  # tty that answers #raw (io/console): StringIO/pipe/Object fakes in specs
+  # and a redirected stdin take none of this path. intr:true keeps Ctrl-C
+  # raising Interrupt (the drain loop traps it). Reline's editor reads nest
+  # their own raw(...) block, restoring to this held raw mode on exit; the
+  # caller's ensure #cooked! restores the tty for the next caller.
+  def self.hold_raw_stdin(task)
+    stdin = task.ui.stdin
+    return nil unless stdin.respond_to?(:raw) && stdin.respond_to?(:tty?) && stdin.tty?
+
+    stdin.raw!(intr: true)
+    stdin
+  rescue StandardError
+    # A tty that refuses the mode change (some PTYs) - steering degrades to
+    # the pre-fix behaviour rather than breaking the turn.
+    nil
   end
 
   # Create the runner's single spinner when none is running.

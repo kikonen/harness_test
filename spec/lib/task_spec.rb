@@ -1143,4 +1143,63 @@ RSpec.describe Task do
       expect(note_harness.notes).to be_empty
     end
   end
+
+  # issue #473: the drain loop holds a REAL-TTY stdin in raw mode so a lone
+  # keypress makes input_pending? true and the note editor opens (the Linux/
+  # KDE symptom: cooked tty line-buffers, so the peek never fired). The
+  # guard must reach only a stream that answers BOTH #raw (io/console) and
+  # a true #tty? - every spec stdin (StringIO, IO.pipe, Object, the
+  # FakePendingStdin wrapper) fails one of those and must be left untouched,
+  # otherwise the whole note suite above would call raw! on a pipe.
+  describe 'Task.hold_raw_stdin (issue #473 raw-mode guard)' do
+    def task_with_stdin(stdin)
+      t = Task.new { }
+      t.ui = UI::Console.new(stdout: StringIO.new, stdin: stdin)
+      t
+    end
+
+    # A stream that lies: says tty? but answers no #raw (a fake tty with its
+    # own fileno, like the spec editor-routing tests) - not held.
+    it 'holds nothing for a non-raw tty' do
+      stdin = Object.new
+      def stdin.tty? = true
+      # no #raw defined
+      expect(described_class.hold_raw_stdin(task_with_stdin(stdin))).to be_nil
+    end
+
+    it 'holds nothing when tty? is false (a redirected stdin)' do
+      stdin = Object.new
+      def stdin.tty? = false
+      def stdin.raw!(*_args) = raise 'raw! must not be called on a non-tty'
+      expect(described_class.hold_raw_stdin(task_with_stdin(stdin))).to be_nil
+    end
+
+    it 'holds nothing for a StringIO (no #raw, no #tty?); the note suite stays untouched' do
+      expect(described_class.hold_raw_stdin(task_with_stdin(StringIO.new))).to be_nil
+    end
+
+    it 'holds a real raw-capable tty and returns it so the ensure can #cooked!' do
+      raw_called = false
+      stdin = Object.new
+      stdin.define_singleton_method(:tty?) { true }
+      stdin.define_singleton_method(:raw) { true }
+      stdin.define_singleton_method(:raw!) { |**_o| raw_called = true }
+      stdin.define_singleton_method(:cooked!) { :cooked }
+
+      held = described_class.hold_raw_stdin(task_with_stdin(stdin))
+      expect(held).to equal(stdin)
+      expect(raw_called).to be(true)
+      expect(held.cooked!).to eq(:cooked)
+    end
+
+    # A tty whose mode change raises (some PTYs): steering degrades to the
+    # pre-fix behaviour rather than taking the turn down with it.
+    it 'returns nil when a tty refuses the raw mode change' do
+      stdin = Object.new
+      stdin.define_singleton_method(:tty?) { true }
+      stdin.define_singleton_method(:raw) { true }
+      stdin.define_singleton_method(:raw!) { raise Errno::ENOTTY, 'refused' }
+      expect(described_class.hold_raw_stdin(task_with_stdin(stdin))).to be_nil
+    end
+  end
 end
