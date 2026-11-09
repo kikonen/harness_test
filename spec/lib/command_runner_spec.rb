@@ -6,6 +6,12 @@ require 'tmpdir'
 require 'command_runner'
 
 RSpec.describe CommandRunner do
+  # Pin the dialog wrap width so note phrases asserted contiguously do not split
+  # on a terminal of another width (issue #476: the dialog now wraps to a
+  # percentage of the detected terminal). 100 columns -> note content = 80% *
+  # 100 - 16 = 64, the content width these assertions were written against.
+  before { allow(Tins::Terminal).to receive(:columns).and_return(100) }
+
   # -- helpers ---------------------------------------------------------------
 
   def seed_allowlist(dir, *prefixes)
