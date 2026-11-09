@@ -806,7 +806,11 @@ RSpec.describe Task do
       end
 
       expect(harness.notes).to eq(['steer left'])
-      expect(io_out.string).to include('[note] got it - steer left')
+      # The ack and the note body are two renderer-owned roles now: a bracketed
+      # :kind ack ("[note] got it") then the note as a wrapped :note paragraph
+      # indented under the prompt (not a baked "[note] got it - <body>" run-on).
+      expect(io_out.string).to include('[note] got it')
+      expect(io_out.string).to include('  steer left')
       expect(io_out.string).to include('working')
     end
 
@@ -1000,6 +1004,7 @@ RSpec.describe Task do
     def gesture_task(harness)
       task_class = Class.new do
         attr_accessor :harness, :ui, :buffer
+        define_method(:renderer) { @renderer ||= UI::Renderer.new }
       end
       # The real buffer's #put collects the entries; a recording stand-in.
       entries = []
@@ -1061,7 +1066,10 @@ RSpec.describe Task do
       expect(harness.toggles).to eq(0)
       expect(harness.notes)
         .to eq(['please run it with yolo off', 'yolo', '/yolo please do it anyway'])
-      expect(io.string).to include('[note] got it - yolo')
+      # Two renderer-owned roles: the [note] got it ack, then the note body as a
+      # wrapped :note paragraph indented under the prompt.
+      expect(io.string).to include('[note] got it')
+      expect(io.string).to include('  yolo')
     end
   end
 
