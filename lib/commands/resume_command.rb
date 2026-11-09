@@ -37,8 +37,10 @@ module Commands
       # the handler of the run being replaced, so its own @harness is exactly
       # that - a stale reference to the session being left behind.
       resumed = @on_resume.call(id)
-      @ui.puts "  Session #{resumed.session.session_id} resumed."
-      @ui.puts "  (conversation, file list and log rebuilt under it - see /session)"
+      emit_role(:note, "Session #{resumed.session.session_id} resumed.")
+      emit_role(
+        :note,
+        "(conversation, file list and log rebuilt under it - see /session)")
     end
 
     # Build the CLI command to resume a session in a new harness run.
