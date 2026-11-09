@@ -20,16 +20,21 @@ module Commands
       if name.empty?
         # issue #217: include the API type + endpoint path so the active
         # backend is visible at a glance.
-        @ui.puts "Current model: #{@harness.session_manager.active_model_name} " \
-                 "(#{@harness.session_manager.target_display} @ #{@options[:base_url]})"
+        emit_role(
+          :note,
+          "Current model: #{@harness.session_manager.active_model_name} " \
+          "(#{@harness.session_manager.target_display} " \
+          "@ #{@options[:base_url]})")
         # issue #449: image support is a per-profile fact the parameter list
         # does not cover (it is not a generation parameter).
         images = @harness.session_manager.vision? ? "inlined to the model" \
                                                   : "files only (no vision declared)"
-        @ui.puts "Tool-result images: #{images}"
+        emit_role(:note, "Tool-result images: #{images}")
         print_params
-        @ui.puts "List models with /models, switch with /model <name>, " \
-                 "adjust parameters with /param."
+        emit_role(
+          :note,
+          "List models with /models, switch with /model <name>, " \
+                           "adjust parameters with /param.")
         return
       end
 
@@ -37,8 +42,10 @@ module Commands
       display = profile[:name] || profile[:model]
       url     = profile[:url] || @options[:base_url]
       # issue #217: the API type can CHANGE with the profile - say it.
-      @ui.puts "Switched to model: #{display} (#{profile[:model]} @ #{url}) " \
-               "-> #{@harness.session_manager.target_display}"
+      emit_role(
+        :note,
+        "Switched to model: #{display} (#{profile[:model]} @ #{url}) " \
+                       "-> #{@harness.session_manager.target_display}")
       print_params
     end
 

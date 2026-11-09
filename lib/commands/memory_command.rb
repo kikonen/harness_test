@@ -36,8 +36,10 @@ module Commands
       all = memories.all
       if all.empty?
         @ui.puts "No memories stored (#{memories.dir})."
-        @ui.puts "The model saves one with memory.add(name:, text:); " \
-          "the file is #{Memories::DIR}/<name>.md."
+        emit_role(
+          :note,
+          "The model saves one with memory.add(name:, text:); " \
+            "the file is #{Memories::DIR}/<name>.md.")
         return
       end
 

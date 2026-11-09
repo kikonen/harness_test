@@ -131,11 +131,15 @@ RSpec.describe Commands::GrantCommand do
     it 'shows the posture coverage line' do
       out = run_command
 
-      expect(out).to include('Posture (YOLO):')
-      expect(out).to include('not a stored grant')
+      # The posture line is a :note paragraph, so the renderer re-wraps it to a
+      # fixed width; match the phrases on whitespace-collapsed text so a wrap
+      # point inside a phrase does not make the assertion wrap-sensitive.
+      squashed = out.gsub(/\s+/, " ")
+      expect(squashed).to include('Posture (YOLO):')
+      expect(squashed).to include('not a stored grant')
       # The dirs the posture leaves asking are named (issue #385); the default
       # FileList here protects local/.
-      expect(out).to include('except sensitive paths and local/')
+      expect(squashed).to include('except sensitive paths and local/')
       expect(out).not_to include('Read only:')
     end
 

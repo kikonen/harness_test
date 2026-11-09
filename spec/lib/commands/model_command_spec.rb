@@ -56,8 +56,12 @@ RSpec.describe Commands::ModelCommand do
 
     it 'closes with the pointers to /models, /model <name> and /param' do
       out = run_command
-      expect(out).to include('List models with /models')
-      expect(out).to include('adjust parameters with /param')
+      # The pointer line is a :note paragraph the renderer re-wraps to a fixed
+      # width; match on whitespace-collapsed text so a wrap point inside a
+      # phrase (e.g. "/param" landing on the next line) stays out of the assert.
+      squashed = out.gsub(/\s+/, " ")
+      expect(squashed).to include('List models with /models')
+      expect(squashed).to include('adjust parameters with /param')
     end
 
     # issue #449: image support is per-profile and not a generation parameter,

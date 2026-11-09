@@ -64,8 +64,9 @@ module Commands
         # hardcoded local/ - the list is configurable.
         protected = @file_list.protected_dirs.map { |dir| "#{dir}/" }.join(", ")
         except = protected.empty? ? "sensitive paths" : "sensitive paths and #{protected}"
-        @ui.puts "Posture (YOLO): read, write and delete cover #{scope}/ "
-        @ui.puts "  (except #{except}) - not a stored grant"
+        emit_role(:note,
+"Posture (YOLO): read, write and delete cover " \
+  "#{scope}/ (except #{except}) - not a stored grant")
       end
 
       tool_list = CommandAllowlist.new(@file_list.workdir).prefixes

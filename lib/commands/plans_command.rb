@@ -46,8 +46,10 @@ module Commands
       all = plans.all
       if all.empty?
         @ui.puts "No plans stored (#{plans.dir})."
-        @ui.puts "The model saves one with plan.add(name:, text:); " \
-          "the file is #{Plans::DIR}/<name>.md."
+        emit_role(
+          :note,
+          "The model saves one with plan.add(name:, text:); " \
+            "the file is #{Plans::DIR}/<name>.md.")
         return
       end
 

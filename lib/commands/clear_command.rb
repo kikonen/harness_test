@@ -54,8 +54,10 @@ module Commands
     private
 
     def report_unknown(name)
-      @ui.puts "Unknown /clear form: #{name} " \
-        "(known: #{FORMS.keys.join(', ')})"
+      emit_role(
+        :note,
+        "Unknown /clear form: #{name} " \
+          "(known: #{FORMS.keys.join(', ')})")
     end
 
     def clear_target(target)
