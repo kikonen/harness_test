@@ -130,4 +130,45 @@ RSpec.describe TaskRunner do
 
     expect(io.string).to eq("  just one paragraph\n")
   end
+  # issue #474: a command report's structure reaches the durable record. The
+  # renderer draws the row layout; harness.record_report_output receives the
+  # STRUCTURED payload (title/columns/items), not a pre-rendered string. A
+  # harness double that lacks record_report_output (a plain command spec) must
+  # still print fine, so the recording is guarded by respond_to?.
+  describe 'emit_list (issue #474: structured command report)' do
+    it 'renders the bullet list AND records the payload as structure' do
+      recorded = []
+      # Plain object (not a strict double): main_thread_renderer asks the harness
+      # whether it answers #output_palette too, so respond_to? must answer both.
+      h = Object.new
+      h.define_singleton_method(:record_report_output) do |type:, origin:, content:|
+        recorded << { type:, origin:, content: }
+      end
+      host.harness = h
+      host.ui = ui
+      allow(Task).to receive(:current).and_return(nil)
+      host.emit_list(title: 'Hosts:', items: [{ value: 'a' }, { value: 'b' }],
+                     columns: [:value], origin: 'grant')
+      # Console: byte-identical to the old @ui.puts output.
+      expect(io.string).to eq("Hosts:\n  - a\n  - b\n")
+      # Record: the fields, not a fused row string.
+      expect(recorded.size).to eq(1)
+      entry = recorded.first
+      expect(entry[:type]).to eq(:list)
+      expect(entry[:origin]).to eq('grant')
+      expect(entry[:content]).to include(:title, :items, :columns, :kind)
+      expect(entry[:content][:items]).to eq([{ value: 'a' }, { value: 'b' }])
+    end
+
+    it 'renders without a record path when harness has no record_report_output' do
+      # An object with NO record_report_output: a plain command spec's harness.
+      host.harness = Object.new
+      host.ui = ui
+      allow(Task).to receive(:current).and_return(nil)
+      host.emit_list(title: 'L:', items: [{ value: 'x' }], columns: [:value])
+      # Console output unchanged.
+      expect(io.string).to eq("L:\n  - x\n")
+    end
+  end
+
 end

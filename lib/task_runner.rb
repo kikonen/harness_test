@@ -59,6 +59,28 @@ module TaskRunner
     status_event(role, content, origin)
   end
 
+  # Emit a structured list/table report (issue #474). The emitter states the
+  # DATA - title, kind, columns and per-item field values - never a fused row
+  # string, so the durable record and a future remote sink carry the fields
+  # themselves (#146). UI::Renderer owns the row shape. Main-thread only (a
+  # slash command runs with no active Task); the payload is recorded so resume
+  # replay redraws the structure, not a pre-rendered string.
+  def emit_list(title:, items:, columns: nil, kind: :bullet,
+                footer: nil, gap: false, origin: nil)
+    payload = {
+      title:,
+      kind:,
+      columns: Array(columns),
+      items:,
+      footer: Array(footer),
+      gap:
+    }
+    ui.puts(main_thread_renderer.line(type: :list, content: payload))
+    if harness.respond_to?(:record_report_output)
+      harness.record_report_output(type: :list, content: payload, origin:)
+    end
+  end
+
   private
 
   # Route a typed role to the right sink: a live Task carries it as an event

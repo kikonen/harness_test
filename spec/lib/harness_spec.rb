@@ -3065,6 +3065,55 @@ RSpec.describe Harness do
 
       expect(harness.output_log.replay_tail).to be_empty
     end
+
+    # issue #474: a slash-command report is now a structured :list entry in the
+    # record (title/columns/items), NOT a fused row string. record_report_output
+    # is the main-thread seam that writes it; the content survives the save ->
+    # resume round trip symbol-keyed so a resumed run redraws the structure.
+    it 'records a command report as a :list entry holding the structure' do
+      harness = build_harness
+      payload = {
+        title: 'Hosts:', kind: :bullet, columns: [:value],
+        items: [{ value: 'a.example' }, { value: 'b.example' }]
+      }
+      harness.record_report_output(type: :list, origin: 'grant', content: payload)
+
+      entry = harness.output_log.replay_tail.first
+      expect(entry.type).to eq(:list)
+      expect(entry.origin).to eq(:grant)
+      expect(entry.content).to be_a(Hash)
+      expect(entry.content[:items]).to eq([{ value: 'a.example' }, { value: 'b.example' }])
+    end
+
+    it 'skips the report when replay_entries is 0' do
+      harness = build_harness(resume_replay_entries: 0)
+      harness.record_report_output(type: :list, origin: 'grant',
+                                   content: { title: 'Hosts:', items: [] })
+      expect(harness.output_log.replay_tail).to be_empty
+    end
+
+    # The full round trip a resumed run takes: Entry#to_h -> session JSON ->
+    # symbolize_names restore -> redraw through UI::Renderer. A :list must come
+    # back as the structure (symbol-keyed), not a pre-rendered line.
+    it 'redraws a saved :list report through the renderer on resume' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
+      File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate({
+        session_id: id, created_at: Time.now.iso8601, system_prompt: 'saved prompt',
+        messages: [{ role: 'system', content: 'saved prompt' }],
+        replay_tail: [{ type: 'list', origin: 'grant',
+                        content: { title: 'Hosts:', kind: :bullet, columns: [:value],
+                                   items: [{ value: 'api.example.com' }] } }]
+      }))
+      data = JSON.parse(File.read(session_path(id, SessionLocator::SESSION_FILE)),
+                        symbolize_names: true)
+
+      harness = build_harness(session_id: id, resume_data: data)
+      entry = harness.output_log.replay_tail.first
+      expect(entry.type).to eq(:list)
+      line = UI::Renderer.new.line(type: entry.type, content: entry.content, origin: entry.origin)
+      expect(line).to eq("Hosts:\n  - api.example.com")
+    end
   end
 end
 

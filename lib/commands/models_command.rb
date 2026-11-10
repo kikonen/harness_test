@@ -25,8 +25,12 @@ module Commands
 
       default_name = @harness.session_manager.default_model_name
 
-      @ui.puts "Configured models (#{profiles.size}):"
-      profiles.each do |p|
+      # issue #474: emit the listing as STRUCTURE (title + per-profile fields),
+      # not a fused row string, so the run record and a future remote sink carry
+      # the fields themselves. UI::Renderer#arrow_row reproduces the old
+      # `  name -> model @ url` line byte-for-byte. The note field is the tag +
+      # mark suffix exactly as the old line appended them.
+      items = profiles.map do |p|
         name   = p[:name] || p[:model]
         marks  = []
         marks << "default" if default_name && (name == default_name || p[:model] == default_name)
@@ -39,10 +43,16 @@ module Commands
         # models a tool-result image could actually be sent to.
         url  = p[:url] || CLIOptions::DEFAULT_BASE_URL
         tags = p[:vision] ? " (#{api}) [vision]" : " (#{api})"
-        @ui.puts "  #{name}  ->  #{p[:model]} @ #{url}#{tags}#{suffix}"
+        { name:, model: p[:model], location: url, note: "#{tags}#{suffix}" }
       end
-      @ui.puts
-      @ui.puts "Switch with: /model <name>   (current: #{current})"
+      emit_list(
+        title: "Configured models (#{profiles.size}):",
+        kind: :arrow,
+        columns: %i[name model location note],
+        items:,
+        gap: true,
+        footer: ["Switch with: /model <name>   (current: #{current})"],
+        origin: "models")
     end
   end
 end

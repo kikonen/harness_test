@@ -1184,6 +1184,19 @@ class Harness
     @output_log.keep_tail(@replay_limit)
   end
 
+  # Record a main-thread slash-command report in the run OutputBuffer so a
+  # resumed run redraws it (#474). Slash commands run on the main thread with
+  # no Task, so nothing harvested their output before this - a structured
+  # :list payload is stored AS the structure (not a pre-rendered line), which
+  # is what lets a future remote sink lay it out from the fields (#146). The
+  # replay_limit guard and keep_tail match record_user_prompt / absorb_turn.
+  def record_report_output(type:, origin:, content:)
+    return if @replay_limit.zero?
+
+    @output_log.put(type:, origin:, content:)
+    @output_log.keep_tail(@replay_limit)
+  end
+
   # The saved form of the tail (Entry#to_h hashes), written to the session JSON
   # so a resumed run can redraw the last topic.
   def replay_tail_for_save
