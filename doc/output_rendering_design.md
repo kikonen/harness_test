@@ -50,7 +50,7 @@ decoration that a renderer can produce itself.
 | `:ack` | the badge word | `  [YOLO ON]` (bracketed ack, unpainted; issue #466) |
 | `:kind` | the message after the kind | `  [LLM error] rate limited` (bracket names a kind, unpainted; #466) |
 | `:note` | ONE or MORE unwrapped paragraphs | each re-wrapped to a fixed width, indented (harness prose, unpainted; #470) |
-| `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, arrow `  a -> b @ c`, kv `  n - d`, numbered_kv `  N. n - d`); footer indents from its LEVEL; unpainted; #474 |
+| `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, arrow `  a -> b @ c`, kv `  n - d`, numbered_kv `  N. n - d`, grouped_kv section `  h:` then `    n - d`); footer indents from its LEVEL; unpainted; #474 |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
 | `:spinner_detail` | the spinner payload | no line at all (animated) |
 
@@ -151,20 +151,22 @@ section; issue #474 landed its groundwork (:bullet and :arrow, /grant lists and
 `:list` is the groundwork that closes the "fused row string" half of #474. A
 command report states the DATA - `{ title:, kind:, columns:, items:, footer:,
 gap: }` where `items` are Hashes keyed by the column names - and `UI::Renderer#list_line`
-draws the rows from those fields. Four kinds today: `:bullet` (a 1-field list,
+draws the rows from those fields. Five kinds today: `:bullet` (a 1-field list,
 `  - value`, so `/grant` hosts and the run.command/shell prefix lists) and
-`:arrow` (`  name -> target @ location` so `/models`); other table shapes (nested
-groups, multi-column rows) are
-still future #474 work. A `:kv` kind (`  name - description`, with an optional
+`:arrow` (`  name -> target @ location` so `/models`); the remaining multi-column
+rows are still future #474 work. A `:kv` kind (`  name - description`, with an optional
 `annotation` appended verbatim) covers the flat tables `/skills` and `/memory`
 share. A `:numbered_kv` kind (`  N. name - description[annotation]`, the ordinal a
 named `number` field, the renderer right-aligning every ordinal to the width of
 the largest in the list) covers `/plans` - the alignment that the emitter used to
 bake with `format("%{w}d")` now lives in the renderer, and the ordinal is a field
-so the `columns` order cannot scramble it. The renderer owns the indent and the
-` -> `/` @ `/dash` joins and reproduces the old `@ui.puts` rows byte-for-byte (no
-terminal regression). UNPAINTED like `:note`: only the layout moves, so a colored
-or a plain console both print identical bytes.
+so the `columns` order cannot scramble it. A `:grouped_kv` kind covers the
+grouped `/tools` table: each item is a SECTION (a named `header` label and a
+named `rows` list), the renderer draws the header at `INDENT` and each row one
+level deeper, reproducing the old `@ui.puts` block byte-for-byte. The renderer
+owns the indent and the ` -> `/` @ `/dash` joins (no terminal regression).
+UNPAINTED like `:note`: only the layout moves, so a colored or a plain console
+both print identical bytes.
 
 A row's fields are read BY NAME (`LIST_KIND_FIELDS`: bullet `value`, arrow
 `name`/`model`/`location` plus an optional `note`), never by reading the `columns`

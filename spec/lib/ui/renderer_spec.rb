@@ -231,6 +231,33 @@ RSpec.describe UI::Renderer do
       expect(renderer.line(type: :list, content: payload)).to eq('  1. sized - 12345 (5 chars)')
     end
 
+    # The :grouped_kv kind (the /tools listing): each item is a SECTION (a header
+    # line + its rows indented one level deeper). Rows are kv rows read by name.
+    it 'renders a grouped_kv list (section header + rows one level deeper)' do
+      payload = {
+        title: 'Available tools (2):',
+        kind: :grouped_kv,
+        columns: %i[header rows],
+        items: [
+          { header: 'file', rows: [{ name: 'file.read', description: 'read a file' }] },
+          { header: 'dir', rows: [{ name: 'dir.create', description: 'make a dir' }] }
+        ]
+      }
+      expect(renderer.line(type: :list, content: payload)).to eq(
+        ['Available tools (2):',
+         '  file:',
+         '    file.read - read a file',
+         '  dir:',
+         '    dir.create - make a dir'].join("\n")
+      )
+    end
+
+    it 'is a loud diagnostic for a grouped item that is not a header+rows section' do
+      out = renderer.line(type: :list, content: { kind: :grouped_kv, columns: %i[header rows], items: ['nope'] })
+
+      expect(out).to eq('  [list-section] a grouped item needs header and rows')
+    end
+
     it 'leaves the list unpainted with a palette (only the layout moves)' do
       painted = described_class.new(palette: UI::Palette.fetch('default'))
       payload = {

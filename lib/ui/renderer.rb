@@ -99,7 +99,13 @@ module UI
       # named :number field, not the array position, so the columns order cannot
       # scramble it. The renderer right-aligns the numbers to the width of the
       # largest number in the list (the alignment is the renderer's, not baked).
-      numbered_kv: %i[number name description]
+      numbered_kv: %i[number name description],
+      # A grouped list: each item is a SECTION (a header line + its rows), the
+      # /tools shape (  ns: then its tools indented one level deeper). A group is
+      # a Hash with a named :header (the section label) and a named :rows (the
+      # section's kv rows). The group shape is validated; each row carries its
+      # own name/description, read by name like any kv row.
+      grouped_kv: %i[header rows]
     }.freeze
 
     # The start of an iteration and the start of the final answer are the two
@@ -240,12 +246,32 @@ module UI
       # one in the list, so a 10-item list keeps the rows aligned past 9.
       number_width = kind == :numbered_kv ?
         items.map { |i| (i.is_a?(Hash) ? i[:number].to_s : "").length }.max.to_i : nil
-      items.each do |item|
-        lines << row_for(kind, item, number_width:)
+      if kind == :grouped_kv
+        items.each { |section| lines.concat(section_lines(section)) }
+      else
+        items.each do |item|
+          lines << row_for(kind, item, number_width:)
+        end
       end
       lines << "" if data[:gap]
       Array(data[:footer]).each { |f| lines << footer_line(f) }
       lines.join("\n")
+    end
+
+    # A grouped_kv section: a header line at INDENT, then its kv rows indented one
+    # level deeper (INDENT * 2). Each row's fields are read BY NAME (name,
+    # description, optional annotation) like any kv row. A section that is not a
+    # Hash with a :header and :rows renders a diagnostic, not a broken block.
+    def section_lines(section)
+      return [list_error("list-section", "a grouped item needs header and rows")] \
+        unless section.is_a?(Hash) && section.key?(:header) && section.key?(:rows)
+
+      out = ["#{INDENT}#{section[:header]}:"]
+      Array(section[:rows]).each do |row|
+        r = row.is_a?(Hash) ? row : {}
+        out << "#{INDENT * 2}#{r[:name]} - #{r[:description]}#{r[:annotation]}"
+      end
+      out
     end
 
     # A row built from NAMED fields the item hash carries; the columns array's
