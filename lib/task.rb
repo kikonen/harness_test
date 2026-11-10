@@ -369,15 +369,21 @@ class Task
   # if the drain-loop peek (stdin.input_pending?) can SEE the key. On a cooked
   # tty (Linux/KDE) the tty line-buffers until Enter, so input_pending? stays
   # false and the editor never opens. Holding a real-tty stdin in raw mode for
-  # the wait makes input_pending? report a single keypress. Guarded to a real
-  # tty that answers #raw (io/console): StringIO/pipe/Object fakes in specs
-  # and a redirected stdin take none of this path. intr:true keeps Ctrl-C
-  # raising Interrupt (the drain loop traps it). Reline's editor reads nest
-  # their own raw(...) block, restoring to this held raw mode on exit; the
-  # caller's ensure #cooked! restores the tty for the next caller.
+  # the wait makes input_pending? report a single keypress. But raw mode is a
+  # pure cost where the peek never runs, so the guard requires the capability
+  # the peek consumes: #input_pending? (issue #473 Ctrl+C regression - Windows
+  # answers #raw && #tty? so this fired every turn, yet its mingw build has no
+  # input_pending?, so the editor is never opened there and the raw(intr:true)
+  # hold only broke Ctrl+C. Gating on input_pending? leaves Windows cooked and
+  # keeps the Linux/KDE hold). StringIO/pipe/Object spec fakes and a redirected
+  # stdin still fail the guard. intr:true keeps Ctrl-C raising Interrupt (the
+  # drain loop traps it). Reline's editor reads nest their own raw(...) block,
+  # restoring to this held raw mode on exit; the caller's ensure #cooked!
+  # restores the tty for the next caller.
   def self.hold_raw_stdin(task)
     stdin = task.ui.stdin
-    return nil unless stdin.respond_to?(:raw) && stdin.respond_to?(:tty?) && stdin.tty?
+    return nil unless stdin.respond_to?(:raw) &&
+      stdin.respond_to?(:tty?) && stdin.respond_to?(:input_pending?) && stdin.tty?
 
     stdin.raw!(intr: true)
     stdin

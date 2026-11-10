@@ -1178,11 +1178,13 @@ RSpec.describe Task do
       expect(described_class.hold_raw_stdin(task_with_stdin(StringIO.new))).to be_nil
     end
 
-    it 'holds a real raw-capable tty and returns it so the ensure can #cooked!' do
+    # A Linux/KDE tty: raw + tty? + input_pending? (the peek consumes raw mode).
+    it 'holds a real raw-capable tty with a peek path and returns it for #cooked!' do
       raw_called = false
       stdin = Object.new
       stdin.define_singleton_method(:tty?) { true }
       stdin.define_singleton_method(:raw) { true }
+      stdin.define_singleton_method(:input_pending?) { false }
       stdin.define_singleton_method(:raw!) { |**_o| raw_called = true }
       stdin.define_singleton_method(:cooked!) { :cooked }
 
@@ -1192,12 +1194,30 @@ RSpec.describe Task do
       expect(held.cooked!).to eq(:cooked)
     end
 
+    # issue #473 Ctrl+C regression: the Windows mingw shape answers #raw && #tty?
+    # but has NO #input_pending? (the peek never runs). It must NOT be held in
+    # raw mode - that raw(intr:true) hold is what broke Ctrl+C while the peek it
+    # serves never fired there.
+    it 'holds nothing for a raw tty with no input_pending? peek (the Windows shape)' do
+      raw_called = false
+      stdin = Object.new
+      stdin.define_singleton_method(:tty?) { true }
+      stdin.define_singleton_method(:raw) { true }
+      # deliberately no #input_pending?
+      stdin.define_singleton_method(:raw!) { |**_o| raw_called = true }
+      stdin.define_singleton_method(:cooked!) { :cooked }
+
+      expect(described_class.hold_raw_stdin(task_with_stdin(stdin))).to be_nil
+      expect(raw_called).to be(false)
+    end
+
     # A tty whose mode change raises (some PTYs): steering degrades to the
     # pre-fix behaviour rather than taking the turn down with it.
     it 'returns nil when a tty refuses the raw mode change' do
       stdin = Object.new
       stdin.define_singleton_method(:tty?) { true }
       stdin.define_singleton_method(:raw) { true }
+      stdin.define_singleton_method(:input_pending?) { false }
       stdin.define_singleton_method(:raw!) { raise Errno::ENOTTY, 'refused' }
       expect(described_class.hold_raw_stdin(task_with_stdin(stdin))).to be_nil
     end
