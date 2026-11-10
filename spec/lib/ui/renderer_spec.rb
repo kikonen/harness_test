@@ -333,6 +333,57 @@ RSpec.describe UI::Renderer do
     end
   end
 
+  # issue #485: a labeled prose line (plan / say) spilled past the terminal as
+  # one long unwrapped line when markdown was OFF. The default path now wraps to
+  # the fixed RULE_WIDTH minus the label and aligns continuations under the
+  # label (the markdown-on path already did this; the buffer still holds the raw
+  # content so a browser re-wraps). A fitting line stays byte-identical.
+  describe '#line (plan / say wrap when markdown is off, issue #485)' do
+    it 'wraps a long plan to the fixed width, label-aligned continuation' do
+      content = 'Now the bad-arg tests already assert usage. But the old def ' \
+                'usage printed combined forms; the new render_inline prints them ' \
+                'separately, which a spec only asserts as a substring.'
+      out   = renderer.line(type: :plan, content: content)
+      lines = out.lines.map(&:chomp)
+
+      expect(lines.size).to be > 1
+      expect(lines.first).to start_with('plan:  ')
+      # Continuation lines carry the label-width pad (no ANSI in the pad).
+      expect(lines[1]).to start_with(' ' * 'plan:  '.length)
+      # No rendered line exceeds RULE_WIDTH whatever the terminal is.
+      expect(lines).to all(satisfy { |l| strip_ansi(l).length <= described_class::RULE_WIDTH })
+    end
+
+    it 'wraps a long say line the same way' do
+      content = 'Checking one more site before answering, because a long interim ' \
+                'note also spilled as a single long line before this fix landed.'
+      lines = renderer.line(type: :interstitial, content: content).lines.map(&:chomp)
+
+      expect(lines.size).to be > 1
+      expect(lines[1]).to start_with(' ' * 'say:   '.length)
+      expect(lines).to all(satisfy { |l| strip_ansi(l).length <= described_class::RULE_WIDTH })
+    end
+
+    it 'leaves a plan/say line that fits on one line byte-identical' do
+      expect(renderer.line(type: :plan, content: 'read the tool first')).to eq('plan:  read the tool first')
+      expect(renderer.line(type: :interstitial, content: 'checking one more site')).to eq(
+        'say:   checking one more site'
+      )
+    end
+
+    it 'keeps coloring on every wrapped line (label run + body runs, no bleed)' do
+      painted = described_class.new(palette: UI::Palette.fetch('default'))
+      content = 'wrap this long plan line so it becomes two colored runs that ' \
+                'each reset, proving the wrap does not drop the role color'
+      out = painted.line(type: :plan, content: content)
+      lines = out.lines.map(&:chomp)
+
+      expect(lines.size).to be > 1
+      expect(lines).to all(end_with("\e[0m"))
+      expect(out).not_to include("\e[0m\e[0m")
+    end
+  end
+
   describe '#labeled?' do
     it 'is true for a role the renderer patterns' do
       expect(renderer.labeled?(:plan)).to eq(true)
