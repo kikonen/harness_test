@@ -126,8 +126,18 @@ the tty hands bytes over one at a time. A cooked tty (measured on Linux/KDE;
 issue #473) buffers a whole line, so a lone keypress never fired the peek and no
 editor opened. `Task.run` therefore holds a real-tty stdin in raw mode for the
 wait (`raw!(intr: true)`, restored by `cooked!` in its `ensure`); the hold is
-guarded to a stream answering both `#raw` and a true `#tty?`, so a redirected
-stdin and every spec stdin (StringIO, pipe, plain Object) never see it.
+guarded to a stream answering `#raw`, a true `#tty?`, AND `#input_pending?`.
+
+Requiring `#input_pending?` is the load-bearing part (issue #473 follow-up):
+raw mode is a pure cost wherever the peek never runs. Windows (mingw-ucrt, the
+owner's box) answers `#raw` && `#tty?` but has NO `#input_pending?` - so the
+guard's `#raw && #tty?` form fired `raw!(intr:true)` on EVERY turn there even
+though the peek it exists to serve never opened the editor on that platform.
+The raw `intr:true` hold was what broke Ctrl+C there. Gating on `#input_pending?`
+(the exact capability `poll_for_note` already gates on) leaves a Windows tty
+cooked - Ctrl+C restored - and keeps the Linux/KDE raw hold where it helps. A
+redirected stdin and every spec stdin (StringIO, pipe, plain Object) still fail
+the guard.
 
 The commit-time ack cannot know whether the note will still be in time, so a
 note still pending when a turn ENDS is dropped, not carried: `call_llm` discards
