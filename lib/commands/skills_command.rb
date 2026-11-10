@@ -41,9 +41,6 @@ module Commands
         return
       end
 
-      # issue #474: the skill list is a flat name - description table emitted as
-      # STRUCTURE (one field pair per item), not a fused "  name - desc" string.
-      # UI::Renderer's :kv row reproduces the old line byte-for-byte.
       emit_list(
         title: "Skills (#{all.size}):",
         kind: :kv,

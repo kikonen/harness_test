@@ -26,12 +26,25 @@ module Commands
         return
       end
 
-      @ui.puts "Saved sessions (#{sessions.size}):"
-      sessions.each do |s|
-        @ui.puts "  #{s[:id]}  saved #{s[:saved_at].strftime('%Y-%m-%d %H:%M:%S')}  " \
-             "#{s[:messages]} messages, #{s[:files]} file(s)  [workdir: #{s[:workdir]}]"
-      end
-      @ui.puts "Resume one with: /resume <id>  (or: ruby harness.rb -m <model> --resume <id>)"
+      footer_text = "Resume one with: /resume <id>  " \
+                    "(or: ruby harness.rb -m <model> --resume <id>)"
+      emit_list(
+        title: "Saved sessions (#{sessions.size}):",
+        kind: :session,
+        columns: %i[id saved messages files workdir],
+        items: sessions.map { |session| session_item(session) },
+        footer: [footer_text],
+        origin: "sessions")
+    end
+
+    def session_item(session)
+      {
+        id: session[:id],
+        saved: session[:saved_at].strftime("%Y-%m-%d %H:%M:%S"),
+        messages: session[:messages],
+        files: session[:files],
+        workdir: session[:workdir]
+      }
     end
   end
 end

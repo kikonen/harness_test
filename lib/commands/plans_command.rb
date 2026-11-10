@@ -56,11 +56,6 @@ module Commands
         return
       end
 
-      # issue #474: the plan listing is a numbered name - description table
-      # emitted as STRUCTURE. The ordinal is a named :number field (the number
-      # "plans N" opens), the size suffix the optional :annotation. The renderer
-      # right-aligns the ordinals (the alignment moved out of the emitter),
-      # reproducing the old rows byte-for-byte.
       emit_list(
         title: "Plans (#{all.size}/#{Plans::MAX_PLANS} plans, " \
           "#{Plans::MAX_BODY_CHARS} chars max each):",
@@ -71,8 +66,6 @@ module Commands
         origin: "plans")
     end
 
-    # The :numbered_kv items: the ordinal is the listing position (the number
-    # "plans N" opens), the size suffix the optional :annotation field.
     def listing_items(all)
       all.map.with_index do |plan, i|
         {
