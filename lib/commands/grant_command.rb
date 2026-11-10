@@ -78,12 +78,13 @@ module Commands
       unless hosts.empty?
         # issue #474: a 1-field bullet list emitted as STRUCTURE (the host is
         # one field per item), not a fused "  - host" string. UI::Renderer#bullet_row
-        # reproduces the old line byte-for-byte; the footer stays verbatim prose.
+        # reproduces the old line byte-for-byte. The footer states an indent
+        # LEVEL (not baked spaces) so a variable-width sink indents it too.
         emit_list(
           title: "Hosts for web.fetch (exact hosts only):",
           items: hosts.map { |host| { value: host } },
           columns: [:value],
-          footer: ["  revoke with: /clear hosts"],
+          footer: [{ text: "revoke with: /clear hosts", indent: 1 }],
           origin: "grant")
       end
 
@@ -97,7 +98,7 @@ module Commands
           title: "Commands for run.command:",
           items: tool_list.map { |p| { value: p } },
           columns: [:value],
-          footer: ["  revoke with: /clear commands"],
+          footer: [{ text: "revoke with: /clear commands", indent: 1 }],
           origin: "grant")
       end
       unless shell_list.empty?
@@ -105,7 +106,7 @@ module Commands
           title: "Commands for shell (!):",
           items: shell_list.map { |p| { value: p } },
           columns: [:value],
-          footer: ["  revoke with: /clear shell"],
+          footer: [{ text: "revoke with: /clear shell", indent: 1 }],
           origin: "grant")
       end
     end

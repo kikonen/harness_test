@@ -152,7 +152,7 @@ RSpec.describe UI::Renderer do
         kind: :bullet,
         columns: [:value],
         items: [{ value: 'api.example.com' }, { value: 'docs.example.org' }],
-        footer: ['  revoke with: /clear hosts']
+        footer: [{ text: 'revoke with: /clear hosts', indent: 1 }]
       }
       expect(renderer.line(type: :list, content: payload)).to eq(
         ['Hosts for web.fetch:',
@@ -187,6 +187,25 @@ RSpec.describe UI::Renderer do
       }
       expect(painted.line(type: :list, content: payload)).to eq("X:\n  - a")
     end
+    # The footer's indent is a LEVEL in the data, not baked leading spaces - the
+    # renderer turns the level into columns so a variable-width sink (a browser)
+    # can map the same level to CSS margin. A plain String is indent 0 verbatim.
+    it 'indents a footer line from its LEVEL, not baked spaces' do
+      payload = {
+        kind: :bullet,
+        columns: [:value],
+        items: [{ value: 'a' }],
+        footer: [
+          { text: 'top level', indent: 0 },
+          { text: 'revoke with: /clear hosts', indent: 1 },
+          { text: 'plain string footer' }
+        ]
+      }
+      expect(renderer.line(type: :list, content: payload)).to eq(
+        ['  - a', 'top level', '  revoke with: /clear hosts', 'plain string footer'].join("\n")
+      )
+    end
+
   end
 
   # issue #106: an opted-in :response is rendered as markdown; the default (off)
