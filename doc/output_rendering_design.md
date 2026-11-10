@@ -50,7 +50,7 @@ decoration that a renderer can produce itself.
 | `:ack` | the badge word | `  [YOLO ON]` (bracketed ack, unpainted; issue #466) |
 | `:kind` | the message after the kind | `  [LLM error] rate limited` (bracket names a kind, unpainted; #466) |
 | `:note` | ONE or MORE unwrapped paragraphs | each re-wrapped to a fixed width, indented (harness prose, unpainted; #470) |
-| `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, arrow `  a -> b @ c`, kv `  n - d`, numbered_kv `  N. n - d`, grouped_kv section `  h:` then `    n - d`, session `  id  saved ...`); footer indents from its LEVEL; unpainted; #474 |
+| `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, arrow `  a -> b @ c`, kv `  n - d`, numbered_kv `  N. n - d`, grouped_kv section `  h:` then `    n - d`, table rendered as a markdown table via kramdown); footer indents from its LEVEL; unpainted; #474 |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
 | `:spinner_detail` | the spinner payload | no line at all (animated) |
 
@@ -161,8 +161,22 @@ draws the rows from those fields. A kind per report shape:
   of the largest (the `format("%{w}d")` alignment moved out of the emitter)
 - `:grouped_kv` - `/tools`; each item is a `header`+`rows` SECTION, header at
   `INDENT`, rows one level deeper
-- `:session` - `/sessions`; the `saved`/`file(s)`/`[workdir: ]` separators are
-  renderer layout (as `:arrow` owns ` -> `)
+- `:table` - `/sessions`; the payload's `columns` array IS the schema and a cell
+  is read BY NAME from the item. The renderer states the fields as a **markdown
+  table** and hands it to the kramdown `MarkdownRenderer` (#106), which owns the
+  column sizing and word-wrap - the harness does NOT re-invent padding here. A
+  colored sink gets kramdown's bordered box table; a sink with no palette (a
+  plain console, a spec) gets the raw markdown itself, which is the re-lay-out-able
+  table form the buffer keeps. See `#table_lines` / `#markdown_table`.
+
+`:table` goes through kramdown rather than a harness-side layout on purpose.
+kramdown is the markdown engine already in the repo (issue #106) and it has TWO
+backends: the ANSI one the colored terminal uses (the bordered box table) and its
+HTML output (a real `<table>`). The markdown the harness builds for the terminal is
+the same form a remote/browser sink turns into a genuine HTML table, so #474's
+deferred remote half reuses this data with no second table engine and no harness
+layout in either direction - the reason a markdown table (not a hand-padded row)
+is the right carrier.
 
 The renderer owns the indent and the join glyphs, reproducing the old `@ui.puts`
 rows byte-for-byte (no terminal regression). UNPAINTED like `:note`: only the

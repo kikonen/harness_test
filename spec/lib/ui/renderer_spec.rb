@@ -258,20 +258,48 @@ RSpec.describe UI::Renderer do
       expect(out).to eq('  [list-section] a grouped item needs header and rows')
     end
 
-    # The :session kind (the /sessions listing): a multi-column row whose named
-    # fields (id, saved, messages, files, workdir) the renderer joins with the
-    # layout words  saved / messages, / file(s) / [workdir: ] - the words belong
-    # to the renderer, the fields to the data, exactly as :arrow owns  ->  and  @ .
-    it 'renders a session row (multi-column, separators are renderer layout)' do
+    # The :table kind: the payload's columns ARE the schema. The renderer states
+    # the fields as a markdown table and hands it to the kramdown renderer
+    # (#106's MarkdownRenderer), which owns the column sizing - the padding is not
+    # re-invented in the harness. A cell is read BY NAME from the item. A SINK WITH
+    # NO PALETTE (a plain console, a spec) gets the raw markdown: itself a
+    # readable, re-lay-out-able table, the DATA form #474 keeps in the buffer.
+    it 'renders a :table as a markdown table (the data form, no palette)' do
       payload = {
-        kind: :session,
+        title: 'Saved sessions (2):',
+        kind: :table,
         columns: %i[id saved messages files workdir],
-        items: [{ id: 'abc', saved: '2026-01-01 10:00:00', messages: 3, files: 2,
-                  workdir: '/work' }]
+        items: [{ id: 'abc', saved: '2026-01-01 10:00:00', messages: 3, files: 2, workdir: '/work' },
+                { id: 'de', saved: '2026-02-01 11:00:00', messages: 12, files: 1, workdir: '/w2' }]
       }
       expect(renderer.line(type: :list, content: payload)).to eq(
-        '  abc  saved 2026-01-01 10:00:00  3 messages, 2 file(s)  [workdir: /work]'
+        ['Saved sessions (2):',
+         '| id | saved | messages | files | workdir |',
+         '| -- | ----- | -------- | ----- | ------- |',
+         '| abc | 2026-01-01 10:00:00 | 3 | 2 | /work |',
+         '| de | 2026-02-01 11:00:00 | 12 | 1 | /w2 |'].join("\n")
       )
+    end
+
+    # A colored sink renders the :table through kramdown: a bordered box table,
+    # the layout the gem (not the harness) draws. The column widths are the gem's
+    # (terminal-dependent), so the pin asserts the table's identity - borders and
+    # every field value survive - not its exact column count.
+    it 'renders a :table as a kramdown box table when the sink is colored' do
+      painted = described_class.new(palette: UI::Palette.fetch('default'))
+      payload = {
+        kind: :table,
+        columns: %i[id saved workdir],
+        items: [{ id: 'abc', saved: '2026-01-01 10:00:00', workdir: '/work' }]
+      }
+      out = painted.line(type: :list, content: payload)
+      body = strip_ansi(out)
+
+      expect(out).to include('╭') # kramdown's box border, not raw pipe markdown
+      expect(body).to include('id')
+      expect(body).to include('2026-01-01')
+      expect(body).to include('/work')
+      expect(out).not_to include('| -- |') # the raw fallback was not used
     end
 
     it 'leaves the list unpainted with a palette (only the layout moves)' do
