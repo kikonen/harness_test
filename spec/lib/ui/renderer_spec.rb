@@ -187,6 +187,30 @@ RSpec.describe UI::Renderer do
       }
       expect(painted.line(type: :list, content: payload)).to eq("X:\n  - a")
     end
+    # The row is built from NAMED item fields (LIST_KIND_FIELDS), never by reading
+    # the columns array by position. A payload that lists its columns in a
+    # different ORDER renders the same row; one that omits a required field is a
+    # loud diagnostic, not a field-dropping row (#146's "unknown is loud").
+    it 'is a loud diagnostic for an unknown kind (never silently bullet-shaped)' do
+      out = renderer.line(type: :list, content: { kind: :grid, columns: %i[a b], items: [] })
+
+      expect(out).to eq('  [list-kind:grid] known kinds: bullet, arrow')
+    end
+
+    it 'is a loud diagnostic when the columns do not name a kind\'s required fields' do
+      # :arrow reads name/model/location; omitting location would drop a field.
+      out = renderer.line(type: :list, content: { kind: :arrow, columns: %i[name model], items: [] })
+
+      expect(out).to eq('  [list-fields:arrow] columns must name name, model, location')
+    end
+
+    it 'renders the same row whatever order the columns array lists (no positional read)' do
+      payload = { kind: :arrow, columns: %i[location name note model],
+                  items: [{ name: 'a', model: 'b', location: 'c', note: ' (x)' }] }
+
+      expect(renderer.line(type: :list, content: payload)).to eq('  a  ->  b @ c (x)')
+    end
+
     # The footer's indent is a LEVEL in the data, not baked leading spaces - the
     # renderer turns the level into columns so a variable-width sink (a browser)
     # can map the same level to CSS margin. A plain String is indent 0 verbatim.

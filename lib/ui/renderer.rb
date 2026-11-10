@@ -78,8 +78,19 @@ module UI
     # The renderer owns the layout and reproduces today's terminal bytes for the
     # converted reports byte-for-byte. UNPAINTED like :note. Payload is a Hash
     # { title:, kind:, columns:, items:, footer:, gap: }. Footer lines carry an
-    # INDENT LEVEL, never baked leading spaces (see #footer_line).
+    # INDENT LEVEL, never baked leading spaces (see #footer_line). A row is built
+    # from NAMED item fields (see LIST_KIND_FIELDS), never by reading the columns
+    # array by position, so a payload that lists its columns in another order
+    # renders the same row.
     LIST = :list
+
+    # The item fields each :list kind's terminal row reads, BY NAME. The order is
+    # the row template's own, not the columns array's, so a reordered columns
+    # list cannot scramble a row. :arrow also renders an optional trailing
+    # annotation (:note) straight from its template. An unknown kind, or columns
+    # that do not name a kind's required fields, is a loud diagnostic - never a
+    # garbled or field-dropping row (#146).
+    LIST_KIND_FIELDS = { bullet: %i[value], arrow: %i[name model location] }.freeze
 
     # The start of an iteration and the start of the final answer are the two
     # BLOCK boundaries, and both get the same fused rule. plan / say / tools /
@@ -189,36 +200,58 @@ module UI
     # Layout a structured list/table (#474). The payload carries the fields; the
     # renderer owns the row shape via :kind. Two kinds today: :bullet (1-field
     # lists) and :arrow (the entity -> target @ location table /models shows);
-    # other table shapes are future #474 work. Unpainted (see LIST). Items are
-    # symbol-keyed Hashes; a column name is matched by #to_sym so a payload that
+    # other table shapes are future #474 work. Unpainted (see LIST). A kind reads
+    # its item fields BY NAME (LIST_KIND_FIELDS); the columns array is checked
+    # only to confirm it NAMES those fields, never read by position. Items are
+    # symbol-keyed Hashes; a name is matched by #to_sym so a payload that
     # round-tripped through JSON (string keys re-symbolized by read_session) and
-    # one built in memory read the same item.
+    # one built in memory read the same item. An unknown kind, or columns that do
+    # not name a kind's required fields, is a diagnostic - never a garbled row.
     def list_line(payload)
       data    = payload.is_a?(Hash) ? payload : {}
       kind    = (data[:kind] || :bullet).to_sym
       columns = Array(data[:columns])
-      lines   = []
+      required = LIST_KIND_FIELDS[kind]
+      if required.nil?
+        kinds = LIST_KIND_FIELDS.keys.join(", ")
+        return list_error("list-kind:#{kind}", "known kinds: #{kinds}")
+      end
+
+      missing = required - columns.map(&:to_sym)
+      unless missing.empty?
+        names = required.join(", ")
+        return list_error("list-fields:#{kind}", "columns must name #{names}")
+      end
+
+      lines = []
       lines << data[:title].to_s unless data[:title].nil?
       Array(data[:items]).each do |item|
-        lines << (kind == :arrow ? arrow_row(item, columns) : bullet_row(item, columns))
+        lines << row_for(kind, item)
       end
       lines << "" if data[:gap]
       Array(data[:footer]).each { |f| lines << footer_line(f) }
       lines.join("\n")
     end
 
-    def bullet_row(item, columns)
-      value = item.is_a?(Hash) ? item[columns[0].to_sym].to_s : item.to_s
-      "#{INDENT}- #{value}"
+    # A row built from NAMED fields the item hash carries; the columns array's
+    # order never decides what a field is. :arrow appends an optional :note.
+    def row_for(kind, item)
+      row = item.is_a?(Hash) ? item : {}
+      if kind == :arrow
+        name = row[:name].to_s
+        tgt  = row[:model].to_s
+        loc  = row[:location].to_s
+        note = row[:note].to_s
+        "#{INDENT}#{name}  ->  #{tgt} @ #{loc}#{note}"
+      else
+        "#{INDENT}- #{row[:value]}"
+      end
     end
 
-    def arrow_row(item, columns)
-      row  = item.is_a?(Hash) ? item : {}
-      name = row[columns[0].to_sym].to_s
-      tgt  = row[columns[1].to_sym].to_s
-      loc  = row[columns[2].to_sym].to_s
-      note = row[columns[3].to_sym].to_s if columns.size > 3
-      "#{INDENT}#{name}  ->  #{tgt} @ #{loc}#{note}"
+    # A :list payload the layout cannot draw: name the kind and what was wrong,
+    # so a broken payload is loud instead of a garbled row (#146).
+    def list_error(tag, detail)
+      "#{INDENT}[#{tag}] #{detail}"
     end
 
     # A footer line. Its indent is a LEVEL in the data, not baked leading

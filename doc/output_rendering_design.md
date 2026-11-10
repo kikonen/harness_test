@@ -159,6 +159,13 @@ joins and reproduces the old `@ui.puts` rows byte-for-byte (no terminal
 regression). UNPAINTED like `:note`: only the layout moves, so a colored or a
 plain console both print identical bytes.
 
+A row's fields are read BY NAME (`LIST_KIND_FIELDS`: bullet `value`, arrow
+`name`/`model`/`location` plus an optional `note`), never by reading the `columns`
+array by position - so a payload that lists its columns in a different order
+renders the same row. The `columns` array is only checked to confirm it NAMES the
+kind's required fields; an unknown kind or missing field is a loud diagnostic,
+never a garbled or field-dropping row (the same #146 rule ` [untyped:...]` follows).
+
 A footer line carries an indent LEVEL, not baked leading spaces: a footer entry
 is `{ text:, indent: n }` (or a plain String at level 0) and `#footer_line` turns
 the level into columns (`INDENT * n`) for the terminal. A browser maps the same
