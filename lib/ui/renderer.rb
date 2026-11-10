@@ -71,6 +71,15 @@ module UI
     # rendered paragraph is identical from a 60-col or a 176-col terminal.
     NOTE_WIDTH = RULE_WIDTH - INDENT.length
 
+    # A structured list/table report (issue #474). The emitter states the DATA
+    # - a title, a kind, a columns list and per-item field values - never a
+    # fused row string, so a remote sink can lay out a real list/table from the
+    # fields instead of regexing the separators back out (#146's machinery).
+    # The renderer owns the layout and reproduces today's terminal bytes for the
+    # converted reports byte-for-byte. UNPAINTED like :note. Payload is a Hash
+    # { title:, kind:, columns:, items:, footer:, gap: }.
+    LIST = :list
+
     # The start of an iteration and the start of the final answer are the two
     # BLOCK boundaries, and both get the same fused rule. plan / say / tools /
     # warn / error stay plain labels: they are lines INSIDE a block.
@@ -126,6 +135,8 @@ module UI
       type = type.to_sym
       text = content.to_s
 
+      return list_line(content) if type == LIST
+
       return status_line(type, text, origin) if STATUS_GLYPHS.key?(type)
       return ack_line(type, text, origin) if ACK_TYPES.include?(type)
       return boundary_line(type, text) if BOUNDARY_ROLES.include?(type)
@@ -141,6 +152,7 @@ module UI
       return true if STATUS_GLYPHS.key?(type)
       return true if ACK_TYPES.include?(type)
       return true if type == NOTE
+      return true if type == LIST
 
       !VERBATIM.include?(type) && LABELS.key?(type)
     end
@@ -171,6 +183,41 @@ module UI
         wrapped.each { |seg| out << (seg.empty? ? INDENT : INDENT + seg) }
       end
       out.join("\n")
+    end
+
+    # Layout a structured list/table (#474). The payload carries the fields; the
+    # renderer owns the row shape via :kind. Two kinds today: :bullet (1-field
+    # lists) and :arrow (the entity -> target @ location table /models shows);
+    # other table shapes are future #474 work. Unpainted (see LIST). Items are
+    # symbol-keyed Hashes; a column name is matched by #to_sym so a payload that
+    # round-tripped through JSON (string keys re-symbolized by read_session) and
+    # one built in memory read the same item.
+    def list_line(payload)
+      data    = payload.is_a?(Hash) ? payload : {}
+      kind    = (data[:kind] || :bullet).to_sym
+      columns = Array(data[:columns])
+      lines   = []
+      lines << data[:title].to_s unless data[:title].nil?
+      Array(data[:items]).each do |item|
+        lines << (kind == :arrow ? arrow_row(item, columns) : bullet_row(item, columns))
+      end
+      lines << "" if data[:gap]
+      Array(data[:footer]).each { |f| lines << f.to_s }
+      lines.join("\n")
+    end
+
+    def bullet_row(item, columns)
+      value = item.is_a?(Hash) ? item[columns[0].to_sym].to_s : item.to_s
+      "#{INDENT}- #{value}"
+    end
+
+    def arrow_row(item, columns)
+      row  = item.is_a?(Hash) ? item : {}
+      name = row[columns[0].to_sym].to_s
+      tgt  = row[columns[1].to_sym].to_s
+      loc  = row[columns[2].to_sym].to_s
+      note = row[columns[3].to_sym].to_s if columns.size > 3
+      "#{INDENT}#{name}  ->  #{tgt} @ #{loc}#{note}"
     end
 
     # A multi-line message (a pasted multiline script is the everyday case)

@@ -142,6 +142,53 @@ RSpec.describe UI::Renderer do
     end
   end
 
+  # issue #474: a structured list/table report. The emitter states the fields
+  # (title, kind, columns, items) and the renderer owns the layout, so the
+  # durable record and a remote sink carry the fields, not a fused row string.
+  describe '#line (:list) - structured list/table (issue #474)' do
+    it 'renders a bullet list (1-field: the dash is the renderer layout, not the emitter string)' do
+      payload = {
+        title: 'Hosts for web.fetch:',
+        kind: :bullet,
+        columns: [:value],
+        items: [{ value: 'api.example.com' }, { value: 'docs.example.org' }],
+        footer: ['  revoke with: /clear hosts']
+      }
+      expect(renderer.line(type: :list, content: payload)).to eq(
+        ['Hosts for web.fetch:',
+         '  - api.example.com',
+         '  - docs.example.org',
+         '  revoke with: /clear hosts'].join("\n")
+      )
+    end
+
+    it 'renders an arrow table (entity -> target @ location + note)' do
+      payload = {
+        title: 'Configured models (1):',
+        kind: :arrow,
+        columns: %i[name model location note],
+        items: [{ name: 'qwen', model: 'qwen3:8b', location: 'http://x', note: ' (ollama)' }],
+        footer: [],
+        gap: false
+      }
+      expect(renderer.line(type: :list, content: payload)).to eq(
+        ['Configured models (1):',
+         '  qwen  ->  qwen3:8b @ http://x (ollama)'].join("\n")
+      )
+    end
+
+    it 'leaves the list unpainted with a palette (only the layout moves)' do
+      painted = described_class.new(palette: UI::Palette.fetch('default'))
+      payload = {
+        title: 'X:',
+        kind: :bullet,
+        columns: [:value],
+        items: [{ value: 'a' }]
+      }
+      expect(painted.line(type: :list, content: payload)).to eq("X:\n  - a")
+    end
+  end
+
   # issue #106: an opted-in :response is rendered as markdown; the default (off)
   # keeps every answer byte-for-byte as emitted.
   describe '#line (:response) markdown rendering (issue #106)' do
@@ -401,6 +448,10 @@ RSpec.describe UI::Renderer do
 
     it 'is true for the note role (the renderer owns its wrap and indent)' do
       expect(renderer.labeled?(:note)).to eq(true)
+    end
+
+    it 'is true for the list role (the renderer owns its layout)' do
+      expect(renderer.labeled?(:list)).to eq(true)
     end
 
     it 'is false for verbatim types and for the spinner' do

@@ -76,11 +76,15 @@ module Commands
       hosts = WebHostAllowlist.new(@file_list.workdir).hosts
 
       unless hosts.empty?
-        @ui.puts "Hosts for web.fetch (exact hosts only):"
-        hosts.each { |host| @ui.puts "  - #{host}" }
-        # Every list shown here is revocable from the CLI (issue #104) - the
-        # footer names the form so a user never has to edit a .yml by hand.
-        @ui.puts "  revoke with: /clear hosts"
+        # issue #474: a 1-field bullet list emitted as STRUCTURE (the host is
+        # one field per item), not a fused "  - host" string. UI::Renderer#bullet_row
+        # reproduces the old line byte-for-byte; the footer stays verbatim prose.
+        emit_list(
+          title: "Hosts for web.fetch (exact hosts only):",
+          items: hosts.map { |host| { value: host } },
+          columns: [:value],
+          footer: ["  revoke with: /clear hosts"],
+          origin: "grant")
       end
 
       if tool_list.empty? && shell_list.empty?
@@ -89,14 +93,20 @@ module Commands
       end
 
       unless tool_list.empty?
-        @ui.puts "Commands for run.command:"
-        tool_list.each { |p| @ui.puts "  - #{p}" }
-        @ui.puts "  revoke with: /clear commands"
+        emit_list(
+          title: "Commands for run.command:",
+          items: tool_list.map { |p| { value: p } },
+          columns: [:value],
+          footer: ["  revoke with: /clear commands"],
+          origin: "grant")
       end
       unless shell_list.empty?
-        @ui.puts "Commands for shell (!):"
-        shell_list.each { |p| @ui.puts "  - #{p}" }
-        @ui.puts "  revoke with: /clear shell"
+        emit_list(
+          title: "Commands for shell (!):",
+          items: shell_list.map { |p| { value: p } },
+          columns: [:value],
+          footer: ["  revoke with: /clear shell"],
+          origin: "grant")
       end
     end
   end

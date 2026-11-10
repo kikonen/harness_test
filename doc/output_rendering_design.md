@@ -50,6 +50,7 @@ decoration that a renderer can produce itself.
 | `:ack` | the badge word | `  [YOLO ON]` (bracketed ack, unpainted; issue #466) |
 | `:kind` | the message after the kind | `  [LLM error] rate limited` (bracket names a kind, unpainted; #466) |
 | `:note` | ONE or MORE unwrapped paragraphs | each re-wrapped to a fixed width, indented (harness prose, unpainted; #470) |
+| `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v` or arrow `  a -> b @ c`), unpainted; #474 |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
 | `:spinner_detail` | the spinner payload | no line at all (animated) |
 
@@ -141,8 +142,31 @@ legends, numbered store lists, `name - desc` rows, denylist bullet lists, usage
 columns, server/param tables). Word-wrap would destroy that alignment, so those
 are the note array's boundaries. A `Heading: value` line with NO columns to align
 is not such a block - it is prose, and folds into the array. (A structured
-`:list` role for genuinely tabular output remains future work, issue #474; that
-is about multi-column tables, not a single labeled sentence.)
+`:list` role for genuinely tabular output is the next step - see the next
+section; issue #474 landed its groundwork (:bullet and :arrow, /grant lists and
+/models) and the remaining aligned tables move onto it incrementally.)
+
+## Structured list/table reports (issue #474)
+
+`:list` is the groundwork that closes the "fused row string" half of #474. A
+command report states the DATA - `{ title:, kind:, columns:, items:, footer:,
+gap: }` where `items` are Hashes keyed by the column names - and `UI::Renderer#list_line`
+draws the rows from those fields. Two kinds today: `:bullet` (a 1-field list,
+`  - value`, so `/grant` hosts and the run.command/shell prefix lists) and
+`:arrow` (`  name -> target @ location` so `/models`); other table shapes are
+still future #474 work. The renderer owns the indent and the ` -> `/` @ `/dash`
+joins and reproduces the old `@ui.puts` rows byte-for-byte (no terminal
+regression). UNPAINTED like `:note`: only the layout moves, so a colored or a
+plain console both print identical bytes.
+
+The point of `:list` is not the terminal (a terminal was already fine with the
+string) - it is that the field boundaries no longer die at the emitter. The
+payload is stored in the run record as the structure, so `Harness#record_report_output`
+puts the Hash (not a rendered line) into the `OutputBuffer`, it survives the
+save -> resume JSON round trip symbol-keyed, and `print_resume_replay` redraws
+it through the renderer. A future remote sink lays out a real list/table from
+the fields instead of regexing the separators back out (#146's forbidden
+machinery). The browser/SSE side is the deliberately-deferred half of #474.
 
 The `OutputBuffer` stores the RAW paragraph, not the wrapped lines - so a browser
 can re-wrap it in CSS (issue #146 / the #324 remote client) instead of inheriting
