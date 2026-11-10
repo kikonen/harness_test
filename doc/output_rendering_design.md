@@ -40,8 +40,8 @@ decoration that a renderer can produce itself.
 | type | emitted content | rendered line |
 | --- | --- | --- |
 | `:step_label` | the iteration NUMBER | fused gray rule (see "Block boundaries") |
-| `:plan` | the reasoning digest | `plan:  I will read the tool first` |
-| `:interstitial` | the model's interim text | `say:   checking one more site` |
+| `:plan` | the reasoning digest | `plan:  I will read the tool first` (wrapped to RULE_WIDTH, continuation aligned under the label; #485) |
+| `:interstitial` | the model's interim text | `say:   checking one more site` (wrapped like `:plan`) |
 | `:tool_plan` | the tool names | `tools: file.read, file.search` |
 | `:response` | the model's answer | fused gray rule + answer verbatim ("Block boundaries") |
 | `:warn` | a recovered failure | `warn:  auto-save failed: EACCES` |

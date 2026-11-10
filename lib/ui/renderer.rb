@@ -131,6 +131,7 @@ module UI
       return boundary_line(type, text) if BOUNDARY_ROLES.include?(type)
       return note_line(text) if type == NOTE
       return labeled_markdown_line(type, text) if markdown_role?(type)
+      return wrapped_labeled_line(type, text) if MARKDOWN_ROLES.include?(type)
 
       paint(type, labeled(type, text))
     end
@@ -247,6 +248,24 @@ module UI
       pad   = " " * label.length
       out   = [segment(type, label) + lines.first.to_s]
       lines[1..].each { |cont| out << (cont.empty? ? "" : pad + cont) }
+      out.join("\n")
+    end
+
+    # A labeled prose line (plan / say) with markdown OFF: wrap to the fixed
+    # RULE_WIDTH minus the label and align continuations under the label
+    # (#485 - a single-liner plan spilled past the terminal as one long line).
+    # TextWrap.line keeps a fitting line verbatim, so a short plan stays
+    # byte-identical; the buffer still holds the raw content (a browser re-wraps).
+    def wrapped_labeled_line(type, content)
+      label = LABELS[type]
+      return paint(type, label) if content.empty?
+
+      width = RULE_WIDTH - label.length
+      segs  = content.split("\n").flat_map { |para| TextWrap.line(para, width) }
+      segs = [""] if segs.empty?
+      pad  = " " * label.length
+      out  = [paint(type, label + segs.first.to_s)]
+      segs[1..].each { |seg| out << (pad + paint(type, seg)) }
       out.join("\n")
     end
 
