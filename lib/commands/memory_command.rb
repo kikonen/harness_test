@@ -46,9 +46,6 @@ module Commands
         return
       end
 
-      # issue #474: the memory list is the same flat name - description table as
-      # /skills; the size suffix rides as the :kv row's optional :annotation so
-      # the char count is a FIELD, not a fused tail of the string.
       emit_list(
         title: "Memories (#{all.size}/#{memories.max_memories} notes, " \
           "#{Memories::MAX_BODY_CHARS} chars max each):",

@@ -97,15 +97,11 @@ module UI
       kv: %i[name description],
       # A numbered kv row (  N. name - description[annotation]): the ordinal is a
       # named :number field, not the array position, so the columns order cannot
-      # scramble it. The renderer right-aligns the numbers to the width of the
-      # largest number in the list (the alignment is the renderer's, not baked).
+      # scramble it. The renderer right-aligns every ordinal to the width of the
+      # largest in the list - the alignment is the renderer's, not baked.
       numbered_kv: %i[number name description],
-      # A grouped list: each item is a SECTION (a header line + its rows), the
-      # /tools shape (  ns: then its tools indented one level deeper). A group is
-      # a Hash with a named :header (the section label) and a named :rows (the
-      # section's kv rows). The group shape is validated; each row carries its
-      # own name/description, read by name like any kv row.
-      grouped_kv: %i[header rows]
+      grouped_kv: %i[header rows],
+      session: %i[id saved messages files workdir]
     }.freeze
 
     # The start of an iteration and the start of the final answer are the two
@@ -213,16 +209,12 @@ module UI
       out.join("\n")
     end
 
-    # Layout a structured list/table (#474). The payload carries the fields; the
-    # renderer owns the row shape via :kind. Two kinds today: :bullet (1-field
-    # lists) and :arrow (the entity -> target @ location table /models shows);
-    # other table shapes are future #474 work. Unpainted (see LIST). A kind reads
-    # its item fields BY NAME (LIST_KIND_FIELDS); the columns array is checked
-    # only to confirm it NAMES those fields, never read by position. Items are
-    # symbol-keyed Hashes; a name is matched by #to_sym so a payload that
-    # round-tripped through JSON (string keys re-symbolized by read_session) and
-    # one built in memory read the same item. An unknown kind, or columns that do
-    # not name a kind's required fields, is a diagnostic - never a garbled row.
+    # Layout a structured list/table (#474). Unpainted (see LIST). A kind reads its
+    # item fields BY NAME (LIST_KIND_FIELDS); the columns array is checked only to
+    # confirm it NAMES those fields, never read by position. Names are matched by
+    # #to_sym so a JSON round-trip (string keys re-symbolized by read_session) and
+    # an in-memory payload read the same item. A kind, or columns, that break the
+    # contract render a diagnostic - never a garbled row.
     def list_line(payload)
       data    = payload.is_a?(Hash) ? payload : {}
       kind    = (data[:kind] || :bullet).to_sym
@@ -294,6 +286,9 @@ module UI
         name = row[:name].to_s
         desc = row[:description].to_s
         "#{INDENT}#{num}. #{name} - #{desc}#{row[:annotation]}"
+      when :session
+        "#{INDENT}#{row[:id]}  saved #{row[:saved]}  #{row[:messages]} messages, " \
+          "#{row[:files]} file(s)  [workdir: #{row[:workdir]}]"
       else
         "#{INDENT}- #{row[:value]}"
       end

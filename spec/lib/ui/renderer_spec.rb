@@ -258,6 +258,22 @@ RSpec.describe UI::Renderer do
       expect(out).to eq('  [list-section] a grouped item needs header and rows')
     end
 
+    # The :session kind (the /sessions listing): a multi-column row whose named
+    # fields (id, saved, messages, files, workdir) the renderer joins with the
+    # layout words  saved / messages, / file(s) / [workdir: ] - the words belong
+    # to the renderer, the fields to the data, exactly as :arrow owns  ->  and  @ .
+    it 'renders a session row (multi-column, separators are renderer layout)' do
+      payload = {
+        kind: :session,
+        columns: %i[id saved messages files workdir],
+        items: [{ id: 'abc', saved: '2026-01-01 10:00:00', messages: 3, files: 2,
+                  workdir: '/work' }]
+      }
+      expect(renderer.line(type: :list, content: payload)).to eq(
+        '  abc  saved 2026-01-01 10:00:00  3 messages, 2 file(s)  [workdir: /work]'
+      )
+    end
+
     it 'leaves the list unpainted with a palette (only the layout moves)' do
       painted = described_class.new(palette: UI::Palette.fetch('default'))
       payload = {
