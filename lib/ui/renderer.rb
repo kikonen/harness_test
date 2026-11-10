@@ -87,13 +87,19 @@ module UI
     # The item fields each :list kind's terminal row reads, BY NAME. The order is
     # the row template's own, not the columns array's, so a reordered columns
     # list cannot scramble a row. :arrow also renders an optional trailing
-    # annotation (:note) and :kv renders one (:annotation) straight from its
-    # template. An unknown kind, or columns that do not name a kind's required
-    # fields, is a loud diagnostic - never a garbled or field-dropping row (#146).
+    # annotation (:note) and :kv / :numbered_kv render one (:annotation) straight
+    # from their template. An unknown kind, or columns that do not name a kind's
+    # required fields, is a loud diagnostic - never a garbled or field-dropping
+    # row (#146).
     LIST_KIND_FIELDS = {
       bullet: %i[value],
       arrow: %i[name model location],
-      kv: %i[name description]
+      kv: %i[name description],
+      # A numbered kv row (  N. name - description[annotation]): the ordinal is a
+      # named :number field, not the array position, so the columns order cannot
+      # scramble it. The renderer right-aligns the numbers to the width of the
+      # largest number in the list (the alignment is the renderer's, not baked).
+      numbered_kv: %i[number name description]
     }.freeze
 
     # The start of an iteration and the start of the final answer are the two
@@ -229,8 +235,13 @@ module UI
 
       lines = []
       lines << data[:title].to_s unless data[:title].nil?
-      Array(data[:items]).each do |item|
-        lines << row_for(kind, item)
+      items = Array(data[:items])
+      # The numbered kind right-aligns every ordinal to the width of the largest
+      # one in the list, so a 10-item list keeps the rows aligned past 9.
+      number_width = kind == :numbered_kv ?
+        items.map { |i| (i.is_a?(Hash) ? i[:number].to_s : "").length }.max.to_i : nil
+      items.each do |item|
+        lines << row_for(kind, item, number_width:)
       end
       lines << "" if data[:gap]
       Array(data[:footer]).each { |f| lines << footer_line(f) }
@@ -239,7 +250,7 @@ module UI
 
     # A row built from NAMED fields the item hash carries; the columns array's
     # order never decides what a field is. :arrow appends an optional :note.
-    def row_for(kind, item)
+    def row_for(kind, item, number_width: nil)
       row = item.is_a?(Hash) ? item : {}
       case kind
       when :arrow
@@ -252,6 +263,11 @@ module UI
         name = row[:name].to_s
         desc = row[:description].to_s
         "#{INDENT}#{name} - #{desc}#{row[:annotation]}"
+      when :numbered_kv
+        num  = row[:number].to_s.rjust(number_width.to_i)
+        name = row[:name].to_s
+        desc = row[:description].to_s
+        "#{INDENT}#{num}. #{name} - #{desc}#{row[:annotation]}"
       else
         "#{INDENT}- #{row[:value]}"
       end
