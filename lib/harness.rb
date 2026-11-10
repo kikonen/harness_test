@@ -108,6 +108,14 @@ class Harness
               "it is NOT applied. Send it again if you still mean it."
   }.freeze
 
+  # Fed back to the model when it wrote a tool call as text the harness could
+  # not run, so it re-issues it instead of the failure only reaching the user
+  # (issue #487).
+  UNSOLVED_TEXT_CALL_FEEDBACK = "Your previous message contained a tool call the " \
+    "harness could not run (its tool name matched no registered tool), so NO tool " \
+    "was executed. Re-issue it as a structured tool call using the exact name of a " \
+    "registered tool, or answer directly in plain text if you do not need a tool."
+
   # rules_repair_note: what the LAST rules-file read had to replace (nil when the
   # file was clean). A repair must not be silent - the prompt the model was given
   # is then not byte-for-byte what harness.md holds.
@@ -770,7 +778,7 @@ class Harness
   def report_unresolved_text_tool_call(content)
     #logger.info "-----text_tool_call-----\n#{content}\n----------------"
 
-    return unless @text_tool_call_parser.text_call?(content)
+    return false unless @text_tool_call_parser.text_call?(content)
 
     msg = "the model wrote a tool call as text the harness could not run " \
           "(no structured tool call was returned and its name matched no tool) " \
@@ -781,6 +789,19 @@ class Harness
       "-----text_tool_call-----\n#{content}\n----------------"
 
     Task.emit(:warn, origin: :harness, content: msg)
+    true
+  end
+
+  # True when content carries a text-shaped call the harness could not run;
+  # records it to the log only. The user-facing warn is left to the terminal
+  # fallback (report_unresolved_text_tool_call) so the first occurrence can
+  # instead be fed back to the model (issue #487).
+  def log_unresolved_text_tool_call(content)
+    return false unless @text_tool_call_parser.text_call?(content)
+
+    logger.warn "text-shaped tool call in response (issue #461) - NOT executed\n" \
+      "-----text_tool_call-----\n#{content}\n----------------"
+    true
   end
 
   # -- LLM call logic -------------------------------------------------------
@@ -799,6 +820,7 @@ class Harness
     last_tool_name = nil
     loop_warning_injected = false
     loop_hard_break = false
+    text_call_retried = false
     total_usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
 
     # One ImageDelivery per turn: its inline budget is turn-scoped (issue #449).
@@ -961,12 +983,27 @@ class Harness
 
       discard_pending_user_note(:late)
 
-      # issue #461: no structured tool_calls arrived, but the model may have
-      # written one as text. A name that DID resolve was recovered above and ran
-      # in the tool loop. This fires only for markers whose name matched no tool
-      # (or that did not parse), so prose that merely quotes a call gets a
-      # visible warning instead of silently ending the turn.
-      report_unresolved_text_tool_call(message[:content])
+      # issue #461 / #487: a text-shaped call whose name matched no tool (or an
+      # ambiguous short name the harness will not guess). A name that DID resolve
+      # was recovered above and ran. For one that did NOT:
+      #   - the first time this turn produces it, feed it back so the model can
+      #     re-issue it (issue #487 - the model never learned its call failed);
+      #   - bounded to ONE retry (text_call_retried), so prose that merely QUOTES
+      #     a call cannot spin the loop - the second occurrence falls through to
+      #     the honest warn + commit.
+      if text_call_retried
+        report_unresolved_text_tool_call(message[:content])
+      elsif log_unresolved_text_tool_call(message[:content])
+        text_call_retried = true
+        @session.add_assistant_message({ role: "assistant", content: message[:content] })
+        messages << { role: "user", content: UNSOLVED_TEXT_CALL_FEEDBACK }
+        Tool.push_status(
+          label: "text_call",
+          verdict: :warn,
+          message: "tool call arrived as text the harness could not run - " \
+                   "asked the model to re-issue it")
+        next
+      end
 
       elapsed = (Time.now - start_time).round(2)
       stats = {
