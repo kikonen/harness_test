@@ -177,6 +177,35 @@ RSpec.describe UI::Renderer do
       )
     end
 
+    # The :kv kind: the flat `name - description` row the skills and memory
+    # listings share. An optional :annotation rides the row verbatim (the memory
+    # listing's " (N chars)" suffix is a FIELD, not a baked-in tail).
+    it 'renders a kv list (name - description, flat table)' do
+      payload = {
+        title: 'Skills (2):',
+        kind: :kv,
+        columns: %i[name description],
+        items: [{ name: 'changelog', description: 'Regenerate the changelog' },
+                { name: 'triage', description: 'Sort issues' }],
+        footer: ['Show one with: /skills <name>']
+      }
+      expect(renderer.line(type: :list, content: payload)).to eq(
+        ['Skills (2):',
+         '  changelog - Regenerate the changelog',
+         '  triage - Sort issues',
+         'Show one with: /skills <name>'].join("\n")
+      )
+    end
+
+    it 'appends a kv row\'s optional annotation verbatim (memory size suffix)' do
+      payload = {
+        kind: :kv,
+        columns: %i[name description annotation],
+        items: [{ name: 'sized', description: '12345', annotation: ' (5 chars)' }]
+      }
+      expect(renderer.line(type: :list, content: payload)).to eq('  sized - 12345 (5 chars)')
+    end
+
     it 'leaves the list unpainted with a palette (only the layout moves)' do
       painted = described_class.new(palette: UI::Palette.fetch('default'))
       payload = {
@@ -194,7 +223,8 @@ RSpec.describe UI::Renderer do
     it 'is a loud diagnostic for an unknown kind (never silently bullet-shaped)' do
       out = renderer.line(type: :list, content: { kind: :grid, columns: %i[a b], items: [] })
 
-      expect(out).to eq('  [list-kind:grid] known kinds: bullet, arrow')
+      known = described_class::LIST_KIND_FIELDS.keys.join(", ")
+      expect(out).to eq("  [list-kind:grid] known kinds: #{known}")
     end
 
     it 'is a loud diagnostic when the columns do not name a kind\'s required fields' do

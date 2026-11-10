@@ -154,10 +154,12 @@ gap: }` where `items` are Hashes keyed by the column names - and `UI::Renderer#l
 draws the rows from those fields. Two kinds today: `:bullet` (a 1-field list,
 `  - value`, so `/grant` hosts and the run.command/shell prefix lists) and
 `:arrow` (`  name -> target @ location` so `/models`); other table shapes are
-still future #474 work. The renderer owns the indent and the ` -> `/` @ `/dash`
-joins and reproduces the old `@ui.puts` rows byte-for-byte (no terminal
-regression). UNPAINTED like `:note`: only the layout moves, so a colored or a
-plain console both print identical bytes.
+still future #474 work. A `:kv` kind (`  name - description`, with an optional
+`annotation` appended verbatim) covers the flat tables `/skills` and `/memory`
+share. The renderer owns the indent and the ` -> `/` @ `/dash` joins and
+reproduces the old `@ui.puts` rows byte-for-byte (no terminal regression).
+UNPAINTED like `:note`: only the layout moves, so a colored or a plain console
+both print identical bytes.
 
 A row's fields are read BY NAME (`LIST_KIND_FIELDS`: bullet `value`, arrow
 `name`/`model`/`location` plus an optional `note`), never by reading the `columns`

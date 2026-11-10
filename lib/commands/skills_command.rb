@@ -41,9 +41,16 @@ module Commands
         return
       end
 
-      @ui.puts "Skills (#{all.size}):"
-      all.each { |s| @ui.puts "  #{s.name} - #{s.description}" }
-      @ui.puts "Show one with: /skills <name>"
+      # issue #474: the skill list is a flat name - description table emitted as
+      # STRUCTURE (one field pair per item), not a fused "  name - desc" string.
+      # UI::Renderer's :kv row reproduces the old line byte-for-byte.
+      emit_list(
+        title: "Skills (#{all.size}):",
+        kind: :kv,
+        columns: %i[name description],
+        items: all.map { |s| { name: s.name, description: s.description } },
+        footer: ["Show one with: /skills <name>"],
+        origin: "skills")
     end
 
     def show_skill(skills, requested)
