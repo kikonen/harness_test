@@ -41,9 +41,22 @@ name only becomes a call when it maps to a registered tool
   plan.list / skills.list; `read`, `delete`, `search`, `add` are likewise
   ambiguous) maps to **nothing**, as does an unknown name.
 
-Unresolved markers never run; they fall through to `report_unresolved_text_tool_call`,
-which warns on the console + log so the user sees the model *tried* to act and can
-re-prompt. Prose quoting a bogus name is therefore reported, not executed.
+Unresolved markers never run. What happens next is a bounded feedback loop
+(issue #487): the owner's complaint was that a broken call (e.g. a lone `read`,
+ambiguous across file/memory/plan/skills.read) failed silently to the *user*
+while the model never learned it had failed, so it repeated the same bad call
+every few steps. The first unresolved text-shaped call in a turn is therefore
+**fed back**: the assistant message is committed, a `user` message
+(`UNSOLVED_TEXT_CALL_FEEDBACK`) tells the model its call matched no tool and to
+re-issue it as a structured call (or answer in plain text), a `text_call` status
+line says so, and the loop `next`s for one retry.
+
+The retry is bounded to **one** per turn (`text_call_retried`). A second
+occurrence falls through to `report_unresolved_text_tool_call` (warn on console
++ log, then commit the turn). This bound is what keeps prose that merely
+**quotes** a call from spinning the loop: quoting prose cannot re-issue a real
+call, so its second occurrence ends the turn with the honest warn. Prose
+quoting a bogus name is still never executed.
 
 ---
 

@@ -1919,14 +1919,41 @@ RSpec.describe Harness do
 
       # Nothing was executed - no tool message entered the chain.
       expect(h.session.messages.map { |m| m[:role] }).not_to include('tool')
-      # The honest report is a :warn event (origin :harness), not a status line.
+      # issue #487: the FIRST occurrence is fed back to the model, not dumped
+      # at the user. The model is asked to re-issue it and, here, answers with
+      # the real one - the turn ends normally, no user-facing warn.
+      expect(h.client.calls.size).to eq(2)
+      asked = h.client.calls.last
+      expect(asked.last[:content]).to include('could not run')
+      expect(asked.last[:content]).to include('Re-issue it as a structured tool call')
+      expect(h.call_llm).not_to be_nil # second scripted response drove the final answer
+      line = drained_status(task).find { |m| m[:origin] == 'text_call' }
+      expect(line[:content]).to include('asked the model to re-issue it')
+    end
+
+    # issue #487: the feedback is bounded to ONE retry per turn. A model that
+    # keeps emitting an unrunnable text call must not spin the loop - the
+    # second occurrence falls through to the honest user-facing warn and the
+    # turn commits.
+    it 'feeds the failure back at most once, then warns and ends the turn' do
+      quoted = "looks like #{qwen_call('bogus_tool', 'path' => 'x')}"
+      h = build_harness_with_responses([
+        text_round(quoted), text_round(quoted), text_round(quoted)
+      ])
+      h.session.add_user('go')
+
+      task = with_task { h.call_llm }
+
+      expect(h.session.messages.map { |m| m[:role] }).not_to include('tool')
+      # First occurrence: fed back. Second: the bounded retry falls through to
+      # the warn + commit (the third scripted response is never reached).
+      expect(h.client.calls.size).to eq(2)
       events = []
       loop { m = task.poll(0); break unless m; events << m }
-      line = events.find do |m|
+      warn = events.find do |m|
         m[:type] == :warn && m[:origin] == :harness && m[:content].to_s.include?('could not run')
       end
-      expect(line[:content]).to include('could not run')
-      expect(line[:content]).to include('NOT run')
+      expect(warn).not_to be_nil
     end
   end
 
