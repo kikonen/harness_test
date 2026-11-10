@@ -77,7 +77,8 @@ module UI
     # fields instead of regexing the separators back out (#146's machinery).
     # The renderer owns the layout and reproduces today's terminal bytes for the
     # converted reports byte-for-byte. UNPAINTED like :note. Payload is a Hash
-    # { title:, kind:, columns:, items:, footer:, gap: }.
+    # { title:, kind:, columns:, items:, footer:, gap: }. Footer lines carry an
+    # INDENT LEVEL, never baked leading spaces (see #footer_line).
     LIST = :list
 
     # The start of an iteration and the start of the final answer are the two
@@ -202,7 +203,7 @@ module UI
         lines << (kind == :arrow ? arrow_row(item, columns) : bullet_row(item, columns))
       end
       lines << "" if data[:gap]
-      Array(data[:footer]).each { |f| lines << f.to_s }
+      Array(data[:footer]).each { |f| lines << footer_line(f) }
       lines.join("\n")
     end
 
@@ -218,6 +219,18 @@ module UI
       loc  = row[columns[2].to_sym].to_s
       note = row[columns[3].to_sym].to_s if columns.size > 3
       "#{INDENT}#{name}  ->  #{tgt} @ #{loc}#{note}"
+    end
+
+    # A footer line. Its indent is a LEVEL in the data, not baked leading
+    # spaces: the renderer turns the level into columns (INDENT * level) for the
+    # terminal, and a remote sink maps the same level to CSS margin. Baked
+    # spaces mean nothing in a variable-width font, so the level is the only
+    # robust form (#474). A footer entry is a String (indent 0, verbatim) or a
+    # Hash { text:, indent: }.
+    def footer_line(entry)
+      text   = entry.is_a?(Hash) ? entry[:text].to_s : entry.to_s
+      indent = entry.is_a?(Hash) ? entry[:indent].to_i : 0
+      "#{INDENT * indent}#{text}"
     end
 
     # A multi-line message (a pasted multiline script is the everyday case)

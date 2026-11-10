@@ -50,7 +50,7 @@ decoration that a renderer can produce itself.
 | `:ack` | the badge word | `  [YOLO ON]` (bracketed ack, unpainted; issue #466) |
 | `:kind` | the message after the kind | `  [LLM error] rate limited` (bracket names a kind, unpainted; #466) |
 | `:note` | ONE or MORE unwrapped paragraphs | each re-wrapped to a fixed width, indented (harness prose, unpainted; #470) |
-| `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v` or arrow `  a -> b @ c`), unpainted; #474 |
+| `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v` or arrow `  a -> b @ c`); footer indents from its LEVEL; unpainted; #474 |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
 | `:spinner_detail` | the spinner payload | no line at all (animated) |
 
@@ -158,6 +158,14 @@ still future #474 work. The renderer owns the indent and the ` -> `/` @ `/dash`
 joins and reproduces the old `@ui.puts` rows byte-for-byte (no terminal
 regression). UNPAINTED like `:note`: only the layout moves, so a colored or a
 plain console both print identical bytes.
+
+A footer line carries an indent LEVEL, not baked leading spaces: a footer entry
+is `{ text:, indent: n }` (or a plain String at level 0) and `#footer_line` turns
+the level into columns (`INDENT * n`) for the terminal. A browser maps the same
+level to CSS margin. Baked leading spaces are fragile the moment a sink is not a
+fixed-width monospace grid (a variable-width font, HTML collapsing leading
+whitespace) - so the level is the only form that survives being re-laid out, the
+same #146 rule the rows follow.
 
 The point of `:list` is not the terminal (a terminal was already fine with the
 string) - it is that the field boundaries no longer die at the emitter. The
