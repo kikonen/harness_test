@@ -87,10 +87,14 @@ module UI
     # The item fields each :list kind's terminal row reads, BY NAME. The order is
     # the row template's own, not the columns array's, so a reordered columns
     # list cannot scramble a row. :arrow also renders an optional trailing
-    # annotation (:note) straight from its template. An unknown kind, or columns
-    # that do not name a kind's required fields, is a loud diagnostic - never a
-    # garbled or field-dropping row (#146).
-    LIST_KIND_FIELDS = { bullet: %i[value], arrow: %i[name model location] }.freeze
+    # annotation (:note) and :kv renders one (:annotation) straight from its
+    # template. An unknown kind, or columns that do not name a kind's required
+    # fields, is a loud diagnostic - never a garbled or field-dropping row (#146).
+    LIST_KIND_FIELDS = {
+      bullet: %i[value],
+      arrow: %i[name model location],
+      kv: %i[name description]
+    }.freeze
 
     # The start of an iteration and the start of the final answer are the two
     # BLOCK boundaries, and both get the same fused rule. plan / say / tools /
@@ -237,12 +241,17 @@ module UI
     # order never decides what a field is. :arrow appends an optional :note.
     def row_for(kind, item)
       row = item.is_a?(Hash) ? item : {}
-      if kind == :arrow
+      case kind
+      when :arrow
         name = row[:name].to_s
         tgt  = row[:model].to_s
         loc  = row[:location].to_s
         note = row[:note].to_s
         "#{INDENT}#{name}  ->  #{tgt} @ #{loc}#{note}"
+      when :kv
+        name = row[:name].to_s
+        desc = row[:description].to_s
+        "#{INDENT}#{name} - #{desc}#{row[:annotation]}"
       else
         "#{INDENT}- #{row[:value]}"
       end
