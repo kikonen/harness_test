@@ -101,7 +101,10 @@ module UI
       # largest in the list - the alignment is the renderer's, not baked.
       numbered_kv: %i[number name description],
       grouped_kv: %i[header rows],
-      session: %i[id saved messages files workdir]
+      # :table needs no fixed field list: the payload's columns array IS the
+      # schema (each column a named field). #table_lines builds a markdown table
+      # from the fields and hands it to the kramdown renderer. See #table_lines.
+      table: []
     }.freeze
 
     # The start of an iteration and the start of the final answer are the two
@@ -238,16 +241,52 @@ module UI
       # one in the list, so a 10-item list keeps the rows aligned past 9.
       number_width = kind == :numbered_kv ?
         items.map { |i| (i.is_a?(Hash) ? i[:number].to_s : "").length }.max.to_i : nil
-      if kind == :grouped_kv
+      case kind
+      when :grouped_kv
         items.each { |section| lines.concat(section_lines(section)) }
+      when :table
+        lines.concat(table_lines(columns.map(&:to_sym), items))
       else
-        items.each do |item|
-          lines << row_for(kind, item, number_width:)
-        end
+        items.each { |item| lines << row_for(kind, item, number_width:) }
       end
       lines << "" if data[:gap]
       Array(data[:footer]).each { |f| lines << footer_line(f) }
       lines.join("\n")
+    end
+
+    # A :table: state the fields as a markdown table and let kramdown lay it out -
+    # the sizing and word-wrap are the gem's (#106), not re-invented here. With no
+    # palette there is no kramdown, so the raw markdown is the fallback (it is
+    # itself a readable, re-lay-out-able table).
+    def table_lines(columns, items)
+      markdown = markdown_table(columns, items)
+      return [markdown] if table_renderer.nil?
+
+      table_renderer.render(markdown).split("\n")
+    end
+
+    # Cells are neutralised (see #cell_text) so a value's own pipe or newline
+    # cannot be read as a column boundary or row break and corrupt the table.
+    def markdown_table(columns, items)
+      head  = columns.map { |c| cell_text(c) }
+      rule  = columns.map { |c| "-" * cell_text(c).length }
+      rows  = items.map { |item| columns.map { |c| cell_text(item[c]) } }
+      ([head, rule] + rows).map { |row| "| #{row.join(" | ")} |" }.join("\n")
+    end
+
+    # One table cell: nil to empty, a pipe/newline neutralised so it cannot be
+    # read as a column boundary or row break.
+    def cell_text(value)
+      value.to_s.gsub("|", "\\|").gsub("\n", " ")
+    end
+
+    # :table renders as a table in any colored terminal regardless of the opt-in
+    # markdown flag; it only needs a palette (no palette means no kramdown).
+    def table_renderer
+      return @markdown if @markdown
+      return nil unless @palette
+
+      @table_renderer ||= MarkdownRenderer.new(palette: @palette)
     end
 
     # A grouped_kv section: a header line at INDENT, then its kv rows indented one
@@ -286,9 +325,6 @@ module UI
         name = row[:name].to_s
         desc = row[:description].to_s
         "#{INDENT}#{num}. #{name} - #{desc}#{row[:annotation]}"
-      when :session
-        "#{INDENT}#{row[:id]}  saved #{row[:saved]}  #{row[:messages]} messages, " \
-          "#{row[:files]} file(s)  [workdir: #{row[:workdir]}]"
       else
         "#{INDENT}- #{row[:value]}"
       end

@@ -30,7 +30,7 @@ module Commands
                     "(or: ruby harness.rb -m <model> --resume <id>)"
       emit_list(
         title: "Saved sessions (#{sessions.size}):",
-        kind: :session,
+        kind: :table,
         columns: %i[id saved messages files workdir],
         items: sessions.map { |session| session_item(session) },
         footer: [footer_text],
