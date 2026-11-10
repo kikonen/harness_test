@@ -206,6 +206,31 @@ RSpec.describe UI::Renderer do
       expect(renderer.line(type: :list, content: payload)).to eq('  sized - 12345 (5 chars)')
     end
 
+    # The :numbered_kv kind (the /plans listing): a named :number ordinal, the
+    # size suffix as :annotation, and right-alignment to the width of the largest
+    # ordinal so the block stays aligned past 9. The ordinal is a FIELD, not the
+    # array position, so a reordered columns list cannot scramble it.
+    it 'renders a numbered_kv list, right-aligned past 9' do
+      payload = {
+        kind: :numbered_kv,
+        columns: %i[number name description annotation],
+        items: (1..10).map { |n| { number: n, name: "plan#{n}", description: "d #{n}", annotation: '' } }
+      }
+      lines = renderer.line(type: :list, content: payload).lines.map(&:chomp)
+
+      expect(lines.first).to eq('   1. plan1 - d 1')
+      expect(lines.last).to eq('  10. plan10 - d 10')
+    end
+
+    it 'numbered_kv annotation is a field, not a fused tail' do
+      payload = {
+        kind: :numbered_kv,
+        columns: %i[number name description],
+        items: [{ number: 1, name: 'sized', description: '12345', annotation: ' (5 chars)' }]
+      }
+      expect(renderer.line(type: :list, content: payload)).to eq('  1. sized - 12345 (5 chars)')
+    end
+
     it 'leaves the list unpainted with a palette (only the layout moves)' do
       painted = described_class.new(palette: UI::Palette.fetch('default'))
       payload = {
