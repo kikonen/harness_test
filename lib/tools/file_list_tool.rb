@@ -18,12 +18,12 @@ module Tools
       super(
         name: "file.list",
         description: "Lists files matching a glob pattern under the harness working directory. " \
-                     'The pattern must reside inside the working directory (e.g. "lib/**/*.rb"). ' \
+                     "The pattern must reside inside the working directory (e.g. `lib/**/*.rb`). " \
                      "Sensitive files are excluded from the results.",
         parameters: {
           type: "object",
           properties: {
-            pattern: { type: "string", description: 'Glob pattern relative to the working directory (e.g. "lib/**/*.rb")' }
+            pattern: { type: "string", description: "Glob pattern relative to the working directory (e.g. `lib/**/*.rb`)" }
           },
           required: ["pattern"]
         }

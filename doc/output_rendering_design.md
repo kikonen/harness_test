@@ -50,7 +50,7 @@ decoration that a renderer can produce itself.
 | `:ack` | the badge word | `  [YOLO ON]` (bracketed ack, unpainted; issue #466) |
 | `:kind` | the message after the kind | `  [LLM error] rate limited` (bracket names a kind, unpainted; #466) |
 | `:note` | ONE or MORE unwrapped paragraphs | each re-wrapped to a fixed width, indented (harness prose, unpainted; #470) |
-| `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, arrow `  a -> b @ c`, kv `  n - d`, numbered_kv `  N. n - d`, grouped_kv section `  h:` then `    n - d`, table rendered as a markdown table via kramdown); footer indents from its LEVEL; unpainted; #474 |
+| `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, arrow `  a -> b @ c`, kv `  n - d`, numbered_kv `  N. n - d`, table rendered as a markdown table via kramdown); footer indents from its LEVEL; unpainted; #474 |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
 | `:spinner_detail` | the spinner payload | no line at all (animated) |
 
@@ -159,15 +159,17 @@ draws the rows from those fields. A kind per report shape:
 - `:numbered_kv` `  N. name - description` (+ `annotation`) - `/plans`; the
   ordinal is a named `number` field, right-aligned by the renderer to the width
   of the largest (the `format("%{w}d")` alignment moved out of the emitter)
-- `:grouped_kv` - `/tools`; each item is a `header`+`rows` SECTION, header at
-  `INDENT`, rows one level deeper
-- `:table` - `/sessions`, the `/mcp` tool listing; the payload's `columns` array
-  IS the schema and a cell is read BY NAME from the item. The renderer states the
-  fields as a **markdown table** and hands it to the kramdown `MarkdownRenderer`
-  (#106), which owns the column sizing and word-wrap - the harness does NOT
-  re-invent padding here. A colored sink gets kramdown's bordered box table; a
-  sink with no palette (a plain console, a spec) gets the raw markdown itself, the
-  re-lay-out-able table form the buffer keeps. A multi-paragraph cell (an MCP
+- `:table` - `/sessions`, the `/mcp` and `/tools` tool listings; the payload's
+  `columns` array IS the schema and a cell is read BY NAME from the item. The
+  renderer states the fields as a **markdown table** and hands it to the
+  kramdown `MarkdownRenderer` (#106), which owns the column sizing and
+  word-wrap - the harness does NOT re-invent padding here. The table is built
+  with the renderer's `markdown_max_width` basis even when markdown opt-in is off,
+  so a configured width (`--markdown-width` / `markdown_max_width:`) constrains
+  it (clamped to the terminal, else 80% of it). A colored sink gets
+  kramdown's bordered box table; a sink with no palette (a plain console, a spec)
+  gets the raw markdown itself, the re-lay-out-able table form the buffer keeps.
+  A multi-paragraph cell (an MCP
   description - servers send real prose) is EXPANDED into simulated rows, one per
   paragraph, the item's name on its first row and a blank continuation cell after
   (`#table_rows` / `#cell_paragraphs`), because kramdown-ansi cannot stack
