@@ -231,33 +231,6 @@ RSpec.describe UI::Renderer do
       expect(renderer.line(type: :list, content: payload)).to eq('  1. sized - 12345 (5 chars)')
     end
 
-    # The :grouped_kv kind (the /tools listing): each item is a SECTION (a header
-    # line + its rows indented one level deeper). Rows are kv rows read by name.
-    it 'renders a grouped_kv list (section header + rows one level deeper)' do
-      payload = {
-        title: 'Available tools (2):',
-        kind: :grouped_kv,
-        columns: %i[header rows],
-        items: [
-          { header: 'file', rows: [{ name: 'file.read', description: 'read a file' }] },
-          { header: 'dir', rows: [{ name: 'dir.create', description: 'make a dir' }] }
-        ]
-      }
-      expect(renderer.line(type: :list, content: payload)).to eq(
-        ['Available tools (2):',
-         '  file:',
-         '    file.read - read a file',
-         '  dir:',
-         '    dir.create - make a dir'].join("\n")
-      )
-    end
-
-    it 'is a loud diagnostic for a grouped item that is not a header+rows section' do
-      out = renderer.line(type: :list, content: { kind: :grouped_kv, columns: %i[header rows], items: ['nope'] })
-
-      expect(out).to eq('  [list-section] a grouped item needs header and rows')
-    end
-
     # The :table kind: the payload's columns ARE the schema. The renderer states
     # the fields as a markdown table and hands it to the kramdown renderer
     # (#106's MarkdownRenderer), which owns the column sizing - the padding is not
@@ -344,6 +317,30 @@ RSpec.describe UI::Renderer do
       data = rows.reject { |r| r.include?('tool') } # drop the header row too
       tool_cells = data.map { |r| r.split('│')[1].strip } # the tool column, per data row
       expect(tool_cells).to eq(['blender.exec', '']) # name on first row, blank continuation
+    end
+
+    # The :table honors the renderer's markdown_max_width basis even with markdown
+    # opt-in OFF (the table renderer is built with it, so a configured width -
+    # --markdown-width / 'markdown_max_width:' - actually constrains the table
+    # instead of being ignored). The cells are wrappable (space-separated), so the
+    # gem lays them within the basis; a wider basis uses the extra room, proving
+    # the width is read and not defaulted.
+    it 'sizes a :table to a configured markdown_max_width (even with markdown off)' do
+      desc = "Executes a shell command in the harness working directory. Most " \
+             "commands require explicit user confirmation before they run; " \
+             "approved prefixes auto-approve. Long prose wraps at 120 but not 176."
+      payload = { kind: :table, columns: %i[tool description],
+                  items: [{ tool: 'run.command', description: desc }] }
+
+      allow(Tins::Terminal).to receive(:columns).and_return(176)
+      wide = described_class.new(palette: UI::Palette.fetch('default'))
+                            .line(type: :list, content: payload)
+      capped = described_class.new(palette: UI::Palette.fetch('default'),
+                                   markdown_max_width: 120)
+                            .line(type: :list, content: payload)
+
+      expect(wide.lines.map { |l| strip_ansi(l).rstrip.length }.max).to be > 120
+      expect(capped.lines.map { |l| strip_ansi(l).rstrip.length }.max).to be <= 120
     end
 
     it 'leaves the list unpainted with a palette (only the layout moves)' do

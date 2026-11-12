@@ -21,12 +21,12 @@ module Tools
         description: "Searches for a regex pattern in files under the working directory (like grep). " \
                      'Returns matching lines as "file:line: text". ' \
                      "Sensitive files are excluded. " \
-                     'Use the optional glob to limit which files are searched (e.g. "lib/**/*.rb").',
+                     "Use the optional glob to limit which files are searched (e.g. `lib/**/*.rb`).",
         parameters: {
           type: "object",
           properties: {
             pattern: { type: "string", description: "Regular expression to search for (Ruby regex syntax)" },
-            glob:    { type: "string", description: 'Optional glob to limit which files to search (e.g. "lib/**/*.rb"). Defaults to all files.' },
+            glob:    { type: "string", description: "Optional glob to limit which files to search (e.g. `lib/**/*.rb`). Defaults to all files." },
             context: { type: "integer", description: "Optional number of context lines before/after each match (default 0)" }
           },
           required: ["pattern"]

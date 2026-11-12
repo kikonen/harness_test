@@ -7,8 +7,7 @@ module Commands
   class ToolsCommand < Command
     HELP = CommandHelp.new(
       usage: "tools",
-      summary: "List the tools the model can call, grouped by namespace, with " \
-        "each one's description",
+      summary: "List the tools the model can call, with each one's description",
       group: :general,
       see_also: %w[help])
 
@@ -16,18 +15,19 @@ module Commands
       registry = @harness.tool_registry
       emit_list(
         title: "Available tools (#{registry.tools.size}):",
-        kind: :grouped_kv,
-        columns: %i[header rows],
-        items: grouped_items(registry),
+        kind: :table,
+        columns: %i[tool description],
+        items: table_items(registry),
         origin: "tools")
     end
 
-    def grouped_items(registry)
-      registry.grouped.map do |ns, tools|
-        {
-          header: ns,
-          rows: tools.map { |t| { name: t.name, description: t.description } }
-        }
+    # One row per tool. The row ORDER is the registry's namespace grouping (sorted
+    # for prompt caching); the command must not re-sort or rename anything the
+    # model was already told about. The namespace itself is not a column - the
+    # tool name is already namespaced, so a separate group column only repeats it.
+    def table_items(registry)
+      registry.grouped.flat_map do |_ns, tools|
+        tools.map { |t| { tool: t.name, description: t.description } }
       end
     end
   end

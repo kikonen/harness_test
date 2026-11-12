@@ -100,7 +100,6 @@ module UI
       # scramble it. The renderer right-aligns every ordinal to the width of the
       # largest in the list - the alignment is the renderer's, not baked.
       numbered_kv: %i[number name description],
-      grouped_kv: %i[header rows],
       # :table needs no fixed field list: the payload's columns array IS the
       # schema (each column a named field). #table_lines builds a markdown table
       # from the fields and hands it to the kramdown renderer. See #table_lines.
@@ -154,6 +153,9 @@ module UI
       @palette  = palette
       @markdown = markdown ?
         MarkdownRenderer.new(palette:, max_width: markdown_max_width) : nil
+      # A :table (sessions / mcp / tools) sizes from this same basis even when
+      # markdown opt-in is off, so a configured width constrains the table too.
+      @markdown_max_width = markdown_max_width
     end
 
     # origin: for a status type, the bracket label ("file.read", "access",
@@ -242,8 +244,6 @@ module UI
       number_width = kind == :numbered_kv ?
         items.map { |i| (i.is_a?(Hash) ? i[:number].to_s : "").length }.max.to_i : nil
       case kind
-      when :grouped_kv
-        items.each { |section| lines.concat(section_lines(section)) }
       when :table
         lines.concat(table_lines(columns.map(&:to_sym), items))
       else
@@ -312,23 +312,8 @@ module UI
       return @markdown if @markdown
       return nil unless @palette
 
-      @table_renderer ||= MarkdownRenderer.new(palette: @palette)
-    end
-
-    # A grouped_kv section: a header line at INDENT, then its kv rows indented one
-    # level deeper (INDENT * 2). Each row's fields are read BY NAME (name,
-    # description, optional annotation) like any kv row. A section that is not a
-    # Hash with a :header and :rows renders a diagnostic, not a broken block.
-    def section_lines(section)
-      return [list_error("list-section", "a grouped item needs header and rows")] \
-        unless section.is_a?(Hash) && section.key?(:header) && section.key?(:rows)
-
-      out = ["#{INDENT}#{section[:header]}:"]
-      Array(section[:rows]).each do |row|
-        r = row.is_a?(Hash) ? row : {}
-        out << "#{INDENT * 2}#{r[:name]} - #{r[:description]}#{r[:annotation]}"
-      end
-      out
+      @table_renderer ||=
+        MarkdownRenderer.new(palette: @palette, max_width: @markdown_max_width)
     end
 
     # A row built from NAMED fields the item hash carries; the columns array's
