@@ -80,8 +80,19 @@ module Commands
       print_sample(current)
       available = UI::Palette.names.join(", ")
       emit_role(:note, "Switch with /palette <name>; available: #{available}")
-      @ui.puts "  basic16 - codes stay inside 30..37 (a 16-color-only terminal)"
-      @ui.puts "  none    - no color at all (what --no-color selects)"
+      items = [
+        {
+          name: "basic16",
+          description: "codes stay inside 30..37 (a 16-color-only terminal)"
+        },
+        { name: "none", description: "no color at all (what --no-color selects)" }
+      ]
+      emit_list(
+        kind: :table,
+        columns: %i[name description],
+        items:,
+        title: nil,
+        origin: "palette")
     end
 
     # What the palette actually paints, so the names are not guesswork.

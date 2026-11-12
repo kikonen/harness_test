@@ -70,6 +70,18 @@ RSpec.describe Commands::PaletteCommand do
       expect(out).to include('dialog kind context')
     end
 
+    # Pinned as row prefixes: the cell padding is kramdown's, so at the 80-column
+    # basis the description wraps and only the row start is width-stable.
+    it 'prints the palette-name legend as a table' do
+      out = run_command('', build_harness('none'))
+
+      expect(out).to include(
+        "│ name    │ description",
+        "│ basic16 │ codes stay inside 30..37",
+        "│ none    │ no color at all (what --no-color selects)"
+      )
+    end
+
     it 'shows a sample line so the change is visible without a new turn' do
       out = run_command('', build_harness('default'))
 

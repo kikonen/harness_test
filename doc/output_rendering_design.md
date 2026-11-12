@@ -138,14 +138,24 @@ into one array removes that arbitrariness.
 
 The only thing a block stays verbatim `@ui.puts` for is when **its value IS its
 column alignment**: a multi-row aligned block (role groups `plan=34 warn=38`,
-legends, numbered store lists, `name - desc` rows, usage
-columns). Word-wrap would destroy that alignment, so those are the note array's
+numbered store lists, `name - desc` rows, usage columns). Word-wrap
+would destroy that alignment, so those are the note array's
 boundaries. A `Heading: value` line with NO columns to align is not such a block -
 it is prose, and folds into the array. A genuinely tabular block with named
 columns (the param listing, the server, tool and session reports) moves onto the
 structured `:list`/`:table` role (see the next section) instead: the column
 boundaries then survive as DATA that a browser can re-lay out, rather than as a
 fused row string. The remaining aligned tables move onto it incrementally.
+
+The `/palette` role groups were listed here as alignment blocks and are not: a
+`heading: role=code role=code` line pads nothing (the codes print unpainted), and
+the longest is already past 80 columns. The rule above would make them prose, but
+the legend is the only part of that report that was genuinely tabular - its
+name/description pairs were a real padded block, and those moved to `:table`, so
+the alignment is now kramdown's column sizing rather than baked spaces. The role
+groups stay verbatim for now.
+
+
 
 ## Structured list/table reports (issue #474)
 
