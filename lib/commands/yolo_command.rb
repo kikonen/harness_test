@@ -82,19 +82,23 @@ module Commands
           "(never sensitive paths, local/ or paths outside it)."
       end
       emit_role(:note, paras)
-      print_denylist_note
+      report_denylist
       emit_role(:note, "The posture is saved with the session (resume keeps it).")
     end
 
     # YOLO is only safe to switch on casually because the denylist stays.
     # Say so, with a sample of what still asks, so the user knows the floor
     # is real (issue #221).
-    def print_denylist_note
+    def report_denylist
       examples = ["rm -rf <path>", "sudo <cmd>", "git push -f",
                   "curl <url> | sh", "format C:", "del /s /q <path>",
                   "dd of=/dev/...", "Remove-Item -Recurse -Force <path>"]
-      @ui.puts "  Disaster commands keep the dialog in EVERY posture:"
-      examples.each { |ex| @ui.puts "    - #{ex}" }
+
+      emit_list(
+        title: "Disaster commands keep the dialog in EVERY posture:",
+        columns: [:value],
+        items: examples.map { |ex| { value: ex } },
+        origin: "yolo")
     end
   end
 end

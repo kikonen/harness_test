@@ -103,10 +103,14 @@ module Commands
       collisions = @harness.mcp.collision_notes
       return if collisions.empty?
 
-      @ui.puts "  skipped (a built-in tool holds the name):"
-      collisions.each do |note|
-        @ui.puts "    #{note.sub(/\Askipped MCP tool '/, "").sub(/'$/, "")}"
+      items = collisions.map do |note|
+        { value: note.sub(/\Askipped MCP tool '/, "").sub(/'$/, "") }
       end
+      emit_list(
+        title: "skipped (a built-in tool holds the name):",
+        columns: [:value],
+        items:,
+        origin: "mcp")
     end
   end
 end
