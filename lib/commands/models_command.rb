@@ -18,8 +18,14 @@ module Commands
       current  = @harness.session_manager.active_model_name
 
       if profiles.empty?
-        @ui.puts "No model profiles configured."
-        @ui.puts "Current model: #{current} (@ #{@options[:base_url]})"
+        # Contiguous prose -> ONE note call, two paragraphs (the renderer owns
+        # the wrap, not the emitter - #470).
+        emit_role(
+          :note,
+          [
+            "No model profiles configured.",
+            "Current model: #{current} (@ #{@options[:base_url]})"
+          ])
         return
       end
 

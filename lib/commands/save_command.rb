@@ -15,9 +15,15 @@ module Commands
     def handle(_args)
       id = @harness.session_manager.save_session
       # issue #207: the session JSON lives inside the session's own dir.
-      @ui.puts "Session saved as #{id} (#{@harness.session_manager.session_file_path(id)})"
-      @ui.puts "Resume it later with: /resume #{id}"
-      @ui.puts "  or from the command line: #{resume_cli_string(id)}"
+      # Contiguous prose ack -> ONE note call, three paragraphs; the renderer
+      # owns the indent and wrap (#470), not the emitter.
+      emit_role(
+        :note,
+        [
+          "Session saved as #{id} (#{@harness.session_manager.session_file_path(id)})",
+          "Resume it later with: /resume #{id}",
+          "or from the command line: #{resume_cli_string(id)}"
+        ])
     end
 
     # Build the CLI command to resume this session in a new harness run.
