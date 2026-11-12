@@ -153,25 +153,26 @@ RSpec.describe ParamOverrides do
     end
   end
 
-  # issue #219: /param and /model share this listing, so the format must be
-  # identical for both. It shows the config/profile value when a parameter is
-  # not overridden (not just the overridden ones), and marks overrides.
-  describe '#list_display (issue #219: shared by /param and /model)' do
-    # The line for a given key (whitespace-tolerant).
-    def line_for(lines, key)
-      lines.find { |line| line.include?(key + ' ') }
+  # issue #474/#219: /param and /model share this listing as STRUCTURED rows, so
+  # both commands print the same table from the same data method. The field
+  # boundaries survive to the item hash (key/value/annotation) rather than a
+  # fused "key  value (mark)" string. It shows the config/profile value when a
+  # parameter is not overridden (not just the overridden ones), and marks
+  # overrides.
+  describe '#list_items (issue #474/#219: shared by /param and /model)' do
+    def item_for(items, key)
+      items.find { |item| item[:key] == key }
     end
 
-    it 'lists every parameter with the config value when not overridden' do
+    it 'lists every parameter as a structured row with the config value when not overridden' do
       po = build({ reasoning_effort: 'medium', num_ctx: 65_536 },
                  prof: profile(value: { reasoning_effort: 'medium', num_ctx: 65_536 }))
 
-      lines = po.list_display
+      items = po.list_items
 
-      expect(lines.first).to start_with('Model parameters')
-      expect(line_for(lines, 'reasoning_effort')).to include('medium')
-      expect(line_for(lines, 'num_ctx')).to include('65536')
-      expect(lines).not_to include('(override)')
+      expect(item_for(items, 'reasoning_effort')[:value]).to eq('medium')
+      expect(item_for(items, 'num_ctx')[:value]).to eq('65536')
+      expect(item_for(items, 'reasoning_effort')[:annotation]).to be_empty
     end
 
     it 'shows the overridden value and marks it when a session override is set' do
@@ -179,13 +180,12 @@ RSpec.describe ParamOverrides do
                  prof: profile(value: { reasoning_effort: 'medium' }))
       po.set('reasoning_effort', 'low')
 
-      lines = po.list_display
-      line  = line_for(lines, 'reasoning_effort')
+      item = item_for(po.list_items, 'reasoning_effort')
 
-      expect(line).to include('low')
+      expect(item[:value]).to eq('low')
       # Marked as an override, and the config value it overrides is still
       # visible too.
-      expect(line).to include('(override, config: medium)')
+      expect(item[:annotation]).to eq('(override, config: medium)')
     end
   end
 end

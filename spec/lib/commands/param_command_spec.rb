@@ -30,22 +30,35 @@ RSpec.describe Commands::ParamCommand do
     io.string
   end
 
-  it 'lists every parameter with its effective value and source' do
-    out = run_command
-
-    expect(out).to include('reasoning_effort')
-    expect(out).to include('num_ctx')
-    expect(out).to include('medium')
-    expect(out).to include('65536')
-    expect(out).to include('default')
+  # Split a markdown table row (`| a | b | c |`) into its trimmed cells.
+  def split_row(line)
+    line.strip.sub(/\A\|/, '').sub(/\|\z/, '').split(/\s*\|\s*/).map(&:strip)
   end
 
-  it 'marks session overrides in the list' do
-    param.set('reasoning_effort', 'low')
+  # The listing is a :table (raw markdown here - this console has no palette,
+  # so the re-lay-out-able DATA the buffer keeps). One row per parameter, read
+  # BY NAME from the shared list_items data method.
+  it 'lists every parameter as a table row with its effective value and source' do
     out = run_command
+    lines = out.lines.map(&:chomp)
 
-    expect(out).to include('low')
-    expect(out).to include('override')
+    expect(lines.first).to start_with('Model parameters')
+    expect(split_row(lines[1])).to eq(%w[key value annotation])
+    rows = lines[3..].map { |l| split_row(l) }
+
+    # A row with an empty trailing cell splits to 2 cells (no annotation), so
+    # the non-overridden parameters show just key + value.
+    expect(rows).to include(['reasoning_effort', 'medium'])
+    expect(rows).to include(['num_ctx', '65536'])
+  end
+
+  it 'marks session overrides in the table' do
+    param.set('reasoning_effort', 'low')
+    rows = run_command.lines.map(&:chomp)[3..].map { |l| split_row(l) }
+    override_row = rows.find { |r| r[0] == 'reasoning_effort' }
+
+    expect(override_row[1]).to eq('low')
+    expect(override_row[2]).to eq('(override, config: medium)')
   end
 
   it 'shows a single parameter' do

@@ -437,8 +437,15 @@ RSpec.describe Session do
 
   # issue #251: /session reports the server-side performance of the last
   # request when the server measured it, and says nothing when it did not.
-  describe '#summary performance line' do
-    it 'names the cache depth and the rates' do
+  # #474: #summary returns structured {field:, value:} rows (read by /session as
+  # a :table). The last-request performance is one row, not a fused line, so the
+  # pin reads the value of the 'Last request' row.
+  describe '#summary as structured rows' do
+    def value_for(rows, field)
+      rows.find { |row| row[:field] == field }&.dig(:value)
+    end
+
+    it 'names the cache depth and the rates in the last-request row' do
       session.add_user('go')
       session.add_assistant('done')
       session.record_stats(
@@ -449,10 +456,10 @@ RSpec.describe Session do
                        prompt_tokens: 1000, completion_tokens: 50 }
       )
 
-      line = session.summary.lines.grep(/last request/).first
-      expect(line).to include('768 cached')
-      expect(line).to include('prompt 200 tok/s')
-      expect(line).to include('gen 38.2 tok/s')
+      value = value_for(session.summary, 'Last request')
+      expect(value).to include('768 cached')
+      expect(value).to include('prompt 200 tok/s')
+      expect(value).to include('gen 38.2 tok/s')
     end
 
     it 'adds no performance part when the server reported none' do
@@ -460,9 +467,9 @@ RSpec.describe Session do
       session.add_assistant('done')
       session.record_stats(usage: { prompt_tokens: 10, total_tokens: 15 }, prompt_tokens: 10)
 
-      line = session.summary.lines.grep(/last request/).first
-      expect(line).not_to include('tok/s')
-      expect(line).not_to include('cached')
+      value = value_for(session.summary, 'Last request')
+      expect(value).not_to include('tok/s')
+      expect(value).not_to include('cached')
     end
 
     # The performance is session state: it is saved in last_stats, so /session
@@ -486,9 +493,9 @@ RSpec.describe Session do
         FileUtils.remove_entry(workdir)
       end
 
-      line = restored.summary.lines.grep(/last request/).first
-      expect(line).to include('768 cached')
-      expect(line).to include('gen 38.2 tok/s')
+      value = value_for(restored.summary, 'Last request')
+      expect(value).to include('768 cached')
+      expect(value).to include('gen 38.2 tok/s')
     end
 
     it 'says nothing for a session saved before this feature (no performance key)' do
@@ -501,7 +508,7 @@ RSpec.describe Session do
       ), symbolize_names: true)
       restored = described_class.new('sys').restore(saved, FileList.new([], workdir: Dir.mktmpdir))
 
-      expect(restored.summary.lines.grep(/last request/).first).not_to include('tok/s')
+      expect(value_for(restored.summary, 'Last request')).not_to include('tok/s')
     end
   end
 end

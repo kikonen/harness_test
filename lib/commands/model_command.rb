@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../command"
+require_relative "../param_overrides"
 
 module Commands
   # /model <name> - switch the active model for this run.
@@ -54,11 +55,16 @@ module Commands
 
     # issue #219: show every parameter for the active model with its current
     # (effective) value, marking which ones are session-level overrides. The
-    # listing is shared with /param (ParamOverrides#list_display) so both
-    # commands print the exact same format.
+    # listing is shared with /param (ParamOverrides#list_items) so both
+    # commands print the exact same table.
     def print_params
       param = @harness.session_manager.param_overrides
-      param.list_display.each { |line| @ui.puts line }
+      emit_list(
+        title: ParamOverrides::LIST_TITLE,
+        kind: :table,
+        columns: %i[key value annotation],
+        items: param.list_items,
+        origin: "param")
     end
   end
 end
