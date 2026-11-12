@@ -24,6 +24,20 @@ RSpec.describe Commands::GrantCommand do
     io.string
   end
 
+  def split_row(line)
+    line.strip.sub(/\A\|/, '').sub(/\|\z/, '').split(/\s*\|\s*/).map(&:strip)
+  end
+
+  # Data rows only: the markdown rule row and the header row are dropped so a pin
+  # compares one grant to one row, whatever kramdown padded the columns to.
+  def grant_rows(out)
+    out.lines.map(&:chomp)
+       .select { |l| l.start_with?('|') }
+       .reject { |l| l.match?(/\A\| [-| ]+\|\z/) }
+       .reject { |l| split_row(l)[0] == 'number' }
+       .map { |l| split_row(l) }
+  end
+
   it 'lists file, dir and flat-dir grants grouped by mode' do
     file_list.add_file('lib/foo.rb', :r)
     file_list.add_dir('spec', :rw)
@@ -32,11 +46,14 @@ RSpec.describe Commands::GrantCommand do
     out = run_command
 
     expect(out).to include('Read only:')
-    expect(out).to include('1. lib/foo.rb')
     expect(out).to include('Read + write:')
-    expect(out).to include('spec/ (recursive)')
     expect(out).to include('Delete:')
-    expect(out).to include('tmp/ (dir only)')
+    rows = grant_rows(out)
+    expect(rows).to include(['1', 'spec/', '(recursive)'])
+    # A row with an empty trailing cell splits to 2 cells (no annotation), so a
+    # plain file grant shows just number + path.
+    expect(rows).to include(['1', 'lib/foo.rb'])
+    expect(rows).to include(['1', 'tmp/', '(dir only)'])
   end
 
   # issue #384: the standing grant is on the working directory itself, whose
@@ -50,8 +67,11 @@ RSpec.describe Commands::GrantCommand do
     out = run_command
 
     expect(out).to include('Read + write:')
-    expect(out).to include('the working directory (recursive)')
-    expect(out).not_to include('./ (recursive)')
+    rows = grant_rows(out)
+    expect(rows).to eq([['1', 'the working directory', '(recursive)'],
+                        ['1', 'the working directory', '(recursive)']])
+    # The workdir's display form is ".", so no row may show it as a bare path.
+    expect(rows.map { |r| r[1] }).not_to include('.')
     expect(out).to include('Delete:')
   end
 
@@ -149,7 +169,8 @@ RSpec.describe Commands::GrantCommand do
       out = run_command
 
       expect(out).to include('Read + write:')
-      expect(out).to include('spec/ (recursive)')
+      expect(grant_rows(out)).to eq([['1', 'spec/', '(recursive)']])
+      # The stored grants come before the posture note.
       expect(out.lines.index { |l| l.include?('Read + write:') })
         .to be < out.lines.index { |l| l.include?('Posture (YOLO):') }
     end
