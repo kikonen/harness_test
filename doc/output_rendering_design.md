@@ -161,13 +161,18 @@ draws the rows from those fields. A kind per report shape:
   of the largest (the `format("%{w}d")` alignment moved out of the emitter)
 - `:grouped_kv` - `/tools`; each item is a `header`+`rows` SECTION, header at
   `INDENT`, rows one level deeper
-- `:table` - `/sessions`; the payload's `columns` array IS the schema and a cell
-  is read BY NAME from the item. The renderer states the fields as a **markdown
-  table** and hands it to the kramdown `MarkdownRenderer` (#106), which owns the
-  column sizing and word-wrap - the harness does NOT re-invent padding here. A
-  colored sink gets kramdown's bordered box table; a sink with no palette (a
-  plain console, a spec) gets the raw markdown itself, which is the re-lay-out-able
-  table form the buffer keeps. See `#table_lines` / `#markdown_table`.
+- `:table` - `/sessions`, the `/mcp` tool listing; the payload's `columns` array
+  IS the schema and a cell is read BY NAME from the item. The renderer states the
+  fields as a **markdown table** and hands it to the kramdown `MarkdownRenderer`
+  (#106), which owns the column sizing and word-wrap - the harness does NOT
+  re-invent padding here. A colored sink gets kramdown's bordered box table; a
+  sink with no palette (a plain console, a spec) gets the raw markdown itself, the
+  re-lay-out-able table form the buffer keeps. A multi-paragraph cell (an MCP
+  description - servers send real prose) is EXPANDED into simulated rows, one per
+  paragraph, the item's name on its first row and a blank continuation cell after
+  (`#table_rows` / `#cell_paragraphs`), because kramdown-ansi cannot stack
+  paragraphs in one cell; a single-paragraph cell stays one row, so `/sessions` is
+  unchanged. See `#table_lines` / `#markdown_table`.
 
 `:table` goes through kramdown rather than a harness-side layout on purpose.
 kramdown is the markdown engine already in the repo (issue #106) and it has TWO

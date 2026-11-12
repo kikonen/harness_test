@@ -265,19 +265,45 @@ module UI
       table_renderer.render(markdown).split("\n")
     end
 
-    # Cells are neutralised (see #cell_text) so a value's own pipe or newline
-    # cannot be read as a column boundary or row break and corrupt the table.
+    # A multi-paragraph cell expands to simulated rows (see #table_rows); every
+    # cell is pipe-neutralised (see #escape_cell).
     def markdown_table(columns, items)
-      head  = columns.map { |c| cell_text(c) }
-      rule  = columns.map { |c| "-" * cell_text(c).length }
-      rows  = items.map { |item| columns.map { |c| cell_text(item[c]) } }
-      ([head, rule] + rows).map { |row| "| #{row.join(" | ")} |" }.join("\n")
+      headers = columns.map { |c| escape_cell(c.to_s) }
+      rule    = headers.map { |h| "-" * h.length }
+      rows    = table_rows(columns, items)
+      ([headers, rule] + rows).map { |row| "| #{row.join(" | ")} |" }.join("\n")
     end
 
-    # One table cell: nil to empty, a pipe/newline neutralised so it cannot be
-    # read as a column boundary or row break.
-    def cell_text(value)
-      value.to_s.gsub("|", "\\|").gsub("\n", " ")
+    # Expand each item into 1..N rows: a multi-paragraph cell becomes one row per
+    # paragraph, because kramdown-ansi cannot stack paragraphs inside a single
+    # cell. A column that runs out of paragraphs contributes a blank cell on the
+    # continuation rows (so the tool name shows only on the item's first row). A
+    # single-paragraph item is one row - a plain table like /sessions is unchanged.
+    def table_rows(columns, items)
+      items.flat_map do |item|
+        paras = columns.map { |c| cell_paragraphs(item[c]) }
+        count = [paras.map(&:size).max, 1].max
+        (0...count).map do |k|
+          columns.each_index.map { |i| escape_cell(paras[i][k].to_s) }
+        end
+      end
+    end
+
+    # Split a cell into paragraphs on blank lines; each paragraph's soft line
+    # breaks collapse to spaces. nil/blank -> one empty paragraph.
+    def cell_paragraphs(value)
+      text = value.to_s
+      return [""] if text.strip.empty?
+
+      text.split(/\n[ \t]*\n/).map do |para|
+        para.split("\n").map(&:strip).reject(&:empty?).join(" ")
+      end
+    end
+
+    # A single-paragraph cell: a pipe is neutralised so it cannot be read as a
+    # column boundary (no newlines remain after #cell_paragraphs).
+    def escape_cell(paragraph)
+      paragraph.gsub("|", "\\|")
     end
 
     # :table renders as a table in any colored terminal regardless of the opt-in
