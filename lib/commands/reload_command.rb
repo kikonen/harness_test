@@ -16,8 +16,9 @@ module Commands
 
     def handle(_args)
       @harness.session_manager.reload_rules
-      @ui.puts "System prompt reloaded (base prompt file + harness.md project rules)."
-      @ui.puts
+      emit_role(
+        :note,
+        "System prompt reloaded (base prompt file + harness.md project rules).")
     end
   end
 end

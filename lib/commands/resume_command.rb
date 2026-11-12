@@ -23,7 +23,7 @@ module Commands
     def handle(args)
       id = args.strip
       if id.empty?
-        @ui.puts "Usage: /resume <id>   (see /sessions for available ids)"
+        emit_role(:note, "Usage: /resume <id>   (see /sessions for available ids)")
         return
       end
 

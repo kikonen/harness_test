@@ -31,10 +31,14 @@ RSpec.describe Commands::ReloadCommand do
     expect(out).to include('harness.md project rules')
   end
 
-  it 'ends with a blank line' do
+  # The whole report body is ONE note paragraph now: the emitter states the
+  # unwrapped paragraph with no leading indent and the renderer owns the wrap
+  # and the indent (#470). The old trailing blank line was the emitter's baked
+  # break, so it is gone - the body is the single indented note line.
+  it 'prints the body as one indented note paragraph' do
     out, _ = run_command
 
-    expect(out.end_with?("\n\n")).to be true
+    expect(out).to eq("  System prompt reloaded (base prompt file + harness.md project rules).\n")
   end
 
   it 'propagates a reload failure instead of printing a false confirmation' do

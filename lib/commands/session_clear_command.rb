@@ -14,7 +14,7 @@ module Commands
 
     def handle(_args)
       @harness.session.clear
-      @ui.puts "Session cleared (conversation history reset)."
+      emit_role(:note, "Session cleared (conversation history reset).")
     end
   end
 end
