@@ -103,14 +103,15 @@ RSpec.describe Commands::MemoryCommand do
 
         out = run_command(dir, 'typo')
 
-        expect(out).to include('no memory named')
-        expect(out).to include('real')
+        # The bracket and the glyph are the renderer's (the origin names the store).
+        expect(out).to eq("  [memory] ✗ no memory named 'typo' (real)\n")
       end
     end
 
     it 'refuses a name that is not one path segment' do
       Dir.mktmpdir do |dir|
-        expect(run_command(dir, '../sessions')).to include('one path segment')
+        expect(run_command(dir, '../sessions'))
+          .to eq("  [memory] ✗ a memory name is one path segment: ../sessions\n")
       end
     end
   end

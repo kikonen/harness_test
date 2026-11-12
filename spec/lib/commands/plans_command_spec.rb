@@ -123,14 +123,15 @@ RSpec.describe Commands::PlansCommand do
 
         out = run_command(dir, 'typo')
 
-        expect(out).to include('no plan named')
-        expect(out).to include('real')
+        # The bracket and the glyph are the renderer's (the origin names the store).
+        expect(out).to eq("  [plans] ✗ no plan named 'typo' (real)\n")
       end
     end
 
     it 'refuses a name that is not one path segment' do
       Dir.mktmpdir do |dir|
-        expect(run_command(dir, '../sessions')).to include('one path segment')
+        expect(run_command(dir, '../sessions'))
+          .to eq("  [plans] ✗ a plan name is one path segment, or a plan number: ../sessions\n")
       end
     end
   end

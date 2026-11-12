@@ -61,13 +61,19 @@ module Commands
     def show_memory(requested)
       name = memories.normalize_name(requested)
       if name.nil?
-        @ui.puts "[error] a memory name is one path segment: #{requested}"
+        emit_status(
+          label: "memory",
+          verdict: :fail,
+          message: "a memory name is one path segment: #{requested}")
         return
       end
 
       body = memories.body(name)
       if body.nil?
-        @ui.puts "[error] no memory named '#{name}' (#{available_hint})"
+        emit_status(
+          label: "memory",
+          verdict: :fail,
+          message: "no memory named '#{name}' (#{available_hint})")
         return
       end
 

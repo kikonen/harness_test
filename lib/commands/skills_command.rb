@@ -53,13 +53,19 @@ module Commands
     def show_skill(skills, requested)
       name = skills.normalize_name(requested)
       if name.nil?
-        @ui.puts "[error] a skill name is one path segment: #{requested}"
+        emit_status(
+          label: "skills",
+          verdict: :fail,
+          message: "a skill name is one path segment: #{requested}")
         return
       end
 
       body = skills.body(name)
       if body.nil?
-        @ui.puts "[error] no skill named '#{name}' (#{available_hint(skills)})"
+        emit_status(
+          label: "skills",
+          verdict: :fail,
+          message: "no skill named '#{name}' (#{available_hint(skills)})")
         return
       end
 
