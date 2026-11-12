@@ -138,7 +138,7 @@ into one array removes that arbitrariness.
 
 The only thing a block stays verbatim `@ui.puts` for is when **its value IS its
 column alignment**: a multi-row aligned block (role groups `plan=34 warn=38`,
-legends, numbered store lists, `name - desc` rows, denylist bullet lists, usage
+legends, numbered store lists, `name - desc` rows, usage
 columns). Word-wrap would destroy that alignment, so those are the note array's
 boundaries. A `Heading: value` line with NO columns to align is not such a block -
 it is prose, and folds into the array. A genuinely tabular block with named
@@ -154,7 +154,13 @@ command report states the DATA - `{ title:, kind:, columns:, items:, footer:,
 gap: }` where `items` are Hashes keyed by the column names - and `UI::Renderer#list_line`
 draws the rows from those fields. A kind per report shape:
 
-- `:bullet` `  - value` - `/grant` hosts, the command-prefix lists
+- `:bullet` `  - value` - `/grant` hosts, the command-prefix lists, the `/yolo`
+  denylist examples and the `/mcp` collision names. Its title renders at level 0
+  and its items at level 1, so a block that was nested deeper inside a prose
+  report (header at level 1, rows at level 2) RE-INDENTS when it converts - it
+  was never byte-identical. A single-field list has no column alignment to
+  preserve, so it is structure rather than an alignment block and converts; the
+  `/mcp` names gained the dash the renderer owns.
 - `:arrow` `  name -> target @ location` - `/models`
 - `:kv` `  name - description` (+ optional `annotation`) - `/skills`, `/memory`
 - `:numbered_kv` `  N. name - description` (+ `annotation`) - `/plans`; the

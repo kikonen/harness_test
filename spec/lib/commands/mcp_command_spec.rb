@@ -131,8 +131,9 @@ RSpec.describe Commands::McpCommand do
 
       out = run(manager, registry)
 
-      expect(out).to include('skipped (a built-in tool holds the name):')
-      expect(out).to include('fs.read')
+      # A :bullet structure: the title at level 0 and each name at level 1 with
+      # the dash the renderer owns, so the emitter no longer bakes the row.
+      expect(out).to include("skipped (a built-in tool holds the name):\n  - fs.read")
     end
   end
 

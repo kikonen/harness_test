@@ -84,11 +84,14 @@ RSpec.describe Commands::YoloCommand do
   it 'prints the denylist floor reminder with examples' do
     command(build_harness).handle('on')
 
-    expect(io.string).to include('Disaster commands keep the dialog in EVERY posture:')
-    ['- rm -rf <path>', '- sudo <cmd>', '- git push -f',
-     '- curl <url> | sh', '- format C:', '- del /s /q <path>'].each do |line|
-      expect(io.string).to include(line), line
-    end
+    # The block is a :bullet structure: the title at level 0, the examples at
+    # level 1, the dash the renderer's layout rather than the emitter's string.
+    expect(io.string).to include(
+      "Disaster commands keep the dialog in EVERY posture:\n" \
+      "  - rm -rf <path>\n  - sudo <cmd>\n  - git push -f\n  - curl <url> | sh\n" \
+      "  - format C:\n  - del /s /q <path>\n  - dd of=/dev/...\n" \
+      "  - Remove-Item -Recurse -Force <path>"
+    )
   end
 
   it 'mentions that the posture is saved with the session' do
