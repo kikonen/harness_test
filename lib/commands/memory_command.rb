@@ -78,9 +78,8 @@ module Commands
       end
 
       rule = "-" * [1, 60 - name.length].max
-      @ui.puts "--- #{name} (#{Memories::DIR}) #{rule}"
-      body.each_line { |line| @ui.print line }
-      @ui.puts unless body.end_with?("\n")
+      emit_role(:rule, "--- #{name} (#{Memories::DIR}) #{rule}")
+      emit_role(:text, body)
     end
 
     def available_hint

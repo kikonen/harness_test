@@ -122,7 +122,7 @@ module Commands
     def show_body(name, body, index)
       return if body.nil?
 
-      @ui.puts header(name, index)
+      emit_role(:rule, header(name, index))
       rendered = markdown_renderer&.render(body)
       return dump_verbatim(body) if rendered.nil?
 
@@ -133,8 +133,7 @@ module Commands
     end
 
     def dump_verbatim(body)
-      body.each_line { |line| @ui.print line }
-      @ui.puts unless body.end_with?("\n")
+      emit_role(:text, body)
     end
 
     def header(name, index)

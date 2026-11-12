@@ -24,9 +24,9 @@ module Commands
       end
 
       emit_role(:note, "Reasoning for the last response (#{reasoning.length} chars):")
-      @ui.puts "-" * 60
-      @ui.puts reasoning
-      @ui.puts "-" * 60
+      emit_role(:rule, "-" * 60)
+      emit_role(:text, reasoning)
+      emit_role(:rule, "-" * 60)
     end
   end
 end
