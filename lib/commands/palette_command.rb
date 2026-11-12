@@ -105,8 +105,13 @@ module Commands
         shown = painted.empty? ? "(terminal color)" : painted.join(" ")
         @ui.puts "  #{heading}: #{shown}"
       end
-      @ui.puts "  plain roles: model answer, tool notes, command output"
-      @ui.puts "  dialog kind context: the terminal's own color (content, not chrome)"
+      # Contiguous prose -> ONE note call, two paragraphs.
+      emit_role(
+        :note,
+        [
+          "plain roles: model answer, tool notes, command output",
+          "dialog kind context: the terminal's own color (content, not chrome)"
+        ])
     end
 
     # Rendered through the SAME UI::Renderer the drain loop uses, so the

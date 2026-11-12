@@ -22,7 +22,7 @@ module Commands
       locator  = SessionLocator.new(@file_list.workdir)
       sessions = locator.list
       if sessions.empty?
-        @ui.puts "No saved sessions (#{locator.sessions_dir})."
+        emit_role(:note, "No saved sessions (#{locator.sessions_dir}).")
         return
       end
 
