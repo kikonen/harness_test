@@ -20,7 +20,9 @@ RSpec.describe Commands::ModelCommand do
     sm.define_singleton_method(:vision?) { vision }
     sm.define_singleton_method(:switch_model) { |name| profiles.find { |p| p[:name] == name } }
     po = Object.new
-    po.define_singleton_method(:list_display) { ['  temperature: 0.7  (default)'] }
+    po.define_singleton_method(:list_items) do
+      [{ key: 'temperature', value: '0.7', annotation: '' }]
+    end
     sm.define_singleton_method(:param_overrides) { po }
     sm
   end
@@ -50,8 +52,14 @@ RSpec.describe Commands::ModelCommand do
     end
 
     # issue #219: the parameter listing is shared with /param, so /model prints it.
-    it 'prints every parameter through the shared ParamOverrides listing' do
-      expect(run_command).to include('temperature: 0.7')
+    it 'prints every parameter through the shared ParamOverrides table' do
+      out = run_command
+      row = out.lines.map(&:chomp).find { |l| l.include?('temperature') }
+
+      # A :table cell renders value in its own column, so key and value are
+      # separate cells (no fused "temperature: 0.7").
+      expect(row).to include('temperature')
+      expect(row).to include('0.7')
     end
 
     it 'closes with the pointers to /models, /model <name> and /param' do
@@ -97,10 +105,13 @@ RSpec.describe Commands::ModelCommand do
       expect(out).to include('Switched to model: bare (bare-model @ http://srv:11434/v1)')
     end
 
-    it 'prints the parameter listing after a switch too' do
+    it 'prints the parameter table after a switch too' do
       sm = session_manager([{ name: 'qwen', model: 'qwen3:8b' },
                             { name: 'big', model: 'llama3:70b' }], 'qwen')
-      expect(run_command('big', manager: sm)).to include('temperature: 0.7')
+      row = run_command('big', manager: sm).lines.map(&:chomp).find { |l| l.include?('temperature') }
+
+      expect(row).to include('temperature')
+      expect(row).to include('0.7')
     end
 
     # An unknown name finds no profile: switch_model returns nil and the command

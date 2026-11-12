@@ -32,6 +32,13 @@ class ParamOverrides
     repeat_penalty:   :float
   }.freeze
 
+  # The listing title, shared by /param and /model so both print the exact
+  # same header. Kept here (not in the commands) because the listing itself is
+  # shared: the emitter states the DATA (list_items) and the title is the one
+  # string the two commands must not be able to drift apart on (#219).
+  LIST_TITLE = "Model parameters (adjust with /param <key> <value>, " \
+    "reset with 'default'):"
+
   attr_reader :options
 
   # options: the shared options hash - mutated in place so the LLM call and
@@ -48,24 +55,20 @@ class ParamOverrides
     PARAM_KEYS.keys
   end
 
-  # The full parameter listing (a header line plus one line per parameter),
-  # shared by the /param and /model commands so their output is identical
-  # (issue #219). Each line shows the parameter and its effective value (a
-  # session override when one is set, else the config/profile value). When a
-  # session override is in place the line also shows the config value it
-  # overrides, e.g. "num_ctx  20000 (override, config: 65536)".
-  def list_display
-    lines = ["Model parameters (adjust with /param <key> <value>, reset with 'default'):"]
-    keys.each do |key|
-      mark =
-        if overridden?(key)
-          " (override, config: #{display_value(profile_value(key))})"
-        else
-          ""
-        end
-      lines << "  #{key.to_s.ljust(16)} #{display_value(effective(key))}#{mark}"
+  # The full parameter listing as structured rows (issue #474), shared by the
+  # /param and /model commands so their output is identical (#219). Each row
+  # carries the parameter and its effective value (a session override when one
+  # is set, else the config/profile value); the annotation is the override
+  # provenance, e.g. "(override, config: 65536)" - empty when not overridden.
+  # The emitter states the DATA, never a fused "key  value (mark)" string, so a
+  # table sink lays out the columns from the fields instead of regexing them
+  # back out.
+  def list_items
+    keys.map do |key|
+      config = display_value(profile_value(key))
+      mark = overridden?(key) ? "(override, config: #{config})" : ""
+      { key: key.to_s, value: display_value(effective(key)), annotation: mark }
     end
-    lines
   end
 
   def overrideable?(key)

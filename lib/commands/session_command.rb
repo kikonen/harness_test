@@ -13,7 +13,12 @@ module Commands
       see_also: %w[conversation session-clear compact ctx save retry])
 
     def handle(_args)
-      @ui.puts @harness.session.summary
+      emit_list(
+        title: nil,
+        kind: :table,
+        columns: %i[field value],
+        items: @harness.session.summary,
+        origin: "session")
     end
   end
 end

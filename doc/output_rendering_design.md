@@ -139,12 +139,13 @@ into one array removes that arbitrariness.
 The only thing a block stays verbatim `@ui.puts` for is when **its value IS its
 column alignment**: a multi-row aligned block (role groups `plan=34 warn=38`,
 legends, numbered store lists, `name - desc` rows, denylist bullet lists, usage
-columns, server/param tables). Word-wrap would destroy that alignment, so those
-are the note array's boundaries. A `Heading: value` line with NO columns to align
-is not such a block - it is prose, and folds into the array. (A structured
-`:list` role for genuinely tabular output is the next step - see the next
-section; issue #474 landed its groundwork (:bullet and :arrow, /grant lists and
-/models) and the remaining aligned tables move onto it incrementally.)
+columns). Word-wrap would destroy that alignment, so those are the note array's
+boundaries. A `Heading: value` line with NO columns to align is not such a block -
+it is prose, and folds into the array. A genuinely tabular block with named
+columns (the param listing, the server, tool and session reports) moves onto the
+structured `:list`/`:table` role (see the next section) instead: the column
+boundaries then survive as DATA that a browser can re-lay out, rather than as a
+fused row string. The remaining aligned tables move onto it incrementally.
 
 ## Structured list/table reports (issue #474)
 
@@ -159,22 +160,23 @@ draws the rows from those fields. A kind per report shape:
 - `:numbered_kv` `  N. name - description` (+ `annotation`) - `/plans`; the
   ordinal is a named `number` field, right-aligned by the renderer to the width
   of the largest (the `format("%{w}d")` alignment moved out of the emitter)
-- `:table` - `/sessions`, the `/mcp` and `/tools` tool listings; the payload's
-  `columns` array IS the schema and a cell is read BY NAME from the item. The
-  renderer states the fields as a **markdown table** and hands it to the
-  kramdown `MarkdownRenderer` (#106), which owns the column sizing and
+- `:table` - `/sessions`, the `/param` and `/model` parameter listing, the
+  `/mcp` and `/tools` tool listings, and `/session` (its field/value rows); the
+  payload's `columns` array IS the schema and a cell is read BY NAME from the
+  item. The renderer states the fields as a **markdown table** and hands it to
+  the kramdown `MarkdownRenderer` (#106), which owns the column sizing and
   word-wrap - the harness does NOT re-invent padding here. The table is built
-  with the renderer's `markdown_max_width` basis even when markdown opt-in is off,
-  so a configured width (`--markdown-width` / `markdown_max_width:`) constrains
-  it (clamped to the terminal, else 80% of it). A colored sink gets
-  kramdown's bordered box table; a sink with no palette (a plain console, a spec)
-  gets the raw markdown itself, the re-lay-out-able table form the buffer keeps.
-  A multi-paragraph cell (an MCP
-  description - servers send real prose) is EXPANDED into simulated rows, one per
-  paragraph, the item's name on its first row and a blank continuation cell after
-  (`#table_rows` / `#cell_paragraphs`), because kramdown-ansi cannot stack
-  paragraphs in one cell; a single-paragraph cell stays one row, so `/sessions` is
-  unchanged. See `#table_lines` / `#markdown_table`.
+  with the renderer's `markdown_max_width` basis even when markdown opt-in is
+  off, so a configured width (`--markdown-width` / `markdown_max_width:`)
+  constrains it (clamped to the terminal, else 80% of it). A colored sink gets
+  kramdown's bordered box table; a sink with no palette (a plain console, a
+  spec) gets the raw markdown itself, the re-lay-out-able table form the buffer
+  keeps. A multi-paragraph cell (an MCP description - servers send real prose)
+  is EXPANDED into simulated rows, one per paragraph, the item's name on its
+  first row and a blank continuation cell after (`#table_rows` /
+  `#cell_paragraphs`), because kramdown-ansi cannot stack paragraphs in one
+  cell; a single-paragraph cell stays one row, so `/sessions` is unchanged. See
+  `#table_lines` / `#markdown_table`.
 
 `:table` goes through kramdown rather than a harness-side layout on purpose.
 kramdown is the markdown engine already in the repo (issue #106) and it has TWO

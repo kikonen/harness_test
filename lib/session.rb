@@ -388,32 +388,39 @@ class Session
     @messages.size - 1
   end
 
-  # Human-readable summary of the session state.
+  # Structured summary of the session state as {field:, value:} rows (issue
+  # #474), read by /session, which emits them as a :table. Every line the old
+  # fused version printed is now one named row: the message-role counts (one row
+  # each) and the last-request performance become rows too, so the field
+  # boundaries survive to the data instead of dying at a joined string.
   def summary
     counts = Hash.new(0)
     @messages.each { |m| counts[m[:role]] += 1 }
 
-    lines = []
-    lines << "Session id:      #{session_id}"
-    lines << "Session started: #{created_at.strftime('%Y-%m-%d %H:%M:%S')}"
-    lines << "Messages:        #{@messages.size} total"
-    counts.each { |role, n| lines << "  - #{role}: #{n}" }
-    lines << "User prompts:    #{@user_prompts}"
-    lines << "Pending prompt:  #{pending? ? 'yes (last request failed - use /retry)' : 'no'}"
+    items = [
+      { field: "Session id", value: session_id },
+      { field: "Session started", value: created_at.strftime("%Y-%m-%d %H:%M:%S") },
+      { field: "Messages", value: "#{@messages.size} total" }
+    ]
+    counts.each { |role, n| items << { field: role, value: n.to_s } }
+    items << { field: "User prompts", value: @user_prompts.to_s }
+    items << {
+      field: "Pending prompt",
+      value: pending? ? "yes (last request failed - use /retry)" : "no"
+    }
     if @last_stats
       usage = @last_stats[:usage]
-      parts = ["last request: #{@last_stats[:elapsed_seconds]}s, #{@last_stats[:iterations]} iteration(s)"]
+      parts = ["#{@last_stats[:elapsed_seconds]}s, #{@last_stats[:iterations]} iteration(s)"]
       if usage && usage[:total_tokens] > 0
         parts << "#{usage[:prompt_tokens]}→#{usage[:completion_tokens]} tokens (#{usage[:total_tokens]} total)"
       end
       perf = LLM::UsageStats.performance_parts(@last_stats[:performance])
       parts << perf.join(", ") unless perf.empty?
-
-      lines << parts.join(", ")
+      items << { field: "Last request", value: parts.join(", ") }
     else
-      lines << "No successful requests yet."
+      items << { field: "Last request", value: "no successful requests yet" }
     end
-    lines.join("\n")
+    items
   end
 
   # Serialize the session (including the file list) into a plain hash that

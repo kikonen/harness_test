@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../command"
+require_relative "../param_overrides"
 
 module Commands
   # /param - show and adjust the LLM parameters for this session (issue #219).
@@ -49,7 +50,12 @@ module Commands
     private
 
     def list_all
-      param.list_display.each { |line| @ui.puts line }
+      emit_list(
+        title: ParamOverrides::LIST_TITLE,
+        kind: :table,
+        columns: %i[key value annotation],
+        items: param.list_items,
+        origin: "param")
     end
 
     def show_one(key)
