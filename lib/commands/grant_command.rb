@@ -23,34 +23,15 @@ module Commands
       labels = { both: "Read + write", read: "Read only", write: "Write only", delete: "Delete" }
 
       %i[both read write delete].each do |mode|
-        section = access[mode]
-        files   = section[:files]
-        dirs    = section[:dirs]
-        flats   = section[:flat_dirs] || []
-        next if files.empty? && dirs.empty? && flats.empty?
+        items = store_items(access[mode])
+        next if items.empty?
 
-        @ui.puts "#{labels[mode]}:"
-        unless files.empty?
-          files.each_with_index do |f, i|
-            @ui.puts "  #{i + 1}. #{@file_list.display_path(f)}"
-          end
-        end
-        idx = files.size + 1
-        unless dirs.empty?
-          dirs.each_with_index do |d, i|
-            # The standing grant (issue #384) is on the working directory, whose
-            # display form is "."; "./" reads as noise, so name it.
-            label = d == @file_list.workdir ? "the working directory" \
-                                            : "#{@file_list.display_path(d)}/"
-            @ui.puts "  #{idx + i}. #{label} (recursive)"
-          end
-        end
-        idx += dirs.size
-        unless flats.empty?
-          flats.each_with_index do |d, i|
-            @ui.puts "  #{idx + i}. #{@file_list.display_path(d)}/ (dir only)"
-          end
-        end
+        emit_list(
+          title: "#{labels[mode]}:",
+          kind: :table,
+          columns: %i[number path annotation],
+          items:,
+          origin: "grant")
       end
 
       # YOLO's file coverage is a POSTURE, not a stored grant (issue #274): it is
@@ -109,6 +90,41 @@ module Commands
           footer: [{ text: "revoke with: /clear shell", indent: 1 }],
           origin: "grant")
       end
+    end
+
+    private
+
+    # One row per stored grant, in the order files, recursive dirs, flat dirs. The
+    # ordinal is the row's position in that order, so it is a field the payload
+    # carries rather than a number the emitter bakes into a string.
+    def store_items(section)
+      items = []
+
+      section[:files].each do |f|
+        items << {
+          number: items.size + 1,
+          path: @file_list.display_path(f),
+          annotation: ""
+        }
+      end
+
+      section[:dirs].each do |d|
+        # The standing grant is on the working directory, whose display form is
+        # "."; "./" reads as noise, so name it.
+        label = d == @file_list.workdir ? "the working directory" \
+                                        : "#{@file_list.display_path(d)}/"
+        items << { number: items.size + 1, path: label, annotation: "(recursive)" }
+      end
+
+      (section[:flat_dirs] || []).each do |d|
+        items << {
+          number: items.size + 1,
+          path: "#{@file_list.display_path(d)}/",
+          annotation: "(dir only)"
+        }
+      end
+
+      items
     end
   end
 end

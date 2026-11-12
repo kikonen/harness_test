@@ -138,7 +138,7 @@ into one array removes that arbitrariness.
 
 The only thing a block stays verbatim `@ui.puts` for is when **its value IS its
 column alignment**: a multi-row aligned block (role groups `plan=34 warn=38`,
-numbered store lists, `name - desc` rows, usage columns). Word-wrap
+`name - desc` rows, usage columns). Word-wrap
 would destroy that alignment, so those are the note array's
 boundaries. A `Heading: value` line with NO columns to align is not such a block -
 it is prose, and folds into the array. A genuinely tabular block with named
@@ -177,8 +177,12 @@ draws the rows from those fields. A kind per report shape:
   ordinal is a named `number` field, right-aligned by the renderer to the width
   of the largest (the `format("%{w}d")` alignment moved out of the emitter)
 - `:table` - `/sessions`, the `/param` and `/model` parameter listing, the
-  `/mcp` and `/tools` tool listings, and `/session` (its field/value rows); the
-  payload's `columns` array IS the schema and a cell is read BY NAME from the
+  `/mcp` and `/tools` tool listings, `/session` (its field/value rows) and the
+  `/grant` store lists (number, path, annotation - the ordinal is a field the
+  payload carries, so the number is no longer baked into the row string). The
+  `/grant` lists were the last numbered rows kept for their alignment; only the
+  ordinal was aligned, so they are a table rather than an alignment block;
+  the payload's `columns` array IS the schema and a cell is read BY NAME from the
   item. The renderer states the fields as a **markdown table** and hands it to
   the kramdown `MarkdownRenderer` (#106), which owns the column sizing and
   word-wrap - the harness does NOT re-invent padding here. The table is built
