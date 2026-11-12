@@ -60,17 +60,19 @@ module Commands
 
     def show_one(key)
       unless param.overrideable?(key)
-        @ui.puts "Unknown parameter '#{key}'. Adjustable: #{param.keys.join(', ')}"
+        emit_role(
+          :note,
+          "Unknown parameter '#{key}'. Adjustable: #{param.keys.join(', ')}")
         return
       end
 
       eff  = param.effective(key)
       mark = param.overridden?(key) ? "session override" : "profile default"
-      @ui.puts "#{key}: #{param.display_value(eff)} (#{mark})"
+      emit_role(:note, "#{key}: #{param.display_value(eff)} (#{mark})")
     end
 
     def set_one(key, value)
-      @ui.puts param.set(key, value)
+      emit_role(:note, param.set(key, value))
     end
 
     # The shared override object (SessionManager owns the single instance).

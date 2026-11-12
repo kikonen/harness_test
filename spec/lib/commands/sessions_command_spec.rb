@@ -68,7 +68,11 @@ RSpec.describe Commands::SessionsCommand do
   it 'names the sessions dir when nothing is saved' do
     sessions_dir = File.join(workdir, '.harness', 'sessions')
 
-    expect(run_command).to include("No saved sessions (#{sessions_dir})")
+    # A :note now owns the wrap, so a long path lands on a continuation line;
+    # rejoin the renderer's lines before matching the sentence.
+    out = run_command.lines.map(&:chomp).map { |l| l.delete_prefix("  ") }.join(" ")
+
+    expect(out).to eq("No saved sessions (#{sessions_dir}).")
   end
 
   it 'creates no session directory while listing' do

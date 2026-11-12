@@ -89,7 +89,7 @@ module Commands
       end
 
       if tool_list.empty? && shell_list.empty?
-        @ui.puts "Commands: (none allowed)"
+        emit_role(:note, "Commands: (none allowed)")
         return
       end
 
