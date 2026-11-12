@@ -52,6 +52,7 @@ decoration that a renderer can produce itself.
 | `:note` | ONE or MORE unwrapped paragraphs | each re-wrapped to a fixed width, indented (harness prose, unpainted; #470) |
 | `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, arrow `  a -> b @ c`, kv `  n - d`, numbered_kv `  N. n - d`, table rendered as a markdown table via kramdown); footer indents from its LEVEL; unpainted; #474 |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
+| `:rule` | the rule line the emitter drew | content verbatim, painted with the palette `rule` role (see below) |
 | `:spinner_detail` | the spinner payload | no line at all (animated) |
 
 `:warn` and `:error` are now separated by whether the turn survived, not by
@@ -251,6 +252,14 @@ joined note block.
 `:stats` / `:compact` notes are rendered VERBATIM: their emitters still own the
 indentation and the `[...]` wrapper. `VERBATIM` in `UI::Renderer` is the exact
 list of what is still emitter-shaped.
+
+A `:rule` joins that list for one reason: the content IS the dashes the emitter drew,
+so the emitter still owns the shape. The type exists to make the rule COLORABLE -
+the palette has always had a `rule` role, but no type could name it, so a rule the
+emitter wrote could never be painted. `#segment(:rule, ...)` was reachable only
+inside `status_line` / `boundary_line`. The store-command headers (`/memory`,
+`/plans`, `/skills`) and the `/reasoning` rules now go through it, so they paint
+with the same role as every other rule; plain and no-palette output is unchanged.
 
 Task's own main-thread acks (`  [note] got it - ...`, `  [YOLO ON]`,
 `  [mode is now ...]`) are still hand-written to ui + buffer as `:text`, so

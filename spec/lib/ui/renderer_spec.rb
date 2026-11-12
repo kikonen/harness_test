@@ -72,6 +72,14 @@ RSpec.describe UI::Renderer do
       expect(renderer.line(type: :system, content: '  [rules reloaded]')).to eq('  [rules reloaded]')
     end
 
+    it 'renders a rule line verbatim and colors it with the palette rule role' do
+      painted = described_class.new(palette: UI::Palette.fetch('default'))
+
+      expect(painted.line(type: :rule, content: 'a rule the emitter drew')).to eq(
+        "\e[38;5;240ma rule the emitter drew\e[0m"
+      )
+    end
+
     it 'announces an unknown type loudly instead of hiding it (issue #146)' do
       expect(renderer.line(type: :brand_new_kind, content: 'text')).to eq('text [untyped:brand_new_kind]')
     end
@@ -667,6 +675,7 @@ RSpec.describe UI::Renderer do
     it 'is false for verbatim types and for the spinner' do
       expect(renderer.labeled?(:text)).to eq(false)
       expect(renderer.labeled?(:spinner_detail)).to eq(false)
+      expect(renderer.labeled?(:rule)).to eq(false)
     end
 
     it 'is false for an unknown type (there is no pattern to check)' do

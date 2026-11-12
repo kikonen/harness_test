@@ -264,7 +264,10 @@ RSpec.describe Commands::PlansCommand do
       Dir.mktmpdir do |dir|
         write_plan(dir, 'tail', "step one\nstep two")
 
-        expect(run_with_palette(dir, 'tail')).to eq(run_command(dir, 'tail'))
+        # The header rule now paints, so the two runs differ by SGR only;
+        # compare the text so the pin is about how the body ENDS.
+        colored = run_with_palette(dir, 'tail').gsub(/\e\[[0-9;]*m/, "")
+        expect(colored).to eq(run_command(dir, 'tail'))
       end
     end
   end

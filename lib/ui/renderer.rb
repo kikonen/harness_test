@@ -59,7 +59,10 @@ module UI
 
     # The emitter still owns these lines' shape. :spinner_detail is listed
     # because the drain loop animates it - it must never produce a line.
-    VERBATIM = %i[system text stats compact spinner_detail].freeze
+    # :rule is listed because the content IS the rule the emitter drew: the type
+    # exists only to carry the palette's rule color, which was previously
+    # unreachable because no type named it.
+    VERBATIM = %i[system text stats compact spinner_detail rule].freeze
 
     INDENT      = "  "
     GUTTER      = "#{INDENT}|"
