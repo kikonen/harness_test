@@ -302,6 +302,50 @@ RSpec.describe UI::Renderer do
       expect(out).not_to include('| -- |') # the raw fallback was not used
     end
 
+    # A multi-paragraph cell is the case kramdown-ansi cannot stack inside one
+    # box-table cell (it would collapse the paragraphs). The renderer expands a
+    # multi-paragraph item into one row per paragraph, the item's name on its
+    # first row only. A single-paragraph item (a plain table like /sessions) is
+    # still one row, unchanged.
+    it 'expands a multi-paragraph :table cell into one row per paragraph' do
+      payload = {
+        kind: :table,
+        columns: %i[tool description],
+        items: [
+          { tool: 'blender.exec',
+            description: "First paragraph here.\n\nSecond paragraph with `code` spans." },
+          { tool: 'blender.run', description: 'Just one line.' }
+        ]
+      }
+      expect(renderer.line(type: :list, content: payload)).to eq(
+        ['| tool | description |',
+         '| ---- | ----------- |',
+         '| blender.exec | First paragraph here. |',
+         '|  | Second paragraph with `code` spans. |',
+         '| blender.run | Just one line. |'].join("\n")
+      )
+    end
+
+    # The colored sink renders the same expansion as a box table: the name sits
+    # on the item's first row, the continuation row's tool column is blank. The
+    # column widths are the gem's (terminal-dependent), so the pin asserts the
+    # row structure, not the exact width.
+    it 'renders the multi-paragraph expansion as a box table when the sink is colored' do
+      painted = described_class.new(palette: UI::Palette.fetch('default'))
+      payload = {
+        kind: :table,
+        columns: %i[tool description],
+        items: [{ tool: 'blender.exec', description: "Para one.\n\nPara two." }]
+      }
+      body = strip_ansi(painted.line(type: :list, content: payload))
+      rows = body.lines.map(&:chomp).reject { |l| l.match?(/─/) } # drop the box rules
+
+      expect(body).to include('╭')
+      data = rows.reject { |r| r.include?('tool') } # drop the header row too
+      tool_cells = data.map { |r| r.split('│')[1].strip } # the tool column, per data row
+      expect(tool_cells).to eq(['blender.exec', '']) # name on first row, blank continuation
+    end
+
     it 'leaves the list unpainted with a palette (only the layout moves)' do
       painted = described_class.new(palette: UI::Palette.fetch('default'))
       payload = {

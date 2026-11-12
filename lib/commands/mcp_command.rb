@@ -77,11 +77,24 @@ module Commands
     # Descriptions come from the registry, not re-read from the server: the
     # registry holds what the model was actually told, which is the thing a user
     # checking "what can the model call" wants to see.
+    #
+    # A :table, not a fused "name - description" line: MCP descriptions are the
+    # one report text that is genuinely multi-paragraph markdown (servers send
+    # them as real prose), so the field boundaries must survive to the data.
+    # UI::Renderer#markdown_table expands each multi-paragraph description into
+    # one row per paragraph (the tool name on its first row only), because
+    # kramdown-ansi cannot stack paragraphs in a single cell.
     def report_tools(state)
       registry = @harness.tool_registry
-      state.tool_names.each do |name|
-        @ui.puts "      #{name} - #{registry.get(name)&.description}"
+      items = state.tool_names.map do |name|
+        { tool: name, description: registry.get(name)&.description.to_s }
       end
+      emit_list(
+        columns: %i[tool description],
+        items:,
+        title: nil,
+        kind: :table,
+        origin: "tools")
     end
 
     # A collision is about a tool on BOTH sides (the built-in wins), so it belongs

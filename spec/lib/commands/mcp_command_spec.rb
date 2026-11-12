@@ -90,7 +90,9 @@ RSpec.describe Commands::McpCommand do
     it 'lists each connected server\'s tools from the registry it was registered in' do
       out = report([http_entry], 'remote' => ['ping'])
 
-      expect(out).to include('remote.ping - desc of ping')
+      # A :table (#474): the tool name and description are table cells (the raw
+      # markdown fallback - this command's console has no palette), not a fused line.
+      expect(out).to include('| remote.ping | desc of ping |')
     end
 
     it 'counts the tools it registered across servers' do
