@@ -88,7 +88,11 @@ carries the bracket + glyph; the `:note` role is a wrapped paragraph with neithe
 tool's own name); `Tool.push_status(label:, verdict:, message:)` is the same
 thing for the emitters that are NOT tools - the shell runner (`run.command` /
 bang `shell`), the grant reports (`access`), the safety pre-check (`safety`)
-and the harness's own note ack. `:info` deliberately has no glyph: a count or
+and the harness's own note ack. A slash command states a verdict through
+`TaskRunner#emit_status(label:, verdict:, message:)`, which is the same event on
+a live task and the same rendered line on the main thread; the store commands
+(`memory`, `plans`, `skills`) name the store as the origin for a refused name or
+a missing entry. `:info` deliberately has no glyph: a count or
 a progress line is not a verdict about an operation.
 
 **One buffer entry, one OR MORE console lines.** A status message can be

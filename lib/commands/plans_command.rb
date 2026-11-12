@@ -88,14 +88,19 @@ module Commands
 
       name = plans.normalize_name(requested)
       if name.nil?
-        @ui.puts "[error] a plan name is one path segment, " \
-          "or a plan number: #{requested}"
+        emit_status(
+          label: "plans",
+          verdict: :fail,
+          message: "a plan name is one path segment, or a plan number: #{requested}")
         return
       end
 
       body = plans.body(name)
       if body.nil?
-        @ui.puts "[error] no plan named '#{name}' (#{available_hint(all)})"
+        emit_status(
+          label: "plans",
+          verdict: :fail,
+          message: "no plan named '#{name}' (#{available_hint(all)})")
         return
       end
 

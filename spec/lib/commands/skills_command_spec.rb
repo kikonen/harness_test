@@ -79,7 +79,7 @@ RSpec.describe Commands::SkillsCommand do
         write_skill(dir, 'real.md', "x\n")
         out = run_command(dir, 'ghost')
 
-        expect(out).to start_with("[error] no skill named 'ghost'")
+        expect(out).to start_with("  [skills] ✗ no skill named 'ghost'")
         expect(out).to include('real')
       end
     end
@@ -87,7 +87,7 @@ RSpec.describe Commands::SkillsCommand do
     it 'refuses a name that is not one path segment' do
       Dir.mktmpdir do |dir|
         expect(run_command(dir, '../sessions'))
-          .to eq("[error] a skill name is one path segment: ../sessions\n")
+          .to eq("  [skills] ✗ a skill name is one path segment: ../sessions\n")
       end
     end
   end
