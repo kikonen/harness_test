@@ -83,8 +83,10 @@ RSpec.describe Commands::McpCommand do
       out = report([stdio_entry, http_entry],
                    'fs' => ['read_file'], 'remote' => ['ping'])
 
-      expect(out).to include('fs  [stdio]  npx -y srv')
-      expect(out).to include('remote  [http]  https://example.com/mcp')
+      # A :table (#474): each server is one row read BY NAME (name, transport,
+      # target, status) - the status column carries the tool count here.
+      expect(out).to include('| fs | stdio | npx -y srv | connected (1 tool(s)) |')
+      expect(out).to include('| remote | http | https://example.com/mcp | connected (1 tool(s)) |')
     end
 
     it 'lists each connected server\'s tools from the registry it was registered in' do
@@ -116,8 +118,9 @@ RSpec.describe Commands::McpCommand do
       out = report([stdio_entry, http_entry(name: 'gone')], 'fs' => ['read_file'])
 
       expect(out).to include('MCP servers: 2 declared, 1 connected (1 tool(s) available)')
-      expect(out).to include('gone  [http]  https://example.com/mcp')
-      expect(out).to include('DOWN (')
+      # A :table (#474): the failure reason is the status cell of the failed
+      # server's row, not a fused line the emitter built.
+      expect(out).to include('| gone | http | https://example.com/mcp | DOWN (Errno::ENOENT')
     end
   end
 

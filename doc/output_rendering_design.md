@@ -182,7 +182,8 @@ draws the rows from those fields. A kind per report shape:
   ordinal is a named `number` field, right-aligned by the renderer to the width
   of the largest (the `format("%{w}d")` alignment moved out of the emitter)
 - `:table` - `/sessions`, the `/param` and `/model` parameter listing, the
-  `/mcp` and `/tools` tool listings, `/session` (its field/value rows) and the
+  `/mcp` server report (one row per server: name, transport, target, status) and
+  its tool listings, the `/tools` listing, `/session` (its field/value rows) and the
   `/grant` store lists (number, path, annotation - the ordinal is a field the
   payload carries, so the number is no longer baked into the row string). The
   `/grant` lists were the last numbered rows kept for their alignment; only the
@@ -202,6 +203,12 @@ draws the rows from those fields. A kind per report shape:
   `#cell_paragraphs`), because kramdown-ansi cannot stack paragraphs in one
   cell; a single-paragraph cell stays one row, so `/sessions` is unchanged. See
   `#table_lines` / `#markdown_table`.
+
+The `/mcp` server report shows what a status column is for: the tool count and
+the failure reason do not share a schema, so the status is a named field read by
+the renderer, not a sub-line the emitter baked. Its count header is prose (one
+sentence, no columns to align), so it is a `:note`, and the tool table stays one
+per connected server.
 
 `:table` goes through kramdown rather than a harness-side layout on purpose.
 kramdown is the markdown engine already in the repo (issue #106) and it has TWO
