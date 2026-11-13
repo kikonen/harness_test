@@ -598,6 +598,35 @@ RSpec.describe UI::Renderer do
     end
   end
 
+  # issue #474: a store body (plan / memory / skill) is RAW markdown. The emitter
+  # states the role and the stored text; the renderer renders it, so the markers are
+  # consumed by the render instead of printed - the three-copies bug the design doc
+  # left for a follow-up. With no palette there is no kramdown, so the text comes
+  # back as stored (a plain console, a spec double).
+  describe '#line (:body) - a store body rendered from raw markdown (issue #474)' do
+    it 'returns the text as stored when the sink has no palette to render with' do
+      expect(renderer.line(type: :body, content: '# Title')).to eq('# Title')
+    end
+
+    it 'renders the markdown so the markers are consumed, not printed' do
+      painted = described_class.new(palette: UI::Palette.fetch('default'))
+      out = painted.line(type: :body, content: '# Title' + "\n\nRun **bin/rspec** first.")
+
+      expect(out).to include("\e[")
+      expect(out).to include('Title')
+      expect(out).not_to include('# Title')
+      expect(out).not_to include('**bin/rspec**')
+    end
+
+    # kramdown closes its last block with a blank line; the render is trimmed to the
+    # single newline the sink writes, so a body ends like the file it was read from.
+    it 'trims the render to one trailing newline' do
+      painted = described_class.new(palette: UI::Palette.fetch('default'))
+
+      expect(painted.line(type: :body, content: "step one\nstep two\n")).to eq("step one\nstep two")
+    end
+  end
+
   # issue #485: a labeled prose line (plan / say) spilled past the terminal as
   # one long unwrapped line when markdown was OFF. The default path now wraps to
   # the fixed RULE_WIDTH minus the label and aligns continuations under the
@@ -670,6 +699,10 @@ RSpec.describe UI::Renderer do
 
     it 'is true for the list role (the renderer owns its layout)' do
       expect(renderer.labeled?(:list)).to eq(true)
+    end
+
+    it 'is true for the body role (the renderer owns its render)' do
+      expect(renderer.labeled?(:body)).to eq(true)
     end
 
     it 'is false for verbatim types and for the spinner' do

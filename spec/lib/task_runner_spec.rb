@@ -171,4 +171,46 @@ RSpec.describe TaskRunner do
     end
   end
 
+  # issue #474: a store body is the one main-thread role whose RECORD must hold the
+  # RAW stored markdown rather than the printed line, so a replay redraws it through
+  # the renderer (the same #146 rule :list follows). The console line is the render.
+  describe 'emit_role(:body) - the record holds the raw text, not the render' do
+    def recording_harness
+      recorded = []
+      h = Object.new
+      h.define_singleton_method(:record_report_output) do |type:, origin:, content:|
+        recorded << { type:, origin:, content: }
+      end
+      [h, recorded]
+    end
+
+    it 'records the stored markdown while printing the rendered line' do
+      harness, recorded = recording_harness
+      host.harness = harness
+      host.ui = UI::Console.new(stdout: io, palette: UI::Palette.fetch('default'))
+      allow(Task).to receive(:current).and_return(nil)
+      host.emit_role(:body, '# Title' + "\n\nRun **bin/rspec** first.", origin: 'plans')
+
+      expect(recorded.size).to eq(1)
+      entry = recorded.first
+      expect(entry[:type]).to eq(:body)
+      expect(entry[:origin]).to eq('plans')
+      # The record is the RAW file content: no escape bytes, no consumed markers.
+      expect(entry[:content]).to eq("# Title\n\nRun **bin/rspec** first.")
+      # The console got the render (markers consumed, title painted).
+      expect(io.string).to include('Title')
+      expect(io.string).to include("\e[")
+      expect(io.string).not_to include('# Title')
+    end
+
+    it 'still prints when harness has no record path' do
+      host.harness = Object.new
+      host.ui = ui
+      allow(Task).to receive(:current).and_return(nil)
+      host.emit_role(:body, '# Title', origin: 'plans')
+
+      expect(io.string).to eq("# Title\n")
+    end
+  end
+
 end

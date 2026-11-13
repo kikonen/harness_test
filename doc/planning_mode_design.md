@@ -224,9 +224,12 @@ What #416 changed about that owner-side command:
 - The body is a markdown FILE, so it is RENDERED rather than dumped: with a
   palette the headings/bold/code/lists are styled, palette `none` (--no-color)
   renders plain marker-free text, and only a harness that answers no palette at
-  all (a spec double, a bare console) prints the file verbatim. `/memory` and
-  `/skills` print their bodies the old verbatim way - the same three copies of
-  one bug, deliberately left for a follow-up rather than folded into this one.
+  all (a spec double, a bare console) prints the file verbatim.
+
+  CLOSED by #474 (2026-11-13): the command no longer builds a renderer of its own.
+  It states the RAW markdown as the `:body` role and `UI::Renderer` renders it, so
+  `/plans`, `/memory` and `/skills` share ONE mechanism - the three copies of one
+  bug became one rule. The buffer keeps the raw text, so a replay redraws it.
 
 **Read-on-demand vs injected.** A `plan.*` tool set means a stored plan is read
 when asked, not injected into every prompt - the same "never injected" rule

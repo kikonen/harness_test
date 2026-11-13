@@ -2,7 +2,6 @@
 
 require_relative "../command"
 require_relative "../plans"
-require_relative "../ui/markdown_renderer"
 
 module Commands
   # /plans - list the project's stored plans numbered, or print one body.
@@ -11,11 +10,11 @@ module Commands
   # (Plans) behind both sides, so what the owner inspects and what the model
   # reads cannot drift apart (the same shape as /memory and /skills). Issue #359.
   #
-  # A body is a MARKDOWN file (issue #416): it is rendered, not dumped. With a
-  # palette the headings/bold/code/lists are styled; palette 'none' (--no-color)
-  # renders plain text with no ANSI and no markdown markers. Only a harness that
-  # answers no palette at all (a bare console, a spec double) prints the body
-  # verbatim, as before this issue.
+  # A body is a MARKDOWN file (issue #416): the command states the RAW text as the
+  # :body role and UI::Renderer renders it, so this command owns no renderer of its
+  # own (#474). With a palette the headings/bold/code/lists are styled; palette
+  # 'none' renders plain marker-free text, and a sink with no palette prints the
+  # body as stored.
   class PlansCommand < Command
     HELP = CommandHelp.new(
       usage: "plans [name|N]",
@@ -123,17 +122,7 @@ module Commands
       return if body.nil?
 
       emit_role(:rule, header(name, index))
-      rendered = markdown_renderer&.render(body)
-      return emit_verbatim(body) if rendered.nil?
-
-      # The gem closes its last block with a blank line; the verbatim path
-      # ends with the file's single newline, and the two must match.
-      @ui.print rendered.sub(/\n+\z/, "")
-      @ui.puts
-    end
-
-    def emit_verbatim(body)
-      emit_role(:text, body)
+      emit_role(:body, body)
     end
 
     def header(name, index)
@@ -142,20 +131,6 @@ module Commands
       title = index.nil? ? "--- #{name}" : "--- #{index + 1}. #{name}"
       title = "#{title} (#{Plans::DIR})"
       "#{title} #{'-' * [1, 60 - title.length].max}"
-    end
-
-    # Harness#output_palette is always a palette in a real run (palette 'none'
-    # paints nothing but still renders the markdown structure). The width basis
-    # is the configured one, so a plan table is sized like an answer table.
-    def markdown_renderer
-      return nil unless @harness.respond_to?(:output_palette)
-
-      palette = @harness.output_palette
-      return nil if palette.nil?
-
-      width = @harness.respond_to?(:markdown_max_width) ?
-        @harness.markdown_max_width : nil
-      UI::MarkdownRenderer.new(palette:, max_width: width)
     end
 
     def available_hint(all)

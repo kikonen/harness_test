@@ -95,10 +95,17 @@ module TaskRunner
     else
       line = main_thread_renderer.line(type:, content: text, origin:)
       ui.puts(line)
+      # :body is the one main-thread role whose RECORD is the raw text, not the
+      # printed line, so a replay redraws it through the renderer (#146).
+      if type == :body && harness.respond_to?(:record_report_output)
+        harness.record_report_output(type: :body, origin:, content: text)
+      end
     end
   end
 
   def main_thread_renderer
-    UI::Renderer.new(palette: UI::Renderer.palette_for(ui:, harness:))
+    width = harness.respond_to?(:markdown_max_width) ? harness.markdown_max_width : nil
+    UI::Renderer.new(
+      palette: UI::Renderer.palette_for(ui:, harness:), markdown_max_width: width)
   end
 end

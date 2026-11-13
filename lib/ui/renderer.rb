@@ -57,6 +57,13 @@ module UI
     # paragraph is what lands in the OutputBuffer, so a browser re-wraps it in CSS.
     NOTE = :note
 
+    # A STORE BODY read by name (a plan, a memory, a skill): the emitter states the
+    # RAW markdown text and the renderer renders it, so a stored file's markers are
+    # consumed by the render instead of printed. It is NOT the :note role (a note is
+    # harness prose that gets wrapped); a body keeps its own markdown structure and
+    # its own paragraphs, and a body that no renderer can render stays as stored.
+    BODY = :body
+
     # The emitter still owns these lines' shape. :spinner_detail is listed
     # because the drain loop animates it - it must never produce a line.
     # :rule is listed because the content IS the rule the emitter drew: the type
@@ -175,6 +182,7 @@ module UI
       return note_line(text) if type == NOTE
       return labeled_markdown_line(type, text) if markdown_role?(type)
       return wrapped_labeled_line(type, text) if MARKDOWN_ROLES.include?(type)
+      return body_line(text) if type == BODY
 
       paint(type, labeled(type, text))
     end
@@ -185,6 +193,7 @@ module UI
       return true if ACK_TYPES.include?(type)
       return true if type == NOTE
       return true if type == LIST
+      return true if type == BODY
 
       !VERBATIM.include?(type) && LABELS.key?(type)
     end
@@ -263,9 +272,20 @@ module UI
     # itself a readable, re-lay-out-able table).
     def table_lines(columns, items)
       markdown = markdown_table(columns, items)
-      return [markdown] if table_renderer.nil?
+      return [markdown] if kramdown.nil?
 
-      table_renderer.render(markdown).split("\n")
+      kramdown.render(markdown).split("\n")
+    end
+
+    # A store body read by name: the content is RAW markdown and the render IS the
+    # line, and kramdown is used whatever the opt-in flag says (a stored file renders
+    # whenever a palette exists, #416). The gem closes its last block with a blank
+    # line, so the render is trimmed to the single newline the sink writes.
+    def body_line(content)
+      rendered = kramdown&.render(content)
+      return content if rendered.nil?
+
+      rendered.sub(/\n+\z/, "")
     end
 
     # A multi-paragraph cell expands to simulated rows (see #table_rows); every
@@ -309,13 +329,15 @@ module UI
       paragraph.gsub("|", "\\|")
     end
 
-    # :table renders as a table in any colored terminal regardless of the opt-in
-    # markdown flag; it only needs a palette (no palette means no kramdown).
-    def table_renderer
+    # The kramdown instance the renderer renders with. A :table renders as a table
+    # in any colored terminal regardless of the opt-in markdown flag, and so does a
+    # :body: both need a palette (no palette means no kramdown, and both fall back
+    # to the raw markdown / the text as stored).
+    def kramdown
       return @markdown if @markdown
       return nil unless @palette
 
-      @table_renderer ||=
+      @kramdown ||=
         MarkdownRenderer.new(palette: @palette, max_width: @markdown_max_width)
     end
 
