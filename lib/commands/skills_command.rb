@@ -71,7 +71,7 @@ module Commands
 
       rule = "-" * [1, 60 - name.length].max
       emit_role(:rule, "--- #{name} (#{Skills::DIR}) #{rule}")
-      emit_role(:text, body)
+      emit_role(:body, body)
     end
 
     def available_hint(skills)

@@ -15,9 +15,29 @@ RSpec.describe Commands::SkillsCommand do
     h
   end
 
+  # A harness that answers a palette is the real-run shape (Harness#output_palette
+  # is ALWAYS a palette there), and it is what lets the renderer render the body as
+  # markdown (#474): the emitter states the RAW stored text, the markers are consumed
+  # by the render.
+  def harness_with_palette(dir, name = 'default')
+    skills = Skills.new(dir)
+    h = Object.new
+    h.define_singleton_method(:skills) { skills }
+    h.define_singleton_method(:output_palette) { UI::Palette.new(name) }
+    h
+  end
+
   def run_command(dir, args = '')
     stdout = StringIO.new
     described_class.new(harness: harness_with(dir), file_list: nil, options: nil,
+                        ui: UI::Console.new(stdout: stdout)).handle(args)
+    stdout.string
+  end
+
+  def run_with_palette(dir, args = '', palette = 'default')
+    stdout = StringIO.new
+    described_class.new(harness: harness_with_palette(dir, palette),
+                        file_list: nil, options: nil,
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string
   end
@@ -39,6 +59,33 @@ RSpec.describe Commands::SkillsCommand do
         expect(out).to include('  changelog - Regenerate the changelog')
         expect(out).to include('  triage - Sort issues')
         expect(out).to include('Show one with: /skills <name>')
+      end
+    end
+
+    # issue #474: the body is stored markdown. The command states the RAW text as the
+    # :body role and UI::Renderer renders it, so markers are consumed by the render.
+    # Front matter is stripped by Skills#body, so it never reaches the render.
+    it 'renders the body markdown with a palette instead of printing markers' do
+      Dir.mktmpdir do |dir|
+        write_skill(dir, 'styled/SKILL.md', "---\ndescription: d\n---\n# Title\n\nRun **bin/rspec** first.\n")
+        out = run_with_palette(dir, 'styled')
+
+        expect(out).to include("\e[")
+        expect(out).to include('Title')
+        expect(out).not_to include('# Title')
+        expect(out).not_to include('**bin/rspec**')
+      end
+    end
+
+    # palette 'none' renders the STRUCTURE: plain text, no ANSI, no markers.
+    it 'renders plain marker-free text under palette none' do
+      Dir.mktmpdir do |dir|
+        write_skill(dir, 'plain/SKILL.md', "---\ndescription: d\n---\n# Title\n\nRun **bin/rspec** first.\n")
+        out = run_with_palette(dir, 'plain', 'none')
+
+        expect(out).not_to include("\e[")
+        expect(out).to include('Run bin/rspec first.')
+        expect(out).not_to include('# Title')
       end
     end
 

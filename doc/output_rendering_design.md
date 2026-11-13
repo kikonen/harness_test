@@ -50,6 +50,7 @@ decoration that a renderer can produce itself.
 | `:ack` | the badge word | `  [YOLO ON]` (bracketed ack, unpainted; issue #466) |
 | `:kind` | the message after the kind | `  [LLM error] rate limited` (bracket names a kind, unpainted; #466) |
 | `:note` | ONE or MORE unwrapped paragraphs | each re-wrapped to a fixed width, indented (harness prose, unpainted; #470) |
+| `:body` | the RAW markdown of a stored file (a plan, a memory, a skill) | the render of that markdown (markers consumed); as stored when there is no palette; unpainted (the gem colors it); #474 |
 | `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, arrow `  a -> b @ c`, kv `  n - d`, numbered_kv `  N. n - d`, table rendered as a markdown table via kramdown); footer indents from its LEVEL; unpainted; #474 |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
 | `:rule` | the rule line the emitter drew | content verbatim, painted with the palette `rule` role (see below) |
@@ -260,6 +261,24 @@ can re-wrap it in CSS (issue #146 / the #324 remote client) instead of inheritin
 this terminal's column choice. `spec/lib/ui/renderer_spec.rb` pins the wrap width
 and the unpainted-ness; `spec/lib/task_runner_spec.rb` pins that an array is ONE
 joined note block.
+
+## A store body: the render is the renderer's job too
+
+A body read BY NAME from a store (a plan, a memory, a skill) is a markdown FILE, so
+`/plans` used to build its own `UI::MarkdownRenderer`, reach for the harness palette
+and print the result. That broke the rule at the top of this doc twice: the emitter
+owned the pattern (the render) AND the printed line was the record. It also made the
+three store commands three copies of one implementation, so two of them printed
+markdown markers.
+
+`:body` closes both. The emitter states the role and the RAW stored text, and
+`#body_line` renders it through the renderer's kramdown - the same instance `:table`
+uses - so a stored file renders whenever a palette exists, whatever the markdown
+opt-in flag says. With no palette (a plain console, a spec double) the text comes
+back as stored. The harness paints nothing itself: the colors are the gem's. The
+record holds the RAW text, not the rendered line, so a replay redraws it through the
+renderer - the same #146 rule `:list` follows, and the reason `#status_event` records
+`:body` on the main thread.
 
 ## What is deliberately NOT moved yet
 
