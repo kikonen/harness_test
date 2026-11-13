@@ -97,6 +97,12 @@ a live task and the same rendered line on the main thread; the store commands
 a missing entry. `:info` deliberately has no glyph: a count or
 a progress line is not a verdict about an operation.
 
+`TaskRunner#emit_line` (a console line from inside a task block) states the `:text`
+role and hands it to the SAME router, so one place asks for the active Task - it no
+longer writes to the stream itself on the main thread. The task-error line went the
+same way: the emitter states the `:kind` role with origin `task error` (increment 22)
+and the renderer draws the bracket.
+
 `/clear` is the case that shows the distinction: a revocation that removed
 something is `:ok`, and a store that was already empty is `:info`, because
 "nothing to remove" reports the state of the store rather than an outcome.

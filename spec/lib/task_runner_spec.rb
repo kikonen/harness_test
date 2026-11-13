@@ -46,13 +46,39 @@ RSpec.describe TaskRunner do
     expect(captured[:result]).to eq(:work_done)
   end
 
-  it 'reports a task error as a [task error] line on the console' do
+  # issue #474 increment 22: the bracket shape belongs to UI::Renderer, so the
+  # emitter states the :kind role and the origin names the kind. The console bytes
+  # are unchanged, and the content is pattern-free - so a replay redraws the line
+  # through the renderer instead of inheriting this emitter's prefix.
+  it 'states the task error as the :kind role, the bracket being the renderer shape' do
     setup_host
+    allow(Task).to receive(:current).and_return(nil)
     allow(Task).to receive(:run) { |harness:, ui:, &blk| ['boom', nil] }
 
     host.do_thing
 
-    expect(io.string).to include('[task error] boom')
+    # run_on_task's own leading and trailing blank lines are unchanged; only the
+    # middle line now comes from the renderer.
+    expect(io.string).to eq("\n  [task error] boom\n\n")
+  end
+
+  # The same role routed the normal way: with a task active the error travels as an
+  # event, so it enters the record as type + origin + content, never as a fused
+  # "[task error] boom" string.
+  it 'carries the task error as a :kind event when a task is active' do
+    setup_host
+    events = []
+    fake_task = Class.new do
+      define_method(:push_event) do |type:, origin: nil, content: nil|
+        events << { type: type, origin: origin, content: content }
+      end
+    end.new
+    allow(Task).to receive(:current).and_return(fake_task)
+    allow(Task).to receive(:run) { |harness:, ui:, &blk| ['boom', nil] }
+
+    host.do_thing
+
+    expect(events).to eq([{ type: :kind, origin: 'task error', content: 'boom' }])
   end
 
   it 'prints blank lines before and after the task output' do
@@ -93,7 +119,10 @@ RSpec.describe TaskRunner do
     host.instance_eval { run_on_task { emit_line 'hello' } }
 
     expect(io.string).to eq("\n\n") # only run_on_task's blank lines
-    expect(events).to eq([{ type: :text, origin: :command, content: 'hello' }])
+    # The origin is the bracket label and the record keeps it as a STRING (the
+    # single router normalizes it, so every role's origin reads the same after the
+    # session JSON round trip).
+    expect(events).to eq([{ type: :text, origin: 'command', content: 'hello' }])
   end
 
   # emit_role takes an ARRAY of paragraphs: a contiguous report-prose body is
