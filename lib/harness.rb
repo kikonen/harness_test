@@ -1155,25 +1155,30 @@ class Harness
     "🧠 #{label}#{pct}% (#{window_label(window)})"
   end
 
-  def context_report
+  # The context facts as DATA (issue #474, increment 21): the arithmetic that
+  # decides a compaction stays here, and the row shape belongs to UI::Renderer, so
+  # /ctx states these fields rather than baking a padded value column. nil when
+  # there is nothing to measure yet (the command then answers with the prose note).
+  def context_usage
     window = options[:num_ctx] || LLMClient::NUM_CTX
     used   = @session.context_used
-    return "No conversation yet - nothing to measure." if used.nil?
+    return nil if used.nil?
 
     trigger = compact_trigger_tokens
 
     pct      = @session.context_pct(window)
     headroom = [window - used[:tokens], 0].max
-    due      = trigger && (used[:tokens] >= trigger)
 
-    status = due ? "due" : "not due"
-    lines = []
-    lines << "🧠 Context usage"
-    lines << "  Used:        #{used[:tokens]} tokens (#{pct}% of #{window})"
-    lines << "  Source:      #{used[:estimated] ? 'estimate (~4 chars/token)' : 'last LLM response'}"
-    lines << "  Headroom:    #{headroom} tokens"
-    lines << "  Auto-compact: #{status} (fires at #{trigger} tokens, #{(trigger.to_f / window * 100).round}% of the window)" if trigger
-    lines.join("\n")
+    {
+      window:,
+      tokens: used[:tokens],
+      estimated: used[:estimated],
+      pct:,
+      headroom:,
+      trigger:,
+      trigger_pct: trigger ? (trigger.to_f / window * 100).round : nil,
+      due: trigger ? used[:tokens] >= trigger : false
+    }
   end
 
   # Thin delegators to the Mcp::Manager (issue #48). The CLI calls close_mcp on

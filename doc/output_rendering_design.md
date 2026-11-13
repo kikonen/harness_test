@@ -155,7 +155,13 @@ columns (the param listing, the server, tool and session reports) moves onto the
 structured `:list`/`:table` role (see the next section) instead: the column
 boundaries then survive as DATA that a browser can re-lay out, rather than as a
 fused row string. The aligned blocks that remain are the ones whose alignment is
-the point: `/help`'s usage columns and `/ctx`'s padded value column.
+the point: `/help`'s usage columns. `/ctx`'s padded value column was the last one
+and is now a two-column `field | value` table (increment 21): the harness answers
+the FACTS it already computes for the compaction decision (window, tokens, the
+estimate flag, pct, headroom, trigger, due) and the command states them as fields,
+so the padding is the gem's column width rather than source-aligned text. An
+unmeasured session has no fields, so it answers with the prose note instead of an
+empty table.
 
 The `/palette` role groups were listed here as alignment blocks and are not: a
 `heading: role=code role=code` line pads nothing (the codes print unpainted), and
@@ -192,7 +198,8 @@ draws the rows from those fields. A kind per report shape:
   `/palette` role groups (one row per role: group, role, code), and the numbered
   lists: `/grant` (number, path, annotation), `/memory` and `/plans` (number,
   name, description, chars - increment 20, so the size is a column the payload
-  carries rather than a fused ` (N chars)` annotation). The payload's `columns`
+  carries rather than a fused ` (N chars)` annotation), and `/ctx` (field, value -
+  increment 21, the last aligned block, see the section above). The payload's `columns`
   array IS the schema and a cell is read BY NAME from the item, so no number is
   baked into a row string. The `:numbered_kv` kind is GONE with the last numbered
   row that needed it: right-aligning an ordinal was the flat row's only job, and

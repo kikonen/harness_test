@@ -211,24 +211,24 @@ RSpec.describe Harness do
     end
   end
 
-  describe '#context_report' do
-    it 'reports "nothing to measure" for an empty session' do
-      expect(build_harness.context_report)
-        .to eq('No conversation yet - nothing to measure.')
+  # issue #474 increment 21: the report is FIELDS, not a printed block. The
+  # arithmetic that decides a compaction is what these pins hold; /ctx renders them.
+  describe '#context_usage' do
+    it 'answers nil for an empty session (nothing to measure)' do
+      expect(build_harness.context_usage).to be_nil
     end
 
-    it 'shows usage, headroom and auto-compact status' do
+    it 'answers usage, pct, headroom and the trigger as fields' do
       harness = build_harness
       seed_usage(harness, 42_133)
 
-      report = harness.context_report
+      usage = harness.context_usage
 
-      expect(report).to include('42133 tokens (64% of 65536)')
-      expect(report).to include('Headroom:    23403 tokens')
-      expect(report).to include('last LLM response')
+      expect(usage).to eq({ window: 65_536, tokens: 42_133, estimated: false,
+                            pct: 64, headroom: 23_403, trigger: 57_344,
+                            trigger_pct: 88, due: false })
       # issue #151: trigger depends on context size - min(88% of 65536,
       # 65536 - 8192) = 57344.
-      expect(report).to include('not due (fires at 57344 tokens, 88% of the window)')
     end
 
     it 'flags auto-compact as due when the threshold is exceeded' do
@@ -236,7 +236,7 @@ RSpec.describe Harness do
       seed_usage(harness, 60_000)
 
       # 60000 >= 57344 (window - reserved headroom) -> due (issue #151).
-      expect(harness.context_report).to include('due (fires at 57344 tokens, 88% of the window)')
+      expect(harness.context_usage[:due]).to eq(true)
     end
   end
 
