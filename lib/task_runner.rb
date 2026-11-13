@@ -8,7 +8,8 @@ require_relative "tool"
 # all its console I/O is serialized through the main-thread drain loop.
 # Without it, Task.emit events (spinner, response lines) are silently
 # dropped and any dialog blocks the console - the log moves but the console
-# looks stuck (issue #235). A task error is surfaced as a [task error] line.
+# looks stuck (issue #235). A task error is the :kind role, so the bracket shape
+# belongs to UI::Renderer and not to this emitter (#474, increment 22).
 #
 # Included by anything that drives an LLM round: CommandHandler (direct
 # prompts) and the Command subclasses that do (/retry issue #235, /compact
@@ -20,23 +21,16 @@ module TaskRunner
     # Feed the turn's buffer tail into the harness' run OutputBuffer (the
     # durable both-sides record) so a later resume can redraw it (issue #458).
     harness.absorb_turn(task) if harness.respond_to?(:absorb_turn)
-    ui.puts "  [task error] #{error}" if error
+    emit_role(:kind, error, origin: "task error") if error
     ui.puts
   end
 
   # Console line emitted from INSIDE a task block. A task thread must never
   # write to a stream (single-thread I/O rule, issue #40), so the line goes
-  # as a :text event onto the active task's outbox and the drain loop renders
-  # it in order with the rest of the turn. When no task is active - specs, or
-  # a command dispatched directly on the main thread - it writes to the
-  # console itself, so output is still captured deterministically.
+  # as the :text role through the one router, #status_event - the only place that
+  # asks for the active Task.
   def emit_line(text)
-    task = defined?(Task) ? Task.current : nil
-    if task
-      task.push_event(type: :text, origin: :command, content: text.to_s)
-    else
-      ui.puts(text.to_s)
-    end
+    status_event(:text, text, "command")
   end
 
   # Main-thread counterpart to Tool.push_status. A command runs on the main

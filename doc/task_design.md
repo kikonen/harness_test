@@ -36,7 +36,10 @@ Main thread (drain loop):   poll outbox, dispatch by type
 A task thread owns no console (single-thread I/O rule), so an exception raised
 inside the turn block cannot be printed where it happened. It travels as one
 `:error_ctrl` event carrying `"Class: message"`; `Task.run` returns that string
-and `TaskRunner#run_on_task` prints it as `[task error] Class: message`.
+and `TaskRunner#run_on_task` states it as the `:kind` role with origin `task error`
+(issue #474, increment 22), so `UI::Renderer` draws the bracket - the emitter holds
+the message alone, which is what lets a replay redraw the line from the record rather
+than inherit this emitter's prefix.
 
 That line is the whole story on the CONSOLE by design: a multi-line backtrace
 there would be interleaved with the turn's own output. It is NOT the whole
