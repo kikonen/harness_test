@@ -96,7 +96,7 @@ RSpec.describe SessionManager do
         { reasoning: nil, content: 'ok', stats: {} }
       end
 
-      def print_stats(_stats)
+      def emit_stats(_stats)
         # no-op in specs
       end
 
@@ -1168,7 +1168,7 @@ RSpec.describe SessionManager, '#retry (issue #208)' do
 
       attr_reader :discarded
 
-      def print_stats(_stats); end
+      def emit_stats(_stats); end
     end.new(session, client, Logger.new(File::NULL), sent_chains)
   end
   let(:manager) { described_class.new(harness, file_list) }

@@ -17,7 +17,7 @@ record does not contain this week's label wording.
 
 ## Before: one type carrying four roles
 
-`Harness#print_step_display` emitted ONE type (`:step`) for four different
+`Harness#emit_step` emitted ONE type (`:step`) for four different
 things, and baked the pattern into every string:
 
     Task.emit(:step, content: "[step #{iteration}]")

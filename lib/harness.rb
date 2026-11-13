@@ -886,7 +886,7 @@ class Harness
         end
       end
 
-      print_step_display(iteration, message) if message[:tool_calls]
+      emit_step(iteration, message) if message[:tool_calls]
 
       # AFTER the step line, so the warn lands inside the block it describes.
       truncated = report_finish_reason(data, iteration)
@@ -1091,7 +1091,7 @@ class Harness
     # A malformed note must never break the turn.
   end
 
-  def print_stats(stats)
+  def emit_stats(stats)
     return unless stats
 
     elapsed = stats[:elapsed_seconds]
@@ -1316,7 +1316,7 @@ class Harness
     parts.join(" ")
   end
 
-  def print_step_display(iteration, message)
+  def emit_step(iteration, message)
     return if step_display_disabled?
 
     @session_manager.log_response(reasoning: message[:reasoning], content: message[:content])
