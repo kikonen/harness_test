@@ -577,11 +577,11 @@ RSpec.describe Harness do
     end
   end
 
-  describe '#print_step_display (issue #131)' do
+  describe '#emit_step (issue #131)' do
     let(:harness) { build_harness }
-    # The roles print_step_display is allowed to emit (issue #146).
+    # The roles emit_step is allowed to emit (issue #146).
     let(:step_roles) { %i[step_label plan interstitial tool_plan] }
-    # issue #40 follow-up: print_step_display emits typed events onto the
+    # issue #40 follow-up: emit_step emits typed events onto the
     # Task's outbox (single event queue) via Task.emit. Set the thread-local
     # task so Task.emit finds it, then drain the outbox to assert on the
     # lines - exactly what the real drain loop does.
@@ -613,8 +613,8 @@ RSpec.describe Harness do
       }
     end
 
-    it 'prints the step number, a digest of the reasoning and the tools called' do
-      harness.send(:print_step_display, 3, message)
+    it 'emits the step number, a digest of the reasoning and the tools called' do
+      harness.send(:emit_step, 3, message)
       lines = drained_lines
 
       # Content is the ROLE the emitter stated; the pattern ('step ',
@@ -628,7 +628,7 @@ RSpec.describe Harness do
     it 'falls back to message content when there is no reasoning' do
       msg = { reasoning: nil, content: 'checking the test suite', tool_calls: [{ id: 'c1', function: { name: 'run.command' } }] }
 
-      harness.send(:print_step_display, 2, msg)
+      harness.send(:emit_step, 2, msg)
       lines = drained_lines
 
       expect(lines).to include('checking the test suite')
@@ -636,7 +636,7 @@ RSpec.describe Harness do
     end
 
     it 'emits the reasoning digest and the interstitial as distinct roles' do
-      harness.send(:print_step_display, 3, message)
+      harness.send(:emit_step, 3, message)
       rendered = drain_outbox(task).map { |m| UI::Renderer.new.line(type: m[:type], content: m[:content]) }
 
       expect(rendered).to include('plan:  First I will inspect the spinner, then run the specs.')
@@ -644,29 +644,29 @@ RSpec.describe Harness do
       expect(rendered).not_to include(a_string_matching(/\|\|\|/))
     end
 
-    it 'prints only the tool line when there is no reasoning text at all' do
+    it 'emits only the tool line when there is no reasoning text at all' do
       msg = { reasoning: nil, content: nil, tool_calls: [{ id: 'c1', function: { name: 'file.search' } }] }
 
-      harness.send(:print_step_display, 4, msg)
+      harness.send(:emit_step, 4, msg)
       lines = drained_lines
 
       expect(lines).to include('file.search')
     end
 
     it 'emits only the step roles - no spinner pause/resume (drain loop owns that)' do
-      harness.send(:print_step_display, 1, message)
+      harness.send(:emit_step, 1, message)
 
       types = drain_outbox(task).map { |m| m[:type] }
       expect(types - step_roles).to be_empty
       expect(types).not_to include(:progress_pause, :progress_resume, :spinner_detail)
     end
 
-    it 'prints nothing when disabled via HARNESS_STEP_DISPLAY=off' do
+    it 'emits nothing when disabled via HARNESS_STEP_DISPLAY=off' do
       original = ENV['HARNESS_STEP_DISPLAY']
       ENV['HARNESS_STEP_DISPLAY'] = 'off'
 
       begin
-        harness.send(:print_step_display, 1, message)
+        harness.send(:emit_step, 1, message)
 
         expect(drain_outbox(task)).to be_empty
       ensure
@@ -1700,7 +1700,7 @@ RSpec.describe Harness do
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
-        build_harness.print_stats(stats)
+        build_harness.emit_stats(stats)
       ensure
         Thread.current[:harness_task] = old_current
       end

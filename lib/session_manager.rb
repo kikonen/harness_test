@@ -428,7 +428,7 @@ class SessionManager
     # can frame itself. The rules are gone; the model's text is the content.
     Task.emit(:response, origin: :session_manager, content: response[:content].to_s)
 
-    @harness.print_stats(response[:stats])
+    @harness.emit_stats(response[:stats])
 
     # issue #107: persist the completed turn. The pre-send save already
     # captured the pending prompt; this snapshot makes sure the model's

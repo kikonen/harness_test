@@ -32,7 +32,7 @@ module Commands
               "(#{@harness.session_manager.target_display} @ #{@options[:base_url]})",
             "Tool-result images: #{images}"
           ])
-        print_params
+        emit_params
         emit_role(
           :note,
           "List models with /models, switch with /model <name>, " \
@@ -48,7 +48,7 @@ module Commands
         :note,
         "Switched to model: #{display} (#{profile[:model]} @ #{url}) " \
         "-> #{@harness.session_manager.target_display}")
-      print_params
+      emit_params
     end
 
     private
@@ -56,8 +56,8 @@ module Commands
     # issue #219: show every parameter for the active model with its current
     # (effective) value, marking which ones are session-level overrides. The
     # listing is shared with /param (ParamOverrides#list_items) so both
-    # commands print the exact same table.
-    def print_params
+    # commands render the exact same table.
+    def emit_params
       param = @harness.session_manager.param_overrides
       emit_list(
         title: ParamOverrides::LIST_TITLE,

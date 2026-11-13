@@ -124,7 +124,7 @@ module Commands
 
       emit_role(:rule, header(name, index))
       rendered = markdown_renderer&.render(body)
-      return dump_verbatim(body) if rendered.nil?
+      return emit_verbatim(body) if rendered.nil?
 
       # The gem closes its last block with a blank line; the verbatim path
       # ends with the file's single newline, and the two must match.
@@ -132,7 +132,7 @@ module Commands
       @ui.puts
     end
 
-    def dump_verbatim(body)
+    def emit_verbatim(body)
       emit_role(:text, body)
     end
 
