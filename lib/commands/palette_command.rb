@@ -40,6 +40,9 @@ module Commands
       ["note roles", %i[system stats compact]]
     ].freeze
 
+    # The code cell of a role the palette maps to nil (the terminal's own color).
+    TERMINAL = "(terminal color)"
+
     def handle(args)
       arg = args.to_s.strip.downcase
       case arg
@@ -96,15 +99,22 @@ module Commands
     end
 
     # What the palette actually paints, so the names are not guesswork.
+    # A :table (#474): group, role and code are three named fields, so
+    # `role=code` is no longer a fused sub-string a sink would have to regex.
+    # A role the palette leaves to the terminal's own color says so in the code
+    # cell (UI::Palette maps such a role to nil).
     def print_roles(palette)
-      ROLE_GROUPS.each do |heading, roles|
-        painted = roles.filter_map do |role|
-          code = palette&.color_for(role)
-          code.nil? ? nil : "#{role}=#{code}"
+      items = ROLE_GROUPS.flat_map do |heading, roles|
+        roles.map do |role|
+          { group: heading, role:, code: palette&.color_for(role) || TERMINAL }
         end
-        shown = painted.empty? ? "(terminal color)" : painted.join(" ")
-        @ui.puts "  #{heading}: #{shown}"
       end
+      emit_list(
+        kind: :table,
+        columns: %i[group role code],
+        items:,
+        title: nil,
+        origin: "palette")
       # Contiguous prose -> ONE note call, two paragraphs.
       emit_role(
         :note,
