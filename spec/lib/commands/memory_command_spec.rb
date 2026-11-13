@@ -48,6 +48,24 @@ RSpec.describe Commands::MemoryCommand do
     File.write(File.join(dir, Memories::DIR, "#{name}.md"), content)
   end
 
+  # Split a markdown table row (`| a | b |`) into its cells (the same helper the
+  # other :table specs use). This sink has no palette, so the listing renders the
+  # raw markdown table - the field boundaries survive as real delimiters, which is
+  # the point of #474.
+  def split_row(line)
+    line.strip.sub(/\A\|/, '').sub(/\|\z/, '').split(/\s*\|\s*/).map(&:strip)
+  end
+
+  # Data rows only: the markdown rule row and the header row are dropped so a pin
+  # compares one note to one row, whatever kramdown padded the columns to.
+  def table_rows(out)
+    out.lines.map(&:chomp)
+       .select { |l| l.start_with?('|') }
+       .reject { |l| l.match?(/\A\| [-| ]+\|\z/) }
+       .reject { |l| split_row(l)[0] == 'number' }
+       .map { |l| split_row(l) }
+  end
+
   describe 'the help entry (issue #323 contract)' do
     it 'declares a HELP entry whose usage starts with its registered name' do
       help = described_class.help
@@ -67,9 +85,26 @@ RSpec.describe Commands::MemoryCommand do
         out = run_command(dir)
 
         expect(out).to include("Memories (2/#{Memories::MAX_MEMORIES} notes")
-        expect(out).to include('  consent - YOLO skips the shell dialog.')
-        expect(out).to include('  ci - rspec and rubocop on ubuntu.')
-        expect(out).to include('Show one with: /memory <name>')
+        expect(table_rows(out)).to eq([
+          ['1', 'ci', 'rspec and rubocop on ubuntu.', '34'],
+          ['2', 'consent', 'YOLO skips the shell dialog.', '28']
+        ])
+        expect(out).to include('Show one with: /memory <name>  or  /memory <N>')
+      end
+    end
+
+    # issue #474 increment 20: the number is a COLUMN the payload carries, not a
+    # baked ordinal, so a browser re-lays the table out from the fields.
+    it 'numbers the listing so a note can be opened by its number' do
+      Dir.mktmpdir do |dir|
+        write_note(dir, 'consent', 'YOLO skips the shell dialog.')
+
+        lines = run_command(dir).lines.map(&:chomp)
+
+        expect(lines).to include('| number | name | description | chars |')
+        expect(split_row(lines.find { |l| l.start_with?('| 1 |') })).to eq(
+          ['1', 'consent', 'YOLO skips the shell dialog.', '28']
+        )
       end
     end
 
@@ -116,12 +151,12 @@ RSpec.describe Commands::MemoryCommand do
       Dir.mktmpdir do |dir|
         write_note(dir, 'sized', '12345')
 
-        expect(run_command(dir)).to include('sized - 12345 (5 chars)')
+        expect(run_command(dir)).to include('| 1 | sized | 12345 | 5 |')
       end
     end
   end
 
-  describe 'with a name (the body)' do
+  describe 'with a name or a number (the body)' do
     it 'prints one note body under a named rule line' do
       Dir.mktmpdir do |dir|
         write_note(dir, 'pipeline', "step one\nstep two\n")
@@ -159,7 +194,55 @@ RSpec.describe Commands::MemoryCommand do
     it 'refuses a name that is not one path segment' do
       Dir.mktmpdir do |dir|
         expect(run_command(dir, '../sessions'))
-          .to eq("  [memory] ✗ a memory name is one path segment: ../sessions\n")
+          .to eq("  [memory] ✗ a memory name is one path segment, or a memory number: ../sessions\n")
+      end
+    end
+  end
+
+  # issue #416 part 2 for memory too, via the shared StoreListing module: the
+  # listing number is the selector, and it is honoured only while IN RANGE.
+  describe 'the numbered selector (issue #474, increment 20)' do
+    it 'opens a note by its listing number and shows the number in the rule' do
+      Dir.mktmpdir do |dir|
+        write_note(dir, 'consent', 'YOLO skips the shell dialog.')
+        write_note(dir, 'ci', 'rspec and rubocop on ubuntu.')
+
+        out = run_command(dir, '2')
+
+        expect(out).to eq("--- 2. consent (#{Memories::DIR}) --------------------------\n" \
+          "YOLO skips the shell dialog.\n")
+      end
+    end
+
+    # A name lookup prints the rule with no number (the existing pin above).
+    it 'shows the number in the rule only when a number was asked for' do
+      Dir.mktmpdir do |dir|
+        write_note(dir, 'consent', 'YOLO skips the shell dialog.')
+
+        expect(run_command(dir, 'consent')).to include("--- consent (#{Memories::DIR})")
+      end
+    end
+
+    # The index only wins while IN RANGE, so a note genuinely named with digits is
+    # still reachable by that name.
+    it 'keeps a digit-named note reachable when the number is out of range' do
+      Dir.mktmpdir do |dir|
+        write_note(dir, '3', 'named-three body')
+
+        out = run_command(dir, '3')
+
+        expect(out).to include('named-three body')
+      end
+    end
+
+    it 'reports an out-of-range number with the names that exist' do
+      Dir.mktmpdir do |dir|
+        write_note(dir, 'real', 'text')
+
+        out = run_command(dir, '9')
+
+        expect(out).to include('no memory named')
+        expect(out).to include('real')
       end
     end
   end

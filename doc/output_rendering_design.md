@@ -51,7 +51,7 @@ decoration that a renderer can produce itself.
 | `:kind` | the message after the kind | `  [LLM error] rate limited` (bracket names a kind, unpainted; #466) |
 | `:note` | ONE or MORE unwrapped paragraphs | each re-wrapped to a fixed width, indented (harness prose, unpainted; #470) |
 | `:body` | the RAW markdown of a stored file (a plan, a memory, a skill) | the render of that markdown (markers consumed); as stored when there is no palette; unpainted (the gem colors it); #474 |
-| `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, arrow `  a -> b @ c`, kv `  n - d`, numbered_kv `  N. n - d`, table rendered as a markdown table via kramdown); footer indents from its LEVEL; unpainted; #474 |
+| `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, arrow `  a -> b @ c`, kv `  n - d`, table rendered as a markdown table via kramdown); footer indents from its LEVEL; unpainted; #474 |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
 | `:rule` | the rule line the emitter drew | content verbatim, painted with the palette `rule` role (see below) |
 | `:spinner_detail` | the spinner payload | no line at all (animated) |
@@ -185,20 +185,20 @@ draws the rows from those fields. A kind per report shape:
   preserve, so it is structure rather than an alignment block and converts; the
   `/mcp` names gained the dash the renderer owns.
 - `:arrow` `  name -> target @ location` - `/models`
-- `:kv` `  name - description` (+ optional `annotation`) - `/skills`, `/memory`
-- `:numbered_kv` `  N. name - description` (+ `annotation`) - `/plans`; the
-  ordinal is a named `number` field, right-aligned by the renderer to the width
-  of the largest (the `format("%{w}d")` alignment moved out of the emitter)
+- `:kv` `  name - description` (+ optional `annotation`) - `/skills`
 - `:table` - `/sessions`, the `/param` and `/model` parameter listing, the
   `/mcp` server report (one row per server: name, transport, target, status) and
   its tool listings, the `/tools` listing, `/session` (its field/value rows) and the
-  `/palette` role groups (one row per role: group, role, code) and the
-  `/grant` store lists (number, path, annotation - the ordinal is a field the
-  payload carries, so the number is no longer baked into the row string). The
-  `/grant` lists were the last numbered rows kept for their alignment; only the
-  ordinal was aligned, so they are a table rather than an alignment block;
-  the payload's `columns` array IS the schema and a cell is read BY NAME from the
-  item. The renderer states the fields as a **markdown table** and hands it to
+  `/palette` role groups (one row per role: group, role, code), and the numbered
+  lists: `/grant` (number, path, annotation), `/memory` and `/plans` (number,
+  name, description, chars - increment 20, so the size is a column the payload
+  carries rather than a fused ` (N chars)` annotation). The payload's `columns`
+  array IS the schema and a cell is read BY NAME from the item, so no number is
+  baked into a row string. The `:numbered_kv` kind is GONE with the last numbered
+  row that needed it: right-aligning an ordinal was the flat row's only job, and
+  inside a kramdown table the gem owns the column width, so a number is just a
+  cell like any other field. The renderer states the fields as a **markdown
+  table** and hands it to
   the kramdown `MarkdownRenderer` (#106), which owns the column sizing and
   word-wrap - the harness does NOT re-invent padding here. The table is built
   with the renderer's `markdown_max_width` basis even when markdown opt-in is

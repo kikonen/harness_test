@@ -214,29 +214,21 @@ RSpec.describe UI::Renderer do
       expect(renderer.line(type: :list, content: payload)).to eq('  sized - 12345 (5 chars)')
     end
 
-    # The :numbered_kv kind (the /plans listing): a named :number ordinal, the
-    # size suffix as :annotation, and right-alignment to the width of the largest
-    # ordinal so the block stays aligned past 9. The ordinal is a FIELD, not the
-    # array position, so a reordered columns list cannot scramble it.
-    it 'renders a numbered_kv list, right-aligned past 9' do
+    # The number is a FIELD the payload carries (issue #474, increment 20: the
+    # store listings are tables), so a reordered columns list still reads it by
+    # name, and the column width the gem picks decides how it sits. No padded row
+    # prefix is baked here - the ordinal is a cell like any other.
+    it 'renders a number column as a field, not as a padded row prefix' do
       payload = {
-        kind: :numbered_kv,
-        columns: %i[number name description annotation],
-        items: (1..10).map { |n| { number: n, name: "plan#{n}", description: "d #{n}", annotation: '' } }
+        kind: :table,
+        columns: %i[chars number name description],
+        items: [{ number: 2, name: 'n', description: 'd', chars: 5 }]
       }
-      lines = renderer.line(type: :list, content: payload).lines.map(&:chomp)
-
-      expect(lines.first).to eq('   1. plan1 - d 1')
-      expect(lines.last).to eq('  10. plan10 - d 10')
-    end
-
-    it 'numbered_kv annotation is a field, not a fused tail' do
-      payload = {
-        kind: :numbered_kv,
-        columns: %i[number name description],
-        items: [{ number: 1, name: 'sized', description: '12345', annotation: ' (5 chars)' }]
-      }
-      expect(renderer.line(type: :list, content: payload)).to eq('  1. sized - 12345 (5 chars)')
+      expect(renderer.line(type: :list, content: payload)).to eq(
+        ['| chars | number | name | description |',
+         '| ----- | ------ | ---- | ----------- |',
+         '| 5 | 2 | n | d |'].join("\n")
+      )
     end
 
     # The :table kind: the payload's columns ARE the schema. The renderer states
