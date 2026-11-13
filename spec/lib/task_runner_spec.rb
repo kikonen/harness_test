@@ -78,7 +78,13 @@ RSpec.describe TaskRunner do
 
     host.do_thing
 
-    expect(events).to eq([{ type: :kind, origin: 'task error', content: 'boom' }])
+    # Measured: the framing blanks are the :gap role too, so the whole turn is
+    # events on the outbox - nothing is written to a stream from the emitter.
+    expect(events).to eq([
+      { type: :gap, origin: nil, content: '' },
+      { type: :kind, origin: 'task error', content: 'boom' },
+      { type: :gap, origin: nil, content: '' }
+    ])
   end
 
   it 'prints blank lines before and after the task output' do
@@ -111,18 +117,24 @@ RSpec.describe TaskRunner do
       end
     end.new
 
+    allow(Task).to receive(:current).and_return(fake_task)
     allow(Task).to receive(:run) do |harness:, ui:, &blk|
-      allow(Task).to receive(:current).and_return(fake_task)
       blk.call(nil)
       [nil, nil]
     end
     host.instance_eval { run_on_task { emit_line 'hello' } }
 
-    expect(io.string).to eq("\n\n") # only run_on_task's blank lines
+    # Measured: a task thread writes nothing to a stream, so the blanks reach the
+    # console only after the drain loop renders them - here the outbox alone.
+    expect(io.string).to eq("")
+    expect(events).to eq([
+      { type: :gap, origin: nil, content: '' },
+      { type: :text, origin: 'command', content: 'hello' },
+      { type: :gap, origin: nil, content: '' }
+    ])
     # The origin is the bracket label and the record keeps it as a STRING (the
     # single router normalizes it, so every role's origin reads the same after the
     # session JSON round trip).
-    expect(events).to eq([{ type: :text, origin: 'command', content: 'hello' }])
   end
 
   # emit_role takes an ARRAY of paragraphs: a contiguous report-prose body is

@@ -619,6 +619,25 @@ RSpec.describe UI::Renderer do
     end
   end
 
+  # issue #474, increment 23: the blank line between entries is a ROLE, so the
+  # spacing around a report belongs to the renderer. An emitter that writes the
+  # blank straight to the sink leaves a record another sink cannot re-lay out.
+  describe '#line (:gap) - the blank line the renderer owns (issue #474)' do
+    it 'renders an empty line for the gap role' do
+      expect(renderer.line(type: :gap, content: '')).to eq('')
+    end
+
+    it 'renders an empty line whatever content the gap is handed' do
+      expect(renderer.line(type: :gap, content: 'ignored')).to eq('')
+    end
+
+    # The role must be labeled so a record of it is a pattern the renderer owns,
+    # not verbatim text a replay would print as-is.
+    it 'is a role the renderer patterns' do
+      expect(renderer.labeled?(:gap)).to eq(true)
+    end
+  end
+
   # issue #485: a labeled prose line (plan / say) spilled past the terminal as
   # one long unwrapped line when markdown was OFF. The default path now wraps to
   # the fixed RULE_WIDTH minus the label and aligns continuations under the

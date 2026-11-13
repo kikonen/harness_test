@@ -64,6 +64,13 @@ module UI
     # its own paragraphs, and a body that no renderer can render stays as stored.
     BODY = :body
 
+    # A BLANK LINE between entries. It is a role because the shape of the spacing
+    # around a report is the renderer's, not the emitter's: an emitter that calls
+    # the sink directly cannot be re-laid out by another sink (a browser adds its
+    # own margin). Inside one :list payload the gap is a key instead, because the
+    # payload is a single entry. Unpainted.
+    GAP = :gap
+
     # The emitter still owns these lines' shape. :spinner_detail is listed
     # because the drain loop animates it - it must never produce a line.
     # :rule is listed because the content IS the rule the emitter drew: the type
@@ -169,6 +176,7 @@ module UI
       type = type.to_sym
       text = content.to_s
 
+      return "" if type == GAP
       return list_line(content) if type == LIST
 
       return status_line(type, text, origin) if STATUS_GLYPHS.key?(type)
@@ -189,6 +197,7 @@ module UI
       return true if type == NOTE
       return true if type == LIST
       return true if type == BODY
+      return true if type == GAP
 
       !VERBATIM.include?(type) && LABELS.key?(type)
     end

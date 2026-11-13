@@ -54,6 +54,7 @@ decoration that a renderer can produce itself.
 | `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, arrow `  a -> b @ c`, kv `  n - d`, table rendered as a markdown table via kramdown); footer indents from its LEVEL; unpainted; #474 |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
 | `:rule` | the rule line the emitter drew | content verbatim, painted with the palette `rule` role (see below) |
+| `:gap` | nothing | an empty line (the spacing between entries; unpainted; #474) |
 | `:spinner_detail` | the spinner payload | no line at all (animated) |
 
 `:warn` and `:error` are now separated by whether the turn survived, not by
@@ -102,6 +103,14 @@ role and hands it to the SAME router, so one place asks for the active Task - it
 longer writes to the stream itself on the main thread. The task-error line went the
 same way: the emitter states the `:kind` role with origin `task error` (increment 22)
 and the renderer draws the bracket.
+
+`TaskRunner#run_on_task` states the two blank lines that frame a turn as the `:gap`
+role (increment 23) instead of writing them to the sink. A blank line is the shape of
+the spacing around a report, so it belongs with the other shapes the renderer owns: a
+`ui.puts` call was never in the record at all, so a replay or a sink that spaces
+differently had nothing to lay out. On a task thread the gap now enters the record as
+an event through the one router; on the main thread it renders directly, like every
+role except `:body`. The console bytes are unchanged (`"\n\n"`).
 
 `/clear` is the case that shows the distinction: a revocation that removed
 something is `:ok`, and a store that was already empty is `:info`, because

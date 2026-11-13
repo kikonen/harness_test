@@ -107,8 +107,8 @@ RSpec.describe Commands::CompactCommand do
       end
     end.new
 
+    allow(Task).to receive(:current).and_return(fake_task)
     allow(Task).to receive(:run) do |harness:, ui:, &blk|
-      allow(Task).to receive(:current).and_return(fake_task)
       blk.call(nil)
       [nil, nil]
     end
@@ -116,15 +116,18 @@ RSpec.describe Commands::CompactCommand do
     command.handle('')
 
     # Nothing reached the console directly: every line is an event.
-    expect(io.string).to eq("\n\n")
-    expect(events.map { |e| e[:content] }).to eq([
-      'Session compacted: 10 messages -> 4 messages (2 recent retained).',
-      '  🧠 ctx ~62100/65536 (95%) -> 🧠 ctx ~523/65536 (1%)',
-      '',
-      'Summary:',
-      'summary text',
-      ''
+    expect(io.string).to eq("")
+    expect(events).to eq([
+      { type: :gap, origin: nil, content: '' },
+      { type: :text, origin: 'command',
+        content: 'Session compacted: 10 messages -> 4 messages (2 recent retained).' },
+      { type: :text, origin: 'command',
+        content: '  🧠 ctx ~62100/65536 (95%) -> 🧠 ctx ~523/65536 (1%)' },
+      { type: :text, origin: 'command', content: '' },
+      { type: :text, origin: 'command', content: 'Summary:' },
+      { type: :text, origin: 'command', content: 'summary text' },
+      { type: :text, origin: 'command', content: '' },
+      { type: :gap, origin: nil, content: '' }
     ])
-    expect(events).to all(include(type: :text))
   end
 end
