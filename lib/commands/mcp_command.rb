@@ -46,9 +46,17 @@ module Commands
       connected  = states.count(&:connected)
       tool_count = states.sum { |s| s.tool_names.size }
 
-      @ui.puts "MCP servers: #{states.size} declared, #{connected} connected " \
-        "(#{tool_count} tool(s) available)"
-      states.each { |state| report_server(state) }
+      emit_role(
+        :note,
+        "MCP servers: #{states.size} declared, #{connected} connected " \
+          "(#{tool_count} tool(s) available)")
+      emit_list(
+        title: nil,
+        kind: :table,
+        columns: %i[name transport target status],
+        items: states.map { |state| server_item(state) },
+        origin: "mcp")
+      states.each { |state| report_tools(state) if state.connected }
       report_collisions
 
       # The trailing guidance is contiguous prose -> ONE note call, three paragraphs.
@@ -64,14 +72,13 @@ module Commands
         ])
     end
 
-    def report_server(state)
-      @ui.puts "  #{state.name}  [#{state.transport}]  #{state.target}"
-      if state.connected
-        @ui.puts "    connected: #{state.tool_names.size} tool(s)"
-        report_tools(state)
-      else
-        @ui.puts "    DOWN (#{state.error})"
-      end
+    # The status column carries either the tool count or the failure reason -
+    # the two do not share a schema, so the status IS a named field, not a
+    # sub-line the emitter bakes.
+    def server_item(state)
+      status = state.connected ? "connected (#{state.tool_names.size} tool(s))" \
+                               : "DOWN (#{state.error})"
+      { name: state.name, transport: state.transport, target: state.target, status: }
     end
 
     # Descriptions come from the registry, not re-read from the server: the
