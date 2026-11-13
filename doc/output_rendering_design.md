@@ -146,23 +146,26 @@ same sentence classifies differently across commands. Folding a contiguous run
 into one array removes that arbitrariness.
 
 The only thing a block stays verbatim `@ui.puts` for is when **its value IS its
-column alignment**: a multi-row aligned block (role groups `plan=34 warn=38`,
-`name - desc` rows, usage columns). Word-wrap
-would destroy that alignment, so those are the note array's
+column alignment**: a multi-row aligned block (`name - desc` rows, usage
+columns) whose alignment word-wrap would destroy, so those are the note array's
 boundaries. A `Heading: value` line with NO columns to align is not such a block -
 it is prose, and folds into the array. A genuinely tabular block with named
 columns (the param listing, the server, tool and session reports) moves onto the
 structured `:list`/`:table` role (see the next section) instead: the column
 boundaries then survive as DATA that a browser can re-lay out, rather than as a
-fused row string. The remaining aligned tables move onto it incrementally.
+fused row string. The aligned blocks that remain are the ones whose alignment is
+the point: `/help`'s usage columns and `/ctx`'s padded value column.
 
 The `/palette` role groups were listed here as alignment blocks and are not: a
 `heading: role=code role=code` line pads nothing (the codes print unpainted), and
-the longest is already past 80 columns. The rule above would make them prose, but
-the legend is the only part of that report that was genuinely tabular - its
-name/description pairs were a real padded block, and those moved to `:table`, so
-the alignment is now kramdown's column sizing rather than baked spaces. The role
-groups stay verbatim for now.
+the longest is already past 80 columns - measured 87, 106, 45, 84 and 61 chars on
+the default palette, so two of them exceed `NOTE_WIDTH` and would WRAP as prose.
+That is why they are not folded into the note array either: the report's value is
+one row per role, so they go to `:table` with columns `group | role | code`, where
+the role and the code are separate fields rather than one fused `role=code`
+sub-string. A role the palette maps to nil says `(terminal color)` in its own cell.
+The sample loop stays verbatim: it prints renderer output rather than a row, and a
+preview must not become buffer entries.
 
 
 
@@ -188,6 +191,7 @@ draws the rows from those fields. A kind per report shape:
 - `:table` - `/sessions`, the `/param` and `/model` parameter listing, the
   `/mcp` server report (one row per server: name, transport, target, status) and
   its tool listings, the `/tools` listing, `/session` (its field/value rows) and the
+  `/palette` role groups (one row per role: group, role, code) and the
   `/grant` store lists (number, path, annotation - the ordinal is a field the
   payload carries, so the number is no longer baked into the row string). The
   `/grant` lists were the last numbered rows kept for their alignment; only the

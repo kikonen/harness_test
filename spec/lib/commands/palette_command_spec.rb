@@ -51,10 +51,12 @@ RSpec.describe Commands::PaletteCommand do
     it 'names which roles the palette colors and which stay plain' do
       out = run_command('', build_harness('default'))
 
-      expect(out).to include('plan=34')
-      expect(out).to include('warn=38;5;130')
-      expect(out).to include('status_ok=32')
-      expect(out).to include('marker=38;5;240')
+      # A :table (#474): group, role and code are three named cells, so a
+      # `role=code` pair is no longer one fused sub-string.
+      expect(out).to include('│ turn roles   │ plan          │ 34               │')
+      expect(out).to include('│ turn roles   │ warn          │ 38;5;130         │')
+      expect(out).to include('│ status roles │ status_ok     │ 32               │')
+      expect(out).to include('│ marker roles │ marker        │ 38;5;240         │')
       expect(out).to include('model answer, tool notes, command output')
     end
 
@@ -64,9 +66,10 @@ RSpec.describe Commands::PaletteCommand do
     it 'lists the dialog note roles the palette colors' do
       out = run_command('', build_harness('default'))
 
-      expect(out).to include('dialog roles: dialog_option=36')
-      expect(out).to include('dialog_warn=38;5;130')
-      expect(out).to include('dialog_alert=31 dialog_safe=32')
+      expect(out).to include('│ dialog roles │ dialog_option │ 36               │')
+      expect(out).to include('│ dialog roles │ dialog_warn   │ 38;5;130         │')
+      expect(out).to include('│ dialog roles │ dialog_alert  │ 31               │')
+      expect(out).to include('│ dialog roles │ dialog_safe   │ 32               │')
       expect(out).to include('dialog kind context')
     end
 
@@ -99,9 +102,10 @@ RSpec.describe Commands::PaletteCommand do
     it 'the none palette paints nothing in the sample either' do
       out = run_command('', build_harness('none'))
 
-      # Every role group falls back to the terminal's own color, and the
+      # Every role's code cell falls back to the terminal's own color, and the
       # sample carries no escape bytes at all.
-      expect(out.scan(/\(terminal color\)/).size).to eq(Commands::PaletteCommand::ROLE_GROUPS.size)
+      role_count = Commands::PaletteCommand::ROLE_GROUPS.sum { |(_heading, roles)| roles.size }
+      expect(out.scan(/\(terminal color\)/).size).to eq(role_count)
       expect(out).not_to include("\e[")
     end
   end
