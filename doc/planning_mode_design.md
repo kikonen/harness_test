@@ -375,7 +375,14 @@ seam and adds no tool-behavior change in the first cut.
   prefix-cache cost memory_design.md resolved as "never injected").
 - **Caps**: a plan body budget and a store size cap (memories cap at 50/2000 by
   default to keep listing affordable; a searchable plan store can be larger but
-  still needs *some* cap to avoid unbounded growth).
+  still needs *some* cap to avoid unbounded growth). DECIDED for the body budget
+  (issue #515, 2026-11-13): **12000** chars, raised from 8000. The cap is a
+  constant that every message quotes by interpolation, so the refusal text, the
+  `/plans` report title and the `plan.add` tool description follow it with no
+  re-pinning. The refusal is not only about size: "the agreed approach, not a
+  transcript" is the shape rule, and it stays valid at any value - a plan over
+  the cap is a subsystem document pretending to be a plan, which belongs in
+  `doc/<topic>.md`.
 - **Search depth**: plain substring match (recommended, no ranking) vs anything
   smarter.
 - **Whether a plan survives `/session-clear`**: it is not conversation state, so

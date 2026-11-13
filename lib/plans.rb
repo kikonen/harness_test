@@ -32,7 +32,7 @@ class Plans
   # the body budget is larger; the count cap keeps the store listable/searchable
   # in practice. Over either, add refuses and names the way out.
   MAX_PLANS      = 100
-  MAX_BODY_CHARS = 8000
+  MAX_BODY_CHARS = 12000
 
   # Truncation of the index line (the same glanceable index as a memory's
   # description, see doc/memory_design.md).
