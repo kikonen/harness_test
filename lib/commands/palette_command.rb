@@ -65,7 +65,7 @@ module Commands
       label   = changed ? "(was #{previous || 'none'})" : "(unchanged)"
       emit_role(:kind, label, origin: "palette: #{current.name}")
       emit_role(:note, "Effective from the next turn (this turn's Task already chose).")
-      print_roles(current)
+      emit_roles(current)
       print_sample(current)
       # Contiguous prose -> ONE note call, two paragraphs (not one fused line).
       emit_role(
@@ -79,7 +79,7 @@ module Commands
     def report
       current = @harness.output_palette
       emit_role(:note, "Output palette: #{current ? current.name : 'none'}")
-      print_roles(current)
+      emit_roles(current)
       print_sample(current)
       available = UI::Palette.names.join(", ")
       emit_role(:note, "Switch with /palette <name>; available: #{available}")
@@ -103,7 +103,7 @@ module Commands
     # `role=code` is no longer a fused sub-string a sink would have to regex.
     # A role the palette leaves to the terminal's own color says so in the code
     # cell (UI::Palette maps such a role to nil).
-    def print_roles(palette)
+    def emit_roles(palette)
       items = ROLE_GROUPS.flat_map do |heading, roles|
         roles.map do |role|
           { group: heading, role:, code: palette&.color_for(role) || TERMINAL }
