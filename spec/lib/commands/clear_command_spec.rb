@@ -34,7 +34,9 @@ RSpec.describe Commands::ClearCommand do
         list.add_file('tmp/x.txt', :d)
         expect(list.access_grant_count).to be > 0
 
-        expect(run_command(list)).to eq("Access list cleared.\n")
+        # A verdict (#474): the bracket, the glyph and the indent are the
+        # renderer's, so the command states only the message.
+        expect(run_command(list)).to eq("  [clear] ✓ Access list cleared.\n")
         expect(list.empty?).to be true
         expect(list.readable?('lib/a.rb')).to be false
         expect(list.writable?('lib/a.rb')).to be false
@@ -46,7 +48,8 @@ RSpec.describe Commands::ClearCommand do
       Dir.mktmpdir do |dir|
         list = FileList.new([], workdir: dir)
         expect(list.empty?).to be true
-        expect(run_command(list)).to eq("Access list cleared.\n")
+        # An empty store is not a verdict about an operation, so :info (no glyph).
+        expect(run_command(list)).to eq("  [clear] Access list cleared.\n")
       end
     end
 
@@ -71,7 +74,7 @@ RSpec.describe Commands::ClearCommand do
         list = FileList.new([], workdir: dir)
         list.add_file('a.rb', :r)
 
-        expect(run_command(list, 'access')).to eq("Access list cleared.\n")
+        expect(run_command(list, 'access')).to eq("  [clear] ✓ Access list cleared.\n")
         expect(list.readable?('a.rb')).to be false
       end
     end
@@ -85,7 +88,7 @@ RSpec.describe Commands::ClearCommand do
         seed_lists(dir, tool: ['git status', 'ls'], shell: ['echo'],
                    hosts: ['api.example.com'])
         expect(run_command(FileList.new([], workdir: dir), 'commands'))
-          .to eq("Cleared 2 run.command prefixes.\n")
+          .to eq("  [clear] ✓ Cleared 2 run.command prefixes.\n")
 
         expect(read_list(dir, 'allowed_commands.yml')).to eq([])
         expect(read_list(dir, 'shell_commands.yml')).to eq(['echo'])
@@ -97,7 +100,7 @@ RSpec.describe Commands::ClearCommand do
       Dir.mktmpdir do |dir|
         seed_lists(dir, tool: ['git status'], shell: ['ls -la'])
         expect(run_command(FileList.new([], workdir: dir), 'shell'))
-          .to eq("Cleared 1 shell (!) prefix.\n")
+          .to eq("  [clear] ✓ Cleared 1 shell (!) prefix.\n")
 
         expect(read_list(dir, 'shell_commands.yml')).to eq([])
         expect(read_list(dir, 'allowed_commands.yml')).to eq(['git status'])
@@ -109,7 +112,7 @@ RSpec.describe Commands::ClearCommand do
         seed_lists(dir, tool: ['git status'], hosts: ['api.example.com'])
         out = run_command(FileList.new([], workdir: dir), 'hosts')
 
-        expect(out).to eq("Cleared 1 web.fetch host grant.\n")
+        expect(out).to eq("  [clear] ✓ Cleared 1 web.fetch host grant.\n")
         expect(read_list(dir, 'allowed_hosts.yml')).to eq([])
         expect(read_list(dir, 'allowed_commands.yml')).to eq(['git status'])
       end
@@ -119,7 +122,7 @@ RSpec.describe Commands::ClearCommand do
       Dir.mktmpdir do |dir|
         out = run_command(FileList.new([], workdir: dir), 'commands')
 
-        expect(out).to eq("No run.command prefixes to clear.\n")
+        expect(out).to eq("  [clear] No run.command prefixes to clear.\n")
         expect(File.exist?(File.join(dir, '.harness', 'allowed_commands.yml'))).to be false
       end
     end
@@ -132,10 +135,10 @@ RSpec.describe Commands::ClearCommand do
 
         out = run_command(list, 'all')
 
-        expect(out).to include('Access list cleared.')
-        expect(out).to include('Cleared 1 run.command prefix.')
-        expect(out).to include('Cleared 1 shell (!) prefix.')
-        expect(out).to include('Cleared 1 web.fetch host grant.')
+        expect(out).to include('  [clear] ✓ Access list cleared.')
+        expect(out).to include('  [clear] ✓ Cleared 1 run.command prefix.')
+        expect(out).to include('  [clear] ✓ Cleared 1 shell (!) prefix.')
+        expect(out).to include('  [clear] ✓ Cleared 1 web.fetch host grant.')
         expect(list.empty?).to be true
         expect(read_list(dir, 'allowed_commands.yml')).to eq([])
         expect(read_list(dir, 'shell_commands.yml')).to eq([])

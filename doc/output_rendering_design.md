@@ -96,6 +96,10 @@ a live task and the same rendered line on the main thread; the store commands
 a missing entry. `:info` deliberately has no glyph: a count or
 a progress line is not a verdict about an operation.
 
+`/clear` is the case that shows the distinction: a revocation that removed
+something is `:ok`, and a store that was already empty is `:info`, because
+"nothing to remove" reports the state of the store rather than an outcome.
+
 **One buffer entry, one OR MORE console lines.** A status message can be
 multi-line (a pasted multiline script is the everyday case). The renderer puts a
 `  |` gutter on every continuation line and closes the entry with a short gray

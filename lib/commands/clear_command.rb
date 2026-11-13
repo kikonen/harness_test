@@ -48,7 +48,7 @@ module Commands
       return report_unknown(name) unless FORMS.key?(name)
 
       targets = name == "all" ? FORMS.values : [FORMS[name]]
-      targets.each { |target| @ui.puts(clear_target(target)) }
+      targets.each { |target| clear_target(target) }
     end
 
     private
@@ -63,8 +63,14 @@ module Commands
     def clear_target(target)
       case target
       when :access
+        # The count is read BEFORE the clear so the verdict can say whether
+        # anything was removed.
+        before = @file_list.access_grant_count
         @file_list.clear
-        "Access list cleared."
+        emit_status(
+          label: "clear",
+          verdict: before.zero? ? :info : :ok,
+          message: "Access list cleared.")
       when :commands
         cleared_line(CommandAllowlist.new(@file_list.workdir).clear, :commands)
       when :shell
@@ -80,9 +86,17 @@ module Commands
 
     def cleared_line(count, key)
       singular, plural = LABELS[key]
-      return "No #{plural} to clear." if count.zero?
+      if count.zero?
+        # A zero count is a statement about the store, not a verdict about an
+        # operation, so it carries no glyph (:info).
+        emit_status(label: "clear", verdict: :info, message: "No #{plural} to clear.")
+        return
+      end
 
-      "Cleared #{count} #{count > 1 ? plural : singular}."
+      emit_status(
+        label: "clear",
+        verdict: :ok,
+        message: "Cleared #{count} #{count > 1 ? plural : singular}.")
     end
   end
 end
