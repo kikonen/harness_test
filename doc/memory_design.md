@@ -154,7 +154,11 @@ carries CRLF or an undecodable byte is stored as clean UTF-8 LF.
 - `memory.read(name)` - the note body as an ordinary tool result.
 - `memory.add` / `memory.delete` - one status line, plus the harness' tool-call log
   line.
-- `/memory [name]` - the same listing and the same body text, on the owner's side.
+- `/memory [name|N]` - the same body text, on the owner's side, reached by name or
+  by the listing number. The owner-side listing is a `:table` with a number column
+  (the model-side `memory.list` above stays plain `name - description` lines: a
+  tool result is never rendered, so an ordinal there would be a position the model
+  could misread - the number belongs to the owner-side listing).
 - harness.log - `tool memory.add → ...` / `tool memory.delete → ...`.
 
 ## Deferred: a store that one project shares across its checkouts

@@ -221,6 +221,11 @@ What #416 changed about that owner-side command:
   IN RANGE, so a plan genuinely named with digits stays reachable by name.
   Adding or deleting a plan shifts the numbering, which is why `/plans <name>`
   keeps working unchanged.
+
+  CLOSED by #474 (increment 20, 2026-11-13): the listing is a `:table` whose
+  number is a FIELD the payload carries rather than a padded row prefix, and the
+  number/name shape is shared with `/memory` through `Commands::StoreListing` -
+  the same rule the body render follows, so both stores read one mechanism.
 - The body is a markdown FILE, so it is RENDERED rather than dumped: with a
   palette the headings/bold/code/lists are styled, palette `none` (--no-color)
   renders plain marker-free text, and only a harness that answers no palette at

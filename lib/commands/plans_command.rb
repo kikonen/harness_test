@@ -2,6 +2,7 @@
 
 require_relative "../command"
 require_relative "../plans"
+require_relative "store_listing"
 
 module Commands
   # /plans - list the project's stored plans numbered, or print one body.
@@ -15,7 +16,14 @@ module Commands
   # own (#474). With a palette the headings/bold/code/lists are styled; palette
   # 'none' renders plain marker-free text, and a sink with no palette prints the
   # body as stored.
+  #
+  # The listing is a :table with its own number column (#474, increment 20) and the
+  # row/selector/rule shape comes from StoreListing, shared with /memory. The
+  # renderer's :numbered_kv kind is gone: inside a kramdown table the gem owns the
+  # column width, so the ordinal alignment the flat kind provided has no job left.
   class PlansCommand < Command
+    include StoreListing
+
     HELP = CommandHelp.new(
       usage: "plans [name|N]",
       forms: ["plans", "plans <name>", "plans <N>"],
@@ -58,22 +66,11 @@ module Commands
       emit_list(
         title: "Plans (#{all.size}/#{Plans::MAX_PLANS} plans, " \
           "#{Plans::MAX_BODY_CHARS} chars max each):",
-        kind: :numbered_kv,
-        columns: %i[number name description annotation],
-        items: listing_items(all),
+        kind: :table,
+        columns: %i[number name description chars],
+        items: listing_rows(all),
         footer: ["Show one with: /plans <name>  or  /plans <N>"],
         origin: "plans")
-    end
-
-    def listing_items(all)
-      all.map.with_index do |plan, i|
-        {
-          number: i + 1,
-          name: plan.name,
-          description: plan.description,
-          annotation: " (#{plan.chars} chars)"
-        }
-      end
     end
 
     def show_plan(requested)
@@ -82,7 +79,7 @@ module Commands
 
       if index
         plan = all[index]
-        return show_body(plan.name, plans.body(plan.name), index)
+        return show_body(store_rule(Plans::DIR, plan.name, index), plans.body(plan.name))
       end
 
       name = plans.normalize_name(requested)
@@ -103,34 +100,7 @@ module Commands
         return
       end
 
-      # A name lookup prints the header the way it always did - the number is
-      # only shown when the user asked WITH a number.
-      show_body(name, body, nil)
-    end
-
-    # A purely numeric argument indexes the listing (1-based, same order) only
-    # while it is IN RANGE: a plan genuinely named "3" stays reachable when
-    # there are fewer than three plans.
-    def list_index(requested, count)
-      return nil unless requested.match?(/\A\d+\z/)
-
-      number = requested.to_i
-      number.between?(1, count) ? number - 1 : nil
-    end
-
-    def show_body(name, body, index)
-      return if body.nil?
-
-      emit_role(:rule, header(name, index))
-      emit_role(:body, body)
-    end
-
-    def header(name, index)
-      # nil-safe on purpose: 0 is a LEGITIMATE index and 0 is truthy, so a
-      # plain `index ?` would still be right here but reads like a bug.
-      title = index.nil? ? "--- #{name}" : "--- #{index + 1}. #{name}"
-      title = "#{title} (#{Plans::DIR})"
-      "#{title} #{'-' * [1, 60 - title.length].max}"
+      show_body(store_rule(Plans::DIR, name, nil), body)
     end
 
     def available_hint(all)

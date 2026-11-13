@@ -47,6 +47,20 @@ RSpec.describe Commands::PlansCommand do
     File.write(File.join(dir, Plans::DIR, "#{name}.md"), content)
   end
 
+  def split_row(line)
+    line.strip.sub(/\A\|/, '').sub(/\|\z/, '').split(/\s*\|\s*/).map(&:strip)
+  end
+
+  # Data rows only: the markdown rule row and the header row are dropped so a pin
+  # compares one plan to one row, whatever kramdown padded the columns to.
+  def table_rows(out)
+    out.lines.map(&:chomp)
+       .select { |l| l.start_with?('|') }
+       .reject { |l| l.match?(/\A\| [-| ]+\|\z/) }
+       .reject { |l| split_row(l)[0] == 'number' }
+       .map { |l| split_row(l) }
+  end
+
   describe 'the help entry (issue #323 contract)' do
     it 'declares a HELP entry whose usage starts with its registered name' do
       help = described_class.help
@@ -66,8 +80,10 @@ RSpec.describe Commands::PlansCommand do
         out = run_command(dir)
 
         expect(out).to include("Plans (2/#{Plans::MAX_PLANS} plans")
-        expect(out).to include('  1. auth - split the flow into steps.')
-        expect(out).to include('  2. ci - rspec and rubocop on ubuntu.')
+        expect(table_rows(out)).to eq([
+          ['1', 'auth', 'split the flow into steps.', '26'],
+          ['2', 'ci', 'rspec and rubocop on ubuntu.', '34']
+        ])
         expect(out).to include('Show one with: /plans <name>  or  /plans <N>')
       end
     end
@@ -88,12 +104,12 @@ RSpec.describe Commands::PlansCommand do
       Dir.mktmpdir do |dir|
         write_plan(dir, 'sized', '12345')
 
-        expect(run_command(dir)).to include('sized - 12345 (5 chars)')
+        expect(run_command(dir)).to include('| 1 | sized | 12345 | 5 |')
       end
     end
   end
 
-  describe 'with a name (the body)' do
+  describe 'with a name or a number (the body)' do
     it 'prints one plan body under a named rule line' do
       Dir.mktmpdir do |dir|
         write_plan(dir, 'pipeline', "step one\nstep two\n")
@@ -136,8 +152,8 @@ RSpec.describe Commands::PlansCommand do
     end
   end
 
-  # Issue #416 part 2: the listing is numbered so a plan can be opened by its
-  # number instead of typing a mnemonic name.
+  # Issue #416 part 2, laid out as a :table (issue #474 increment 20): the number
+  # is a field the payload carries, and it is the selector.
   describe 'the numbering (issue #416)' do
     def three_plans(dir)
       write_plan(dir, 'auth', 'auth body text')
@@ -150,8 +166,7 @@ RSpec.describe Commands::PlansCommand do
         three_plans(dir)
 
         expect(run_command(dir)).to include(
-          "  1. auth - auth body text (14 chars)\n  2. brave-falcon - falcon body text (16 chars)" \
-          "\n  3. ci - ci body text (12 chars)"
+          "| 1 | auth | auth body text | 14 |\n| 2 | brave-falcon | falcon body text | 16 |"
         )
       end
     end
@@ -168,14 +183,17 @@ RSpec.describe Commands::PlansCommand do
       end
     end
 
-    it 'right-aligns the numbers so the listing stays readable past 9 plans' do
+    # The ordinal alignment the flat :numbered_kv kind used to provide is now the
+    # gem's: inside a kramdown table the column width decides it, so a number is a
+    # FIELD the payload carries rather than a padded row prefix.
+    it 'carries the number as a field rather than a padded prefix' do
       Dir.mktmpdir do |dir|
         10.times { |i| write_plan(dir, format('plan%02d', i), "body #{i}") }
 
-        out = run_command(dir)
+        rows = table_rows(run_command(dir))
 
-        expect(out).to include('  1. plan00 - body 0')
-        expect(out).to include(' 10. plan09 - body 9')
+        expect(rows.first).to eq(['1', 'plan00', 'body 0', '6'])
+        expect(rows.last).to eq(['10', 'plan09', 'body 9', '6'])
       end
     end
 

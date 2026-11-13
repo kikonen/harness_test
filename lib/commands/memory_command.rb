@@ -2,6 +2,7 @@
 
 require_relative "../command"
 require_relative "../memories"
+require_relative "store_listing"
 
 module Commands
   # /memory - list the project's memories, or print one note's body.
@@ -9,12 +10,20 @@ module Commands
   # The same data the model sees through memory.list / memory.read: one reader
   # (Memories) behind both sides, so what the owner inspects and what the model
   # reads cannot drift apart (the same shape as /skills). Issue #10.
+  #
+  # The listing is a :table with its own number column and an entry opens by name
+  # or by that number (#474, increment 20); the row/selector/rule shape is shared
+  # with /plans through StoreListing. The MODEL SIDE is unchanged: a tool result is
+  # :text and is never rendered, so the ordinal there would be a position the model
+  # could misread - the number is the owner-side listing's.
   class MemoryCommand < Command
+    include StoreListing
+
     HELP = CommandHelp.new(
-      usage: "memory [name]",
-      forms: ["memory", "memory <name>"],
+      usage: "memory [name|N]",
+      forms: ["memory", "memory <name>", "memory <N>"],
       summary: "List the project's memories (#{Memories::DIR}/), " \
-        "or print one note's body",
+        "or print one note's body by name or by its number",
       group: :session,
       see_also: %w[skills session])
 
@@ -49,22 +58,30 @@ module Commands
       emit_list(
         title: "Memories (#{all.size}/#{memories.max_memories} notes, " \
           "#{Memories::MAX_BODY_CHARS} chars max each):",
-        kind: :kv,
-        columns: %i[name description annotation],
-        items: all.map do |m|
-          { name: m.name, description: m.description, annotation: " (#{m.chars} chars)" }
-        end,
-        footer: ["Show one with: /memory <name>"],
+        kind: :table,
+        columns: %i[number name description chars],
+        items: listing_rows(all),
+        footer: ["Show one with: /memory <name>  or  /memory <N>"],
         origin: "memory")
     end
 
     def show_memory(requested)
+      all = memories.all
+      index = list_index(requested, all.size)
+
+      if index
+        entry = all[index]
+        return show_body(
+          store_rule(Memories::DIR, entry.name, index),
+          memories.body(entry.name))
+      end
+
       name = memories.normalize_name(requested)
       if name.nil?
         emit_status(
           label: "memory",
           verdict: :fail,
-          message: "a memory name is one path segment: #{requested}")
+          message: "a memory name is one path segment, or a memory number: #{requested}")
         return
       end
 
@@ -77,9 +94,7 @@ module Commands
         return
       end
 
-      rule = "-" * [1, 60 - name.length].max
-      emit_role(:rule, "--- #{name} (#{Memories::DIR}) #{rule}")
-      emit_role(:body, body)
+      show_body(store_rule(Memories::DIR, name, nil), body)
     end
 
     def available_hint
