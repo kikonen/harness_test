@@ -1,8 +1,11 @@
 # Task model: the registry layer (issue #286 phase 0)
 
 Design notes for the flat task list and the layer that owns it. Verified against
-master `97e7d94` (2026-11-14). No production code exists for this layer yet -
-this is the shape it must have before any runtime is built.
+master `97e7d94` (2026-11-14). Increment 1 built the shape in code: `lib/job.rb`
+(Job) and `lib/registry.rb` (Registry), plus the minimum wiring - the main turn is
+registered as job #0, so the run record is job #0's buffer. What is NOT wired yet
+is the executor: `TaskRunner#run_on_task` still runs a turn rather than awaiting a
+job, and no run builds a Registry for a job other than #0.
 
 Cross-refs: #286 (this), #324, #146, #414, #181, #40, #238, #248, #300.
 Buffer parts and keying rules live in `doc/output_buffer_design.md`; the single

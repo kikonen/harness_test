@@ -3023,6 +3023,26 @@ RSpec.describe Harness do
       expect(harness.output_log.max_saved).to eq(30)
     end
 
+    # Minimum wiring for issue #286 increment 1: the Harness owns the Registry, and
+    # the run record is the buffer of the FIRST job it registers - the main turn,
+    # job #0 - so every single-writer pin still resolves to the same object.
+    it 'the run record is the buffer of the registry job #0 (the main turn)' do
+      harness = build_harness
+      main = harness.registry.jobs.first
+
+      expect(harness.registry.job(0)).to equal(main)
+      expect(main.kind).to eq(:main)
+      expect(harness.output_log).to equal(harness.registry.foreground_buffer)
+      expect(harness.output_log).to equal(main.buffer)
+    end
+
+    # output: tasks_kept is enforced by the harness' own registry, its first
+    # consumer, so the value the CLI carries reaches the object that trims.
+    it 'the harness registry is built with the config tasks_kept value' do
+      harness = build_harness(output_tasks_kept: 4)
+      expect(harness.registry.tasks_kept).to eq(4)
+    end
+
     # One buffer (issue #286): the model/tool side lands through the same single
     # writer as the user side, so there is no harvest step. :spinner_detail is
     # animated, never a rendered line, so it stays in the head.

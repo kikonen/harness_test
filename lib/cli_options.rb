@@ -308,7 +308,7 @@ class CLIOptions
     opts[:max_memories] = config.max_memories
     # OutputBuffer tail limits per task (issue #286): config-derived for the whole
     # run, read once like the palette. tail_memory bounds the tail in RAM; tasks_kept
-    # is carried for the future TaskManager (nothing enforces it yet).
+    # is the registry's retention limit (issue #286 increment 1): its first consumer.
     opts[:output_tail_memory] = config.output_tail_memory
     opts[:output_tasks_kept] = config.output_tasks_kept
     # The saved window is the existing 'resume: replay_entries' key, not a second

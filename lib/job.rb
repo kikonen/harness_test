@@ -1,0 +1,118 @@
+# frozen_string_literal: true
+
+# A graph node with its own buffer and inbox, and NO outbox: its events go to the
+# registry's ONE queue tagged with its id. Design: doc/task_model_design.md.
+class Job
+  # A timed job's dependency is a clock predicate, not a job, so a plain
+  # job-to-job DAG is not enough.
+  KINDS = %i[main sub_agent command timed].freeze
+
+  # A reply equal to STOP is not an answer, so a job must stop rather than read
+  # it as a dialog result.
+  STOP = Object.new.freeze
+
+  # Same timeout as the drain loop, so a poll costs the same everywhere.
+  DEFAULT_POLL_TIMEOUT = 0.1
+
+  attr_reader :id, :kind, :status, :registry, :buffer, :inbox
+  attr_reader :dependencies, :requested_by
+
+  # The buffer comes from the registry: its limits belong to the buffer, and the
+  # fan-in queue is shared by all jobs.
+  def initialize(
+    id:,
+    kind:,
+    registry:,
+    buffer:,
+    dependencies: [],
+    requested_by: nil
+  )
+    raise ArgumentError, "unknown job kind: #{kind}" unless Job::KINDS.include?(kind)
+
+    @id           = id
+    @kind         = kind
+    @registry     = registry
+    @buffer       = buffer
+    @inbox        = Thread::Queue.new
+    @dependencies = dependencies
+    @requested_by = requested_by
+    @status       = :pending
+  end
+
+  def pending?
+    @status == :pending
+  end
+
+  def running?
+    @status == :running
+  end
+
+  def finished?
+    @status == :finished
+  end
+
+  def mark_running
+    @status = :running
+  end
+
+  # A job thread never writes a stream or its own buffer (the single-thread I/O
+  # rule), so the registry stays the only writer of the record.
+  def push_event(type:, origin: nil, content: nil, **extra)
+    event = { type: type.to_sym, origin:, content:, job: id }
+    event.merge!(extra) unless extra.empty?
+    registry << event
+    event
+  end
+
+  # A dependency is a precondition, so it can be a finished job or a callable
+  # predicate rather than an edge.
+  def ready?
+    dependencies.all? do |dep|
+      dep.respond_to?(:finished?) ? dep.finished? : dep.call
+    end
+  end
+
+  # A finished job cannot finish twice: a second finish would answer the
+  # requester a second time.
+  def finish(result = nil)
+    return nil if finished?
+
+    @status = :finished
+    requested_by&.deliver(result)
+    registry.retain(self)
+    result
+  end
+
+  # Latest line wins ONLY while the pending event is itself a note; a note after
+  # another kind queues behind it.
+  def deliver(value)
+    pending = @inbox.size == 1 ? @inbox.pop(true) : nil
+    if pending && !(note?(value) && note?(pending))
+      @inbox << pending
+      @inbox << value
+      return value
+    end
+    @inbox << value
+    value
+  end
+
+  def inbox_empty?
+    @inbox.empty?
+  end
+
+  def poll(timeout = DEFAULT_POLL_TIMEOUT)
+    @inbox.pop(false, timeout:)
+  rescue ThreadError
+    nil
+  end
+
+  def to_s
+    "job ##{id} #{kind} #{status}"
+  end
+
+  private
+
+  def note?(value)
+    value.is_a?(Hash) && value[:type] == :note
+  end
+end
