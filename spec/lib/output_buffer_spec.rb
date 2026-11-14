@@ -326,7 +326,7 @@ RSpec.describe OutputBuffer do
       buffer.put(type: :spinner_detail, origin: :harness, content: 'Sending')
 
       expect(buffer.head.size).to eq(1)
-      expect(buffer.cell(:harness).content).to eq('Sending')
+      expect(buffer.cell(:harness, :spinner_detail).content).to eq('Sending')
     end
 
     # A streamed answer GROWS: chunks append to the one cell for its origin.
@@ -335,7 +335,7 @@ RSpec.describe OutputBuffer do
       buffer.put(type: :response, origin: :session_manager, content: 'Hel', mode: :append)
       buffer.put(type: :response, origin: :session_manager, content: 'lo', mode: :append)
 
-      expect(buffer.cell(:session_manager).content).to eq('Hello')
+      expect(buffer.cell(:session_manager, :response).content).to eq('Hello')
       expect(buffer.tail).to be_empty
     end
 
@@ -357,7 +357,7 @@ RSpec.describe OutputBuffer do
       buffer.put(type: :response, origin: :session_manager, content: 'Hel', mode: :append)
       buffer.put(type: :response, origin: :session_manager, content: 'lo', mode: :append)
 
-      entry = buffer.commit(:session_manager)
+      entry = buffer.commit(:session_manager, :response)
 
       expect(entry.content).to eq('Hello')
       expect(entry).to be_frozen
@@ -367,7 +367,7 @@ RSpec.describe OutputBuffer do
       buffer.put(type: :response, origin: :session_manager, content: ' there')
       # Without a mode the item is FINAL, so it is committed rather than live -
       # the head must never be the only copy of an answer.
-      expect(buffer.cell(:session_manager)).to be_nil
+      expect(buffer.cell(:session_manager, :response)).to be_nil
       expect(buffer.tail.map(&:content)).to eq(['Hello', ' there'])
     end
 
@@ -378,7 +378,7 @@ RSpec.describe OutputBuffer do
       buffer.put(type: :response, origin: :session_manager, content: 'partial', mode: :append)
       expect(buffer.head.size).to eq(1)
 
-      buffer.commit(:session_manager)
+      buffer.commit(:session_manager, :response)
       buffer.put(type: :response, origin: :session_manager, content: 'full answer')
       expect(buffer.tail.map(&:content)).to eq(['partial', 'full answer'])
     end

@@ -63,8 +63,6 @@ class Task
 
   attr_writer :ui
 
-  # -- Spinner content memory ------------------------------------------------
-
   # While true, store_and_render must not clear output lines: a Choice
   # prompt on stdin would vanish with them.
   def dialog_open?
