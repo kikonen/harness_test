@@ -94,9 +94,11 @@ touches the buffer directly. A future TUI can read the buffer as a durable,
 inspectable record of everything shown to the user.
 
 The permanent owner is the registry, which retains several tasks at once: a
-foreground switch is then a question of which task's head is the shown one, and the
+foreground switch is then a question which task's head is the shown one, and the
 task part of the head key arrives at that layer (issue #286). For now only one
 task is ever live, so the buffer is shared and origin + type is the whole key.
+The node the key names is called **Job** (owner decision, 2026-11-14), and each
+retained Job gets its own buffer - see `doc/task_model_design.md`.
 
 ## Threading
 
