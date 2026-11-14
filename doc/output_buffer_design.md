@@ -50,11 +50,16 @@ Head cells are keyed by **`(origin, type)`** (owner decision, 2026-11-14),
 resolved through the drain-loop binding. A single task can hold SEVERAL head
 cells live at once - the spinner cell AND the LLM streamed-response cell, both
 from `:session_manager` - so origin alone is not enough: it would collapse those
-two streams into one cell. Keying per task is not a key inside a buffer: a buffer
-already IS a task, so a foreground switch is just a question of WHICH task's
-buffer the renderer shows, not of keying inside the head. `#cell(origin, type)`
-reads one stream; `#commit(origin, type)` promotes that one cell to the tail.
+two streams into one cell. `#cell(origin, type)` reads one stream;
+`#commit(origin, type)` promotes that one cell to the tail.
 
+The task is the OUTER part of the key, not a field inside `@head` (owner,
+2026-11-14): in the unified model (#286) each task owns its own `OutputBuffer`,
+so a head cell's full identity is `(task, origin, type)` where `task` is supplied
+by WHICH BUFFER the cell lives in. A buffer never holds more than one task, so
+storing `task` inside each buffer's key would just repeat the buffer name within
+itself; the task enters the key at the TaskManager layer that selects which buffer
+is foreground.
 
 `#commit(origin, type)` promotes a finished cell to the tail as ONE immutable entry
 holding its final content and removes it from the head. A stream that keeps going
