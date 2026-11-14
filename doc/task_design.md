@@ -57,10 +57,12 @@ never load-bearing on the error path.
 
 There is ONE OutputBuffer per run (issue #286). `Task.run` hands the task the
 harness' single buffer, so every put the drain loop makes lands in the same record
-a save reads - no harvest step, no second store. A task with no shared buffer to
-use builds none: `buffer:` is required, so a caller (the harness, or a spec double)
-must supply one. The drain loop is the single main-thread writer; the task thread
-never touches the buffer (single-thread I/O rule). The single writer enforces the
+a save reads - no harvest step, no second store. At the registry layer (issue #286)
+each job gets its OWN buffer, so this becomes the buffer of the foreground job.
+A task with no buffer to use builds none: `buffer:` is required, so a caller (the
+harness, the future registry, or a spec double) must supply one. The drain loop is
+the single main-thread writer; the task thread never touches the buffer
+(single-thread I/O rule). The single writer enforces the
 buffer's own saved window right after a tail put (`OutputBuffer#keep_window`).
 See `doc/output_buffer_design.md`.
 

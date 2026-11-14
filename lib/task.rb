@@ -47,9 +47,9 @@ class Task
     @inbox   = Thread::Queue.new   # main -> task (responses, stop)
     @outbox  = Thread::Queue.new   # task -> main (SINGLE event queue)
     # The task USES the buffer it is given (issue #286): Task.run hands it the
-    # harness' single run buffer. The task never builds one - the buffer's own
-    # limits belong to the buffer. The drain loop is the single writer; the task
-    # thread never touches it (single-thread I/O rule).
+    # run buffer, which the registry will replace with one buffer per job. The task
+    # never builds one - the buffer's own limits belong to the buffer. The drain
+    # loop is the single writer; the task thread never touches it.
     @buffer       = buffer
     # Patterns and colors are the renderer's decision, so the drain loop asks
     # it instead of printing content as the emitter wrote it. #run replaces it
