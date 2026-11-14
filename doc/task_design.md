@@ -55,8 +55,14 @@ never load-bearing on the error path.
 
 ## Structured log
 
-The Task instance owns one OutputBuffer, filled by the drain loop and never
-touched by task code - see `doc/output_buffer_design.md`.
+There is ONE OutputBuffer per run (issue #286). `Task.run` hands the task the
+harness' single buffer, so every put the drain loop makes lands in the same record
+a save reads - no harvest step, no second store. A task with no shared buffer to
+use builds none: `buffer:` is required, so a caller (the harness, or a spec double)
+must supply one. The drain loop is the single main-thread writer; the task thread
+never touches the buffer (single-thread I/O rule). The single writer enforces the
+buffer's own saved window right after a tail put (`OutputBuffer#keep_window`).
+See `doc/output_buffer_design.md`.
 
 ## Spinner ownership - the runner decides, trivially
 

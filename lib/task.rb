@@ -42,18 +42,15 @@ class Task
   attr_accessor :note_editor
   attr_accessor :harness
 
-  def initialize(max_memory: OutputBuffer::DEFAULT_MAX_MEMORY,
-                 max_saved: OutputBuffer::DEFAULT_MAX_SAVED, &block)
+  def initialize(buffer:, &block)
     @block   = block
     @inbox   = Thread::Queue.new   # main -> task (responses, stop)
     @outbox  = Thread::Queue.new   # task -> main (SINGLE event queue)
-    # The task owns its buffer (issue #286), and the buffer carries its two tail
-    # limits. A harness-less task (a background command, no LLM round) still has
-    # its buffer on the built-in defaults - the limits are not harness-dependent.
-    # Task.run overrides them from the harness when it answers them.
-    @buffer  = OutputBuffer.new(
-      max_memory:,
-      max_saved:)    # structured log (runner fills it)
+    # The task USES the buffer it is given (issue #286): Task.run hands it the
+    # harness' single run buffer. The task never builds one - the buffer's own
+    # limits belong to the buffer. The drain loop is the single writer; the task
+    # thread never touches it (single-thread I/O rule).
+    @buffer       = buffer
     # Patterns and colors are the renderer's decision, so the drain loop asks
     # it instead of printing content as the emitter wrote it. #run replaces it
     # with the harness's configured palette; this one colors nothing.
@@ -260,15 +257,11 @@ class Task
     ui:,
     &block
   )
-    # The per-task buffer limits come from the harness when it answers them
-    # (issue #286); a harness double in a spec, or a harness-less background
-    # command task, falls back to the buffer's built-in defaults.
-    max_memory = harness.respond_to?(:output_tail_memory) ? harness.output_tail_memory : nil
-    max_saved  = harness.respond_to?(:resume_replay_entries) ? harness.resume_replay_entries : nil
-    task = Task.new(
-      max_memory: max_memory || OutputBuffer::DEFAULT_MAX_MEMORY,
-      max_saved: max_saved || OutputBuffer::DEFAULT_MAX_SAVED,
-      &block)
+    # ONE buffer per run (issue #286): the task uses the harness' buffer. The
+    # drain loop is the single main-thread writer, so every put lands in the same
+    # record a save reads. The task owns no store, and the buffer's limits belong
+    # to the buffer (built by the harness from its config).
+    task = Task.new(buffer: harness.output_log, &block)
     task.ui = ui
     # The editor only PEEKS stdin: no reader thread, so nothing races for
     # the keyboard. Notes need a harness to land on (nil = unit test).
@@ -579,10 +572,12 @@ class Task
       line = task.renderer&.line(type:, content: msg[:content], origin: msg[:origin]) || msg[:content].to_s
       ui.puts(line)
       task.buffer.put(type: :text, origin: msg[:origin] || :task, content: msg[:content])
+      task.buffer.keep_window
     else
       line = task.renderer&.line(type:, content: msg[:content], origin: msg[:origin]) || msg[:content].to_s
       ui.puts(line) unless msg[:content].nil?
       task.buffer.put(type: msg[:type], origin: msg[:origin] || :task, content: msg[:content])
+      task.buffer.keep_window
     end
   end
 

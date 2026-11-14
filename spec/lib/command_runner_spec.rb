@@ -1290,7 +1290,7 @@ RSpec.describe CommandRunner do
   # line that already finished, so a long run reads as if the model were still
   # generating. The runner re-points it for the run itself.
   describe 'spinner re-point while a command runs (issue #362)' do
-    let(:task) { Task.new }
+    let(:task) { Task.new(buffer: OutputBuffer.new) }
     around do |example|
       @old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task

@@ -17,10 +17,10 @@ require_relative "tool"
 module TaskRunner
   def run_on_task
     emit_role(:gap, "")
-    error, task = Task.run(harness:, ui:) { |_t| yield }
-    # Feed the turn's buffer tail into the harness' run OutputBuffer (the
-    # durable both-sides record) so a later resume can redraw it (issue #458).
-    harness.absorb_turn(task) if harness.respond_to?(:absorb_turn)
+    error, _task = Task.run(harness:, ui:) { |_t| yield }
+    # No harvest step: there is ONE buffer (issue #286), and the drain loop is
+    # its single main-thread writer, so the turn's output already landed in the
+    # run record Task.run handed the task. Nothing to copy.
     emit_role(:kind, error, origin: "task error") if error
     emit_role(:gap, "")
   end

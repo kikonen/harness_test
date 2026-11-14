@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
 # Append-only structured record of everything shown to a user, split into the
-# two parts a per-task buffer needs (issue #286): the TAIL is the durable
-# history a renderer can re-lay out, the HEAD is the live state of the streams
-# that are still arriving. Threading and ownership: doc/output_buffer_design.md
+# two parts issue #286 needs: the TAIL is the durable history a renderer can
+# re-lay out, the HEAD is the live state of the streams that are still arriving.
+# ONE buffer per run (held by the harness as a temporary home, the future
+# TaskManager owns it). Threading and ownership: doc/output_buffer_design.md
 
 class OutputBuffer
   # One committed unit of output. A Data instance - IMMUTABLE BY CONSTRUCTION:
@@ -140,9 +141,10 @@ class OutputBuffer
   # The cell for one stream, keyed by (origin, type). A single head can hold
   # several cells from the SAME origin at once - a response cell AND a spinner
   # cell, both from :session_manager - because each (origin, type) stream is its
-  # own cell. The task is not a key field here: a buffer already IS one task, so
-  # the task enters the key at the TaskManager layer that selects which buffer is
-  # foreground (issue #286).
+  # own cell. The task is not a key field here: this buffer is shared and tasks
+  # still die, so only one task's streams are ever live in it. The task enters the
+  # key at the TaskManager/registry layer that retains several tasks at once
+  # (issue #286).
   def cell(origin, type)
     @head[head_key(origin, type)]
   end
@@ -230,6 +232,14 @@ class OutputBuffer
     @read_index = 0
   end
 
+  # Enforce THIS buffer's own saved window on its tail (the max_saved it was
+  # built with). Called by the single main-thread writer right after a TAIL put,
+  # so the one record never grows past what a save writes. max_saved 0 (the
+  # disable) keeps nothing, so the record stays empty. The head is never windowed.
+  def keep_window
+    keep_tail(@max_saved)
+  end
+
   # Drop EVERYTHING (consumed tail, pending tail and live head) and reset the
   # waterline to zero. Intended for explicit "new surface" boundaries.
   def clear
@@ -259,9 +269,10 @@ class OutputBuffer
   end
 
   # The head-cell key is the stream: (origin, type). The task is NOT a key field
-  # here - a buffer already IS one task, so the task's full identity is
-  # (task, origin, type) where task is supplied by WHICH BUFFER the cell lives in,
-  # resolved at the TaskManager layer that picks the foreground buffer (issue #286).
+  # here - the buffer is shared (held by the harness as a temporary home), and
+  # tasks still die, so only one task's streams are ever live. The task part of
+  # the key is deferred to the TaskManager/registry that retains several tasks
+  # (issue #286).
   def head_key(origin, type)
     [normalize(origin), type.to_sym]
   end

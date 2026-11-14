@@ -585,7 +585,7 @@ RSpec.describe Harness do
     # Task's outbox (single event queue) via Task.emit. Set the thread-local
     # task so Task.emit finds it, then drain the outbox to assert on the
     # lines - exactly what the real drain loop does.
-    let(:task) { Task.new { } }
+    let(:task) { Task.new(buffer: harness.output_log) { } }
     around do |example|
       @old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
@@ -677,7 +677,7 @@ RSpec.describe Harness do
 
   describe '#execute_tool_call spinner_detail (issue #40)' do
     let(:harness) { build_harness }
-    let(:task) { Task.new { } }
+    let(:task) { Task.new(buffer: harness.output_log) { } }
     def drain_outbox(t)
       ms = []
       loop do
@@ -986,7 +986,7 @@ RSpec.describe Harness do
 
     it 'says on the console that the late note was NOT applied (issue #430)' do
       harness, = late_note_harness
-      task = Task.new { }
+      task = Task.new(buffer: harness.output_log) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1011,7 +1011,7 @@ RSpec.describe Harness do
     end
 
     it 'leaves the "sent to model" ack when the note WAS injected' do
-      task = Task.new { }
+      task = Task.new(buffer: harness.output_log) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1027,7 +1027,7 @@ RSpec.describe Harness do
     end
 
     it 'says nothing when no note is pending at the final answer' do
-      task = Task.new { }
+      task = Task.new(buffer: harness.output_log) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1042,7 +1042,7 @@ RSpec.describe Harness do
 
     describe '#discard_pending_user_note (issue #430)' do
       it 'returns nil and emits nothing when nothing is pending' do
-        task = Task.new { }
+        task = Task.new(buffer: harness.output_log) { }
         old_current = Thread.current[:harness_task]
         Thread.current[:harness_task] = task
         begin
@@ -1066,7 +1066,7 @@ RSpec.describe Harness do
       end
 
       it 'names the leftover case differently from the late one' do
-        task = Task.new { }
+        task = Task.new(buffer: harness.output_log) { }
         old_current = Thread.current[:harness_task]
         Thread.current[:harness_task] = task
         begin
@@ -1086,7 +1086,7 @@ RSpec.describe Harness do
     end
 
     it 'shows a console ack that the note was sent to the model (issue #198)' do
-      task = Task.new { }
+      task = Task.new(buffer: harness.output_log) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1103,7 +1103,7 @@ RSpec.describe Harness do
     end
 
     it 'shows no "sent to model" ack when there is no note' do
-      task = Task.new { }
+      task = Task.new(buffer: harness.output_log) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1537,7 +1537,7 @@ RSpec.describe Harness do
       client = scripted(h, [echo.call('c1'), echo.call('c2'), pwned, { content: 'final' }])
       h.session.add_user('do the thing')
 
-      task = Task.new { }
+      task = Task.new(buffer: h.output_log) { }
       old = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       events = []
@@ -1562,7 +1562,7 @@ RSpec.describe Harness do
   # re-point made by an earlier wait (an in-loop compaction) cannot stick for
   # the rest of the turn.
   describe '#call_llm spinner announcements (issue #283)' do
-    let(:task) { Task.new { } }
+    let(:task) { Task.new(buffer: OutputBuffer.new) { } }
     around do |example|
       @old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
@@ -1696,7 +1696,7 @@ RSpec.describe Harness do
     it 'shows the performance on the stats line' do
       stats = harness_with({ prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050,
                              cached_tokens: 768, prompt_eval_ms: 1160.0, eval_ms: 1310.2 })
-      task = Task.new { }
+      task = Task.new(buffer: OutputBuffer.new) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1716,7 +1716,7 @@ RSpec.describe Harness do
   # answer. The plumbing (finish_reason in the normalized shape) belongs to the
   # spec/lib/llm/ specs; this is what Harness#call_llm does with it.
   describe '#call_llm finish_reason (issue #345)' do
-    let(:task) { Task.new { } }
+    let(:task) { Task.new(buffer: OutputBuffer.new) { } }
     around do |example|
       @old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
@@ -1858,7 +1858,7 @@ RSpec.describe Harness do
     end
 
     def with_task
-      task = Task.new { }
+      task = Task.new(buffer: OutputBuffer.new) { }
       old = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -2992,8 +2992,8 @@ RSpec.describe Harness do
 
   # issue #458: the harness' run-level OutputBuffer is the durable record a
   # resumed session redraws. The user's own line is one side of it (role :user),
-  # a finished turn's task buffer the other (absorb_turn), and both are capped
-  # to the configured window. 0 disables the whole path.
+  # the model/tool side the other, and both land through the single main-thread
+  # writer. 0 disables the whole path.
   describe 'run OutputBuffer / resume replay (issue #458)' do
     it 'records a user prompt as a :user/:user entry (the renderer labels it)' do
       harness = build_harness
@@ -3023,24 +3023,18 @@ RSpec.describe Harness do
       expect(harness.output_log.max_saved).to eq(30)
     end
 
-    # absorb_turn harvests the model/tool side from a finished turn's task
-    # buffer; :spinner_detail is skipped (it is animated, never a line).
-    it 'harvests a turn task buffer tail, skipping the spinner' do
+    # One buffer (issue #286): the model/tool side lands through the same single
+    # writer as the user side, so there is no harvest step. :spinner_detail is
+    # animated, never a rendered line, so it stays in the head.
+    it 'records the model/tool side through the single writer, the spinner stays in the head' do
       harness = build_harness
-      task = Task.new { }
-      task.buffer.put(type: :response, origin: :session_manager, content: 'the answer')
-      task.buffer.put(type: :spinner_detail, origin: :harness, content: { message: 'Working' })
-      task.buffer.put(type: :status_ok, origin: 'file.read', content: 'ok')
-
-      harness.absorb_turn(task)
+      harness.record_report_output(type: :response, origin: 'session_manager', content: 'the answer')
+      harness.record_report_output(type: :spinner_detail, origin: :harness,
+                                   content: { message: 'Working' })
+      harness.record_report_output(type: :status_ok, origin: 'file.read', content: 'ok')
 
       expect(harness.output_log.replay_tail.map(&:type)).to eq(%i[response status_ok])
-    end
-
-    it 'is a no-op for a nil task (a turn that never produced one)' do
-      harness = build_harness
-      expect { harness.absorb_turn(nil) }.not_to raise_error
-      expect(harness.output_log.replay_tail).to be_empty
+      expect(harness.output_log.head.map(&:type)).to eq([:spinner_detail])
     end
 
     it 'replay_tail_for_save is the Entry#to_h form of the window' do
@@ -3055,9 +3049,7 @@ RSpec.describe Harness do
     it 'records nothing when replay_entries is 0 (the disable)' do
       harness = build_harness(resume_replay_entries: 0)
       harness.record_user_prompt('ignored')
-      task = Task.new { }
-      task.buffer.put(type: :response, origin: :session_manager, content: 'ignored too')
-      harness.absorb_turn(task)
+      harness.record_report_output(type: :response, origin: 'session_manager', content: 'ignored too')
 
       expect(harness.output_log.replay_tail).to be_empty
     end
