@@ -22,6 +22,11 @@ events (`:text`, `:spinner_detail`, ...) AND control events (`:done`,
 a time and dispatches by type. Total ordering of all visible output follows
 because every event flows through exactly one FIFO.
 
+Under the registry design (issue #286 phase 0, `doc/task_model_design.md`) the queue
+belongs to the registry, not to one task: every job pushes onto that ONE queue and each
+event carries the job id. Fan-in keeps this guarantee across jobs - one queue per job
+would leave cross-job order undefined.
+
 Protocol:
 
 ```

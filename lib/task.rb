@@ -45,7 +45,9 @@ class Task
   def initialize(buffer:, &block)
     @block   = block
     @inbox   = Thread::Queue.new   # main -> task (responses, stop)
-    @outbox  = Thread::Queue.new   # task -> main (SINGLE event queue)
+    # task -> main (SINGLE event queue). Under the registry (issue #286) this is
+    # the registry's ONE fan-in queue: events carry the job id, so ordering holds.
+    @outbox  = Thread::Queue.new
     # The task USES the buffer it is given (issue #286): Task.run hands it the
     # run buffer, which the registry will replace with one buffer per job. The task
     # never builds one - the buffer's own limits belong to the buffer. The drain

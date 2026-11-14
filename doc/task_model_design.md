@@ -17,7 +17,7 @@ executor - the main-thread drain loop that owns ALL console I/O for one turn.
 The graph node is a different thing from the executor, so the split is:
 
 - **Job** - the node in the flat list. Has an id, a kind, a status, dependencies,
-  its own buffer, its own inbox and outbox.
+  its own buffer and its own inbox. Its events go to the registry's ONE queue.
 - **Task** - keeps the name. The executor that runs a Job in the foreground and
   renders to the console.
 
@@ -102,6 +102,36 @@ When job A started job B to get a result back, that result is delivered to **job
 A's inbox** when B completes. This is the same primitive for a sub-agent return, a
 command handle, and a timer fire - a dependency edge is a precondition, not a
 message-passing feature. A job's inbox is its own; nothing is shared.
+
+## Event channel: fan-in to the ONE registry queue (owner, 2026-11-14)
+
+Jobs have an inbox (registry -> job) but no outbox of their own. Every job pushes its
+events onto the registry's ONE queue, and each event carries the job id. The registry is
+the only reader of that queue and the only place that turns an event into a record entry
+in the job's buffer.
+
+Why fan-in rather than one queue per job: the single-queue rule in `doc/task_design.md`
+is what guarantees total ordering. One queue means the order of events across jobs is the
+order they were pushed - defined. With one queue per job there is no shared clock, so
+cross-job order is undefined, and the registry would need a select/poll or a sleep/wake
+pipe to learn which queue has data. Fan-in keeps the invariant with no extra mechanism.
+
+`Task#poll` therefore polls the registry queue for events tagged with the job id the
+executor is running for, and the registry's own loop polls the queue once per pass over
+all jobs, writing each event into that job's buffer.
+
+## Gates for increment 1 (the first runtime)
+
+Three things must be settled before any runtime is built because they change existing
+code:
+
+- **Main turn: job #0 or privileged** (open decision 4). Job #0 means the registry has
+  no special case and the foreground buffer is just job #0's buffer.
+- `TaskRunner#run_on_task` stops RUNNING a turn and awaits one: the registry is the
+  executor, so the CLI asks it to run a job and awaits the result.
+- **A denied background dialog needs a real answer value.** `DialogTool#execute` blocks
+  on `task.request(:dialog, ...)`, so the denial must come back as a value the tool can
+  return to the model - a bare refusal is not an answer it can act on.
 
 ## What the model does NOT collapse
 
