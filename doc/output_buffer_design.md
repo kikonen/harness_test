@@ -69,9 +69,14 @@ the live view of the same stream.
 Polling is per part: the tail has the read waterline (`#drain`), the head has a
 per-cell dirty flag (`#dirty_head`) - a replaced cell is not an append, so a
 waterline cannot express it. `#pending?` is true when either half has something
-new to show. `TRIM_AT`, `#keep_tail` and `#restore` apply to the tail only; the
-head is bounded by its own rule (it is current state, never an accumulation) and
-is never windowed.
+new to show. The tail has TWO limits, per buffer and configurable (issue #286):
+`max_memory` bounds how much of the tail lives in RAM and gates the
+consumed-front trim, `max_saved` is the window a session save writes.
+`max_saved <= max_memory`, so the saved window is always inside what memory
+holds, and `max_memory` never cuts a PENDING entry - a renderer that polls later
+still sees everything it has not read. `max_memory`, `#keep_tail` and `#restore`
+apply to the tail only; the head is bounded by its own rule (it is current state,
+never an accumulation) and is never windowed.
 
 ## Ownership
 

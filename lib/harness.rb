@@ -202,7 +202,13 @@ class Harness
     # lines. A resumed run seeds its tail from the saved session so the banner
     # can redraw the last topic. Main-thread only, like OutputBuffer itself.
     @replay_limit  = resume_replay_entries
-    @output_log    = OutputBuffer.new
+    # The run record's buffer gets the two tail limits from the config (issue #286):
+    # max_memory gates the consumed-front trim, max_saved is the window a save
+    # writes. Both fall back to the buffer's built-in default when unset. The saved
+    # window is the existing 'resume: replay_entries' value, not a second key.
+    @output_log    = OutputBuffer.new(
+      max_memory: output_tail_memory || OutputBuffer::DEFAULT_MAX_MEMORY,
+      max_saved:  @replay_limit)
 
     if resume_data
       saved_id = resume_data[:session_id]
@@ -1252,6 +1258,13 @@ class Harness
   def resume_replay_entries
     n = options[:resume_replay_entries]
     n.nil? ? DEFAULT_RESUME_REPLAY_ENTRIES : n.to_i
+  end
+
+  # How much of a buffer's tail lives in RAM (config 'output: tail_memory:'); nil
+  # falls back to the buffer's built-in default. Read through options like every
+  # other config value, so a spec-built Harness that only sets options works.
+  def output_tail_memory
+    options[:output_tail_memory]
   end
 
   # One LLM request. The streaming posture applies to THIS request only, so a

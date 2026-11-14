@@ -58,10 +58,11 @@ class OutputBuffer
     end
   end
 
-  # When the tail read waterline has advanced this far and it is at least half of
-  # what the tail holds, drop the consumed prefix so long sessions do not
-  # accumulate unbounded history in memory.
-  TRIM_AT = 4_096
+  # Two independent limits on the tail (issue #286): how much of it is kept in
+  # memory for review, and how much is saved in the session. max_saved <=
+  # max_memory, so the window a save writes is always inside what memory holds.
+  DEFAULT_MAX_MEMORY = 4_096
+  DEFAULT_MAX_SAVED  = 30
 
   # Types that live in the HEAD, never in the tail: they are the live region and
   # are not part of the durable record a replay redraws.
@@ -73,11 +74,22 @@ class OutputBuffer
   # is committed to the tail - the head must never be the only copy of an answer.
   HEAD_MODES = %i[append replace].freeze
 
-  def initialize
+  # Two independent tail limits (issue #286): max_memory bounds how much of the
+  # tail lives in RAM, max_saved is the window a session save writes. Both can be
+  # configured per buffer (config 'output:' block). max_memory NEVER cuts a PENDING
+  # (unread) entry - the nothing-lost rule of the drain loop - so it gates the
+  # consumed-front trim, not a plain "keep last N". max_saved <= max_memory so the
+  # saved window is always inside what memory holds.
+  def initialize(max_memory: DEFAULT_MAX_MEMORY, max_saved: DEFAULT_MAX_SAVED)
     @tail       = []
     @head       = {}
     @read_index = 0
+    @max_memory = max_memory
+    @max_saved  = max_saved
   end
+
+  # The two tail limits this buffer was built with.
+  attr_reader :max_memory, :max_saved
 
   # Append one item. A live update (mode: :append or :replace, or a type that is
   # transient by nature) lands as a head cell - created, or grown in place if
@@ -125,11 +137,14 @@ class OutputBuffer
     @head.values
   end
 
-  # The cell for one stream, keyed by (origin, type); nil when nothing is live
-  # for that pair. A single task can hold several cells at once (spinner + LLM
-  # response, both from :session_manager), so the key is the pair.
+  # The cell for one stream, keyed by (origin, type). A single head can hold
+  # several cells from the SAME origin at once - a response cell AND a spinner
+  # cell, both from :session_manager - because each (origin, type) stream is its
+  # own cell. The task is not a key field here: a buffer already IS one task, so
+  # the task enters the key at the TaskManager layer that selects which buffer is
+  # foreground (issue #286).
   def cell(origin, type)
-    @head[[normalize(origin), type.to_sym]]
+    @head[head_key(origin, type)]
   end
 
   # Promote one live cell to the record as ONE immutable tail entry holding its
@@ -137,10 +152,10 @@ class OutputBuffer
   # a commit starts a new cell, so the head never holds both the history and the
   # live view of the same stream. Keyed by (origin, type).
   def commit(origin, type)
-    live = @head[[normalize(origin), type.to_sym]]
+    live = @head[head_key(origin, type)]
     return nil if live.nil?
 
-    @head.delete([normalize(origin), type.to_sym])
+    @head.delete(head_key(origin, type))
     tail_entry(type: live.type, origin: live.origin, content: live.content)
   end
 
@@ -233,14 +248,22 @@ class OutputBuffer
   end
 
   def head_cell(type:, origin:, content:, mode: :replace)
-    existing = @head[[origin, type]]
+    existing = @head[head_key(origin, type)]
     return existing.update(content) if existing
 
-    @head[[origin, type]] = HeadCell.new(
+    @head[head_key(origin, type)] = HeadCell.new(
       type:,
       origin:,
       content:,
       mode:)
+  end
+
+  # The head-cell key is the stream: (origin, type). The task is NOT a key field
+  # here - a buffer already IS one task, so the task's full identity is
+  # (task, origin, type) where task is supplied by WHICH BUFFER the cell lives in,
+  # resolved at the TaskManager layer that picks the foreground buffer (issue #286).
+  def head_key(origin, type)
+    [normalize(origin), type.to_sym]
   end
 
   # normalize(origin) -> keep symbols/symbols-able values stable and short so
@@ -252,7 +275,7 @@ class OutputBuffer
   # Drop the consumed prefix when the waterline is far enough along that it
   # no longer matters (it is at least half of what the tail holds).
   def trim_prefix
-    return if @read_index < TRIM_AT
+    return if @read_index < @max_memory
     return if @read_index * 2 < @tail.size
 
     @tail = @tail[@read_index..] || []

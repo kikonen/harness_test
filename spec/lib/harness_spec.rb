@@ -3014,6 +3014,15 @@ RSpec.describe Harness do
       expect(harness.output_log.replay_tail.map(&:content)).to eq(['two', 'three'])
     end
 
+    # The config reaches the run buffer: the saved window is replay_entries, and the
+    # RAM limit comes from output: tail_memory (issue #286). Both fall back to the
+    # built-in default when unset, so a spec-built Harness still works.
+    it 'builds the run buffer from the config tail limits' do
+      harness = build_harness(output_tail_memory: 200, resume_replay_entries: 30)
+      expect(harness.output_log.max_memory).to eq(200)
+      expect(harness.output_log.max_saved).to eq(30)
+    end
+
     # absorb_turn harvests the model/tool side from a finished turn's task
     # buffer; :spinner_detail is skipped (it is animated, never a line).
     it 'harvests a turn task buffer tail, skipping the spinner' do
