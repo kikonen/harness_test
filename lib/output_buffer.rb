@@ -3,8 +3,9 @@
 # Append-only structured record of everything shown to a user, split into the
 # two parts issue #286 needs: the TAIL is the durable history a renderer can
 # re-lay out, the HEAD is the live state of the streams that are still arriving.
-# ONE buffer per run (held by the harness as a temporary home, the future
-# TaskManager owns it). Threading and ownership: doc/output_buffer_design.md
+# Each retained job has its own buffer, held by the registry (the harness holds it
+# as a temporary home until then). Threading and ownership:
+# doc/output_buffer_design.md
 
 class OutputBuffer
   # One committed unit of output. A Data instance - IMMUTABLE BY CONSTRUCTION:
@@ -141,10 +142,9 @@ class OutputBuffer
   # The cell for one stream, keyed by (origin, type). A single head can hold
   # several cells from the SAME origin at once - a response cell AND a spinner
   # cell, both from :session_manager - because each (origin, type) stream is its
-  # own cell. The task is not a key field here: this buffer is shared and tasks
-  # still die, so only one task's streams are ever live in it. The task enters the
-  # key at the TaskManager/registry layer that retains several tasks at once
-  # (issue #286).
+  # own cell. The job is not a key field here: each job's cells live in the job's
+  # own buffer, so the job is supplied by WHICH buffer is read, not by a third key
+  # part (issue #286).
   def cell(origin, type)
     @head[head_key(origin, type)]
   end
@@ -268,11 +268,9 @@ class OutputBuffer
       mode:)
   end
 
-  # The head-cell key is the stream: (origin, type). The task is NOT a key field
-  # here - the buffer is shared (held by the harness as a temporary home), and
-  # tasks still die, so only one task's streams are ever live. The task part of
-  # the key is deferred to the TaskManager/registry that retains several tasks
-  # (issue #286).
+  # The head-cell key is the stream: (origin, type). The job is NOT a key field
+  # here - each job has its own buffer, so the job is supplied by WHICH buffer is
+  # read (issue #286).
   def head_key(origin, type)
     [normalize(origin), type.to_sym]
   end
