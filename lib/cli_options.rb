@@ -118,11 +118,14 @@ class CLIOptions
         "--markdown-width N",
         "Column basis for markdown tables (issue #106): a table is sized to " \
           "fit N columns (clamped to the terminal width). Without it the basis " \
-          "is 80% of the detected terminal width. Only meaningful with " \
-          "--markdown / 'markdown:' in the config.") do |v|
-        opts[:markdown_max_width] = Integer(v)
+          "is 80% of the detected terminal width (capped for prose). A percentage " \
+          "(85%) is accepted as well and kept as the RAW form, because a sink with " \
+          "no column count of its own can only lay out from a percentage. Only " \
+          "meaningful with --markdown / 'markdown:' in the config.") do |v|
+        opts[:markdown_max_width] = v.to_s.match?(/\A\d+%\z/) ? v.to_s : Integer(v)
       rescue ArgumentError, TypeError
-        raise HarnessError, "--markdown-width needs an integer column count, got: #{v}"
+        raise HarnessError,
+          "--markdown-width needs a column count or a percentage, got: #{v}"
       end
       o.on(
         "--editor CMD",

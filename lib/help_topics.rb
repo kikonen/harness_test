@@ -4,7 +4,7 @@ require_relative "harness_error"
 
 # The prose half of /help as DATA (issue #323): named topics whose bodies are
 # paragraphs, so a reader can ask for one topic instead of scrolling a dump,
-# and so the wrapping/indenting is a rendering decision (HelpRenderer), not
+# and so the wrapping/indenting is a rendering decision (UI::HelpRenderer), not
 # hand-aligned text. A topic name must not collide with a command name -
 # HelpTopics.validate! checks that against the dispatch registry.
 module HelpTopics

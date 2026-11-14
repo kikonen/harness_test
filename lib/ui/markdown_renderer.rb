@@ -4,6 +4,7 @@ require "kramdown/ansi"
 require "tins/terminal"
 
 require_relative "palette"
+require_relative "width"
 
 # Renders a markdown string (an assistant answer) to ANSI terminal output
 # (issue #106) through kramdown-ansi, which PRESERVES inline emphasis
@@ -44,11 +45,12 @@ module UI
       code: :plan          # blue (plan)
     }.freeze
 
-    # The default table-width basis when no explicit max_width is configured:
-    # 80% of the detected terminal columns. The gem then sizes a table at 90% of
-    # the basis it is fed, so a table lands a little under the terminal width
-    # instead of the old fixed 80 (which wasted the width of a wide terminal).
-    AUTO_WIDTH_PERCENT = 80
+    # The default width when nothing is configured: 80% of the detected terminal.
+    # The gem then sizes a table at 90% of the basis it is fed, so a table lands a
+    # little under the terminal width instead of the old fixed 80 (which wasted the
+    # width of a wide terminal). A resolved percentage is capped (UI::Width), so a
+    # 200-column terminal does not produce a 170-column paragraph.
+    AUTO_WIDTH_PERCENT = UI::Width::DEFAULT_PERCENT
 
     # #475: a model answer quoting a tool call / XML / HTML (any text kramdown
     # reads as a raw <element>) is DROPPED, because kramdown-ansi has no ANSI
@@ -61,11 +63,28 @@ module UI
     CODE_SPAN = /(?<!`)(`+)(?:(?!\1).)+?\1/m
     AUTOLINK  = %r{<[a-zA-Z][a-zA-Z0-9+.\-]*:[^>\s]*>}
 
-    # max_width: the column basis for the render (nil = AUTO_WIDTH_PERCENT of the
-    # detected terminal). An explicit value is clamped to the terminal width.
-    def initialize(palette: nil, max_width: nil)
+    # max_width: the basis for the render - a column count (clamped to the
+    # terminal) or a percentage like "85%" (taken of the terminal, capped). nil
+    # means AUTO_WIDTH_PERCENT of the detected terminal. It stays as RAW DATA:
+    # a percentage is the only form a sink with no column count of its own (a
+    # browser page, a variable-width font) can lay out from, so the record and a
+    # remote client read #max_width, not this run's resolved number.
+    # ui: the SINK the text is written to, so the percentage is taken of the
+    # terminal that will actually receive it.
+    attr_reader :max_width
+
+    def initialize(palette: nil, max_width: nil, ui: nil)
       @palette   = palette
       @max_width = max_width
+      @ui        = ui
+    end
+
+    # The resolved basis THIS render uses.
+    def width
+      UI::Width.resolve(
+        value: @max_width,
+        terminal: UI::Width.terminal_columns(@ui),
+        fallback: UI::Width::MAX_PARAGRAPH_WIDTH)
     end
 
     # The markdown -> ANSI render. A parse failure never aborts an answer: the
@@ -111,20 +130,16 @@ module UI
     end
 
     # kramdown-ansi sizes tables and wraps paragraphs from Tins::Terminal.columns
-    # (90% of it). We feed it a BASIS: an explicit max_width (clamped to the
-    # terminal) or, by default, 80% of the detected columns. The override wraps
-    # only OUR parse and the ensure restores the original method even when the
-    # parse raises, so no other Tins::Terminal caller sees it.
+    # (90% of it). We feed it the RESOLVED basis and restore the real width
+    # afterwards, so no other Tins::Terminal caller sees the override even when the
+    # parse raises.
     def with_capped_width
       detected = Tins::Terminal.method(:columns)
-      columns  = detected.call
-      cap      =
-        if @max_width
-          [columns, @max_width].min
-        else
-          (columns * AUTO_WIDTH_PERCENT / 100.0).floor
-        end
-      Tins::Terminal.define_singleton_method(:columns) { cap }
+      # The resolved value must be captured in a LOCAL: define_singleton_method
+      # rebinds self, so a bare `width` in the block would be called on
+      # Tins::Terminal instead of on this renderer.
+      basis = width
+      Tins::Terminal.define_singleton_method(:columns) { basis }
       yield
     ensure
       Tins::Terminal.define_singleton_method(:columns, detected) if detected

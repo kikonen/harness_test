@@ -2,6 +2,7 @@
 
 require "io/console"
 require "kramdown/ansi"
+require_relative "width"
 
 # Animated status indicator. NO background thread: the main thread calls
 # `render!` once per drain tick, so a spinner frame can never interleave
@@ -13,9 +14,9 @@ module UI
     # A DETECTED width keeps this many columns free: a frame written into every
     # column makes the terminal wrap the line itself, which lands the next
     # frame's "\r\e[2K" on the wrong row and the residue is back. The same
-    # reason HelpRenderer::DEFAULT_WIDTH is 78 and not 80. An injected width is
-    # NOT reserved - that is exactly what a caller asked for.
-    RESERVED_COLUMNS = 1
+    # reason UI::Width never reserves an explicit count: that is exactly what a
+    # caller asked for. Detection lives in UI::Width, not a second copy here.
+    RESERVED_COLUMNS = UI::Width::RESERVED_COLUMNS
 
     # A live status badge rendered at the END of the frame line (issue #224
     # follow-up: the command consent MODE, e.g. "[YOLO]"). It may be a plain
@@ -253,54 +254,20 @@ module UI
       nil
     end
 
-    def reserve_columns(width)
-      return nil if width.nil?
-
-      [width - RESERVED_COLUMNS, 1].max
-    end
-
     # Width of the console the frame is actually written to (@ui.stdout), NOT
     # the process tty at large: a StringIO sink (every spec console) is not a
     # tty, so it answers nil and those frames stay UNFITTED - the byte-for-byte
-    # behavior every render! example above relies on. Preference order: the
-    # sink's own winsize (a real terminal File answers even when its isatty is
-    # unreliable, as some MSYS2 setups report; IO#winsize answers
-    # [rows, columns] so the COLUMNS are index 1), then - only for a tty sink -
-    # IO.console and $ENV['COLUMNS'].
+    # behavior every render! example above relies on. The detection is UI::Width's
+    # (one rule for every layer that reads a terminal width).
     def detect_columns
       io = @ui.respond_to?(:stdout) ? @ui.stdout : nil
-      sink_columns(io) || (tty_sink?(io) ? console_columns || env_columns : nil)
+      UI::Width.detect_columns(io)
     end
 
-    def tty_sink?(io)
-      io.respond_to?(:tty?) && io.tty?
-    end
+    def reserve_columns(width)
+      return nil if width.nil?
 
-    def sink_columns(io)
-      return nil unless io.respond_to?(:winsize)
-
-      positive_cols(io.winsize[1])
-    rescue StandardError
-      nil
-    end
-
-    def console_columns
-      io = IO.console
-      return nil unless io.respond_to?(:winsize)
-
-      positive_cols(io.winsize[1])
-    rescue StandardError
-      nil
-    end
-
-    def env_columns
-      env = ENV["COLUMNS"].to_s
-      env.match?(/\A\d+\z/) ? positive_cols(env) : nil
-    end
-
-    def positive_cols(value)
-      value = value.to_i
-      value.positive? ? value : nil
+      UI::Width.reserve_amount(width, RESERVED_COLUMNS)
     end
 
     def display_width(text)

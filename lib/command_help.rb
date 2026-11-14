@@ -5,7 +5,7 @@ require_relative "harness_error"
 # Structured help data for ONE slash command (issue #323). The command class
 # declares it, so /help is generated from the dispatch registry instead of
 # being a hand-copied second list that drifts from it.
-# Rendering: HelpRenderer; the prose half: HelpTopics.
+# Rendering: UI::HelpRenderer; the prose half: HelpTopics.
 class CommandHelp
   # Group -> heading, and the order the /help table prints its sections in.
   GROUPS = {

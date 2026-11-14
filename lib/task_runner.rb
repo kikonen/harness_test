@@ -100,6 +100,8 @@ module TaskRunner
   def main_thread_renderer
     width = harness.respond_to?(:markdown_max_width) ? harness.markdown_max_width : nil
     UI::Renderer.new(
-      palette: UI::Renderer.palette_for(ui:, harness:), markdown_max_width: width)
+      palette: UI::Renderer.palette_for(ui:, harness:),
+      ui:,
+      markdown_max_width: width)
   end
 end

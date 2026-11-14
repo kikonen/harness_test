@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../command"
-require_relative "../help_renderer"
+require_relative "../ui/help_renderer"
 require_relative "../help_topics"
 
 module Commands

@@ -101,8 +101,10 @@ class HarnessConfig
     @markdown = data[:markdown] == true
 
     # Table-width basis for markdown rendering (issue #106). nil = the renderer's
-    # default (80% of the detected terminal); an explicit integer is used as-is.
-    @markdown_max_width = int_or_nil(data[:markdown_max_width])
+    # default (80% of the detected terminal, capped for prose); an explicit column
+    # count is used as-is, and a percentage ("85%") is stored RAW because it is the
+    # only form a sink with no column count of its own can lay out from.
+    @markdown_max_width = width_or_nil(data[:markdown_max_width])
 
     # External MCP servers (issue #48). Opt-in: an empty list means no MCP code
     # path runs at all. Each entry is normalized to { name:, command:, args:, env: }.
@@ -317,7 +319,8 @@ class HarnessConfig
   end
 
   # Table-width basis for markdown rendering (issue #106), or nil for the
-  # renderer's default (80% of the detected terminal).
+  # renderer's default (80% of the detected terminal, capped for prose). A
+  # percentage is returned as the raw "N%" string, never as a resolved number.
   def markdown_max_width
     @markdown_max_width
   end
@@ -585,6 +588,15 @@ class HarnessConfig
     Integer(val)
   rescue ArgumentError, TypeError
     raise HarnessError, "expected an integer, got: #{val.inspect}"
+  end
+
+  def width_or_nil(val)
+    return nil if val.nil?
+
+    text = val.to_s
+    return text if text.match?(/\A\d+%\z/)
+
+    int_or_nil(val)
   end
 
   def float_or_nil(val)

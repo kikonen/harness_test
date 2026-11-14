@@ -102,8 +102,10 @@ RSpec.describe UI::MarkdownRenderer do
   end
 
   # The gem sizes tables from Tins::Terminal.columns (90% of it). We feed it a
-  # BASIS: an explicit max_width (clamped to the terminal) or, by default, 80% of
-  # the detected columns. The override must restore the real width afterwards.
+  # BASIS from UI::Width: an explicit CHAR count (clamped to the terminal and
+  # honored as asked), a PERCENTAGE (taken of the terminal and capped at the
+  # reading maximum), or neither (the default percentage, capped). The override
+  # must restore the real width afterwards.
   describe 'table width basis' do
     def widest(line)
       line.lines.map { |l| l.gsub(/\e\[[0-9;]*m/, "").rstrip.length }.max
@@ -128,13 +130,32 @@ RSpec.describe UI::MarkdownRenderer do
       expect(width).to be > 80 # the extra width is actually used
     end
 
-    it 'defaults to 80% of the terminal when no max_width is given' do
-      # 80% of 176 = 140 basis -> a wider table than the old fixed 80, but never
-      # past the terminal itself.
-      width = widest(described_class.new(palette: UI::Palette.fetch('default')).render(table))
+    # Measured: 80% of 176 would be 140, but a resolved percentage is capped at
+    # the reading maximum (UI::Width::MAX_PARAGRAPH_WIDTH = 120), so a wide
+    # terminal gets a readable line instead of a 170-column one.
+    it 'caps the default percentage at the reading maximum' do
+      renderer = described_class.new(palette: UI::Palette.fetch('default'))
 
-      expect(width).to be > 80
-      expect(width).to be <= 176
+      expect(renderer.width).to eq(120)
+      expect(widest(renderer.render(table))).to eq(103)
+    end
+
+    # A PERCENTAGE is the form that travels to a sink with no column count of its
+    # own (a browser, variable-width font), so the renderer keeps it as data.
+    it 'keeps a percentage basis as data and resolves it against the terminal' do
+      renderer = described_class.new(palette: UI::Palette.fetch('default'), max_width: '85%')
+
+      expect(renderer.max_width).to eq('85%')
+      expect(renderer.width).to eq(120) # capped, not 149
+    end
+
+    # An explicit CHAR count is exactly what the caller asked for: it is honored
+    # past the cap, only clamped to the terminal.
+    it 'honors an explicit count past the cap (only clamped to the terminal)' do
+      renderer = described_class.new(palette: UI::Palette.fetch('default'), max_width: 140)
+
+      expect(renderer.width).to eq(140)
+      expect(widest(renderer.render(table))).to eq(123)
     end
 
     it 'clamps an explicit max_width to the terminal width' do
@@ -144,11 +165,12 @@ RSpec.describe UI::MarkdownRenderer do
     end
 
     it 'restores the detected width after the render (the basis is not global)' do
-      described_class.new(palette: UI::Palette.fetch('default'), max_width: 120).render(table)
+      pinned = UI::MarkdownRenderer.new(palette: UI::Palette.fetch('default'), max_width: 100)
+      widest(pinned.render(table))
 
-      # The next render sees the real 176 again (auto basis 140), not 120.
+      # The next renderer sees the terminal-derived basis again, not 100.
       expect(widest(described_class.new(palette: UI::Palette.fetch('default')).render(table)))
-        .to be > 120
+        .to be > 87
     end
   end
 

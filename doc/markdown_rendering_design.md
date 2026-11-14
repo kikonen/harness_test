@@ -115,8 +115,19 @@ parse raises). The basis is:
   `markdown_max_width:` key), clamped to the detected terminal width, or
 - by default, `AUTO_WIDTH_PERCENT` (80%) of the detected terminal columns.
 
-So on a 160-column terminal the default basis is ~128 and a table can use the
-extra width instead of the old fixed 80; an explicit count pins it. The basis is
+The rule lives in `UI::Width` (issue #474, increment 24), verified against the gem
+on 2026-11-13. A width is stated as a column COUNT or as a PERCENTAGE:
+
+- an explicit count is honored as asked and only clamped to the terminal;
+- a percentage is taken of the terminal and capped at `UI::Width::MAX_PARAGRAPH_WIDTH`
+  (120), so a wide terminal gets a readable paragraph instead of a 170-column one;
+- with no terminal to measure (a spec StringIO, a pipe) the caller's fallback
+  applies, which is what keeps every existing wrapped pin byte-identical.
+
+The RAW form is kept as data (`#max_width`): a percentage is the only form a sink
+with no column count of its own (an HTML page, a variable-width font) can lay out
+from. So on a 160-column terminal the default basis is 120 (80%, capped), and a
+table can use the extra width instead of the old fixed 80. The basis is
 config-derived for the whole run (read when a Task builds its renderer, like the
 palette) - NOT a live toggle like the markdown on/off posture itself.
 

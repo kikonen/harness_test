@@ -323,8 +323,10 @@ RSpec.describe UI::Renderer do
     # opt-in OFF (the table renderer is built with it, so a configured width -
     # --markdown-width / 'markdown_max_width:' - actually constrains the table
     # instead of being ignored). The cells are wrappable (space-separated), so the
-    # gem lays them within the basis; a wider basis uses the extra room, proving
-    # the width is read and not defaulted.
+    # gem lays them within the basis. A resolved percentage is capped at the
+    # reading maximum, so the default basis at a 176-col terminal is 120 - and an
+    # explicit count past the cap is honored as asked, proving the width is read
+    # and not defaulted.
     it 'sizes a :table to a configured markdown_max_width (even with markdown off)' do
       desc = "Executes a shell command in the harness working directory. Most " \
              "commands require explicit user confirmation before they run; " \
@@ -339,8 +341,28 @@ RSpec.describe UI::Renderer do
                                    markdown_max_width: 120)
                             .line(type: :list, content: payload)
 
-      expect(wide.lines.map { |l| strip_ansi(l).rstrip.length }.max).to be > 120
+      # Measured: the default percentage (80% of 176 = 140) is capped to the
+      # reading maximum 120, so the table lays out inside 120.
+      expect(wide.lines.map { |l| strip_ansi(l).rstrip.length }.max).to be <= 120
       expect(capped.lines.map { |l| strip_ansi(l).rstrip.length }.max).to be <= 120
+    end
+
+    # An explicit count past the cap is honored as asked (only clamped to the
+    # terminal), so a caller who wants a wider table can still get one.
+    it 'honors a count past the cap for a table' do
+      desc = "Executes a shell command in the harness working directory. Most " \
+             "commands require explicit user confirmation before they run; " \
+             "approved prefixes auto-approve. Long prose wraps at 120 but not 176."
+      payload = { kind: :table, columns: %i[tool description],
+                  items: [{ tool: 'run.command', description: desc }] }
+
+      allow(Tins::Terminal).to receive(:columns).and_return(176)
+      lines = described_class.new(palette: UI::Palette.fetch('default'),
+                                  markdown_max_width: 140)
+                             .line(type: :list, content: payload)
+                             .lines.map { |l| strip_ansi(l).rstrip.length }
+
+      expect(lines.max).to be > 120
     end
 
     it 'leaves the list unpainted with a palette (only the layout moves)' do

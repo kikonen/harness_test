@@ -96,12 +96,21 @@ RSpec.describe CLIOptions do
       expect(opts[:markdown_max_width]).to eq(90)
     end
 
+    # A percentage is accepted as RAW data (the only form a sink with no column
+    # count of its own can lay out from), so it is stored as written.
+    it 'accepts a percentage as the raw basis' do
+      opts = resolve(['-m', 'test-model', '-d', workdir,
+                      '-c', write_config('md-config.yml', "model: test-model\n"),
+                      '--markdown-width', '85%'])
+      expect(opts[:markdown_max_width]).to eq('85%')
+    end
+
     it 'a non-integer --markdown-width is a CLI error, not a silent nil' do
       expect {
         resolve(['-m', 'test-model', '-d', workdir,
                  '-c', write_config('md-config.yml', "model: test-model\n"),
                  '--markdown-width', 'wide'])
-      }.to raise_error(HarnessError, /--markdown-width needs an integer/)
+      }.to raise_error(HarnessError, /--markdown-width needs a column count or a percentage/)
     end
   end
 
