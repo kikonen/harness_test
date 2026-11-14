@@ -30,7 +30,7 @@ this issue started.
 | registry | `lib/command_handler.rb` | WHICH commands exist (`COMMANDS`) |
 | entry data | each `lib/commands/<name>_command.rb` | WHAT one command is: usage form, accepted forms, one-line summary, group, see-also |
 | topic data | `lib/help_topics.rb` | the prose: named topics with paragraph bodies |
-| rendering | `lib/help_renderer.rb` | HOW it looks: grouping, column width, wrapping, the see-also resolution, the "did you mean" list |
+| rendering | `lib/ui/help_renderer.rb` | HOW it looks: the tables, the wrapping, the see-also resolution, the "did you mean" list |
 
 `Command.help` (on the shared base) reads the class's own `HELP` constant, and
 **raises if a command declares none**. That is the whole anti-drift mechanism:
@@ -38,18 +38,21 @@ this issue started.
 registered command without help cannot be silently skipped - it fails loudly, the
 same principle #146 applied to unknown output types.
 
-`HelpRenderer` takes the registry as a parameter and returns LINES; it prints
-nothing. The command that owns the console decides how they land - the same
-data-then-render split the output layer uses.
+`UI::HelpRenderer` takes the registry as a parameter and returns LINES; it prints
+nothing. It lays out NOTHING by hand (issue #474): every table here is data handed
+to `UI::Renderer`, the blank line between blocks is the `:gap` role, and prose is
+wrapped by `UI::TextWrap`. The command that owns the console decides how they land -
+the same data-then-render split the output layer uses.
 
 ## What the reader gets
 
-- bare `/help`: the command table grouped by kind (one column width computed from
-  the entries, not hand-padded) + the topic index. 73 lines instead of 169.
+- bare `/help`: the command table grouped by kind (the column width is the gem's,
+  not computed or hand-padded here) + the topic index. 73 lines instead of 169.
 - `/help <command>`: that command's summary and every accepted form.
 - `/help <topic>`: one prose topic on its own. The bodies are plain paragraphs;
-  the renderer wraps them to `DEFAULT_WIDTH` (78), so the wording is data and
-  the line shape is a rendering decision.
+  the renderer wraps them to the RESOLVED width (UI::Width: a percentage of the
+  terminal capped at the reading maximum, or an explicit count), so the wording is
+  data and the line shape is a rendering decision.
 - `/help <unknown>` and `/<unknown>`: the closest registered names, from the same
   registry the lookup just missed.
 - An entry's `see_also` is resolved against BOTH registries: a command becomes
@@ -75,7 +78,7 @@ data-then-render split the output layer uses.
   `/help session` ambiguous (the first topic set did collide on `session`, which
   is why the prose topic is `conversation`).
 
-`HelpRenderer#help_entries` additionally refuses an entry whose usage does not
+`UI::HelpRenderer#help_entries` additionally refuses an entry whose usage does not
 start with its registered name: the table prints the usage form in the command's
 slot, so a mismatched one would advertise a form the dispatcher does not accept -
 the spec asserts the same thing for every entry, without running the renderer.

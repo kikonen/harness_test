@@ -36,7 +36,7 @@ require_relative "commands/memory_command"
 require_relative "commands/plans_command"
 require_relative "commands/plan_command"
 
-require_relative "help_renderer"
+require_relative "ui/help_renderer"
 require_relative "help_topics"
 
 # Thin dispatcher: checks if input starts with "/", extracts the first word,
@@ -94,7 +94,10 @@ class CommandHandler
     @on_resume = on_resume
     # One renderer for the whole run: it reads the registry this class owns,
     # so /help can never list a different set than /dispatch accepts.
-    @help_renderer = HelpRenderer.new(registry: COMMANDS)
+    @help_renderer = UI::HelpRenderer.new(
+      registry: COMMANDS,
+      ui:,
+      harness:)
     HelpTopics.validate!(COMMANDS.keys)
   end
 

@@ -2,9 +2,9 @@
 
 require 'spec_helper'
 require 'command'
-require 'help_renderer'
+require 'ui/help_renderer'
 
-RSpec.describe HelpRenderer do
+RSpec.describe UI::HelpRenderer do
   # A tiny registry stands in for CommandHandler::COMMANDS: the renderer works
   # off ANY registry, which is what makes the drift spec meaningful.
   def stub_command(usage:, summary:, group: :general, forms: [], see_also: [])
@@ -62,19 +62,20 @@ RSpec.describe HelpRenderer do
     it 'prints a usage line and one aligned line per form' do
       lines = renderer.render_inline(help)
 
-      expect(lines.first).to start_with('  usage: /demo')
-      expect(lines.grep(/\/demo </).first).to include('with an argument')
+      expect(lines.first).to eq('usage: /demo [thing]')
+      expect(lines.grep(%r{/demo <thing>}).first).to include('with an argument')
     end
 
-    it 'aligns every form column from the longest form (no hand padding)' do
+    it 'has no column padding of its own - the layout belongs to UI::Renderer' do
       lines = renderer.render_inline(help)
-      # The description column is fixed at prefix length + (longest form + 1),
-      # so it never depends on hand padding: every line starts its text there.
-      col = HelpRenderer::INDENT.length + 'usage: '.length + '/demo <thing>'.length + 1
-      expect(lines[0][col - 1]).to eq(' ')
-      expect(lines[1][col - 1]).to eq(' ')
-      expect(lines[0][col..]).to eq('run it')
-      expect(lines[1][col..]).to eq('with an argument')
+
+      expect(lines).to eq([
+        'usage: /demo [thing]',
+        '| form | note |',
+        '| ---- | ---- |',
+        '| /demo | run it |',
+        '| /demo <thing> | with an argument |'
+      ])
     end
   end
 
@@ -83,43 +84,51 @@ RSpec.describe HelpRenderer do
       lines = renderer.overview
 
       expect(lines).to include('Commands:')
-      expect(lines).to include('  Access and consent', '  General')
+      expect(lines).to include('Access and consent', 'General')
       # Groups print in GROUPS order, not registry order.
-      expect(lines.index('  Access and consent')).to be < lines.index('  General')
+      expect(lines.index('Access and consent')).to be < lines.index('General')
     end
 
-    it 'lists every registered command with its usage form' do
-      rendered = renderer.overview.join("\n")
-
-      expect(registry.keys).to all(satisfy { |name| rendered.match?(%r{^\s+/#{name}\b}) })
-    end
-
-    it 'wraps a long summary under its own column, not under the usage form' do
-      lines      = renderer.overview
-      row        = lines.find { |line| line.include?('/demo [thing]') }
-      continuation = lines[lines.index(row) + 1]
-      column   = row.index('A demo')
-
-      expect(row).to match(/\A\s+\/demo \[thing\]\s+A demo/)
-      # The continuation lines up with the summary column, not with the usage form.
-      expect(continuation).to start_with(' ' * column)
-      expect(continuation).not_to include('/')
-    end
-
-    it 'aligns every summary to the SAME column across groups' do
+    # The row is a table ROW of named fields, not a padded string: a cell is read
+    # by name, so a reordered columns list cannot scramble it (issue #474).
+    it 'lists every registered command as a row starting with its usage form' do
       lines = renderer.overview
-      starts = ['Other command', 'Short one', 'A demo command'].map do |summary|
-        lines.find { |line| line.include?(summary) }.index(summary)
-      end
 
-      expect(starts.uniq).to eq([starts.first])
+      expect(registry.values).to all(satisfy { |klass|
+        lines.any? { |l| l.start_with?("| /#{klass.help.usage} |") }
+      })
+    end
+
+
+    # No column width is computed here any more: the layout is UI::Renderer's, so
+    # the SAME data handed to the renderer produces the SAME rows.
+    it 'produces the same rows as UI::Renderer given the same data' do
+      plain = UI::Renderer.new
+      payload = {
+        title: 'Access and consent',
+        kind: :table,
+        columns: %i[name summary],
+        items: [{ name: '/other', summary: 'Other command' },
+                { name: '/s', summary: 'Short one' }]
+      }
+
+      expect(renderer.overview[2..6]).to eq(plain.line(type: :list, content: payload).split("\n"))
+    end
+
+    # A long summary stays ONE cell: nothing is pre-chopped at a column a remote
+    # sink cannot change, so the gem (or a browser) owns the wrap.
+    it 'keeps a long summary as one cell, not as pre-wrapped text' do
+      row = renderer.overview.find { |line| line.include?('/demo [thing]') }
+
+      expect(row).to eq('| /demo [thing] | A demo command whose summary is long enough to be ' \
+        'wrapped into more than one rendered line by the table |')
     end
 
     it 'finishes with the topic index instead of the prose' do
       lines = renderer.overview
 
       expect(lines).to include('Topics (read one with /help <topic>):')
-      expect(lines).to include('  topic  The Topic')
+      expect(lines).to include('| topic | The Topic |')
       expect(lines.join("\n")).not_to include('A short body.')
     end
 

@@ -49,7 +49,7 @@ decoration that a renderer can produce itself.
 | `:status_ok` ... `:status_info` | the verdict's message | `  [label] ✓ message` (see below) |
 | `:ack` | the badge word | `  [YOLO ON]` (bracketed ack, unpainted; issue #466) |
 | `:kind` | the message after the kind | `  [LLM error] rate limited` (bracket names a kind, unpainted; #466) |
-| `:note` | ONE or MORE unwrapped paragraphs | each re-wrapped to a fixed width, indented (harness prose, unpainted; #470) |
+| `:note` | ONE or MORE unwrapped paragraphs | each re-wrapped to the resolved width, indented (harness prose, unpainted; #470) |
 | `:body` | the RAW markdown of a stored file (a plan, a memory, a skill) | the render of that markdown (markers consumed); as stored when there is no palette; unpainted (the gem colors it); #474 |
 | `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, arrow `  a -> b @ c`, kv `  n - d`, table rendered as a markdown table via kramdown); footer indents from its LEVEL; unpainted; #474 |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
@@ -143,11 +143,22 @@ ONE or MORE unwrapped paragraphs with NO leading indent, and `#note_line` re-wra
 each to a fixed width and indents every line. UNPAINTED (`NOTE` has no palette
 entry): only the wrap/indent move, so no line changes color.
 
-The wrap width is the constant `NOTE_WIDTH` (= `RULE_WIDTH - INDENT`), NOT the
-terminal width - the same reason `RULE_WIDTH` is fixed: a paragraph that re-wraps
-on every resize is as unlocatable as a boundary that moves. A word wider than the
-wrap gets its own line rather than being split mid-word (a command name or URL is
-one token).
+The wrap width is RESOLVED, not hardcoded (issue #474, increment 24): a width can
+be stated as a column count or as a percentage of the terminal, and
+`UI::Renderer#width` resolves it against the terminal the text is written to.
+
+- A COUNT is clamped to the terminal and honored as asked (it is never shrunk to
+  the cap - that is what a caller requested).
+- A PERCENTAGE is capped at the reading maximum (`UI::Width::MAX_PARAGRAPH_WIDTH`,
+  120): 80% of a 176-column terminal is 120, not 140, because a 170-column
+  paragraph is not readable. The RAW form is what the record and a remote sink
+  keep, because a percentage is the only form a variable-width sink can lay out
+  from - "120 chars" means nothing on an HTML page.
+- With NO terminal to measure (a spec console, a pipe) the fallback is
+  `RULE_FALLBACK_WIDTH`, so `NOTE_WIDTH` (= fallback - `INDENT` = 78) keeps every
+  existing wrapped pin byte-identical.
+A word wider than the wrap gets its own line rather than being split mid-word (a
+command name or URL is one token).
 
 **A whole report body is ONE note call.** `emit_role(:note, ...)` accepts an ARRAY
 of paragraphs; `TaskRunner#status_event` newline-joins them into ONE event, and
@@ -170,7 +181,10 @@ columns (the param listing, the server, tool and session reports) moves onto the
 structured `:list`/`:table` role (see the next section) instead: the column
 boundaries then survive as DATA that a browser can re-lay out, rather than as a
 fused row string. The aligned blocks that remain are the ones whose alignment is
-the point: `/help`'s usage columns. `/ctx`'s padded value column was the last one
+the point. `/help`'s tables were the last of them and are now data too (increment
+24): the command table, the topic index and the bad-argument usage block each state
+named fields and are laid out by `UI::Renderer`, so no column is padded in
+`UI::HelpRenderer` any more. `/ctx`'s padded value column was the last one
 and is now a two-column `field | value` table (increment 21): the harness answers
 the FACTS it already computes for the compaction decision (window, tokens, the
 estimate flag, pct, headroom, trigger, due) and the command states them as fields,

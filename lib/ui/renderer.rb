@@ -2,6 +2,7 @@
 
 require_relative "palette"
 require_relative "markdown_renderer"
+require_relative "width"
 require_relative "text_wrap"
 
 # Renders one output entry to a console line: the PATTERN (label, status
@@ -84,8 +85,11 @@ module UI
     # Fixed width, NOT the terminal width: a boundary that depends on a
     # terminal setting is a boundary that moves.
     RULE_WIDTH = 80
-    # :note content columns: RULE_WIDTH minus the indent. One fixed value so a
-    # rendered paragraph is identical from a 60-col or a 176-col terminal.
+    # The FALLBACK page width when no terminal can be detected (a spec console, a
+    # pipe). A live terminal resolves its own through UI::Width (chars or a
+    # percentage, capped for prose), so a paragraph is never a 170-column line.
+    # NOTE_WIDTH is the content budget that fallback implies: RULE_WIDTH - INDENT.
+    RULE_FALLBACK_WIDTH = RULE_WIDTH
     NOTE_WIDTH = RULE_WIDTH - INDENT.length
 
     # A structured list/table report (issue #474). The emitter states the DATA
@@ -161,13 +165,39 @@ module UI
     # :response and the MARKDOWN_ROLES prose lines. markdown_max_width is the
     # table-width basis (nil = 80% of the terminal); the boundary chrome stays at
     # the fixed RULE_WIDTH whatever this says.
-    def initialize(palette: nil, markdown: false, markdown_max_width: nil)
+    # ui: the SINK the lines are written to, so the width can be resolved from the
+    # terminal that will actually receive them.
+    def initialize(
+      palette: nil,
+      markdown: false,
+      markdown_max_width: nil,
+      ui: nil
+    )
       @palette  = palette
       @markdown = markdown ?
         MarkdownRenderer.new(palette:, max_width: markdown_max_width) : nil
       # A :table (sessions / mcp / tools) sizes from this same basis even when
       # markdown opt-in is off, so a configured width constrains the table too.
+      @ui = ui
+      # The RAW basis stays as data: a percentage is the only form a sink with no
+      # column count of its own (a browser, variable-width font) can lay out from,
+      # so the record must carry "85%" and not this run's resolved number.
       @markdown_max_width = markdown_max_width
+    end
+
+    # The resolved content width for THIS renderer: the paragraph budget, the
+    # table basis, and the wrap width all read it.
+    def width
+      UI::Width.resolve(
+        value: @markdown_max_width,
+        terminal: UI::Width.columns_for(@ui),
+        fallback: RULE_FALLBACK_WIDTH)
+    end
+
+    # The prose budget: the page width minus the indent a paragraph carries, so a
+    # wrapped line stays inside the page width.
+    def note_width
+      width - INDENT.length
     end
 
     # origin: for a status type, the bracket label ("file.read", "access",
@@ -215,15 +245,16 @@ module UI
     end
 
     # A paragraph of harness prose: indent every wrapped line and re-wrap the
-    # text to the fixed NOTE_WIDTH, so the paragraph is a function of the
-    # renderer, not of where the emitter happened to break the source string
-    # (#470). Unpainted - only the wrap/indent move. A continuation line is the
-    # INDENT alone (a paragraph line, not a status gutter).
+    # text to the resolved note width (UI::Width: a count or a terminal percentage
+    # capped for prose), so the paragraph is a function of the renderer, not of
+    # where the emitter happened to break the source string (#470). Unpainted -
+    # only the wrap/indent move. A continuation line is the INDENT alone (a
+    # paragraph line, not a status gutter).
     def note_line(paragraph)
       lines = paragraph.to_s.split("\n")
       out = []
       lines.each do |raw|
-        wrapped = TextWrap.words(raw, NOTE_WIDTH)
+        wrapped = TextWrap.words(raw, note_width)
         wrapped = [""] if wrapped.empty?
         wrapped.each { |seg| out << (seg.empty? ? INDENT : INDENT + seg) }
       end

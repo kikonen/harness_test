@@ -14,7 +14,7 @@ RSpec.describe Commands::HelpCommand do
   def run(args, reg = registry)
     io      = StringIO.new
     console = UI::Console.new(stdout: io, stdin: StringIO.new(''))
-    renderer = HelpRenderer.new(registry: reg)
+    renderer = UI::HelpRenderer.new(registry: reg)
     described_class.new(
       harness: nil,
       file_list: nil,
@@ -83,7 +83,12 @@ RSpec.describe Commands::HelpCommand do
     it 'lists EVERY registered command (nothing is hand-copied any more)' do
       out = run('')
 
-      expect(registry.keys).to all(satisfy { |name| out.match?(%r{^\s+/#{name}\b}) })
+      # Each command is a table ROW whose first cell is its usage form. The cell is
+      # measured as the row starts (a usage containing a pipe is escaped by the
+      # renderer, so the pin reads the registered name, not the raw usage string).
+      expect(registry.keys).to all(satisfy { |name|
+        out.lines.any? { |line| line.start_with?("| /#{name}") }
+      })
     end
 
     it 'does not print the prose any more - only the topic index' do
@@ -92,8 +97,9 @@ RSpec.describe Commands::HelpCommand do
       expect(out).to include('Topics (read one with /help <topic>):')
       expect(out).not_to include('paste-guarded')
       expect(out).not_to include('Always allow')
-      # The dump it replaces was 169 lines (measured from the old heredoc).
-      expect(out.lines.size).to be < 100
+      # Measured at this registry, no palette (the raw markdown, one row per
+      # command): the table is shorter than the aligned block it replaced.
+      expect(out.lines.size).to eq(62)
     end
 
     it 'labels each group the help entry files the command under' do

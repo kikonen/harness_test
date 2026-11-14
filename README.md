@@ -495,8 +495,10 @@ lib/git_runner.rb   # safe git invocation base for the git tools
 lib/shell_tokenizer.rb  # StringScanner lexer for shell commands
 lib/shell_parser.y  # Racc grammar source (regenerate .rb with racc)
 lib/command_handler.rb + lib/commands/*.rb  # one class per /command
-lib/command_help.rb + lib/help_topics.rb + lib/help_renderer.rb
+lib/command_help.rb + lib/help_topics.rb + lib/ui/help_renderer.rb
                     # /help data (per-command entries, topics) and its renderer
+lib/ui/width.rb     # the width rule: a column count or a terminal percentage,
+                    # resolved against the sink the text is written to
 lib/tools/*.rb      # one file per tool
 tmp/scratch/<n>/    # transient model scratch (probes, -a copies, dumps); deleted
                     # when its PR merges
