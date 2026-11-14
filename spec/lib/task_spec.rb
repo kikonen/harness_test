@@ -272,23 +272,35 @@ RSpec.describe Task do
   # issue #221 review (bug 1): the spinner content the task asked for is
   # remembered, so a spinner rebuilt later in the same wait does not fall
   # back to the bare 'Working' default.
-  describe 'spinner detail memory' do
+  # issue #286: the head cell IS the memory. A re-point lands in the buffer's
+  # head (never the tail), and the rebuild reads the most recently updated
+  # spinner head cell - so the live state and the replay are the same object.
+  describe 'spinner head memory (issue #286)' do
     let(:task) { described_class.new { |_t| } }
 
-    it 'spinner_detail is nil until something is recorded' do
-      expect(task.spinner_detail).to be_nil
+    it 'the spinner head cell is nil until a re-point lands in the head' do
+      expect(task.buffer.latest_head(:spinner_detail)).to be_nil
     end
 
-    it 'record_spinner_detail stores a hash payload' do
-      task.record_spinner_detail(message: 'Sending', suffix: 'ctx 12%')
+    it 'a re-point lands as a head cell, never a tail entry' do
+      task.buffer.put(type: :spinner_detail, origin: :session_manager,
+                      content: { message: 'Sending', suffix: 'ctx 12%' })
 
-      expect(task.spinner_detail).to eq(message: 'Sending', suffix: 'ctx 12%')
+      expect(task.buffer.head.size).to eq(1)
+      expect(task.buffer.tail).to be_empty
+      expect(task.buffer.latest_head(:spinner_detail).content)
+        .to eq(message: 'Sending', suffix: 'ctx 12%')
     end
 
-    it 'ignores a non-hash payload (nothing to re-play)' do
-      task.record_spinner_detail('Sending')
+    # A new wait must re-play its OWN re-point, not one from a finished wait:
+    # the head cell for a spinner is replaced, so it holds the newest state.
+    it 'the head holds the newest re-point, not one from an earlier wait' do
+      task.buffer.put(type: :spinner_detail, origin: :session_manager,
+                      content: { message: 'Compacting session mid-task' })
+      task.buffer.put(type: :spinner_detail, origin: :session_manager,
+                      content: { message: 'Sending to model' })
 
-      expect(task.spinner_detail).to be_nil
+      expect(task.buffer.latest_head(:spinner_detail).content).to eq(message: 'Sending to model')
     end
   end
 
@@ -437,7 +449,10 @@ RSpec.describe Task do
       task = described_class.new { |_t| }
       task.ui = UI::Console.new(stdout: StringIO.new)
       task.harness = mode_harness('MANUAL')
-      task.record_spinner_detail(message: 'Sending to qwen', suffix: 'ctx 12%')
+      # The head cell is the memory the rebuild reads (issue #286): the
+      # store_and_render path lands the re-point as a head cell.
+      task.buffer.put(type: :spinner_detail, origin: :session_manager,
+                      content: { message: 'Sending to qwen', suffix: 'ctx 12%' })
 
       described_class.ensure_spinner_running(task)
       line = task.visible_spinner.frame_line

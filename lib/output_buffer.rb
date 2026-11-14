@@ -153,8 +153,16 @@ class OutputBuffer
   # Head cells changed since the last poll, in first-seen order.
   def dirty_head
     changed = @head.values.select(&:dirty?)
+
     changed.each(&:clear_dirty)
     changed
+  end
+
+  # The most recently UPDATED head cell of a type - the live state a renderer
+  # shows when several streams of that type are live at once (a new wait
+  # announces itself instead of inheriting a finished wait's line).
+  def latest_head(type)
+    @head.values.select { |cell| cell.type == type.to_sym }.max_by(&:version)
   end
 
   # True when a renderer has something new to show: pending tail entries, or a
