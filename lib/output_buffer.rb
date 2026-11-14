@@ -116,25 +116,31 @@ class OutputBuffer
     @tail.last(count)
   end
 
-  # The live half: one cell per stream, in first-seen order.
+  # The live half: one cell per STREAM, a stream being (origin, type). A single
+  # task can have several cells live at once - the spinner cell AND the LLM
+  # streamed-response cell, both from :session_manager - so the key is the pair,
+  # never the origin alone (which would collapse them into one cell). In
+  # first-seen order.
   def head
     @head.values
   end
 
-  # The cell a stream has, or nil when nothing is live for that origin.
-  def cell(origin)
-    @head[normalize(origin)]
+  # The cell for one stream, keyed by (origin, type); nil when nothing is live
+  # for that pair. A single task can hold several cells at once (spinner + LLM
+  # response, both from :session_manager), so the key is the pair.
+  def cell(origin, type)
+    @head[[normalize(origin), type.to_sym]]
   end
 
-  # Promote the live state to the record: each cell becomes ONE immutable tail
-  # entry holding its final content, and leaves the head. A stream that keeps
-  # going after a commit starts a new cell, so the head never holds both the
-  # history and the live view of the same stream.
-  def commit(origin)
-    live = @head[normalize(origin)]
+  # Promote one live cell to the record as ONE immutable tail entry holding its
+  # final content, and remove it from the head. A stream that keeps going after
+  # a commit starts a new cell, so the head never holds both the history and the
+  # live view of the same stream. Keyed by (origin, type).
+  def commit(origin, type)
+    live = @head[[normalize(origin), type.to_sym]]
     return nil if live.nil?
 
-    @head.delete(normalize(origin))
+    @head.delete([normalize(origin), type.to_sym])
     tail_entry(type: live.type, origin: live.origin, content: live.content)
   end
 
@@ -227,10 +233,10 @@ class OutputBuffer
   end
 
   def head_cell(type:, origin:, content:, mode: :replace)
-    existing = @head[origin]
+    existing = @head[[origin, type]]
     return existing.update(content) if existing
 
-    @head[origin] = HeadCell.new(
+    @head[[origin, type]] = HeadCell.new(
       type:,
       origin:,
       content:,

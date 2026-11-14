@@ -46,12 +46,17 @@ head must never be the only copy of an answer.** `HEAD_TYPES`
 (`:spinner_detail`) is the type that is transient by nature and lands in the
 head with no mode, so the drain loop keeps its old call shape.
 
-Head cells are keyed by ORIGIN today (one cell per origin, `#cell(origin)`).
-Whether the key is origin, `(origin, type)` or the task itself is an open
-decision (issue #286): with several agents running at once, keying per task is
-what makes a foreground switch possible.
+Head cells are keyed by **`(origin, type)`** (owner decision, 2026-11-14),
+resolved through the drain-loop binding. A single task can hold SEVERAL head
+cells live at once - the spinner cell AND the LLM streamed-response cell, both
+from `:session_manager` - so origin alone is not enough: it would collapse those
+two streams into one cell. Keying per task is not a key inside a buffer: a buffer
+already IS a task, so a foreground switch is just a question of WHICH task's
+buffer the renderer shows, not of keying inside the head. `#cell(origin, type)`
+reads one stream; `#commit(origin, type)` promotes that one cell to the tail.
 
-`#commit(origin)` promotes a finished cell to the tail as ONE immutable entry
+
+`#commit(origin, type)` promotes a finished cell to the tail as ONE immutable entry
 holding its final content and removes it from the head. A stream that keeps going
 after a commit starts a new cell, so the head never holds both the history and
 the live view of the same stream.
