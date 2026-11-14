@@ -17,6 +17,7 @@ require_relative "output_buffer"
 require_relative "memories"
 require_relative "session_locator"
 require_relative "plans"
+require_relative "registry"
 require_relative "task"
 require_relative "llm/stream_preview"
 require_relative "llm/usage_stats"
@@ -143,12 +144,14 @@ class Harness
 
   attr_accessor :history
 
-  # The single record of everything this run shows the user (issue #458): the
-  # model/tool side harvested from each turn's Task buffer plus the user's own
-  # submitted lines. It is the durable, re-renderable log #146 wants - replay
-  # at resume is just a redraw of its tail through UI::Renderer. Main-thread
-  # only, like OutputBuffer itself.
-  attr_reader :output_log
+  # Each retained job owns its own buffer; the design is in doc/task_model_design.md.
+  attr_reader :registry
+
+  # Main-thread output goes to the FOREGROUND job's buffer, so a foreground switch
+  # changes which buffer the single writer writes.
+  def output_log
+    registry.foreground_buffer
+  end
 
   # Only one note is in flight: a new assignment replaces the note that has
   # not been injected yet - the latest line wins.
@@ -197,18 +200,21 @@ class Harness
     # by plan.* and /plans so the two sides cannot drift apart.
     @plans         = Plans.new(file_list.workdir)
 
-    # The run's single record of everything shown to the user (issue #458):
-    # harvested from each turn's Task buffer plus the user's own submitted
-    # lines. A resumed run seeds its tail from the saved session so the banner
-    # can redraw the last topic. Main-thread only, like OutputBuffer itself.
-    @replay_limit  = resume_replay_entries
-    # The run record's buffer gets the two tail limits from the config (issue #286):
+    # The run record is the registry's foreground job buffer (issue #286): the
+    # single drain loop is its only writer, main-thread only. A resumed run seeds
+    # its tail from the saved session so the banner can redraw the last topic.
+    @replay_limit = resume_replay_entries
+    # The registry's buffers get the two tail limits from the config (issue #286):
     # max_memory gates the consumed-front trim, max_saved is the window a save
     # writes. Both fall back to the buffer's built-in default when unset. The saved
     # window is the existing 'resume: replay_entries' value, not a second key.
-    @output_log    = OutputBuffer.new(
+    # The registry owns the buffers now (issue #286 increment 1), so the run record
+    # is the buffer of the job the registry registers FIRST - the main turn, job #0.
+    @registry = Registry.new(
       max_memory: output_tail_memory || OutputBuffer::DEFAULT_MAX_MEMORY,
-      max_saved:  @replay_limit)
+      max_saved: @replay_limit,
+      tasks_kept: output_tasks_kept)
+    @registry.add_job(kind: :main)
 
     if resume_data
       saved_id = resume_data[:session_id]
@@ -217,7 +223,7 @@ class Harness
           "session file says id #{saved_id} but it is stored under #{session_id}"
       end
       @session.restore(resume_data, @file_list)
-      @output_log.restore(resume_data[:replay_tail]) if @replay_limit.positive?
+      output_log.restore(resume_data[:replay_tail]) if @replay_limit.positive?
     end
 
     @user_note     = nil
@@ -1216,8 +1222,8 @@ class Harness
   def record_user_prompt(text)
     return if @replay_limit.zero?
 
-    @output_log.put(type: :user, origin: :user, content: text.to_s)
-    @output_log.keep_window
+    output_log.put(type: :user, origin: :user, content: text.to_s)
+    output_log.keep_window
   end
 
   # Record a main-thread slash-command report in the run OutputBuffer so a
@@ -1229,14 +1235,14 @@ class Harness
   def record_report_output(type:, origin:, content:)
     return if @replay_limit.zero?
 
-    @output_log.put(type:, origin:, content:)
-    @output_log.keep_window
+    output_log.put(type:, origin:, content:)
+    output_log.keep_window
   end
 
   # The saved form of the tail (Entry#to_h hashes), written to the session JSON
   # so a resumed run can redraw the last topic.
   def replay_tail_for_save
-    @output_log.replay_tail(@replay_limit).map(&:to_h)
+    output_log.replay_tail(@replay_limit).map(&:to_h)
   end
 
   private
@@ -1253,6 +1259,12 @@ class Harness
   # other config value, so a spec-built Harness that only sets options works.
   def output_tail_memory
     options[:output_tail_memory]
+  end
+
+  # Read through options like every other config value, so a spec-built Harness
+  # that only sets options works. nil = nothing dropped.
+  def output_tasks_kept
+    options[:output_tasks_kept]
   end
 
   # One LLM request. The streaming posture applies to THIS request only, so a

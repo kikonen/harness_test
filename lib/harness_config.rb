@@ -169,10 +169,10 @@ class HarnessConfig
 
     # Two OutputBuffer tail limits per task (issue #286): tail_memory bounds how
     # much of a buffer's tail lives in RAM, tasks_kept how many recent finished
-    # tasks the future TaskManager retains for review. The SAVED limit is
+    # jobs the registry retains for review. The SAVED limit is
     # 'resume: replay_entries' above - it is already the window a save writes, so
-    # there is no second key for it. tasks_kept is read here but enforced only by
-    # the TaskManager layer that does not exist yet.
+    # there is no second key for it. tasks_kept is read here and enforced by
+    # Registry#retain, the first consumer of the key.
     @output = {
       tail_memory: int_or_nil(data.dig(:output, :tail_memory)),
       tasks_kept:    int_or_nil(data.dig(:output, :tasks_kept))
@@ -413,9 +413,9 @@ class HarnessConfig
     @output[:tail_memory]
   end
 
-  # How many recent finished tasks the future TaskManager retains for review
-  # (issue #286). nil = the default. Read here, enforced only once the TaskManager
-  # layer exists - there is no enforcement point yet.
+  # How many finished jobs the registry retains for review (issue #286). nil =
+  # the default (nothing dropped). Read here, enforced by Registry#retain, which
+  # is the first consumer of the key.
   def output_tasks_kept
     @output[:tasks_kept]
   end
