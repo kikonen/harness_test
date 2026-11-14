@@ -3,8 +3,8 @@
 Design notes for `lib/output_buffer.rb` - the append-only record of everything
 the harness shows the user, split into the two parts issue #286 needs: the TAIL
 is the durable history, the HEAD is the live state. There is ONE buffer per run,
-held by the harness as a temporary home (the future TaskManager/registry owns it
-per the owner decision). Single-thread I/O rule.
+held by the harness as a temporary home; the registry owns one buffer per job.
+Single-thread I/O rule.
 
 ---
 
@@ -86,7 +86,7 @@ never an accumulation) and is never windowed.
 ## Ownership
 
 There is ONE buffer per run. It is held by the Harness as a TEMPORARY home (the
-future TaskManager/registry owns it); `Task.run` hands the task that buffer, so a
+registry owns it per job); `Task.run` hands the task that buffer, so a
 task does not own a separate store any more. The DRAIN LOOP is the single writer
 (one put per output event it reads from the outbox); task-thread code NEVER
 touches the buffer directly. A future TUI can read the buffer as a durable,
