@@ -74,6 +74,14 @@ bare default; it is NOT a turn-wide state to be cleaned up. So every wait
 emits its own `:spinner_detail` when it starts - whoever finishes a wait does
 not have to clear anything, because whoever starts the next one overwrites it.
 
+The re-point is the spinner's live state, and the head cell holds it (issue
+#286). The ORDER in `Task.store_and_render` is the point: the raw event content
+lands in the buffer HEAD first, and the spinner content is then built FROM that
+head cell - not from the event. The head is the single source of the live state,
+so the spinner and any refreshed remote sink read the same object. The rebuild
+path (`ensure_spinner_running`) reads the newest spinner head cell, so the head
+is both the live view and the memory a rebuilt spinner replays.
+
 Harness code never starts or stops spinners - it just emits `:spinner_detail`
 (or nothing at all) and is done. Tool execution renders output, it does not
 wait, so its OUTPUT never re-points the spinner. The EXECUTION, though, is a

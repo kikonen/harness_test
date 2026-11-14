@@ -302,6 +302,27 @@ RSpec.describe Task do
 
       expect(task.buffer.latest_head(:spinner_detail).content).to eq(message: 'Sending to model')
     end
+
+    # The order is the point (issue #286): the data lands in the HEAD first,
+    # and the spinner content is built FROM the head cell - not from the raw
+    # event. A recording stand-in spinner proves the value it receives is the
+    # head cell's content, so the head is the single source of live state.
+    it 'store_and_render puts the head first, then builds the spinner from the head' do
+      task.ui = UI::Console.new(stdout: StringIO.new)
+      seen = []
+      recorder = Class.new do
+        define_method(:update_detail) { |message:, suffix:| seen << [message, suffix] }
+        define_method(:running?) { true }
+      end.new
+      task.spinner = recorder
+
+      Task.store_and_render(task, { type: :spinner_detail, origin: :session_manager,
+                                    content: { message: 'Sending', suffix: 'ctx 12%' } })
+
+      expect(task.buffer.cell(:session_manager, :spinner_detail).content)
+        .to eq(message: 'Sending', suffix: 'ctx 12%')
+      expect(seen).to eq([['Sending', 'ctx 12%']])
+    end
   end
 
   # issue #224 follow-up: the spinner badge ALWAYS shows the command

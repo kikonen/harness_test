@@ -546,19 +546,18 @@ class Task
 
     case type
     when :spinner_detail
-      payload = msg[:content].is_a?(Hash) ? msg[:content] : { message: msg[:content].to_s }
+      # The DATA lands in the buffer HEAD first, and the spinner is rendered FROM
+      # the head cell - the head is the single source of the live state (issue
+      # #286), so a refresh and the spinner read the same object. The order is the
+      # point: put data in the head, then build the spinner content from the head.
+      origin = msg[:origin] || :task
+      task.buffer.put(type: :spinner_detail, origin:, content: msg[:content])
+      payload = task.buffer.cell(origin, :spinner_detail).content
+      payload = payload.is_a?(Hash) ? payload : { message: payload.to_s }
       # Ensure the spinner is alive for this re-point (it may have been
       # cleared if the previous batch was non-spinner output).
       ensure_spinner_running(task) unless task.visible_spinner
       task.visible_spinner&.update_detail(**payload)
-      # The head cell IS the live spinner state (issue #286): a re-point lands in
-      # the head, never the tail, so a refresh reads the current wait as one
-      # snapshot. A spinner rebuilt later in the same wait re-plays the most
-      # recently updated spinner cell, not a separate ivar copy (bug 1).
-      task.buffer.put(
-        type: :spinner_detail,
-        origin: msg[:origin] || :task,
-        content: payload)
     when :text
       # For a status type the origin IS the bracket label. A Task with a
       # stand-in console (specs) may carry no renderer at all.
