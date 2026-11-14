@@ -170,7 +170,7 @@ RSpec.describe SessionManager do
   # it, so nothing can hold a stale message for the rest of a turn.
   describe '#request_spinner_detail (issue #283)' do
     def emitted_details
-      task = Task.new { }
+      task = Task.new(buffer: OutputBuffer.new) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -975,7 +975,7 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
       messages = inloop_messages
 
       # A Task instance (not started) provides the outbox for event capture.
-      task = Task.new { }
+      task = Task.new(buffer: OutputBuffer.new) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
 
@@ -997,7 +997,7 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
       allow_summary_response
       messages = inloop_messages
 
-      task = Task.new { }
+      task = Task.new(buffer: OutputBuffer.new) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin

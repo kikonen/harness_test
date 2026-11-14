@@ -59,7 +59,7 @@ RSpec.describe UI::Dialog do
     context 'on a task thread (Thread.current[:harness_task] set)' do
       around do |example|
         old = Thread.current[:harness_task]
-        Thread.current[:harness_task] = Task.new { }
+        Thread.current[:harness_task] = Task.new(buffer: OutputBuffer.new) { }
         example.run
       ensure
         Thread.current[:harness_task] = old

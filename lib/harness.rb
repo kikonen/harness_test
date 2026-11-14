@@ -1217,32 +1217,20 @@ class Harness
     return if @replay_limit.zero?
 
     @output_log.put(type: :user, origin: :user, content: text.to_s)
-    @output_log.keep_tail(@replay_limit)
-  end
-
-  # After a turn finishes, harvest its Task buffer's replayable tail into the
-  # run OutputBuffer (the model/tool side). :spinner_detail is skipped - it
-  # animates, it is never a rendered line.
-  def absorb_turn(task)
-    return if @replay_limit.zero? || task.nil?
-
-    task.buffer.replay_tail(@replay_limit).each do |entry|
-      @output_log.put(type: entry.type, origin: entry.origin, content: entry.content)
-    end
-    @output_log.keep_tail(@replay_limit)
+    @output_log.keep_window
   end
 
   # Record a main-thread slash-command report in the run OutputBuffer so a
   # resumed run redraws it (#474). Slash commands run on the main thread with
-  # no Task, so nothing harvested their output before this - a structured
+  # no Task, so their output was recorded here directly (issue #458) - a structured
   # :list payload is stored AS the structure (not a pre-rendered line), which
   # is what lets a future remote sink lay it out from the fields (#146). The
-  # replay_limit guard and keep_tail match record_user_prompt / absorb_turn.
+  # replay_limit guard and keep_window match record_user_prompt.
   def record_report_output(type:, origin:, content:)
     return if @replay_limit.zero?
 
     @output_log.put(type:, origin:, content:)
-    @output_log.keep_tail(@replay_limit)
+    @output_log.keep_window
   end
 
   # The saved form of the tail (Entry#to_h hashes), written to the session JSON

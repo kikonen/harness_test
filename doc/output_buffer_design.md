@@ -1,8 +1,10 @@
 # OutputBuffer: structured output design
 
 Design notes for `lib/output_buffer.rb` - the append-only record of everything
-the harness shows the user, split into the two parts a per-task buffer needs
-(issue #286). Single-thread I/O rule.
+the harness shows the user, split into the two parts issue #286 needs: the TAIL
+is the durable history, the HEAD is the live state. There is ONE buffer per run,
+held by the harness as a temporary home (the future TaskManager/registry owns it
+per the owner decision). Single-thread I/O rule.
 
 ---
 
@@ -25,8 +27,12 @@ of `{type, origin, content}` blobs:
 
 ## Two parts: tail and head (issue #286)
 
-The record and the live view are not the same thing, and once several tasks run
-at once they cannot share one list. The buffer is therefore two parts:
+The record and the live view are not the same thing: one is durable history a
+renderer can re-lay out, the other is the state still arriving, so they cannot
+be one list. There is ONE buffer per run, and tasks still die, so only one
+task's streams are ever live in it; the task part of the head key arrives when
+the registry retains several tasks at once (issue #286). The buffer is therefore
+two parts:
 
 - **tail** - the durable history. Append-only, `Entry` objects,
   **IMMUTABLE BY CONSTRUCTION**. This is the half a renderer can re-lay out: a
@@ -53,13 +59,13 @@ from `:session_manager` - so origin alone is not enough: it would collapse those
 two streams into one cell. `#cell(origin, type)` reads one stream;
 `#commit(origin, type)` promotes that one cell to the tail.
 
-The task is the OUTER part of the key, not a field inside `@head` (owner,
-2026-11-14): in the unified model (#286) each task owns its own `OutputBuffer`,
-so a head cell's full identity is `(task, origin, type)` where `task` is supplied
-by WHICH BUFFER the cell lives in. A buffer never holds more than one task, so
-storing `task` inside each buffer's key would just repeat the buffer name within
-itself; the task enters the key at the TaskManager layer that selects which buffer
-is foreground.
+The task part of the key is DEFERRED to the registry, not a field inside `@head`
+(owner decision, 2026-11-14). The buffer is shared and tasks still die, so only
+one task's streams are ever live in it - origin + type is enough for now. A head
+cell's full identity is `(task, origin, type)`, where `task` is supplied by WHICH
+task the registry retains; it enters the key at the TaskManager/registry layer
+that holds several tasks at once and selects the foreground one (issue #286),
+not inside this buffer.
 
 `#commit(origin, type)` promotes a finished cell to the tail as ONE immutable entry
 holding its final content and removes it from the head. A stream that keeps going
@@ -80,15 +86,17 @@ never an accumulation) and is never windowed.
 
 ## Ownership
 
-The buffer is owned by the TASK (one per Task instance - see `Task#buffer`).
-The DRAIN LOOP fills it (one put per output event it reads from the outbox);
-task-thread code NEVER touches the buffer directly. A future TUI can read the
-buffer as a durable, inspectable record of everything shown to the user.
+There is ONE buffer per run. It is held by the Harness as a TEMPORARY home (the
+future TaskManager/registry owns it); `Task.run` hands the task that buffer, so a
+task does not own a separate store any more. The DRAIN LOOP is the single writer
+(one put per output event it reads from the outbox); task-thread code NEVER
+touches the buffer directly. A future TUI can read the buffer as a durable,
+inspectable record of everything shown to the user.
 
-Under the unified task model (issue #286) the split names the owner precisely:
-the task owns its HEAD (its live view), the run record holds TAILS only. A
-foreground switch is then just a question of which task's head is the shown one,
-because every task already has its own head + tail.
+The permanent owner is the registry, which retains several tasks at once: a
+foreground switch is then a question of which task's head is the shown one, and the
+task part of the head key arrives at that layer (issue #286). For now only one
+task is ever live, so the buffer is shared and origin + type is the whole key.
 
 ## Threading
 
@@ -108,17 +116,21 @@ buffer tail through the same `UI::Renderer` the live drain loop uses, so the
 redrawn exchange looks like the original one (labels, colors, markdown posture
 all respected).
 
-Ownership at the run level: a Task owns the buffer its turn fills, and the
-Harness owns ONE run-level `OutputBuffer` (`#output_log`). After each turn the
-Harness harvests the task buffer's replayable tail into it (`#absorb_turn`) and
-records each user prompt directly (`#record_user_prompt`). `save_session` writes
+Ownership at the run level: there is ONE `OutputBuffer` (`#output_log`) per run,
+held by the Harness as its temporary home. `Task.run` hands the task that buffer,
+so the drain loop's output already lands in the record a save reads - there is NO
+harvest step (`#absorb_turn` is
+gone, it existed only to copy between two stores). The single writer records each
+user prompt directly (`#record_user_prompt`) and enforces the buffer's own saved
+window right after a tail put (`#keep_window`). `save_session` writes
 that window's tail (`#replay_tail_for_save`, the `Entry#to_h` form) into the
 session JSON; a resumed Harness rehydrates it with `OutputBuffer#restore` before
 the drain loop first runs, and the CLI banner redraws it.
 
 - Replay reads the **tail** only, so the head is never replayed: a spinner
   re-point and a still-growing stream are live state, not part of the durable
-  record. `#absorb_turn` is exactly the tail-half operation.
+  record. There is no harvest: the single writer put final items straight into
+  the tail.
 - `#keep_tail(n)` keeps the run record a WINDOW (default 30 entries, config
   `resume: replay_entries:`; 0 disables the whole path). The read waterline is
   pulled back when a window drop removes already-consumed entries, so a later

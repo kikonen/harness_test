@@ -278,6 +278,42 @@ RSpec.describe OutputBuffer do
     end
   end
 
+  # issue #286: the buffer enforces its OWN saved window, so the single
+  # main-thread writer does not have to know the limit - the record never grows
+  # past what a save writes. max_saved 0 (the disable) keeps nothing.
+  describe "#keep_window (issue #286 - the buffer's own saved window)" do
+    it 'trims the tail to the max_saved this buffer was built with' do
+      buffer = described_class.new(max_saved: 2)
+      %w[e1 e2 e3 e4].each { |c| buffer.put(type: :text, origin: :o, content: c) }
+
+      buffer.keep_window
+
+      expect(buffer.size).to eq(2)
+      expect(buffer.replay_tail.map(&:content)).to eq(['e3', 'e4'])
+    end
+
+    it 'keeps nothing when max_saved is 0 (the disable)' do
+      buffer = described_class.new(max_saved: 0)
+      %w[e1 e2].each { |c| buffer.put(type: :text, origin: :o, content: c) }
+
+      buffer.keep_window
+
+      expect(buffer.replay_tail).to be_empty
+    end
+
+    it 'never windows the head (the live half is not the record)' do
+      buffer = described_class.new(max_saved: 1)
+      buffer.put(type: :spinner_detail, origin: :harness, content: 'Working')
+      buffer.put(type: :text, origin: :o, content: 'kept')
+      buffer.put(type: :text, origin: :o, content: 'newer')
+
+      buffer.keep_window
+
+      expect(buffer.head.map(&:content)).to eq(['Working'])
+      expect(buffer.replay_tail.map(&:content)).to eq(['newer'])
+    end
+  end
+
   describe '#restore (issue #458 - rehydrating a saved tail)' do
     # The saved form is Entry#to_h through JSON: type/origin come back as
     # strings, and SessionLocator parses with symbolize_names so the keys are
