@@ -53,9 +53,6 @@ class Task
     @renderer  = UI::Renderer.new
     @spinner = nil
     @thread  = nil
-    # The drain loop rebuilds the spinner whenever the outbox empties;
-    # this replay keeps its message from resetting mid-turn.
-    @spinner_detail = nil
     @ui = nil # set by Task.run before start
     @dialog_open = false           # true while perform_direct is on stdin
     @note_editor  = nil
@@ -67,12 +64,6 @@ class Task
   attr_writer :ui
 
   # -- Spinner content memory ------------------------------------------------
-
-  attr_reader :spinner_detail
-
-  def record_spinner_detail(payload)
-    @spinner_detail = payload if payload.is_a?(Hash)
-  end
 
   # While true, store_and_render must not clear output lines: a Choice
   # prompt on stdin would vanish with them.
@@ -400,7 +391,9 @@ class Task
     # Re-play the last requested spinner content (bug 1): a spinner built
     # after an output batch cleared the previous one shows the SAME message
     # the task asked for, not the bare default.
-    detail  = task.spinner_detail || {}
+    # The head cell is the memory now (issue #286): the live spinner state lives
+    # in the buffer's head, so the rebuild reads it instead of an ivar copy.
+    detail  = task.buffer.latest_head(:spinner_detail)&.content || {}
     spinner = UI::Spinner.new(detail[:message] || DEFAULT_SPINNER_MESSAGE,
                               detail[:suffix], ui: task.ui)
     # A live badge so a mid-turn /yolo toggle is visible at once.
@@ -560,10 +553,14 @@ class Task
       # cleared if the previous batch was non-spinner output).
       ensure_spinner_running(task) unless task.visible_spinner
       task.visible_spinner&.update_detail(**payload)
-      # Remember it so a spinner rebuilt later in the same wait keeps this
-      # message instead of falling back to 'Working...' (bug 1).
-      task.record_spinner_detail(payload)
-      task.buffer.put(type: :spinner_detail, origin: msg[:origin] || :task, content: msg[:content])
+      # The head cell IS the live spinner state (issue #286): a re-point lands in
+      # the head, never the tail, so a refresh reads the current wait as one
+      # snapshot. A spinner rebuilt later in the same wait re-plays the most
+      # recently updated spinner cell, not a separate ivar copy (bug 1).
+      task.buffer.put(
+        type: :spinner_detail,
+        origin: msg[:origin] || :task,
+        content: payload)
     when :text
       # For a status type the origin IS the bracket label. A Task with a
       # stand-in console (specs) may carry no renderer at all.
