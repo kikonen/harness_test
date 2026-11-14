@@ -67,6 +67,17 @@ compact:
 # resume:
 #   replay_entries: 30
 
+# Two OutputBuffer tail limits per task (issue #286). tail_memory bounds how much
+# of a task's tail lives in RAM: the saved window is always inside what memory
+# holds, and the trim only drops already-read entries - a renderer that polls later
+# still sees everything it has not read. tasks_kept is how many recent FINISHED
+# tasks the future TaskManager retains so the user can review what a background
+# task did - READ here, enforced only once the TaskManager layer exists (issue
+# #286 phase 0). The saved window is 'replay_entries' above, not a second key.
+# output:
+#   tail_memory: 4096
+#   tasks_kept: 20
+
 # Auto-save the session at every prompt boundary (crash-proof, issue #107).
 auto_save: true
 

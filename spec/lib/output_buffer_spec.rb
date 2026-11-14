@@ -142,12 +142,14 @@ RSpec.describe OutputBuffer do
   end
 
   describe 'trimming the consumed prefix' do
-    it 'keeps pending entries reachable after more than TRIM_AT were consumed' do
+    # max_memory (the TRIM_AT role, now an instance limit) gates the consumed-front
+    # trim; default DEFAULT_MAX_MEMORY equals the old constant, so the pins hold.
+    it 'keeps pending entries reachable after more than max_memory were consumed' do
       buffer = described_class.new
-      described_class::TRIM_AT.times do |i|
+      buffer.max_memory.times do |i|
         buffer.put(type: :t, origin: :o, content: "old #{i}")
       end
-      buffer.drain # waterline now at TRIM_AT - trim is only allowed when the
+      buffer.drain # waterline now at max_memory - trim is only allowed when the
                    # consumed prefix is at least half of what is stored
 
       pending = (0...10).map { |i| buffer.put(type: :t, origin: :o, content: "new #{i}") }
@@ -156,7 +158,7 @@ RSpec.describe OutputBuffer do
 
     it 'bounds stored entries once the waterline is far along' do
       buffer = described_class.new
-      total  = described_class::TRIM_AT * 2 + 10
+      total  = buffer.max_memory * 2 + 10
 
       total.times { |i| buffer.put(type: :t, origin: :o, content: "e#{i}") }
       drained = buffer.drain
@@ -167,8 +169,8 @@ RSpec.describe OutputBuffer do
 
     it 'does not trim while a large pending tail is still outstanding' do
       buffer = described_class.new
-      described_class::TRIM_AT.times { |i| buffer.put(type: :t, origin: :o, content: "old #{i}") }
-      tail_size = described_class::TRIM_AT + 10
+      buffer.max_memory.times { |i| buffer.put(type: :t, origin: :o, content: "old #{i}") }
+      tail_size = buffer.max_memory + 10
       tail_size.times { |i| buffer.put(type: :t, origin: :o, content: "new #{i}") }
 
       # drain always consumes EVERYTHING up to "now" (there is no partial
@@ -176,10 +178,24 @@ RSpec.describe OutputBuffer do
       # invariant is that a drained batch is complete and nothing is lost.
       consumed = buffer.drain
 
-      expect(consumed.size).to eq(described_class::TRIM_AT + tail_size)
+      expect(consumed.size).to eq(buffer.max_memory + tail_size)
       expect(consumed.first.content).to eq('old 0')
       expect(consumed.last.content).to eq("new #{tail_size - 1}")
       expect(buffer.drain).to be_empty # waterline advanced past everything
+    end
+  end
+
+  # The two tail limits are instance values, not class constants (issue #286): a
+  # smaller max_memory gates the consumed-front trim earlier, proving the buffer was
+  # built with the limit it was given rather than the built-in default.
+  describe 'the two tail limits (issue #286)' do
+    it 'a configured max_memory is the value that gates the trim' do
+      buffer = described_class.new(max_memory: 10)
+      30.times { |i| buffer.put(type: :t, origin: :o, content: "e#{i}") }
+      buffer.drain
+      # Waterline past max_memory and more than half consumed -> trim fires.
+      expect(buffer.size).to eq(0)
+      expect(buffer.max_memory).to eq(10)
     end
   end
 
@@ -220,7 +236,7 @@ RSpec.describe OutputBuffer do
 
     it 'is unaffected by a trim of the consumed front' do
       buffer = described_class.new
-      described_class::TRIM_AT.times { |i| buffer.put(type: :text, origin: :o, content: "old #{i}") }
+      buffer.max_memory.times { |i| buffer.put(type: :text, origin: :o, content: "old #{i}") }
       buffer.drain
       buffer.put(type: :text, origin: :user, content: 'kept a')
       buffer.put(type: :spinner_detail, origin: :harness, content: { message: 'x' })
@@ -348,6 +364,25 @@ RSpec.describe OutputBuffer do
 
       buffer.put(type: :spinner_detail, origin: :harness, content: 'Sending')
       expect(buffer.dirty_head.map(&:content)).to eq(['Sending'])
+    end
+
+    # The key is (origin, type), so the SAME origin can hold SEVERAL cells live at
+    # once: a streamed-answer cell and a spinner cell, both from :session_manager,
+    # are two distinct key pairs and stay two cells. Origin alone would collapse
+    # them (issue #286).
+    it 'keeps two live cells from the same origin as separate streams' do
+      buffer = described_class.new
+      buffer.put(type: :response, origin: :session_manager, content: 'partial', mode: :append)
+      buffer.put(type: :spinner_detail, origin: :session_manager, content: 'Working')
+
+      expect(buffer.head.size).to eq(2)
+      expect(buffer.cell(:session_manager, :response).content).to eq('partial')
+      expect(buffer.cell(:session_manager, :spinner_detail).content).to eq('Working')
+      # Committing one stream leaves the other live.
+      buffer.commit(:session_manager, :response)
+      expect(buffer.head.size).to eq(1)
+      expect(buffer.cell(:session_manager, :response)).to be_nil
+      expect(buffer.cell(:session_manager, :spinner_detail).content).to eq('Working')
     end
 
     # Committing is what makes the tail durable: the live state becomes ONE

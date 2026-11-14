@@ -90,6 +90,28 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  # issue #286: two OutputBuffer tail limits. tail_memory gates the consumed-front
+  # trim; tasks_kept is READ but not enforced - no TaskManager layer consumes it yet.
+  describe '#output tail limits (issue #286)' do
+    it 'defaults to nil when the keys are absent (built-in default applies)' do
+      expect(described_class.new({}).output_tail_memory).to be_nil
+      expect(described_class.new({}).output_tasks_kept).to be_nil
+    end
+
+    it 'reads the output.tail_memory key' do
+      expect(described_class.new(output: { tail_memory: 200 }).output_tail_memory).to eq(200)
+    end
+
+    it 'reads the output.tasks_kept key' do
+      expect(described_class.new(output: { tasks_kept: 5 }).output_tasks_kept).to eq(5)
+    end
+
+    it 'mentions both keys in the default template (commented out)' do
+      expect(template).to include('tail_memory')
+      expect(template).to include('tasks_kept')
+    end
+  end
+
   describe '#max_tool_iterations (issue #226)' do
     it 'defaults to nil when the key is absent (built-in default applies)' do
       expect(described_class.new({}).max_tool_iterations).to be_nil

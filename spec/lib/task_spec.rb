@@ -325,6 +325,35 @@ RSpec.describe Task do
     end
   end
 
+  # issue #286: the task owns its buffer and the buffer carries its two tail limits.
+  # A harness that answers them wins; a harness-less task (a background command, no
+  # LLM round) keeps the built-in defaults - the limits are not harness-dependent, so
+  # a harness-less buffer is still usable.
+  describe 'per-task buffer limits (issue #286)' do
+    def limits_harness(memory, saved)
+      Class.new do
+        define_method(:output_tail_memory) { memory }
+        define_method(:resume_replay_entries) { saved }
+      end.new
+    end
+
+    it 'a harness that answers the limits sets the task buffer' do
+      _err, task = described_class.run(
+        harness: limits_harness(200, 12),
+        ui: UI::Console.new(stdout: StringIO.new, stdin: StringIO.new(''))) { |_t| }
+      expect(task.buffer.max_memory).to eq(200)
+      expect(task.buffer.max_saved).to eq(12)
+    end
+
+    it 'a harness-less task keeps the built-in defaults (its buffer is still usable)' do
+      _err, task = described_class.run(
+        harness: nil,
+        ui: UI::Console.new(stdout: StringIO.new, stdin: StringIO.new(''))) { |_t| }
+      expect(task.buffer.max_memory).to eq(OutputBuffer::DEFAULT_MAX_MEMORY)
+      expect(task.buffer.max_saved).to eq(OutputBuffer::DEFAULT_MAX_SAVED)
+    end
+  end
+
   # issue #224 follow-up: the spinner badge ALWAYS shows the command
   # consent mode (live, re-read every frame) when the harness exposes it.
   describe 'Task.ensure_spinner_running mode badge (issue #224 follow-up)' do

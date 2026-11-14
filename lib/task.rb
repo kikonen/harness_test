@@ -42,11 +42,18 @@ class Task
   attr_accessor :note_editor
   attr_accessor :harness
 
-  def initialize(&block)
+  def initialize(max_memory: OutputBuffer::DEFAULT_MAX_MEMORY,
+                 max_saved: OutputBuffer::DEFAULT_MAX_SAVED, &block)
     @block   = block
     @inbox   = Thread::Queue.new   # main -> task (responses, stop)
     @outbox  = Thread::Queue.new   # task -> main (SINGLE event queue)
-    @buffer  = OutputBuffer.new    # structured log (runner fills it)
+    # The task owns its buffer (issue #286), and the buffer carries its two tail
+    # limits. A harness-less task (a background command, no LLM round) still has
+    # its buffer on the built-in defaults - the limits are not harness-dependent.
+    # Task.run overrides them from the harness when it answers them.
+    @buffer  = OutputBuffer.new(
+      max_memory:,
+      max_saved:)    # structured log (runner fills it)
     # Patterns and colors are the renderer's decision, so the drain loop asks
     # it instead of printing content as the emitter wrote it. #run replaces it
     # with the harness's configured palette; this one colors nothing.
@@ -253,7 +260,15 @@ class Task
     ui:,
     &block
   )
-    task = Task.new(&block)
+    # The per-task buffer limits come from the harness when it answers them
+    # (issue #286); a harness double in a spec, or a harness-less background
+    # command task, falls back to the buffer's built-in defaults.
+    max_memory = harness.respond_to?(:output_tail_memory) ? harness.output_tail_memory : nil
+    max_saved  = harness.respond_to?(:resume_replay_entries) ? harness.resume_replay_entries : nil
+    task = Task.new(
+      max_memory: max_memory || OutputBuffer::DEFAULT_MAX_MEMORY,
+      max_saved: max_saved || OutputBuffer::DEFAULT_MAX_SAVED,
+      &block)
     task.ui = ui
     # The editor only PEEKS stdin: no reader thread, so nothing races for
     # the keyboard. Notes need a harness to land on (nil = unit test).

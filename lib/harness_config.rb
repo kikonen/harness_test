@@ -167,6 +167,17 @@ class HarnessConfig
       replay_entries: int_or_nil(data.dig(:resume, :replay_entries))
     }
 
+    # Two OutputBuffer tail limits per task (issue #286): tail_memory bounds how
+    # much of a buffer's tail lives in RAM, tasks_kept how many recent finished
+    # tasks the future TaskManager retains for review. The SAVED limit is
+    # 'resume: replay_entries' above - it is already the window a save writes, so
+    # there is no second key for it. tasks_kept is read here but enforced only by
+    # the TaskManager layer that does not exist yet.
+    @output = {
+      tail_memory: int_or_nil(data.dig(:output, :tail_memory)),
+      tasks_kept:    int_or_nil(data.dig(:output, :tasks_kept))
+    }
+
     @retry = {
       count: int_or_nil(data.dig(:retry, :count)),
       delay: float_or_nil(data.dig(:retry, :delay))
@@ -393,6 +404,20 @@ class HarnessConfig
   # (issue #458). nil = the built-in default; 0 disables the replay.
   def resume_replay_entries
     @resume[:replay_entries]
+  end
+
+  # How much of a per-task OutputBuffer tail lives in RAM (issue #286). nil = the
+  # buffer's built-in default. This gates the consumed-front trim, never a pending
+  # entry, so a renderer that polls later still sees everything it has not read.
+  def output_tail_memory
+    @output[:tail_memory]
+  end
+
+  # How many recent finished tasks the future TaskManager retains for review
+  # (issue #286). nil = the default. Read here, enforced only once the TaskManager
+  # layer exists - there is no enforcement point yet.
+  def output_tasks_kept
+    @output[:tasks_kept]
   end
 
   # Total retry attempts for transient network errors (or nil).
