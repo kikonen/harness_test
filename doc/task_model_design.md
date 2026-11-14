@@ -120,18 +120,22 @@ pipe to learn which queue has data. Fan-in keeps the invariant with no extra mec
 executor is running for, and the registry's own loop polls the queue once per pass over
 all jobs, writing each event into that job's buffer.
 
-## Gates for increment 1 (the first runtime)
+## Gates for increment 1 (the first runtime) - RESOLVED
 
-Three things must be settled before any runtime is built because they change existing
-code:
+Three things had to be settled before any runtime was built because they change existing
+code. All three are settled; the wiring is what remains.
 
-- **Main turn: job #0 or privileged** (open decision 4). Job #0 means the registry has
-  no special case and the foreground buffer is just job #0's buffer.
-- `TaskRunner#run_on_task` stops RUNNING a turn and awaits one: the registry is the
-  executor, so the CLI asks it to run a job and awaits the result.
-- **A denied background dialog needs a real answer value.** `DialogTool#execute` blocks
-  on `task.request(:dialog, ...)`, so the denial must come back as a value the tool can
-  return to the model - a bare refusal is not an answer it can act on.
+- **Main turn is job #0** (owner answered, 2026-11-14; open decision 4 closed). The
+  registry has no special case, `Registry#add_job` assigns ids in add order so the
+  first job added is #0, and its buffer is just job #0's buffer.
+- `TaskRunner#run_on_task` stops RUNNING a turn and AWAITS one: the registry is the
+  executor, so the CLI asks it to run a job and awaits the result. Decision resolved;
+  `lib/task_runner.rb` still runs the turn directly, so this is the wiring that remains.
+- **A denied background dialog returns a real answer value** (resolved).
+  `DialogTool#execute` blocks on `task.request(:dialog, ...)`, so the denial must come
+  back as a value the tool can return to the model - a bare refusal is not an answer it
+  can act on, not silence. `DialogTool` itself gets no denial path until a run wires in
+  the registry.
 
 ## What the model does NOT collapse
 
