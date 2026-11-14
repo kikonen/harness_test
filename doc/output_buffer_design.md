@@ -1,7 +1,8 @@
 # OutputBuffer: structured output design
 
 Design notes for `lib/output_buffer.rb` - the append-only record of everything
-the harness shows the user (single-thread I/O rule).
+the harness shows the user, split into the two parts a per-task buffer needs
+(issue #286). Single-thread I/O rule.
 
 ---
 
@@ -22,12 +23,57 @@ of `{type, origin, content}` blobs:
   pasted multiline command); the renderer turns that into several console lines
   with a gutter, but the entry stays ONE plain string.
 
+## Two parts: tail and head (issue #286)
+
+The record and the live view are not the same thing, and once several tasks run
+at once they cannot share one list. The buffer is therefore two parts:
+
+- **tail** - the durable history. Append-only, `Entry` objects,
+  **IMMUTABLE BY CONSTRUCTION**. This is the half a renderer can re-lay out: a
+  remote page refreshed later redraws from the tail, so the tail must never hold
+  a string already chopped for today's terminal.
+- **head** - the live state of the streams still arriving: one mutable cell per
+  stream, replaced as it grows. A stream cell is the WHOLE stream so far, so a
+  refresh reads it as one snapshot instead of rebuilding it from a pile of
+  chunks. Immutability holds for the **tail only**; a head cell is mutable on
+  purpose.
+
+`#put` decides the part by the mode the CALLER states (`HEAD_MODES`): a live
+update says `mode: :append` (the content arrives in chunks) or `mode: :replace`
+(a re-point of the live status). A call with no mode states a FINAL item and is
+committed to the tail. That is the invariant that keeps the split honest: **the
+head must never be the only copy of an answer.** `HEAD_TYPES`
+(`:spinner_detail`) is the type that is transient by nature and lands in the
+head with no mode, so the drain loop keeps its old call shape.
+
+Head cells are keyed by ORIGIN today (one cell per origin, `#cell(origin)`).
+Whether the key is origin, `(origin, type)` or the task itself is an open
+decision (issue #286): with several agents running at once, keying per task is
+what makes a foreground switch possible.
+
+`#commit(origin)` promotes a finished cell to the tail as ONE immutable entry
+holding its final content and removes it from the head. A stream that keeps going
+after a commit starts a new cell, so the head never holds both the history and
+the live view of the same stream.
+
+Polling is per part: the tail has the read waterline (`#drain`), the head has a
+per-cell dirty flag (`#dirty_head`) - a replaced cell is not an append, so a
+waterline cannot express it. `#pending?` is true when either half has something
+new to show. `TRIM_AT`, `#keep_tail` and `#restore` apply to the tail only; the
+head is bounded by its own rule (it is current state, never an accumulation) and
+is never windowed.
+
 ## Ownership
 
 The buffer is owned by the TASK (one per Task instance - see `Task#buffer`).
 The DRAIN LOOP fills it (one put per output event it reads from the outbox);
 task-thread code NEVER touches the buffer directly. A future TUI can read the
 buffer as a durable, inspectable record of everything shown to the user.
+
+Under the unified task model (issue #286) the split names the owner precisely:
+the task owns its HEAD (its live view), the run record holds TAILS only. A
+foreground switch is then just a question of which task's head is the shown one,
+because every task already has its own head + tail.
 
 ## Threading
 
@@ -55,8 +101,9 @@ that window's tail (`#replay_tail_for_save`, the `Entry#to_h` form) into the
 session JSON; a resumed Harness rehydrates it with `OutputBuffer#restore` before
 the drain loop first runs, and the CLI banner redraws it.
 
-- `NON_REPLAY` (`:spinner_detail`) is never replayed: it is an animated spinner
-  re-point, never a console line, so it is not part of the durable record.
+- Replay reads the **tail** only, so the head is never replayed: a spinner
+  re-point and a still-growing stream are live state, not part of the durable
+  record. `#absorb_turn` is exactly the tail-half operation.
 - `#keep_tail(n)` keeps the run record a WINDOW (default 30 entries, config
   `resume: replay_entries:`; 0 disables the whole path). The read waterline is
   pulled back when a window drop removes already-consumed entries, so a later

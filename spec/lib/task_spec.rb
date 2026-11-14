@@ -509,7 +509,7 @@ RSpec.describe Task do
 
       expect(io_out.string).to include("\e[34mplan:  read the tool first\e[0m")
 
-      stored = task.buffer.instance_variable_get(:@entries)
+      stored = task.buffer.tail
       expect(stored.map(&:content)).to eq(['read the tool first', 'hunk did not apply'])
       expect(stored.map(&:type)).to eq(%i[plan error])
       expect(stored.any? { |e| e.content.to_s.include?("\e") }).to eq(false)
@@ -535,7 +535,7 @@ RSpec.describe Task do
          '  ------------']
       )
 
-      stored = task.buffer.instance_variable_get(:@entries)
+      stored = task.buffer.tail
       expect(stored.size).to eq(1)
       expect(stored.first.type).to eq(:status_ok)
       # OutputBuffer#normalize turns every origin into a symbol, so the bracket

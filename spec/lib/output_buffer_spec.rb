@@ -185,7 +185,7 @@ RSpec.describe OutputBuffer do
 
   # issue #458: the buffer is the durable record a resumed run redraws. Only
   # entries that actually became a console line are replayable - the spinner is
-  # animated, never rendered, so it is excluded (NON_REPLAY).
+  # animated, never rendered, so it is head state and never enters the tail.
   describe '#replay_tail (issue #458)' do
     it 'skips the animated :spinner_detail entries' do
       buffer = described_class.new
@@ -305,3 +305,83 @@ RSpec.describe OutputBuffer do
     end
   end
 end
+
+RSpec.describe OutputBuffer do
+  # issue #286: the buffer has two parts. The tail is the durable record a
+  # renderer can re-lay out (immutable entries); the head is the live state of
+  # the streams still arriving (mutable cells, replaced as they grow).
+  describe 'the two parts (issue #286)' do
+    it 'lands HEAD_TYPES as a live cell and everything else as a tail entry' do
+      buffer = described_class.new
+      buffer.put(type: :response, origin: :session_manager, content: 'answer')
+      buffer.put(type: :spinner_detail, origin: :harness, content: { message: 'Working' })
+
+      expect(buffer.tail.map(&:type)).to eq([:response])
+      expect(buffer.head.map(&:type)).to eq([:spinner_detail])
+    end
+
+    it 'replaces a live cell instead of appending a second one' do
+      buffer = described_class.new
+      buffer.put(type: :spinner_detail, origin: :harness, content: 'Working')
+      buffer.put(type: :spinner_detail, origin: :harness, content: 'Sending')
+
+      expect(buffer.head.size).to eq(1)
+      expect(buffer.cell(:harness).content).to eq('Sending')
+    end
+
+    # A streamed answer GROWS: chunks append to the one cell for its origin.
+    it 'grows a stream cell by appending, so a refresh reads the whole stream' do
+      buffer = described_class.new
+      buffer.put(type: :response, origin: :session_manager, content: 'Hel', mode: :append)
+      buffer.put(type: :response, origin: :session_manager, content: 'lo', mode: :append)
+
+      expect(buffer.cell(:session_manager).content).to eq('Hello')
+      expect(buffer.tail).to be_empty
+    end
+
+    it 'marks a cell dirty so the live half has its own poll' do
+      buffer = described_class.new
+      buffer.put(type: :spinner_detail, origin: :harness, content: 'Working')
+
+      expect(buffer.dirty_head.map(&:content)).to eq(['Working'])
+      expect(buffer.dirty_head).to be_empty # not dirty until the next update
+
+      buffer.put(type: :spinner_detail, origin: :harness, content: 'Sending')
+      expect(buffer.dirty_head.map(&:content)).to eq(['Sending'])
+    end
+
+    # Committing is what makes the tail durable: the live state becomes ONE
+    # immutable entry holding its final content, and leaves the head.
+    it 'promotes a finished stream to the tail as one entry and leaves the head' do
+      buffer = described_class.new
+      buffer.put(type: :response, origin: :session_manager, content: 'Hel', mode: :append)
+      buffer.put(type: :response, origin: :session_manager, content: 'lo', mode: :append)
+
+      entry = buffer.commit(:session_manager)
+
+      expect(entry.content).to eq('Hello')
+      expect(entry).to be_frozen
+      expect(buffer.head).to be_empty
+      expect(buffer.tail.map(&:content)).to eq(['Hello'])
+      # A stream that keeps going after a commit starts a new cell.
+      buffer.put(type: :response, origin: :session_manager, content: ' there')
+      # Without a mode the item is FINAL, so it is committed rather than live -
+      # the head must never be the only copy of an answer.
+      expect(buffer.cell(:session_manager)).to be_nil
+      expect(buffer.tail.map(&:content)).to eq(['Hello', ' there'])
+    end
+
+    # A live update states its mode on the call; the part is not guessed from
+    # the type, so the final content of a stream is always in the record.
+    it 'keeps the final content in the tail and only the live view in the head' do
+      buffer = described_class.new
+      buffer.put(type: :response, origin: :session_manager, content: 'partial', mode: :append)
+      expect(buffer.head.size).to eq(1)
+
+      buffer.commit(:session_manager)
+      buffer.put(type: :response, origin: :session_manager, content: 'full answer')
+      expect(buffer.tail.map(&:content)).to eq(['partial', 'full answer'])
+    end
+  end
+end
+
