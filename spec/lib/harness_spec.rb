@@ -467,10 +467,10 @@ RSpec.describe Harness do
     it 'restores the saved foreground id through its own registry' do
       id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
       seed_saved_session(id, foreground_job: 1)
-      registry = Registry.new
+      registry = JobRegistry.new
       registry.add_job(kind: :main)
       node = registry.add_job(kind: :command, requested_by: registry.jobs.first)
-      allow(Registry).to receive(:new).and_return(registry)
+      allow(JobRegistry).to receive(:new).and_return(registry)
 
       harness = build_harness(session_id: id, resume_data: saved_data(id))
 
@@ -3054,7 +3054,7 @@ RSpec.describe Harness do
       expect(harness.output_log.max_saved).to eq(30)
     end
 
-    # Minimum wiring for issue #286 increment 1: the Harness owns the Registry, and
+    # Minimum wiring for issue #286 increment 1: the Harness owns the JobRegistry, and
     # the run record is the buffer of the FIRST job it registers - the main turn,
     # job #0 - so every single-writer pin still resolves to the same object.
     it 'the run record is the buffer of the registry job #0 (the main turn)' do

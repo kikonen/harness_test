@@ -3,13 +3,13 @@
 require 'spec_helper'
 require 'output_buffer'
 require 'job'
-require 'registry'
+require 'job_registry'
 
 RSpec.describe Job do
   # The job's buffer and queue always come from a registry, so a spec that
   # asserts on a job must add it to one - a job the registry does not retain
   # cannot be answered or recorded into.
-  let(:registry) { Registry.new }
+  let(:registry) { JobRegistry.new }
 
   def add(node_kind, **kwargs)
     registry.add_job(kind: node_kind, **kwargs)

@@ -4,12 +4,12 @@ require 'spec_helper'
 require 'stringio'
 require 'output_buffer'
 require 'job'
-require 'registry'
+require 'job_registry'
 require 'ui/dialog'
 require 'harness_config'
 
-RSpec.describe Registry do
-  let(:registry) { Registry.new }
+RSpec.describe JobRegistry do
+  let(:registry) { JobRegistry.new }
 
   # The minimum harness Task.run reads (the palette is optional, so a plain
   # object answers only what the drain loop asks).
@@ -94,7 +94,7 @@ RSpec.describe Registry do
     # A dropped job cannot be answered or read, so an event naming an unknown
     # job is not recorded into anything.
     it 'ignores an event naming a job it does not retain' do
-      kept = Registry.new(tasks_kept: 1)
+      kept = JobRegistry.new(tasks_kept: 1)
       fg = kept.add_job(kind: :command)
       dropped = kept.add_job(kind: :command, requested_by: fg)
       dropped.finish
@@ -173,7 +173,7 @@ RSpec.describe Registry do
 
       registry.foreground = other.id
 
-      resumed = Registry.new
+      resumed = JobRegistry.new
       resumed.add_job(kind: :main)
       node = resumed.add_job(kind: :command, requested_by: resumed.jobs.first)
       resumed.foreground = node.id
@@ -189,7 +189,7 @@ RSpec.describe Registry do
     # The session stores the foreground as an ID, so a resumed run restores it on
     # the registry it built. An id this run does not retain cannot be restored.
     it 'restores a saved id that this run retains' do
-      resumed = Registry.new
+      resumed = JobRegistry.new
       resumed.add_job(kind: :main)
       node = resumed.add_job(kind: :command, requested_by: resumed.jobs.first)
       resumed.restore_foreground(node.id)
@@ -197,7 +197,7 @@ RSpec.describe Registry do
     end
 
     it 'leaves the default in place for an id it does not retain' do
-      resumed = Registry.new
+      resumed = JobRegistry.new
       resumed.add_job(kind: :main)
 
       expect(resumed.restore_foreground(9)).to eq(0)
@@ -312,11 +312,11 @@ RSpec.describe Registry do
   end
 
   describe 'the config value it enforces' do
-    # The first consumer wiring: the config value reaches a Registry unchanged,
+    # The first consumer wiring: the config value reaches a JobRegistry unchanged,
     # so the config limit IS the retention limit.
-    it 'is a config value passed through to a Registry unchanged' do
+    it 'is a config value passed through to a JobRegistry unchanged' do
       config = HarnessConfig.new(output: { tasks_kept: 2 })
-      kept = Registry.new(tasks_kept: config.output_tasks_kept)
+      kept = JobRegistry.new(tasks_kept: config.output_tasks_kept)
       fg = kept.add_job(kind: :command)
       3.times { kept.add_job(kind: :command, requested_by: fg).finish }
       fg.finish
@@ -331,7 +331,7 @@ RSpec.describe Registry do
 
   describe 'retention (tasks_kept - first consumer of the key)' do
     it 'defaults to nil, so nothing is dropped' do
-      expect(Registry.new.tasks_kept).to be_nil
+      expect(JobRegistry.new.tasks_kept).to be_nil
 
       3.times { registry.add_job(kind: :command, requested_by: registry.jobs.first) }
       registry.jobs.each(&:finish)
@@ -340,7 +340,7 @@ RSpec.describe Registry do
     end
 
     it 'keeps at most tasks_kept finished jobs' do
-      kept = Registry.new(tasks_kept: 2)
+      kept = JobRegistry.new(tasks_kept: 2)
       main = kept.add_job(kind: :main)
       4.times { kept.add_job(kind: :command, requested_by: main) }
       # Snapshot so a drop during #finish cannot skip a job in the iteration.
@@ -353,7 +353,7 @@ RSpec.describe Registry do
     end
 
     it 'never drops a running or pending job' do
-      kept = Registry.new(tasks_kept: 1)
+      kept = JobRegistry.new(tasks_kept: 1)
       main = kept.add_job(kind: :main)
       running = kept.add_job(kind: :command, requested_by: main)
       running.mark_running
@@ -368,7 +368,7 @@ RSpec.describe Registry do
     end
 
     it 'drops the OLDEST finished jobs first' do
-      kept = Registry.new(tasks_kept: 2)
+      kept = JobRegistry.new(tasks_kept: 2)
       main = kept.add_job(kind: :command)
       first = kept.add_job(kind: :command, requested_by: main)
       second = kept.add_job(kind: :command, requested_by: main)
@@ -388,7 +388,7 @@ RSpec.describe Registry do
     # pending entry, and a dropped job cannot be read, so retention only removes
     # whole finished jobs.
     it 'a dropped job is gone from the list, not just emptied' do
-      kept = Registry.new(tasks_kept: 1)
+      kept = JobRegistry.new(tasks_kept: 1)
       fg = kept.add_job(kind: :command)
       old = kept.add_job(kind: :command, requested_by: fg)
       old.buffer.puts(:task, 'its record')

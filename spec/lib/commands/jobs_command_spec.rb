@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 require 'stringio'
-require 'registry'
+require 'job_registry'
 require 'commands/jobs_command'
 
 # /jobs (issue #286): the registry owns the flat list, so the command reports it
@@ -31,7 +31,7 @@ RSpec.describe Commands::JobsCommand do
 
   describe 'the flat-list report' do
     it 'lists every retained job and marks the foreground one' do
-      registry = Registry.new
+      registry = JobRegistry.new
       main = registry.add_job(kind: :main)
       registry.add_job(kind: :command, requested_by: main)
 
@@ -42,7 +42,7 @@ RSpec.describe Commands::JobsCommand do
     end
 
     it 'marks the job the foreground now points at' do
-      registry = Registry.new
+      registry = JobRegistry.new
       main = registry.add_job(kind: :main)
       other = registry.add_job(kind: :command, requested_by: main)
       registry.foreground = other.id
@@ -53,7 +53,7 @@ RSpec.describe Commands::JobsCommand do
     end
 
     it 'reports the help usage for a bare switch (no id given)' do
-      registry = Registry.new
+      registry = JobRegistry.new
       registry.add_job(kind: :main)
 
       expect(run('switch', registry)).to include('jobs switch <id>')
@@ -62,7 +62,7 @@ RSpec.describe Commands::JobsCommand do
 
   describe 'switching the foreground job' do
     it 'moves the foreground to a retained id' do
-      registry = Registry.new
+      registry = JobRegistry.new
       main = registry.add_job(kind: :main)
       other = registry.add_job(kind: :command, requested_by: main)
 
@@ -75,7 +75,7 @@ RSpec.describe Commands::JobsCommand do
     # A dropped job has no buffer to show, so the registry's guard is what the
     # command reports - the command never mutates state by itself.
     it 'reports the registry error for an id it does not retain' do
-      registry = Registry.new(tasks_kept: 1)
+      registry = JobRegistry.new(tasks_kept: 1)
       fg = registry.add_job(kind: :command)
       dropped = registry.add_job(kind: :command, requested_by: fg)
       dropped.finish

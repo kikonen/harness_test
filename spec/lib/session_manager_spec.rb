@@ -7,7 +7,7 @@ require 'param_overrides'
 require 'ui/spinner'
 require 'output_buffer'
 require 'session_manager'
-require 'registry'
+require 'job_registry'
 require 'fileutils'
 require 'tmpdir'
 
@@ -644,7 +644,7 @@ RSpec.describe SessionManager do
 
     it 'writes the foreground as the retained job id' do
       Dir.mktmpdir do |dir|
-        registry = Registry.new
+        registry = JobRegistry.new
         registry.add_job(kind: :main)
         node = registry.add_job(kind: :command, requested_by: registry.jobs.first)
         registry.foreground = node.id

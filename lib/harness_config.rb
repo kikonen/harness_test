@@ -172,7 +172,7 @@ class HarnessConfig
     # jobs the registry retains for review. The SAVED limit is
     # 'resume: replay_entries' above - it is already the window a save writes, so
     # there is no second key for it. tasks_kept is read here and enforced by
-    # Registry#retain, the first consumer of the key.
+    # JobRegistry#retain, the first consumer of the key.
     @output = {
       tail_memory: int_or_nil(data.dig(:output, :tail_memory)),
       tasks_kept:    int_or_nil(data.dig(:output, :tasks_kept))
@@ -414,7 +414,7 @@ class HarnessConfig
   end
 
   # How many finished jobs the registry retains for review (issue #286). nil =
-  # the default (nothing dropped). Read here, enforced by Registry#retain, which
+  # the default (nothing dropped). Read here, enforced by JobRegistry#retain, which
   # is the first consumer of the key.
   def output_tasks_kept
     @output[:tasks_kept]

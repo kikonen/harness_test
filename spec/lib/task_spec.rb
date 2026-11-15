@@ -135,7 +135,7 @@ RSpec.describe Task do
     # answer apart from inbox-resident notes, so the request gets the real
     # answer and the note stays queued for steering.
     it 'does not consume a queued steering note as the request answer' do
-      registry = Registry.new
+      registry = JobRegistry.new
       main     = registry.add_job(kind: :main)
       note     = { type: :note, content: 'a steering note' }
       # The note lands in the inbox BEFORE the request is posted.
@@ -190,7 +190,7 @@ RSpec.describe Task do
     # raise on it. Here the owed request belongs to another job (a background
     # round), so it is answered and the stopping thread still gets its own STOP.
     it 'answers another job owed request and still stops its own thread' do
-      registry = Registry.new
+      registry = JobRegistry.new
       main = registry.add_job(kind: :main)
       background = registry.add_job(kind: :command, requested_by: main)
       task = described_class.new(buffer: nil, registry:, job: main) { }
@@ -205,7 +205,7 @@ RSpec.describe Task do
     # When the owed request is the stopping thread's OWN inbox, the interrupted
     # answer already lands there, so no STOP is pushed on top of it.
     it 'does not push STOP over the answer it just delivered to its own inbox' do
-      registry = Registry.new
+      registry = JobRegistry.new
       main = registry.add_job(kind: :main)
       task = described_class.new(buffer: nil, registry:, job: main) { }
       main.mark_awaiting
@@ -1396,7 +1396,7 @@ RSpec.describe Task do
     end
 
     it 'its inbox IS the job inbox, so the registry answer reaches it' do
-      registry = Registry.new
+      registry = JobRegistry.new
       job = registry.add_job(kind: :main)
       task = registry_task(registry, job) { }
       task.respond('answer')
@@ -1406,7 +1406,7 @@ RSpec.describe Task do
     end
 
     it 'its buffer IS the job buffer' do
-      registry = Registry.new
+      registry = JobRegistry.new
       job = registry.add_job(kind: :main)
       task = registry_task(registry, job) { }
 
@@ -1416,7 +1416,7 @@ RSpec.describe Task do
     # The foreground task never renders another job's lines: an event naming a
     # foreign job is recorded into that job's own buffer and skipped.
     it 'records a foreign-job event into that job buffer and does not render it' do
-      registry = Registry.new
+      registry = JobRegistry.new
       main = registry.add_job(kind: :main)
       other = registry.add_job(kind: :command, requested_by: main)
       task = registry_task(registry, main) { }
@@ -1429,7 +1429,7 @@ RSpec.describe Task do
     end
 
     it 'outbox_empty? reads the ONE registry queue' do
-      registry = Registry.new
+      registry = JobRegistry.new
       job = registry.add_job(kind: :main)
       task = registry_task(registry, job) { }
 
@@ -1440,7 +1440,7 @@ RSpec.describe Task do
 
     # The drain loop's spinner check is the same queue read everywhere.
     it 'the block value lands as the :done result the caller awaits' do
-      registry = Registry.new
+      registry = JobRegistry.new
       job = registry.add_job(kind: :main)
       io = StringIO.new
       harness = Object.new
@@ -1456,7 +1456,7 @@ RSpec.describe Task do
   # answer VALUE the tool can return to the model; a grant dialog is excepted.
   describe 'handle_request and the background denial (issue #286)' do
     def denied_registry
-      registry = Registry.new
+      registry = JobRegistry.new
       main = registry.add_job(kind: :main)
       [registry, main, registry.add_job(kind: :command, requested_by: main)]
     end
