@@ -87,6 +87,8 @@ module UI
       @stdin = stdin
     end
 
+    attr_reader :stdin
+
     # Read one line. `prefill` (a draft from a previously cancelled editor) is
     # inserted into the Reline buffer on tty only.
     def read(prompt: DEFAULT_PROMPT, prefill: nil)

@@ -4,8 +4,8 @@ require_relative "task"
 require_relative "tool"
 
 # Shared wrapper for running an LLM round on a Task thread (the
-# single-thread I/O rule, issue #40): the block runs on a task thread and
-# all its console I/O is serialized through the main-thread drain loop.
+# single-thread I/O rule, issue #40): the block runs on a task thread and all
+# its console I/O is serialized through the main-thread drain loop.
 # Without it, Task.emit events (spinner, response lines) are silently
 # dropped and any dialog blocks the console - the log moves but the console
 # looks stuck (issue #235). A task error is the :kind role, so the bracket shape
@@ -15,14 +15,32 @@ require_relative "tool"
 # prompts) and the Command subclasses that do (/retry issue #235, /compact
 # issue #253). The includer must expose #harness and #ui.
 module TaskRunner
-  def run_on_task
+  # The run's ONE input path (issue #286): the same reader the idle prompt uses,
+  # so the edit state is one state of the poll loop and not two mechanisms.
+  attr_accessor :input_path
+
+  # Issue #286: the registry is the executor, so this AWAITs a job rather than
+  # running a turn itself - the CLI asks the registry to run a job and reads the
+  # result back. A caller with no registry (a spec harness double, a run built
+  # without one) still goes through the drain loop, so the single-thread I/O
+  # rule and the drain-loop pins are unchanged.
+  def run_on_task(job: nil)
     emit_role(:gap, "")
-    error, _task = Task.run(harness:, ui:) { |_t| yield }
-    # No harvest step: there is ONE buffer (issue #286), and the drain loop is
-    # its single main-thread writer, so the turn's output already landed in the
-    # run record Task.run handed the task. Nothing to copy.
+    registry = harness.respond_to?(:registry) ? harness.registry : nil
+    job ||= registry&.foreground_job
+    error, _task, result =
+      if registry
+        registry.run(job:, harness:, ui:, **input_kwargs) { |_t| yield }
+      else
+        # No job, so no registry result: the block's own value is what the
+        # caller gets back.
+        value = nil
+        error, _t = Task.run(harness:, ui:, **input_kwargs) { |_t| value = yield }
+        [error, nil, value]
+      end
     emit_role(:kind, error, origin: "task error") if error
     emit_role(:gap, "")
+    result
   end
 
   # Console line emitted from INSIDE a task block. A task thread must never
@@ -76,6 +94,12 @@ module TaskRunner
   end
 
   private
+
+  # Only pass the input path when the run owns one (a spec host without one
+  # keeps the drain loop's own default reader).
+  def input_kwargs
+    input_path ? { input_path: } : {}
+  end
 
   # Route a typed role to the right sink: a live Task carries it as an event
   # (rendered by the drain loop with the harness palette), the main thread

@@ -33,7 +33,10 @@ RSpec.describe CLI do
   # run reads the idle prompt through PromptReader; a #run spec that only
   # checks the banner stubs it so the loop exits at once (read => nil).
   def stub_prompt_reader
-    reader = instance_double(PromptReader, read: nil)
+    # issue #286: run hands the reader's ONE input path to the command handler,
+    # so the double answers it with a real InputPath run can assign on.
+    path = InputPath.new(ui: ui)
+    reader = instance_double(PromptReader, read: nil, input_path: path)
     allow(PromptReader).to receive(:new).and_return(reader)
   end
 

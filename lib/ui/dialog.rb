@@ -194,7 +194,7 @@ module UI
     #            cancel is explicit). One pick returns the bare value;
     #            two or more return an array of values.
     def initialize(title:, options:, note: nil, free_text: false, free_text_prompt: nil,
-                   multi_select: false)
+                   multi_select: false, grant: false)
       raise ArgumentError, "dialog title must be a non-empty string" if title.to_s.strip.empty?
       unless options.is_a?(Array) && !options.empty?
         raise ArgumentError, "dialog requires a non-empty array of Dialog::Option"
@@ -202,6 +202,11 @@ module UI
       options.each do |o|
         raise ArgumentError, "every option must be a Dialog::Option" unless o.is_a?(Option)
       end
+
+      # A GRANT dialog can never be denied for a background job: denying the
+      # consent would stop the job from working at all, so the consent path
+      # stays live for it. Every other dialog kind is deniable (issue #286).
+      @grant = grant ? true : false
 
       @title   = title.to_s.strip
       @notes   = normalize_notes(note)
@@ -217,6 +222,12 @@ module UI
       options << Option.new(title: "Cancel", value: CANCEL_VALUE)
       @options = options
       @multi_select = multi_select ? true : false
+    end
+
+    # True when this dialog asks for a consent GRANT, which can never be
+    # denied for a background job (denying it would stop the job working).
+    def grant?
+      @grant
     end
 
     # Render the dialog and wait for the user's choice on stdin.

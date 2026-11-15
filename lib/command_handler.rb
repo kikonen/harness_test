@@ -15,6 +15,7 @@ require_relative "commands/session_command"
 require_relative "commands/session_clear_command"
 require_relative "commands/compact_command"
 require_relative "commands/ctx_command"
+require_relative "commands/jobs_command"
 require_relative "commands/reload_command"
 require_relative "commands/save_command"
 require_relative "commands/resume_command"
@@ -58,6 +59,7 @@ class CommandHandler
     "session-clear" => Commands::SessionClearCommand,
     "compact"       => Commands::CompactCommand,
     "ctx"           => Commands::CtxCommand,
+    "jobs"          => Commands::JobsCommand,
     "reload"        => Commands::ReloadCommand,
     "save"          => Commands::SaveCommand,
     "reasoning"     => Commands::ReasoningCommand,

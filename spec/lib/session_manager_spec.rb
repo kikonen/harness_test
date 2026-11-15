@@ -7,6 +7,7 @@ require 'param_overrides'
 require 'ui/spinner'
 require 'output_buffer'
 require 'session_manager'
+require 'registry'
 require 'fileutils'
 require 'tmpdir'
 
@@ -611,6 +612,44 @@ RSpec.describe SessionManager do
         expect(data[:replay_tail]).to eq(
           tail.map { |e| e.merge(type: e[:type].to_s, origin: e[:origin].to_s) }
         )
+      end
+    end
+  end
+
+  # issue #286: the foreground job travels with the session as an ID (harness
+  # state, like the postures). The save side is guarded by respond_to? so a
+  # harness double with no registry still saves; the RESUME side is
+  # Harness#apply_resume_state, covered in harness_spec.rb.
+  describe 'foreground job round trip (issue #286)' do
+    def save_with_registry(dir, registry)
+      # A local for the session: a singleton block is instance_exec'd on the
+      # double, so naming `session` inside it would recurse forever.
+      sess = session
+      double = Object.new
+      double.define_singleton_method(:session) { sess }
+      double.define_singleton_method(:options) { { auto_save: false } }
+      double.define_singleton_method(:logger) { Logger.new(File::NULL) }
+      double.define_singleton_method(:registry) { registry }
+      double.define_singleton_method(:output_palette) { UI::Palette.fetch(nil) }
+      double.define_singleton_method(:mcp_connected_summary) { [] }
+      double.define_singleton_method(:yolo?) { false }
+      double.define_singleton_method(:stream?) { false }
+      double.define_singleton_method(:markdown?) { false }
+      double.define_singleton_method(:replay_tail_for_save) { [] }
+
+      described_class.new(double, FileList.new([], workdir: dir)).save_session
+      JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
+                                     'session.json')), symbolize_names: true)
+    end
+
+    it 'writes the foreground as the retained job id' do
+      Dir.mktmpdir do |dir|
+        registry = Registry.new
+        registry.add_job(kind: :main)
+        node = registry.add_job(kind: :command, requested_by: registry.jobs.first)
+        registry.foreground = node.id
+
+        expect(save_with_registry(dir, registry)[:foreground_job]).to eq(node.id)
       end
     end
   end
