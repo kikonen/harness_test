@@ -11,6 +11,10 @@ module Commands
       group: :general,
       see_also: %w[save help])
 
+    # Ends the whole run; there is no live loop to end from a mid-turn submit.
+    # Quit is Ctrl-D / /exit at the idle prompt.
+    def self.mid_turn_safe? = false
+
     def exited?
       @exited
     end
