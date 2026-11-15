@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "input_path"
-require_relative "task"
+require_relative "poller"
 require_relative "ui"
 
 # -- PromptReader ---------------------------------------------------------
@@ -67,13 +67,13 @@ class PromptReader
   # The modeline: a bracketed model name (effort inside it) then the posture
   # tags, then the context indicator on the SAME line to save vertical space.
   # The posture tags come from the SAME builder the spinner badge uses
-  # (Task.mode_badge), so consent and streaming cannot read differently in the
+  # (Poller.mode_badge), so consent and streaming cannot read differently in the
   # two places (the spinner only exists while the model works, not while idle).
   def render_modeline(harness)
     model  = harness.session_manager.active_model_name
     effort = harness.session_manager.param_overrides.reasoning_effort_display
     tags   = ["[#{model ? "#{model} (#{effort})" : effort}]"]
-    badge  = Task.mode_badge(harness)
+    badge  = Poller.mode_badge(harness)
     tags  << badge if badge
     prefix = "#{tags.join(' ')} > "
     ctx = harness.context_indicator

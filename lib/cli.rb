@@ -32,7 +32,7 @@ class CLI
     @options   = options || CLIOptions.parse
 
     # This console is the single sink every dialog and status line reaches (a
-    # Task's drain loop renders to it, and Task.handle_request serves a dialog
+    # Task's drain loop renders to it, and the Poller serves a dialog
     # on it). It is built BEFORE the Harness that resolves the palette, and
     # /palette + a mid-run Harness rebuild can change it, so the palette is
     # declared as a live reader (issue #388).
