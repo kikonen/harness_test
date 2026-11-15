@@ -7,7 +7,7 @@ require_relative "task"
 # The flat job list, the ONE fan-in queue that orders events across jobs, and
 # the executor: a turn is AWAITED here rather than run in place by a caller.
 # Design: doc/task_model_design.md.
-class Registry
+class JobRegistry
   # Same timeout as the drain loop, so a poll costs the same everywhere.
   DEFAULT_POLL_TIMEOUT = 0.1
 

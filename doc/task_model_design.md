@@ -2,12 +2,12 @@
 
 Design notes for the flat task list and the layer that owns it. Verified against
 master `97e7d94` (2026-11-14). Increment 1 built the shape in code: `lib/job.rb`
-(Job) and `lib/registry.rb` (Registry), plus the minimum wiring - the main turn is
+(Job) and `lib/job_registry.rb` (JobRegistry), plus the minimum wiring - the main turn is
 registered as job #0, so the run record is job #0's buffer. Increment 2 wired the
 executor: `TaskRunner#run_on_task` AWAITs the foreground job on the registry, a
 job's task reads the ONE queue instead of its own outbox, and the input path is
 the same read for the idle prompt and a mid-turn note (`lib/input_path.rb`). No
-run builds a Registry for a job other than #0 yet.
+run builds a JobRegistry for a job other than #0 yet.
 
 Cross-refs: #286 (this), #324, #146, #414, #181, #40, #238, #248, #300.
 Buffer parts and keying rules live in `doc/output_buffer_design.md`; the single
@@ -32,7 +32,7 @@ holds Jobs.
 
 ## The registry (owner, 2026-11-14)
 
-The CLI (main thread) owns the Registry. It holds the flat list of Jobs and is
+The CLI (main thread) owns the JobRegistry. It holds the flat list of Jobs and is
 the single poller: it polls over ALL jobs, and when a job has pending events it
 updates that job's buffer. It is the only code that touches console and stdin,
 which is what makes dialog routing conflict-free even when several jobs run
@@ -131,7 +131,7 @@ Three things had to be settled before any runtime was built because they change 
 code. All three are settled; the wiring is what remains.
 
 - **Main turn is job #0** (owner answered, 2026-11-14; open decision 4 closed). The
-  registry has no special case, `Registry#add_job` assigns ids in add order so the
+  registry has no special case, `JobRegistry#add_job` assigns ids in add order so the
   first job added is #0, and its buffer is just job #0's buffer.
 - `TaskRunner#run_on_task` stops RUNNING a turn and AWAITS one: the registry is the
   executor, so the CLI asks it to run a job and awaits the result. Decision resolved;

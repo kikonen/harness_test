@@ -17,7 +17,7 @@ require_relative "output_buffer"
 require_relative "memories"
 require_relative "session_locator"
 require_relative "plans"
-require_relative "registry"
+require_relative "job_registry"
 require_relative "task"
 require_relative "llm/stream_preview"
 require_relative "llm/usage_stats"
@@ -210,7 +210,7 @@ class Harness
     # window is the existing 'resume: replay_entries' value, not a second key.
     # The registry owns the buffers now (issue #286 increment 1), so the run record
     # is the buffer of the job the registry registers FIRST - the main turn, job #0.
-    @registry = Registry.new(
+    @registry = JobRegistry.new(
       max_memory: output_tail_memory || OutputBuffer::DEFAULT_MAX_MEMORY,
       max_saved: @replay_limit,
       tasks_kept: output_tasks_kept)

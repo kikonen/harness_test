@@ -3,7 +3,7 @@
 require 'spec_helper'
 require 'stringio'
 require 'task_runner'
-require 'registry'
+require 'job_registry'
 require 'input_path'
 
 # issue #235: the shared wrapper for running an LLM round on a Task thread.
@@ -53,7 +53,7 @@ RSpec.describe TaskRunner do
   # block's value comes back as the job's result.
   describe 'run_on_task awaits the registry job' do
     def registry_host
-      registry = Registry.new
+      registry = JobRegistry.new
       host.harness = Object.new.tap do |h|
         h.define_singleton_method(:registry) { registry }
       end

@@ -3,13 +3,13 @@
 require 'spec_helper'
 require 'stringio'
 require 'input_path'
-require 'registry'
+require 'job_registry'
 
 # The ONE input path (issue #286): the idle prompt and a mid-turn note are the
 # same read, so the edit state is a state of the single poll loop. A submitted
 # block is ONE input event routed to the target job's inbox.
 RSpec.describe InputPath do
-  let(:registry) { Registry.new }
+  let(:registry) { JobRegistry.new }
   let(:stdin_io) { StringIO.new }
   let(:ui) { instance_double(UI::Console) }
   let(:editor) { instance_double(UI::Editor) }
