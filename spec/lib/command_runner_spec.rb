@@ -786,11 +786,14 @@ RSpec.describe CommandRunner do
       end
 
       out = runner.run('seq 50', limit: 10)
-      expect(out).to include('line 10')
-      expect(out).not_to include('line 11')
-      expect(out).to include(
-        '(output truncated: 40 more line(s) omitted'
-      )
+      # Head AND tail (issue #537): the first and last lines always survive and
+      # the dropped middle is named, so a runner's TAIL failure block + summary
+      # reach the model instead of being cut. For 50 lines at limit 10: 5 head
+      # + 5 tail, 40 middle dropped.
+      expect(out).to include('line 1')
+      expect(out).to include('line 50')
+      expect(out).not_to include('line 25')
+      expect(out).to include('output truncated: 40 line(s) omitted from the middle')
     end
   end
 

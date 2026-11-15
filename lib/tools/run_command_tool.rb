@@ -23,7 +23,7 @@ require_relative "../command_runner"
 #     owner's config-only denylist-safe override in CommandRunner (issue #389,
 #     doc/denylist_safe_approve_design.md) - never a model-side option.
 #   - Commands run under a timeout (default 60 s, cap 300 s); output is
-#     truncated to a line limit (default 200, max 5000) because it goes
+#     truncated to a line limit (default 500, max 5000) because it goes
 #     into the LLM context window.
 module Tools
 

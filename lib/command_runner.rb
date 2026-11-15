@@ -67,13 +67,13 @@ require_relative "ui/renderer"
 #     The child runs in its OWN process group; on timeout the whole tree is
 #     killed (taskkill /T on Windows, SIGKILL to the pgroup elsewhere), so a
 #     hung command can never hold the harness' streams open again.
-#   - Output is truncated to a line limit (default 200, max 5000); that
+#   - Output is truncated to a line limit (default 500, max 5000); that
 #     limit exists because the tool path returns output into the LLM
 #     context window - the bang path prints it as-is.
 class CommandRunner
   DEFAULT_TIMEOUT = 60    # seconds
   MAX_TIMEOUT     = 300   # hard cap
-  DEFAULT_LIMIT   = 200   # output lines
+  DEFAULT_LIMIT   = 500   # output lines
   MAX_LIMIT       = 5000  # hard cap
   # Tokens the outcome line keeps as the command's handle once some earlier
   # line (an auto-approval line, or the denylist refusal line) has already
@@ -732,17 +732,24 @@ class CommandRunner
     end
   end
 
-  # Truncate text to `limit` lines (from the top), appending a notice with
-  # the number of dropped lines. Returns [text, truncated?].
+  # Keep the first and last halves of `limit` lines with the dropped middle
+  # named. Returns [text, truncated?].
   def truncate(text, limit)
     # Plain split drops a trailing empty element from a final newline,
     # so line counts match what the user actually sees.
     lines = text.split("\n")
     return [text, false] if lines.size <= limit
 
-    dropped = lines.size - limit
-    notice  = "... (output truncated: #{dropped} more line(s) omitted - " \
-              "raise 'limit' or narrow the command to see them)"
-    [lines.first(limit).join("\n") + "\n" + notice, true]
+    # Head AND tail, never just the head: a test/build runner prints its
+    # failure block and summary at the TAIL, so head-only truncation cut the
+    # very lines that explain a failure (issue #537). The kept budget splits
+    # head-biased (ceil/2 head) so the command header survives; the dropped
+    # middle is named.
+    tail    = limit / 2
+    head    = limit - tail
+    dropped = lines.size - head - tail
+    notice  = "... (output truncated: #{dropped} line(s) omitted from the " \
+              "middle - raise 'limit' or narrow the command to see them)"
+    [(lines.first(head) + [notice] + lines.last(tail)).join("\n"), true]
   end
 end
