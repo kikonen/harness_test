@@ -154,6 +154,10 @@ class CLI
       @commands.input_path = reader.input_path
       @commands.input_path.target = -> { @harness.registry.foreground_job }
       @commands.input_path.registry = -> { @harness.registry }
+      # The poll loop dispatches a "/command" submitted mid-turn through this
+      # handler (doc/unified_loop_design.md). A callable so a /resume rebuild
+      # repoints it, like target/registry above.
+      reader.input_path.command_handler = -> { @commands }
 
       loop do
         input = reader.read

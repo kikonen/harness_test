@@ -14,7 +14,7 @@ class InputPath
   # Both accept a callable so a mid-run /resume can swap the run, and so the
   # TARGET can be read live: a foreground switch changes which job the input
   # event goes to without rebuilding the reader.
-  attr_accessor :registry, :target
+  attr_accessor :registry, :target, :command_handler
   attr_accessor :edit_state
 
   def initialize(

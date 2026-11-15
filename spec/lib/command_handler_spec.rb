@@ -196,4 +196,60 @@ RSpec.describe CommandHandler do
       end
     end
   end
+
+  describe '#run_mid_turn (issue #286 mid-turn command dispatch)' do
+    # A harness double light enough for a read-only safe command (/ctx): it
+    # answers no conversation, so /ctx reports and renders without an LLM.
+    def ctx_harness
+      Class.new do
+        def context_usage = nil
+        def markdown_max_width = nil
+      end.new
+    end
+
+    def mid_handler(stdout)
+      CommandHandler.new(
+        harness: ctx_harness,
+        file_list: FileList.new([], workdir: Dir.pwd),
+        options: {},
+        ui: UI::Console.new(stdout: stdout, stdin: StringIO.new(''))
+      )
+    end
+
+    it 'ignores a non-slash submit (a bare note, not this dispatch)' do
+      stdout = StringIO.new
+      mid_handler(stdout).run_mid_turn('please steer left')
+
+      expect(stdout.string).to be_empty
+    end
+
+    it 'runs a safe command inline on the main thread' do
+      stdout = StringIO.new
+      mid_handler(stdout).run_mid_turn('/ctx')
+
+      expect(stdout.string).to include('No conversation yet')
+    end
+
+    it 'refuses a command that would start a nested drain loop' do
+      stdout = StringIO.new
+      mid_handler(stdout).run_mid_turn('/retry')
+
+      expect(stdout.string).to include('/retry is not available while a turn is running')
+    end
+
+    it 'refuses a run-rebuilding command (resume) and an exit' do
+      stdout = StringIO.new
+      mid_handler(stdout).run_mid_turn('/resume abc')
+      mid_handler(StringIO.new).run_mid_turn('/exit')
+
+      expect(stdout.string).to include('/resume is not available while a turn is running')
+    end
+
+    it 'names an unknown slash command like the idle path' do
+      stdout = StringIO.new
+      mid_handler(stdout).run_mid_turn('/xyzzy')
+
+      expect(stdout.string).to include('Unknown command: /xyzzy')
+    end
+  end
 end

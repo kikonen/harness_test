@@ -30,6 +30,17 @@ class Command
     raise HarnessError, "#{name} declares no HELP (see CommandHelp)"
   end
 
+  # Whether this command may run WHILE a turn is running (a mid-turn submit
+  # dispatched on the main thread). Default true: edit mode allows all commands
+  # (doc/unified_loop_design.md). A command opts OUT when it cannot run safely
+  # while a turn is live: one that drives an LLM round (#run_on_task) would start
+  # a nested drain loop over the single queue (double render, lost events) -
+  # refused until it becomes an event to the live task - and one that rebuilds or
+  # ends the whole run (resume/exit) has no live loop to act in.
+  def self.mid_turn_safe?
+    true
+  end
+
   # on_resume: the mid-run /resume action (issue #280) - a callable that
   # takes a session id and rebuilds the whole run under it. Only the owner
   # of the run (CLI) can do that, so the action arrives as a callable

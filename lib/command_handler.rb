@@ -136,18 +136,55 @@ class CommandHandler
 
     cmd_class = COMMANDS[name]
     if cmd_class
-      cmd = cmd_class.new(
-        harness:,
-        file_list:,
-        options:,
-        ui:,
-        on_resume: @on_resume,
-        help_renderer: @help_renderer)
+      cmd = build_command(cmd_class)
       cmd.handle(args)
       @exiting = true if cmd.respond_to?(:exited?) && cmd.exited?
     else
       unknown_command(name)
     end
+  end
+
+  # Mid-turn dispatch (issue #286, doc/unified_loop_design.md): the poll loop
+  # IS the main thread, so a "/command" submitted while a turn runs is dispatched
+  # here. A command that declares mid_turn_safe? (a pure state write) runs inline;
+  # one that drives an LLM round or rebuilds the run is refused with a hint
+  # instead of silently starting a second drain loop over the single queue. This
+  # is what removes the old /yolo note-gesture special case: /yolo is now just a
+  # command like any other. A non-slash submit is ignored (the caller routes it
+  # as a note).
+  def run_mid_turn(input)
+    input = input.to_s.strip
+    return unless input.start_with?("/")
+
+    name, args = input.gsub(/\s*\n\s*/, " ")[1..].split(" ", 2)
+    args ||= ""
+    cmd_class = COMMANDS[name]
+    if cmd_class.nil?
+      unknown_command(name)
+      return
+    end
+
+    unless cmd_class.mid_turn_safe?
+      emit_role(
+        :kind,
+        "/#{name} is not available while a turn is running",
+        origin: "note")
+      return
+    end
+
+    build_command(cmd_class).handle(args)
+  end
+
+  # Build a command instance with the run's context. Shared by idle #handle and
+  # the mid-turn dispatcher so both construct identically.
+  def build_command(cmd_class)
+    cmd_class.new(
+      harness:,
+      file_list:,
+      options:,
+      ui:,
+      on_resume: @on_resume,
+      help_renderer: @help_renderer)
   end
 
   # issue #129: `! cmd` runs a shell command locally, bypassing the model.

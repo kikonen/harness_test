@@ -20,6 +20,11 @@ module Commands
       group: :session,
       see_also: %w[ctx session conversation])
 
+    # Drives an LLM round (#run_on_task): a mid-turn submit would start a
+    # second drain loop over the single queue. Refused until it becomes an
+    # event to the live task (doc/unified_loop_design.md).
+    def self.mid_turn_safe? = false
+
     def handle(_args)
       run_on_task do |_t|
         result = @harness.session_manager.compact_session

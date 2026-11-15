@@ -212,6 +212,20 @@ class Poller
     case result.status
     when :submitted
       task.note_draft = nil
+      # In edit mode a "/command" submit runs through the run's CommandHandler
+      # (the poll loop IS the main thread), NOT the note path - so any command
+      # available at the idle prompt is available mid-turn (a safe one), and the
+      # old /yolo note gesture is gone. Bare text keeps the note route exactly.
+      # The handler is a loop-level collaborator on the shared input path (like
+      # target/registry), a callable so a /resume rebuild repoints it.
+      # Design: doc/unified_loop_design.md.
+      text = result.text.to_s
+      handler = task.input_path&.command_handler
+      handler = handler.call if handler.respond_to?(:call)
+      if handler && text.strip.start_with?("/")
+        handler.run_mid_turn(text)
+        return
+      end
       commit_input(task.registry&.note_event(result.text) ||
                              { type: :note, content: result.text })
     when *InputPath::ROUND_TRIP
@@ -237,25 +251,8 @@ class Poller
   # Main thread only (single-thread I/O rule).
   def commit_note(note)
     task = @task
-    # HACK (#221, tech debt tracked by #267): hard-codes one slash command
-    # into note plumbing, duplicating CommandHandler's registry. Safe only
-    # because toggle_yolo is a pure main-thread boolean write.
-    if (toggle = self.class.yolo_note_action(note))
-      # A symbol mode: nil from an unmatched optional group would read as
-      # "no gesture" and inject the command into the chain.
-      case toggle
-      when :on  then task.harness.yolo = true
-      when :off then task.harness.yolo = false
-      else           task.harness.toggle_yolo
-      end
-      label = task.harness.respond_to?(:yolo_mode_label) \
-                ? task.harness.yolo_mode_label : nil
-      line  = "  [#{label || 'YOLO toggle unavailable'}]"
-      task.ui.puts(line)
-      task.buffer.put(type: :text, origin: :user_note, content: line)
-      return
-    end
-
+    # Bare note only: a "/command" never reaches here (#commit_read routes it to
+    # the CommandHandler), so the old /yolo note-gesture special case is gone.
     task.harness.user_note_text = note
     ui = task.ui
     # The ack and the note are two roles, not one baked string (the #466/#470
@@ -268,22 +265,6 @@ class Poller
     ui.puts(ack || "  [note] got it")
     ui.puts(body || "  #{note}")
     task.buffer.put(type: :note, origin: :user_note, content: note)
-  end
-
-  # HACK (see commit_note): recognize the single special-cased /yolo
-  # steering gesture. Returns the mode name when the note is a bare /yolo
-  # control gesture (optionally with on/off), nil for any real note (a note
-  # that merely MENTIONS yolo stays a note - only an exact "/yolo",
-  # "/yolo on" or "/yolo off" flips the posture). Goes away with the
-  # gesture-dispatch refactor.
-  def self.yolo_note_action(note)
-    m = note.to_s.strip.match(%r{\A/yolo(?:\s+(on|off))?\z}i)
-    return nil unless m
-
-    # :toggle for the bare marker: an unmatched OPTIONAL group returns nil,
-    # which is falsy - returning it would make "/yolo" look like "no
-    # gesture" and inject the command into the conversation chain.
-    m[1] ? m[1].downcase.to_sym : :toggle
   end
 
   def handle_request(msg)

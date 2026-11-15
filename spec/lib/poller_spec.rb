@@ -10,7 +10,7 @@ require 'stringio'
 # The Poller owns the drain loop, the spinner, the input path and the dialog
 # serving that the Task no longer runs directly (issue #286). These specs drive
 # those methods the way the loop calls them: the instance methods through a
-# Poller built around a task, the posture/gesture helpers as class methods.
+# Poller built around a task, the posture-badge helper as a class method.
 RSpec.describe Poller do
   def spec_buffer
     OutputBuffer.new
@@ -246,45 +246,32 @@ RSpec.describe Poller do
     end
   end
 
-  # issue #221: a steering note that is EXACTLY "/yolo" is consumed as a
-  # control gesture (posture toggle) instead of being injected into the
-  # chain. Unit-level on Poller#commit_note - the drain-loop wiring is the
-  # same one the note specs in task_spec already prove.
-  #
-  # HACK (acknowledged, issue #267): the gesture is
-  # special-cased per command inside the poller's note plumbing. These specs pin
-  # the CONTRACT (only an exact /yolo flips state, a real note never
-  # does, the ack lands on ui + buffer) so the gesture-dispatch refactor
-  # promised in the async-task + CLI work can be verified against it.
-  describe 'Poller#commit_note /yolo control gesture (issue #221)' do
-    # Harness stand-in: the posture surface + the note setter, both
-    # recorded so the spec can see which path was taken.
-    def gesture_harness
+  # Mid-turn command dispatch (issue #286): in edit mode a "/command" submit
+  # runs through the run's CommandHandler on the main thread (the poll loop IS
+  # the main thread), NOT the note path - this is what removes the old /yolo
+  # note-gesture hack (#221/#267): /yolo is now just a command. Bare text keeps
+  # the note route exactly. Design: doc/unified_loop_design.md.
+  describe 'Poller mid-turn command dispatch (issue #286)' do
+    # A stand-in CommandHandler: records what the poll loop dispatched. The
+    # loop reaches it through the shared input path's command_handler (a
+    # callable, like target/registry - doc/unified_loop_design.md).
+    def fake_handler
+      handler = Object.new
+      def handler.run_mid_turn(text)
+        (@seen ||= []) << text
+      end
+      def handler.seen
+        @seen || []
+      end
+      handler
+    end
+
+    def note_harness
       Class.new do
-        attr_reader :notes, :toggles
+        attr_reader :notes
 
         def initialize
-          @notes   = []
-          @toggles = 0
-          @yolo    = false
-        end
-
-        def yolo?
-          @yolo
-        end
-
-        def yolo=(val)
-          @yolo = (val == true)
-        end
-
-        def yolo_mode_label
-          @yolo ? 'YOLO ON' : 'YOLO OFF'
-        end
-
-        def toggle_yolo
-          @toggles += 1
-          @yolo    = !@yolo
-          @yolo ? 'YOLO ON' : 'YOLO OFF'
+          @notes = []
         end
 
         def user_note_text=(text)
@@ -293,77 +280,68 @@ RSpec.describe Poller do
       end.new
     end
 
-    # A task stand-in exposing exactly what commit_note touches (harness /
-    # ui / buffer are Task's own accessors - the stand-in must answer them).
-    def gesture_task(harness)
-      task_class = Class.new do
-        attr_accessor :harness, :ui, :buffer
-        define_method(:renderer) { @renderer ||= UI::Renderer.new }
+    # Drive poll_for_note for one submitted block. The task shares one input
+    # path (the read poll_for_note uses); poll_for_note feeds its result to
+    # Poller#commit_read, where a "/command" diverges from a bare note. Returns
+    # [task, input_path] so the test can wire command_handler onto the path.
+    def task_for_submit(text)
+      editor = instance_double(UI::Editor)
+      allow(editor).to receive(:read_multiline)
+        .and_return(UI::Editor::EDITOR_RESULT.new(text, :submitted, nil))
+      stdin = StringIO.new
+      def stdin.input_pending?
+        true
       end
-      # The real buffer's #put collects the entries; a recording stand-in.
-      entries = []
-      buffer  = Class.new do
-        define_method(:put) { |**entry| entries << entry }
-      end.new
-      io     = StringIO.new
-      task   = task_class.new
-      task.harness = harness
-      task.ui      = UI::Console.new(stdout: io)
-      task.buffer  = buffer
-      [task, io, entries]
+      ui   = UI::Console.new(stdout: StringIO.new, stdin: stdin)
+      path = InputPath.new(ui: ui, editor: editor)
+      task = Task.new(buffer: spec_buffer, input_path: path)
+      task.ui          = ui
+      task.note_editor = editor
+      task.harness     = note_harness
+      [task, path]
     end
 
-    it 'flips the posture and does NOT inject the note into the chain' do
-      harness        = gesture_harness
-      task, io, buf  = gesture_task(harness)
+    it "sends a '/command' submit to the handler, not the note path" do
+      task, path = task_for_submit('/yolo')
+      handler = fake_handler
+      path.command_handler = -> { handler }
 
-      described_class.new(task).commit_note('/yolo')
+      described_class.new(task).poll_for_note
 
-      expect(harness.yolo?).to be(true)
-      expect(harness.toggles).to eq(1)
-      expect(harness.notes).to be_empty # consumed, never injected
-      expect(io.string).to include('[YOLO ON]')
-      expect(buf.map { |e| e[:content] }).to eq(['  [YOLO ON]'])
-      expect(buf.map { |e| e[:origin] }).to eq([:user_note])
+      expect(handler.seen).to eq(['/yolo'])
+      expect(task.harness.notes).to be_empty # never injected as a steering note
     end
 
-    it 'honours an explicit /yolo on / off form (sets, not flips)' do
-      harness = gesture_harness
-      task, io, _buf = gesture_task(harness)
+    it 'sends a bare submit down the note path, never to the handler' do
+      task, path = task_for_submit('please run it with yolo off')
+      handler = fake_handler
+      path.command_handler = -> { handler }
 
-      described_class.new(task).commit_note('/yolo on')
-      described_class.new(task).commit_note('/yolo on') # idempotent
-      expect(harness.yolo?).to be(true)
-      expect(harness.toggles).to eq(0) # explicit forms never blind-toggle
+      described_class.new(task).poll_for_note
 
-      described_class.new(task).commit_note('/YOLO OFF') # casing tolerated
-      expect(harness.yolo?).to be(false)
-      expect(io.string).to include('[YOLO OFF]')
+      expect(handler.seen).to be_empty
+      expect(task.harness.notes).to eq(['please run it with yolo off'])
     end
 
-    it 'recognizes the gesture forms (bare marker is :toggle, never nil)' do
-      expect(described_class.yolo_note_action('/yolo')).to eq(:toggle)
-      expect(described_class.yolo_note_action('/yolo on')).to eq(:on)
-      expect(described_class.yolo_note_action('  /YOLO Off  ')).to eq(:off)
-      expect(described_class.yolo_note_action('foo /yolo')).to be_nil
+    it 'routes /yolo on to the handler as a command, not a poller gesture' do
+      task, path = task_for_submit('/yolo on')
+      handler = fake_handler
+      path.command_handler = -> { handler }
+
+      described_class.new(task).poll_for_note
+
+      expect(handler.seen).to eq(['/yolo on'])
+      expect(task.harness.notes).to be_empty
     end
 
-    it 'leaves every real note alone (a note merely MENTIONS yolo)' do
-      harness = gesture_harness
-      task, io, _buf = gesture_task(harness)
+    it 'routes a /command to the note path when no handler is wired' do
+      # A unit-test task built without the CLI wiring has no command_handler on
+      # its input path, so a "/command" falls through to the note path.
+      task, _path = task_for_submit('/stream')
 
-      described_class.new(task).commit_note('please run it with yolo off')
-      described_class.new(task).commit_note('yolo')
-      described_class.new(task).commit_note('/yolo please do it anyway')
+      described_class.new(task).poll_for_note
 
-      expect(harness.yolo?).to be(false)
-      expect(harness.toggles).to eq(0)
-      expect(harness.notes)
-        .to eq(['please run it with yolo off', 'yolo', '/yolo please do it anyway'])
-      # Two renderer-owned roles: the [note] got it ack, then the note body as a
-      # wrapped :note paragraph indented under the prompt.
-      expect(io.string).to include('[note] got it')
-      expect(io.string).to include('  yolo')
+      expect(task.harness.notes).to eq(['/stream'])
     end
   end
 

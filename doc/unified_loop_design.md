@@ -3,7 +3,7 @@
 Target design for the task/job/registry division of work (issue #286). Verified
 against the Poller-extraction baseline `3739f17` (2026-11). Cross-refs:
 #286, #36/#198 (steering notes), #221 (the /yolo gesture hack), #267 (its tech
-debt), #424. Read `doc/task_model_design.md` and `doc/task_design.md` first.
+debt, #424. Read `doc/task_model_design.md` and `doc/task_design.md` first.
 
 ---
 
@@ -28,10 +28,10 @@ also uses; `PromptReader#edit_state?` already exists). The unification is to
 stop routing a mid-turn submit through the special-cased note plumbing and
 route it through the one command handler instead.
 
-## Why (the hack this removes)
+## Why (the hack this removed)
 
-Today a mid-turn submit is a "note," and the ONLY command it can honour is the
-hardcoded `Poller#commit_note` gesture:
+Before the mid-turn dispatch landed, a mid-turn submit was a "note," and the
+ONLY command it could honour was a hardcoded `Poller#commit_note` gesture:
 
 ```ruby
 if (toggle = self.class.yolo_note_action(note))   # ugly, not scalable (#221/#267)
@@ -41,6 +41,33 @@ Every other command the user might want "at any time" (`/stream`, `/model`,
 `/compact`, ...) is swallowed as plain steering text. A single loop whose edit
 mode submits to the one CommandHandler makes the gesture-dispatch hack
 unnecessary: a bare word is a note-event, a `/x` is a command, both in one path.
+
+## Shipped: mid-turn dispatch (state-only inline)
+
+The first routing step is in. A submitted block in the poll loop
+(`Poller#commit_read`) classifies itself:
+
+- a `"/"`-prefixed submit (edit mode) goes to the run's `CommandHandler` through
+  the shared `InputPath#command_handler` (a callable wired by the CLI like
+  `target`/`registry`, so a `/resume` rebuild repoints it). The handler is a
+  loop-level collaborator, NOT on the Harness - the model layer must not own the
+  CLI dispatcher.
+- bare text keeps the note route exactly (`route_input` + `commit_note`), byte
+  for byte.
+
+`CommandHandler#run_mid_turn` dispatches a `"/command"` INLINE on the main
+thread (the poll loop IS the main thread), gated by `Command.mid_turn_safe?`:
+
+- **default true** (edit mode allows all commands); a command opts OUT when it
+  cannot run safely while a turn is live. The hazard is `#run_on_task` - driving
+  an LLM round would start a SECOND drain loop over the single queue (double
+  render, lost events) - so `/retry` and `/compact` opt out and are refused with
+  a hint. `/resume` and `/exit` opt out: they rebuild/quit the run, with no live
+  loop to act in. The posture toggles (`/yolo`, `/stream`, `/plan`) are pure
+  Harness state writes and stay safe.
+
+This is what deleted `Poller#yolo_note_action` and the `commit_note` gesture
+branch: `/yolo` mid-turn is now just `CommandHandler#run_mid_turn('/yolo')`.
 
 ## Command routing in the unified loop
 
@@ -93,10 +120,13 @@ acceptable; pick when the first slice needs an answer:
 
 1. Add a mode/state to the poll loop (spinner vs edit) without changing routing
    yet - the shared `InputPath#edit_state?` is the seed.
-2. Route a mid-turn `/command` submit to the shared `CommandHandler` (keep the
-   yolo hack until this path proves out), so any command runs mid-turn.
-3. Delete `Poller#yolo_note_action` + the `commit_note` gesture branch; `/yolo`
-   becomes an ordinary command through the handler.
-4. Make `/model` and `/compact` event-to-task instead of shared-state writes.
+2. SHIPPED (state-only inline). Route a mid-turn `/command` submit to the shared
+   `CommandHandler` via `CommandHandler#run_mid_turn` + `Command.mid_turn_safe?`.
+   State-only commands run inline; a model/rebuild command is refused (see
+   "Shipped" above).
+3. SHIPPED. Deleted `Poller#yolo_note_action` + the `commit_note` gesture
+   branch; `/yolo` is an ordinary command through the handler.
+4. Make `/model` and `/compact` event-to-task instead of shared-state writes /
+   refusals (the next step: replace the mid-turn refusal with a live-task event).
 5. Decide the task-thread lifecycle (on-demand vs always-running) once the
    event path is stable.

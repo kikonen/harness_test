@@ -20,6 +20,11 @@ module Commands
       group: :session,
       see_also: %w[sessions save saving])
 
+    # The whole run is rebuilt under a new id; there is no live loop to rebuild
+    # from a mid-turn submit (and the owner flags /resume as of doubtful value,
+    # doc/unified_loop_design.md).
+    def self.mid_turn_safe? = false
+
     def handle(args)
       id = args.strip
       if id.empty?

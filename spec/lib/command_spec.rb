@@ -4,6 +4,13 @@ require 'spec_helper'
 require 'stringio'
 require 'command'
 require 'commands/ctx_command'
+require 'commands/yolo_command'
+require 'commands/stream_command'
+require 'commands/plan_command'
+require 'commands/retry_command'
+require 'commands/compact_command'
+require 'commands/resume_command'
+require 'commands/exit_command'
 
 RSpec.describe Command do
   def build(klass = described_class, ui: UI::Console.new(stdout: StringIO.new), **extra)
@@ -36,6 +43,33 @@ RSpec.describe Command do
       stub_const('NoHelpCommand', subclass)
 
       expect { subclass.help }.to raise_error(HarnessError, /NoHelpCommand/)
+    end
+  end
+
+  describe '.mid_turn_safe?' do
+    # The seam that decides whether a command may run from a mid-turn submit
+    # (doc/unified_loop_design.md). Default true (edit mode allows all commands);
+    # a command opts out when it cannot run safely while a turn is live.
+    it 'defaults to true (a command is mid-turn-safe unless it opts out)' do
+      subclass = Class.new(described_class)
+
+      expect(subclass.mid_turn_safe?).to be true
+    end
+
+    # The posture toggles are pure Harness state writes, so they stay safe.
+    it 'is true for a posture toggle (yolo/stream/plan)' do
+      expect(Commands::YoloCommand.mid_turn_safe?).to be true
+      expect(Commands::StreamCommand.mid_turn_safe?).to be true
+      expect(Commands::PlanCommand.mid_turn_safe?).to be true
+    end
+
+    # A command that drives an LLM round would start a nested drain loop, and
+    # one that rebuilds/ends the run has no live loop to act in: both opt out.
+    it 'is false for commands that drive an LLM round or rebuild the run' do
+      expect(Commands::RetryCommand.mid_turn_safe?).to be false
+      expect(Commands::CompactCommand.mid_turn_safe?).to be false
+      expect(Commands::ResumeCommand.mid_turn_safe?).to be false
+      expect(Commands::ExitCommand.mid_turn_safe?).to be false
     end
   end
 
