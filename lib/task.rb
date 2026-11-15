@@ -51,8 +51,12 @@ class Task
   # outbox, and its inbox IS the job's inbox (the registry routes answers to it).
   def initialize(buffer:, registry: nil, job: nil, input_path: nil, &block)
     @block   = block
-    # main -> task (responses, stop). For a job this IS the job's inbox.
-    @inbox   = job ? job.inbox : Thread::Queue.new
+    # main -> task (the job's inbox). For a job this IS the job's inbox, where
+    # the registry routes steering notes (and STOP for a task servicing no live
+    # request). #request answers come back on the SEPARATE @pending_reply, so a
+    # note can never be mistaken for a dialog answer (issue #424).
+    @inbox         = job ? job.inbox : Thread::Queue.new
+    @pending_reply = nil            # live request's reply channel (one at a time)
     # task -> main (SINGLE event queue). Under the registry (issue #286) this is
     # the registry's ONE fan-in queue: events carry the job id, so ordering holds.
     @outbox  = Thread::Queue.new
@@ -162,7 +166,11 @@ class Task
   # task thread's #request call with the given value.
   def respond(value)
     @job&.mark_awaiting(false)
-    @inbox << value
+    if @pending_reply
+      @pending_reply << value
+    else
+      @inbox << value
+    end
   end
 
   # True when the task thread has been started and has not yet exited.
@@ -177,10 +185,23 @@ class Task
     # answer, so a blocked requester would raise on it). STOP then only breaks
     # this thread's own pending pop when no answer already hit that inbox.
     owed = (@registry&.jobs || []).select(&:awaiting?)
+    had_live = !@pending_reply.nil?
+    if had_live
+      # A live request on THIS task blocks on the reply channel, not the inbox.
+      # Answer it (not STOP) so #request returns normally and the thread runs
+      # its ensure/exit. The owning job was already counted in `owed`; drop it
+      # so it is not ALSO answered into its inbox.
+      @pending_reply << Job::INTERRUPTED_ANSWER
+      @pending_reply = nil
+      @job&.mark_awaiting(false)
+      owed = owed.reject { |job| job.equal?(@job) }
+    end
     owed.each { |job| job.respond(Job::INTERRUPTED_ANSWER) }
-    # @inbox IS the foreground job's inbox (set in #initialize), so an answered
-    # foreground request needs no STOP - it already got the interrupted answer.
-    @inbox << STOP unless owed.any? { |job| job.inbox.equal?(@inbox) }
+    # No live request on this task: STOP the inbox only when the owed answers
+    # did not already land in it (@inbox IS the foreground job's inbox).
+    unless had_live || owed.any? { |job| job.inbox.equal?(@inbox) }
+      @inbox << STOP
+    end
     @thread&.join(timeout)
     @thread&.kill if @thread&.alive?
     @thread = nil
@@ -211,10 +232,14 @@ class Task
   # Blocks until the main thread answers with #respond.
   def request(type, **payload)
     # While a request is unanswered, an input event must queue BEHIND the answer
-    # it gets, so the job is marked awaiting (issue #198 FIFO rule).
+    # it gets, so the job is marked awaiting (issue #198 FIFO rule). The answer
+    # comes back on a channel SEPARATE from @inbox (issue #424): a steering note
+    # already resident in the job inbox can no longer be mistaken for the answer.
+    @pending_reply = Thread::Queue.new
     @job&.mark_awaiting(true)
     push_event(type: :__request__, kind: type, **payload)
-    reply = @inbox.pop
+    reply = @pending_reply.pop
+    @pending_reply = nil
     if reply.equal?(STOP)
       raise "task was stopped while waiting for response to '#{type}'"
     end

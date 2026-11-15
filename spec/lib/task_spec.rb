@@ -128,6 +128,42 @@ RSpec.describe Task do
       end
       expect(got_done).to be(true)
     end
+
+    # issue #424: a steering note that already sits in the shared inbox (typed
+    # earlier in the turn, before the dialog opened) must NOT be mistaken for
+    # the request's answer. A dedicated per-request reply channel keeps the
+    # answer apart from inbox-resident notes, so the request gets the real
+    # answer and the note stays queued for steering.
+    it 'does not consume a queued steering note as the request answer' do
+      registry = Registry.new
+      main     = registry.add_job(kind: :main)
+      note     = { type: :note, content: 'a steering note' }
+      # The note lands in the inbox BEFORE the request is posted.
+      main.deliver(note)
+
+      task = described_class.new(buffer: nil, registry:, job: main) do |t|
+        t.push_event(type: :result, origin: :task, content: t.request(:dialog))
+      end
+      task.start
+
+      msg = nil
+      20.times { msg = task.poll(0.5); break if msg && msg[:type] == :__request__ }
+      expect(msg[:type]).to eq(:__request__)
+
+      task.respond(:allow)
+
+      answer = nil
+      20.times do
+        m = task.poll(0.5)
+        next if m.nil?
+
+        answer = m[:content] if m[:type] == :result
+        break if m[:type] == :done
+      end
+      expect(answer).to eq(:allow)
+      # The note was NOT swallowed as the answer - it stays for steering.
+      expect(main.poll(0)).to eq(note)
+    end
   end
 
   describe 'stop' do

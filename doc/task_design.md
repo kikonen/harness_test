@@ -32,7 +32,7 @@ Protocol:
 ```
 Task thread -> Main thread: push_event(type:, origin:, content:) [outbox]
 Task thread -> Main thread: request(type, **payload)             [outbox, blocking]
-Main thread -> Task thread: task.respond(value)                  [inbox]
+Main thread -> Task thread: task.respond(value)                  [reply channel]
 Main thread (drain loop):   poll outbox, dispatch by type
 ```
 
@@ -135,16 +135,43 @@ drain loop, not a random thread. The task thread is force-stopped (no
 background work survives the turn) and the Interrupt is re-raised for the CLI's
 cleanup path.
 
-`Task#stop` answers what the turn OWES before stopping it. A requester blocked
-on a request the turn was servicing (an open dialog) waits on its inbox, and
-STOP is not an answer - delivering STOP there raises "task was stopped while
-waiting for response". So an interrupted turn delivers `Job::INTERRUPTED_ANSWER`
-to every job it left awaiting, and only pushes STOP to break the stopping
-thread's own pending pop. The join grace is short (`DEFAULT_STOP_JOIN_TIMEOUT`,
-0.5s): a task thread blocked in a long call (the LLM read) never reads STOP, so
-the old 5s join was why Ctrl+C stalled ~5s before killing it.
+`Task#stop` answers what the turn OWES before stopping it. STOP is not an answer,
+so a blocked requester that got STOP instead of a value raises "task was stopped
+while waiting for response". An interrupted turn therefore delivers
+`Job::INTERRUPTED_ANSWER` to every request it left owed:
 
-## Mid-turn user notes - no reader thread
+- A request this task issued (`#request` posted, no answer yet) blocks on its
+  **reply channel** (`@pending_reply`, see issue #424 below), not the inbox. So
+  `stop` pushes the interrupted answer onto that channel and clears the owning
+  job from the owed set so the same answer is not also queued into its inbox.
+- A request owned by ANOTHER awaiting job blocks on that job's inbox; `stop`
+  delivers the interrupted answer via `Job#respond` (the single answer primitive).
+- STOP itself only lands in `@inbox` when neither already answered: this task had
+  no live reply channel AND no owed answer already hit that inbox (`@inbox` IS
+  the foreground job's inbox).
+
+The join grace is short (`DEFAULT_STOP_JOIN_TIMEOUT`, 0.5s): a task thread blocked
+in a long call (the LLM read) never reads the STOP, so the old 5s join was why
+Ctrl+C stalled ~5s before killing it.
+
+## Request replies - a dedicated channel (issue #424)
+
+A `#request` blocks until the main thread answers it. It used to `pop` the task's
+inbox, which assumed the front item WAS the answer - the strict-sync assumption
+that broke when steering notes share that inbox (issue #424). With the registry
+path (production), a steering note typed earlier in the turn is routed into the
+foreground job's inbox (`route_input`/`Job#deliver`); if that note is at the front
+when a dialog request pops, the dialog receives the note-hash as its "choice" and
+the real answer leaks to the next request.
+
+The fix: a task issues at most one request at a time (it is single-threaded), so
+`#request` opens a private `@pending_reply` queue and blocks on THAT. Only
+`#respond` and `#stop` ever write it, so a note (which stays in `@inbox`) can
+never be mistaken for the answer. `@inbox` keeps carrying steering notes and the
+STOP-for-a-task-with-no-live-request. Multiple tasks asking the user a question
+do not conflict: each has its own reply channel. (Async answers from sub-agent
+jobs are a separate future concern; on master `requested_by` is never set, so no
+inbox value is legitimately delivered to a live `#request`.)
 
 Each drain tick PEEKS `stdin.input_pending?` (nil on streams that do not
 support it); if the user is at the keyboard the MAIN thread opens a
