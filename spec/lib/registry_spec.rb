@@ -1,13 +1,23 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'stringio'
 require 'output_buffer'
 require 'job'
 require 'registry'
+require 'ui/dialog'
 require 'harness_config'
 
 RSpec.describe Registry do
   let(:registry) { Registry.new }
+
+  # The minimum harness Task.run reads (the palette is optional, so a plain
+  # object answers only what the drain loop asks).
+  def spec_harness
+    h = Object.new
+    h.define_singleton_method(:output_log) { OutputBuffer.new }
+    h
+  end
 
   describe 'the flat list (main turn is job #0)' do
     it 'assigns ids in add order, so a main turn added first is job #0' do
@@ -102,6 +112,38 @@ RSpec.describe Registry do
     end
   end
 
+  describe 'the executor (a turn is awaited, not run in place)' do
+    # The drain loop is still the single writer of the job's buffer, so a run
+    # through the registry lands the block's value as the awaited result.
+    it 'runs a job and reads its result back' do
+      job = registry.add_job(kind: :main)
+      io = StringIO.new
+
+      error, _task, result = registry.run(job:, harness: spec_harness,
+                                          ui: UI::Console.new(stdout: io, stdin: StringIO.new)) do
+        :turn_value
+      end
+
+      expect(error).to be_nil
+      expect(result).to eq(:turn_value)
+      expect(job.result).to eq(:turn_value)
+    end
+  end
+
+  # The spinner check reads the ONE queue, so a job with no waiting event is
+  # the quiet case everywhere.
+  describe '#queue_empty?' do
+    it 'is true on a quiet queue' do
+      registry.add_job(kind: :main)
+      expect(registry.queue_empty?).to be true
+    end
+
+    it 'is false while an event waits' do
+      registry.add_job(kind: :main).push_event(type: :text, content: 'line')
+      expect(registry.queue_empty?).to be false
+    end
+  end
+
   describe 'foreground' do
     it 'the first job added is the active one' do
       main = registry.add_job(kind: :main)
@@ -143,6 +185,22 @@ RSpec.describe Registry do
       registry.add_job(kind: :main)
 
       expect { registry.foreground = 7 }.to raise_error(ArgumentError, /not retained/)
+    end
+    # The session stores the foreground as an ID, so a resumed run restores it on
+    # the registry it built. An id this run does not retain cannot be restored.
+    it 'restores a saved id that this run retains' do
+      resumed = Registry.new
+      resumed.add_job(kind: :main)
+      node = resumed.add_job(kind: :command, requested_by: resumed.jobs.first)
+      resumed.restore_foreground(node.id)
+      expect(resumed.foreground).to eq(node.id)
+    end
+
+    it 'leaves the default in place for an id it does not retain' do
+      resumed = Registry.new
+      resumed.add_job(kind: :main)
+
+      expect(resumed.restore_foreground(9)).to eq(0)
     end
   end
 
@@ -197,6 +255,36 @@ RSpec.describe Registry do
       registry.answer(background.id, 'allow')
 
       expect(background.poll(0)).to eq('allow')
+    end
+
+    # The predicate the drain loop asks when a request lands: only the foreground
+    # job can be shown a dialog, and a grant dialog is never denied.
+    describe 'denied?' do
+      def grant_dialog
+        UI::Dialog.new(title: 'grant?',
+                       options: [UI::Dialog::Option.new(title: 'Allow', value: :allow)],
+                       grant: true)
+      end
+
+      def plain_dialog
+        UI::Dialog.new(title: 'pick one',
+                       options: [UI::Dialog::Option.new(title: 'Yes', value: :yes)])
+      end
+
+      it 'denies a dialog for a background job' do
+        main = registry.add_job(kind: :main)
+        background = registry.add_job(kind: :command, requested_by: main)
+
+        expect(registry.denied?(background, plain_dialog)).to be true
+        expect(registry.denied?(main, plain_dialog)).to be false
+      end
+
+      it 'never denies a grant dialog, even for a background job' do
+        main = registry.add_job(kind: :main)
+        background = registry.add_job(kind: :command, requested_by: main)
+
+        expect(registry.denied?(background, grant_dialog)).to be false
+      end
     end
 
     # A steering input overrides a pending note-event ONLY if that pending event

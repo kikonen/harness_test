@@ -1294,4 +1294,96 @@ RSpec.describe Task do
       expect(described_class.hold_raw_stdin(task_with_stdin(stdin))).to be_nil
     end
   end
+
+  # issue #286 increment 2: a task built for a job reads the registry's ONE
+  # queue instead of its own outbox, its inbox IS the job's inbox, and the
+  # block's value becomes the result the caller awaits on :done.
+  describe 'a task built for a job (the registry is the executor)' do
+    def registry_task(registry, job, &)
+      task = described_class.new(buffer: nil, registry:, job:, &)
+      task.ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
+      task
+    end
+
+    it 'its inbox IS the job inbox, so the registry answer reaches it' do
+      registry = Registry.new
+      job = registry.add_job(kind: :main)
+      task = registry_task(registry, job) { }
+      task.respond('answer')
+
+      # Same queue seen from both sides - the registry routes answers to it.
+      expect(job.poll(0)).to eq('answer')
+    end
+
+    it 'its buffer IS the job buffer' do
+      registry = Registry.new
+      job = registry.add_job(kind: :main)
+      task = registry_task(registry, job) { }
+
+      expect(task.buffer).to equal(job.buffer)
+    end
+
+    # The foreground task never renders another job's lines: an event naming a
+    # foreign job is recorded into that job's own buffer and skipped.
+    it 'records a foreign-job event into that job buffer and does not render it' do
+      registry = Registry.new
+      main = registry.add_job(kind: :main)
+      other = registry.add_job(kind: :command, requested_by: main)
+      task = registry_task(registry, main) { }
+      other.push_event(type: :text, origin: :task, content: 'from job 1')
+
+      event = task.poll(0)
+      expect(event).to be_nil
+      expect(other.buffer.tail.map(&:content)).to eq(['from job 1'])
+      expect(main.buffer.tail).to be_empty
+    end
+
+    it 'outbox_empty? reads the ONE registry queue' do
+      registry = Registry.new
+      job = registry.add_job(kind: :main)
+      task = registry_task(registry, job) { }
+
+      expect(task.outbox_empty?).to be true
+      job.push_event(type: :text, content: 'waiting')
+      expect(task.outbox_empty?).to be false
+    end
+
+    # The drain loop's spinner check is the same queue read everywhere.
+    it 'the block value lands as the :done result the caller awaits' do
+      registry = Registry.new
+      job = registry.add_job(kind: :main)
+      io = StringIO.new
+      harness = Object.new
+      harness.define_singleton_method(:output_log) { OutputBuffer.new }
+      described_class.run(harness:, ui: UI::Console.new(stdout: io, stdin: StringIO.new),
+                          registry:, job:) { :turn_value }
+
+      expect(job.result).to eq(:turn_value)
+    end
+  end
+
+  # A job outside the foreground cannot be shown a dialog, so its request gets an
+  # answer VALUE the tool can return to the model; a grant dialog is excepted.
+  describe 'handle_request and the background denial (issue #286)' do
+    def denied_registry
+      registry = Registry.new
+      main = registry.add_job(kind: :main)
+      [registry, main, registry.add_job(kind: :command, requested_by: main)]
+    end
+
+    it 'denies a background dialog with the answer value' do
+      registry, _main, background = denied_registry
+      # The request arrives on the background job's own task, so the denial
+      # answer lands on ITS inbox - which is the task's inbox.
+      task = Task.new(buffer: nil, registry:, job: background) { }
+      task.ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
+      dialog = UI::Dialog.new(title: 'pick',
+                              options: [UI::Dialog::Option.new(title: 'Yes', value: :yes)])
+
+      Task.handle_request(task, { type: :__request__, kind: :dialog,
+                                  job: background.id, dialog: })
+
+      expect(background.poll(0)).to eq(Job::DENIED_ANSWER)
+    end
+  end
 end

@@ -325,7 +325,7 @@ RSpec.describe Harness do
   # carry that single identity and no rebind exists anywhere.
   describe 'startup resume via resume_data (issue #276)' do
     def seed_saved_session(id, yolo: true, output_palette: 'basic16', stream: true,
-                           markdown: false, saved_mcp: nil)
+                           markdown: false, saved_mcp: nil, foreground_job: nil)
       FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
       data = {
         session_id:    id,
@@ -344,6 +344,9 @@ RSpec.describe Harness do
       # A session saved before issue #405 has no mcp_connected key at all; nil
       # models that so the resume side has to tolerate its absence.
       data[:mcp_connected] = saved_mcp if saved_mcp
+      # A session saved before issue #286 has no foreground key at all, which
+      # the resume side reads as the default (job #0).
+      data[:foreground_job] = foreground_job if foreground_job
       File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate(data))
     end
 
@@ -455,6 +458,34 @@ RSpec.describe Harness do
       harness = build_harness(session_id: id, resume_data: saved_data(id))
 
       expect(harness.output_palette.name).to eq('default')
+    end
+
+    # issue #286: the foreground job travels with the session as an ID, so a
+    # resumed run restores which buffer was active. The registry this run built
+    # retains job #0 plus whatever it rebuilds, so a saved id it holds wins over
+    # the default; an id it does not hold cannot be restored.
+    it 'restores the saved foreground id through its own registry' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(id, foreground_job: 1)
+      registry = Registry.new
+      registry.add_job(kind: :main)
+      node = registry.add_job(kind: :command, requested_by: registry.jobs.first)
+      allow(Registry).to receive(:new).and_return(registry)
+
+      harness = build_harness(session_id: id, resume_data: saved_data(id))
+
+      expect(harness.registry).to equal(registry)
+      expect(harness.registry.foreground).to eq(node.id)
+      expect(harness.output_log).to equal(node.buffer)
+    end
+
+    it 'leaves the default foreground for a saved id it does not retain' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(id, foreground_job: 4)
+
+      harness = build_harness(session_id: id, resume_data: saved_data(id))
+
+      expect(harness.registry.foreground).to eq(0)
     end
 
     # issue #188: a run that changed postures but sent no prompt now saves a

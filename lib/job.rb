@@ -7,6 +7,15 @@ class Job
   # job-to-job DAG is not enough.
   KINDS = %i[main sub_agent command timed].freeze
 
+  # Types the executor handles as control flow: they are never stored as
+  # output, so the registry's single writer must skip them.
+  CONTROL_TYPES = %i[error_ctrl __request__].freeze
+
+  # A background job cannot be shown a dialog, so its request is answered with a
+  # value the tool can return to the model. Grant dialogs are never denied -
+  # denying one would stop the job from working at all.
+  DENIED_ANSWER = "error: dialog denied (background job)"
+
   # A reply equal to STOP is not an answer, so a job must stop rather than read
   # it as a dialog result.
   STOP = Object.new.freeze
@@ -14,7 +23,7 @@ class Job
   # Same timeout as the drain loop, so a poll costs the same everywhere.
   DEFAULT_POLL_TIMEOUT = 0.1
 
-  attr_reader :id, :kind, :status, :registry, :buffer, :inbox
+  attr_reader :id, :kind, :status, :result, :registry, :buffer, :inbox
   attr_reader :dependencies, :requested_by
 
   # The buffer comes from the registry: its limits belong to the buffer, and the
@@ -37,6 +46,7 @@ class Job
     @dependencies = dependencies
     @requested_by = requested_by
     @status       = :pending
+    @awaiting     = false
   end
 
   def pending?
@@ -53,6 +63,17 @@ class Job
 
   def mark_running
     @status = :running
+  end
+
+  # True while the executor is waiting for an ANSWER to a request it posted. An
+  # input event that arrives meanwhile must queue BEHIND that answer, so the
+  # registry does not deliver it to the inbox (FIFO, issue #198).
+  def awaiting?
+    @awaiting
+  end
+
+  def mark_awaiting(value = true)
+    @awaiting = value
   end
 
   # A job thread never writes a stream or its own buffer (the single-thread I/O
@@ -78,6 +99,7 @@ class Job
     return nil if finished?
 
     @status = :finished
+    @result = result
     requested_by&.deliver(result)
     registry.retain(self)
     result

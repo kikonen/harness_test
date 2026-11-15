@@ -4,6 +4,8 @@
 # for it (single-thread I/O rule); design and protocol: doc/task_design.md
 
 require "io/console"
+require_relative "job"
+require_relative "input_path"
 require_relative "output_buffer"
 require_relative "ui/renderer"
 require_relative "ui/editor"
@@ -33,7 +35,7 @@ class Task
   # ([:__request__], answered on the main thread).
   CONTROL_EVENTS = %i[error_ctrl __request__].freeze
 
-  attr_reader :thread, :buffer, :ui, :renderer
+  attr_reader :thread, :buffer, :ui, :renderer, :job, :registry, :input_path
 
   # Set by #run from the harness's configured palette; the constructor's own
   # renderer colors nothing, which is what a Task without a harness needs.
@@ -42,17 +44,22 @@ class Task
   attr_accessor :note_editor
   attr_accessor :harness
 
-  def initialize(buffer:, &block)
+  # A task built for a job reads the registry's ONE queue instead of its own
+  # outbox, and its inbox IS the job's inbox (the registry routes answers to it).
+  def initialize(buffer:, registry: nil, job: nil, input_path: nil, &block)
     @block   = block
-    @inbox   = Thread::Queue.new   # main -> task (responses, stop)
+    # main -> task (responses, stop). For a job this IS the job's inbox.
+    @inbox   = job ? job.inbox : Thread::Queue.new
     # task -> main (SINGLE event queue). Under the registry (issue #286) this is
     # the registry's ONE fan-in queue: events carry the job id, so ordering holds.
     @outbox  = Thread::Queue.new
-    # The task USES the buffer it is given (issue #286): Task.run hands it the
-    # run buffer, which the registry will replace with one buffer per job. The task
-    # never builds one - the buffer's own limits belong to the buffer. The drain
-    # loop is the single writer; the task thread never touches it.
-    @buffer       = buffer
+    @registry = registry
+    @job      = job
+    # The task USES the buffer it is given (issue #286): the registry's job
+    # supplies its own buffer, otherwise the caller hands the run buffer. The
+    # task never builds one - the buffer's own limits belong to the buffer. The
+    # drain loop is the single writer; the task thread never touches it.
+    @buffer       = job ? job.buffer : buffer
     # Patterns and colors are the renderer's decision, so the drain loop asks
     # it instead of printing content as the emitter wrote it. #run replaces it
     # with the harness's configured palette; this one colors nothing.
@@ -62,7 +69,7 @@ class Task
     @ui = nil # set by Task.run before start
     @dialog_open = false           # true while perform_direct is on stdin
     @note_editor  = nil
-    @note_draft   = nil            # draft kept by a cancelled Esc
+    @input_path   = input_path
     @started_at   = nil            # turn clock (issue #277), set by #start
     @harness      = nil
   end
@@ -74,6 +81,14 @@ class Task
   def dialog_open?
     @dialog_open
   end
+
+  # True while the poll loop is in the edit state (the user is typing); the
+  # loop enters it when the shared input path's peek sees a keypress.
+  def edit_state?
+    input_path&.edit_state?
+  end
+
+  attr_accessor :note_draft
 
   # -- Lifecycle ---------------------------------------------------------------
 
@@ -87,14 +102,16 @@ class Task
       Thread.current[:harness_task] = self
 
       begin
-        @block.call(self)
+        value = @block.call(self)
       rescue => e
         # The event goes FIRST: a logger that cannot write must not swallow the
         # error the user is owed.
         push_event(type: :error_ctrl, content: ErrorText.label(e))
         record_task_error(e)
       ensure
-        push_event(type: :done)
+        # The block's value IS the job's result, so the caller awaiting the job
+        # gets it back on the :done event.
+        push_event(type: :done, result: value)
         # Unblock any pending request so the thread can exit cleanly.
         @inbox << STOP
       end
@@ -113,23 +130,35 @@ class Task
     "#{(secs / 60)}m #{format('%02d', secs % 60)}s"
   end
 
-  # Non-blocking poll: returns one message from the outbox, or nil after
-  # the timeout elapses with no message available.
+  # Non-blocking poll: returns one message from the queue, or nil after the
+  # timeout elapses with nothing available. Over the registry an event naming
+  # ANOTHER job is recorded into that job's own buffer and skipped - the
+  # foreground task never renders another job's lines.
   def poll(timeout = DEFAULT_POLL_TIMEOUT)
-    @outbox.pop(false, timeout:)
+    return @outbox.pop(false, timeout:) unless @registry && @job
+
+    event = @registry.poll(timeout)
+    return nil if event.nil?
+    return event if event[:job] == @job.id
+
+    @registry.record(event)
+    poll(0)
   rescue ThreadError
     nil
   end
 
-  # True when no events are waiting in the outbox (used by the drain loop
-  # to decide whether to show the spinner).
+  # True when no events are waiting (used by the drain loop to decide whether
+  # to show the spinner).
   def outbox_empty?
+    return @registry.queue_empty? if @registry && @job
+
     @outbox.empty?
   end
 
   # Reply to a pending request (called from the main thread). Unblocks the
   # task thread's #request call with the given value.
   def respond(value)
+    @job&.mark_awaiting(false)
     @inbox << value
   end
 
@@ -164,12 +193,17 @@ class Task
   def push_event(type:, origin: nil, content: nil, **extra)
     event = { type: type.to_sym, origin:, content: }
     event.merge!(extra) unless extra.empty?
-    @outbox << event
+    event[:job] = @job.id if @job
+    (@registry || @outbox) << event
+    event
   end
 
   # Blocks until the main thread answers with #respond.
   def request(type, **payload)
-    @outbox << { type: :__request__, kind: type, **payload }
+    # While a request is unanswered, an input event must queue BEHIND the answer
+    # it gets, so the job is marked awaiting (issue #198 FIFO rule).
+    @job&.mark_awaiting(true)
+    push_event(type: :__request__, kind: type, **payload)
     reply = @inbox.pop
     if reply.equal?(STOP)
       raise "task was stopped while waiting for response to '#{type}'"
@@ -233,40 +267,42 @@ class Task
   # -- Drain loop (called from the MAIN thread) ------------------------------
   #
   # Spawns the task, then blocks in a poll loop that:
-  #   1. Shows the spinner ONLY while the outbox is empty (the task is
+  #   1. Shows the spinner ONLY while the queue is empty (the task is
   #      silently working - i.e. waiting on something slow such as an LLM).
-  #   2. Polls the SINGLE event queue (the outbox) one message at a time.
-  #      - Output events: the stale spinner line is cleared FIRST (a spin
-  #        frame must never survive above real output), then the event is
-  #        stored into the OutputBuffer and rendered to stdout in order.
-  #      - Control events (:done, :error_ctrl, :__request__): handled directly.
-  #   3. A :spinner_detail batch keeps the spinner alive with its new
-  #      message (the wait continues); every other batch has already
-  #      cleared the spinner line inside store_and_render before printing.
+  #   2. Polls the SINGLE event queue one message at a time. Output events are
+  #      stored into the buffer and rendered to stdout in order; control events
+  #      (:done, :error_ctrl, :__request__) are handled directly.
+  #   3. A :spinner_detail batch keeps the spinner alive with its new message.
   #
-  # The required `ui:` console is the single sink used for
-  # ALL output - spinner frames, text lines, dialog prompts. Tests can pass
-  # a StringIO-backed UI::Console to capture everything deterministically.
+  # The same loop owns the ONE input path: the prompt and a mid-turn note are
+  # the same read, and the edit state is entered when typing starts.
+  #
+  # The required `ui:` console is the single sink used for ALL output - spinner
+  # frames, text lines, dialog prompts. Tests can pass a StringIO-backed
+  # UI::Console to capture everything deterministically.
   #
   # Ctrl+C: SIGINT is trapped for the duration of this call, so an interrupt
-  # always hits the drain loop (which then force-stops the task thread - a
-  # task must NEVER keep working in the background) and re-raises Interrupt
-  # for the caller's cleanup path.
+  # always hits the drain loop (which then force-stops the task thread) and
+  # re-raises Interrupt for the caller's cleanup path.
   #
   # Returns [error_msg, task] where error_msg is nil on success.
   def self.run(
     harness:,
     ui:,
+    registry: nil,
+    job: nil,
+    input_path: nil,
     &block
   )
-    # ONE buffer per run (issue #286): the task uses the harness' buffer. The
-    # drain loop is the single main-thread writer, so every put lands in the same
-    # record a save reads. The task owns no store, and the buffer's limits belong
-    # to the buffer (built by the harness from its config).
-    task = Task.new(buffer: harness.output_log, &block)
+    # A task built for a job uses that job's buffer and inbox through the
+    # registry; otherwise the harness' run buffer is the single record. The
+    # drain loop is the single main-thread writer, so every put lands in the
+    # same record a save reads.
+    task = Task.new(buffer: harness.output_log, registry:, job:, input_path:, &block)
     task.ui = ui
-    # The editor only PEEKS stdin: no reader thread, so nothing races for
-    # the keyboard. Notes need a harness to land on (nil = unit test).
+    # The input path is the ONE reader the main thread's poll loop shares with
+    # the idle prompt. It only PEEKS stdin until typing starts, so nothing races
+    # for the keyboard. Input needs a harness to land on (nil = unit test).
     task.harness = harness
     # The palette is the harness's (issue #303). A harness double in a spec
     # may not answer #output_palette, and a Task without a harness colors
@@ -320,6 +356,9 @@ class Task
           case msg[:type]
           when :done
             finished = true
+            # The registry is the only writer of the record, so the finish (and
+            # the result the caller awaits) lands there, not here.
+            task.registry&.record(msg)
             break
           when :error_ctrl
             error_msg = msg[:content]
@@ -432,7 +471,7 @@ class Task
   end
 
   # Spinner frame for this tick: visible only while waiting on an EMPTY
-  # outbox. No data => the task is silently working => animate.
+  # queue. No data => the task is silently working => animate.
   def self.show_spinner_if_waiting(task)
     return unless task.outbox_empty?
 
@@ -440,37 +479,49 @@ class Task
     task.visible_spinner&.render!
   end
 
-  # MULTILINE read: Enter inserts a newline, the submit key commits the
-  # whole block as one note. Safe to call every tick: the read only PEEKS,
-  # and while the editor is open this thread owns stdin. Cancel (:cancelled
-  # / :empty) keeps the task running; :eof raises NoteAbort.
+  # The ONE input path, reached the same way the loop reaches it here: it peeks,
+  # and once the user starts typing the loop falls into the edit state. MULTILINE
+  # read: Enter inserts a newline, the submit key commits the whole block as ONE
+  # input event routed to the job's inbox. Safe to call every tick: the read only
+  # PEEKS, and while the editor is open this thread owns stdin. Cancel
+  # (:cancelled / :empty) keeps the task running; :eof raises NoteAbort.
   def self.poll_for_note(task)
     return unless task.note_editor && task.harness
 
-    stdin = task.ui.stdin
-    return if !stdin.respond_to?(:input_pending?) || stdin.input_pending? != true
+    path = task.input_path || InputPath.new(ui: task.ui, editor: task.note_editor)
+    return unless path.pending?
 
-    # The user is at the keyboard: drop any spin frame first so the
-    # editor prompt starts on a clean line (the spinner resumes itself
-    # on the next tick once the editor returns).
+    # The user is at the keyboard: drop any spin frame first so the editor
+    # prompt starts on a clean line (the spinner resumes itself on the next
+    # tick once the editor returns).
     task.clear_all_spinners
+    commit_read(task, path.read(prefill: task.note_draft))
+  end
 
-    result = task.note_editor.read_multiline(prefill: task.instance_variable_get(:@note_draft))
+  # A submitted block commits as one input event; EOF aborts the running turn.
+  def self.commit_read(task, result)
     case result.status
     when :submitted
-      task.instance_variable_set(:@note_draft, nil)
-      commit_note(task, result.text)
-    when :edited, :cancelled
-      # Esc, and the Ctrl+G hand-off (issue #298), are the same round-trip: the
-      # buffer is kept as the draft, prefilled on the next trigger. An editor
-      # round-trip is NOT a note commit - closing an editor is not a submission.
-      task.instance_variable_set(:@note_draft, result.text)
-    when :empty
-      # Bare Enter: the user changed their mind mid-thought - no note.
+      task.note_draft = nil
+      commit_input(task, task.registry&.note_event(result.text) ||
+                              { type: :note, content: result.text })
+    when *InputPath::ROUND_TRIP
+      # An editor round-trip is NOT an input commit - closing an editor is not
+      # a submission, and a note that reached the model just because an editor
+      # was closed would inject text the user never sent.
+      task.note_draft = result.text
     when :eof
-      # Ctrl-D inside the editor: abort the running turn (see NoteAbort).
       raise NoteAbort
     end
+  end
+
+  # Commit one input event: route it to the job's inbox (so the override rule
+  # applies - a note replaces a pending note only, otherwise it queues behind),
+  # then ack and record it. Main thread only (single-thread I/O rule).
+  def self.commit_input(task, event)
+    task.registry&.route_input(task.job&.id, event)
+
+    commit_note(task, event[:content])
   end
 
   # Main thread only (single-thread I/O rule).
@@ -525,23 +576,30 @@ class Task
   end
 
   def self.handle_request(task, msg)
-    if msg[:kind] == :dialog
-      dialog = msg[:dialog]
-      task.instance_variable_set(:@dialog_open, true)
-      begin
-        # No reader thread during the turn, so the dialog can read stdin with
-        # nothing to race for the keyboard. The task's OWN console serves the
-        # dialog: it is the same stdout/stdin pair the drain loop renders to
-        # (single-thread order) and it already carries the run's presentation,
-        # so nothing here has to know how a dialog renders or which palette a
-        # turn chose (issue #388).
-        answer = dialog.perform_direct(ui: task.ui)
-        task.respond(answer)
-      ensure
-        task.instance_variable_set(:@dialog_open, false)
-      end
-    else
-      task.respond(nil)
+    return task.respond(nil) unless msg[:kind] == :dialog
+
+    dialog = msg[:dialog]
+    # A job outside the foreground cannot be shown a dialog, so it gets an
+    # answer VALUE the tool can return to the model. Grant dialogs are excepted:
+    # denying one would stop the job from working at all.
+    target = task.registry&.job(msg[:job])
+    if task.registry&.denied?(target, dialog)
+      task.respond(Job::DENIED_ANSWER)
+      return
+    end
+
+    task.instance_variable_set(:@dialog_open, true)
+    begin
+      # No reader thread during the turn, so the dialog can read stdin with
+      # nothing to race for the keyboard. The task's OWN console serves the
+      # dialog: it is the same stdout/stdin pair the drain loop renders to
+      # (single-thread order) and it already carries the run's presentation,
+      # so nothing here has to know how a dialog renders or which palette a
+      # turn chose (issue #388).
+      answer = dialog.perform_direct(ui: task.ui)
+      task.respond(answer)
+    ensure
+      task.instance_variable_set(:@dialog_open, false)
     end
   end
 
@@ -583,7 +641,7 @@ class Task
     end
   end
 
-  # After :done, drain any remaining events from the outbox and render them.
+  # After :done, drain any remaining events from the queue and render them.
   def self.drain_remaining(task)
     loop do
       msg = task.poll(0)

@@ -772,6 +772,14 @@ class SessionManager
     # resume side can validate it against the palettes this build has.
     data[:output_palette] = @harness.output_palette.name
 
+    # issue #286: which job was foreground is harness state, not conversation
+    # state (the same treatment as the postures), so it travels as an id and
+    # apply_resume_state restores it on the registry this run built. Guarded by
+    # respond_to? so a harness double with no registry still saves.
+    if @harness.respond_to?(:registry)
+      data[:foreground_job] = @harness.registry.foreground
+    end
+
     # issue #405: what a session's conversation actually had tools from. The
     # servers themselves come from the config (they are not a session posture),
     # but the TOOLS the conversation used are a property of the session: a

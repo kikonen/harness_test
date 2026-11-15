@@ -3,6 +3,8 @@
 require 'spec_helper'
 require 'stringio'
 require 'task_runner'
+require 'registry'
+require 'input_path'
 
 # issue #235: the shared wrapper for running an LLM round on a Task thread.
 # Without it, Task.emit events are dropped and dialogs block the console.
@@ -44,6 +46,53 @@ RSpec.describe TaskRunner do
     expect(captured[:harness]).to equal(harness)
     expect(captured[:ui]).to equal(ui)
     expect(captured[:result]).to eq(:work_done)
+  end
+
+  # issue #286 increment 2: the registry is the executor, so a host whose harness
+  # has one AWAITs a job there rather than running the turn in place, and the
+  # block's value comes back as the job's result.
+  describe 'run_on_task awaits the registry job' do
+    def registry_host
+      registry = Registry.new
+      host.harness = Object.new.tap do |h|
+        h.define_singleton_method(:registry) { registry }
+      end
+      host.ui = ui
+      [host, registry, registry.add_job(kind: :main)]
+    end
+
+    it 'runs the foreground job through the registry and returns its result' do
+      host, registry, job = registry_host
+      allow(registry).to receive(:run) do |job:, harness:, ui:, &blk|
+        [nil, nil, blk.call(nil)]
+      end
+
+      expect(host.do_thing).to eq(:work_done)
+      expect(registry).to have_received(:run).with(job:, harness: host.harness, ui:)
+    end
+
+    # The ONE input path is handed to the executor when the host owns one, so
+    # the edit state is one state of the run's single poll loop.
+    it 'passes the host input path to the registry run' do
+      host, registry = registry_host
+      host.input_path = InputPath.new(ui:)
+      allow(registry).to receive(:run) { |**kwargs| [nil, nil, nil] }
+      host.do_thing
+
+      expect(registry).to have_received(:run).with(include(input_path: host.input_path))
+    end
+
+    # A host with no registry (a spec harness double) keeps the plain drain loop.
+    it 'falls back to Task.run when the harness has no registry' do
+      # The block's value is what the no-registry path returns, so the pin
+      # captures it from the block itself.
+      captured = nil
+      allow(Task).to receive(:run) { |harness:, ui:, &blk| [nil, captured = blk.call(nil)] }
+      host.harness = harness
+      host.ui = ui
+      host.do_thing
+      expect(captured).to eq(:work_done)
+    end
   end
 
   # issue #474 increment 22: the bracket shape belongs to UI::Renderer, so the

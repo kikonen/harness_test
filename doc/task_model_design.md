@@ -3,9 +3,11 @@
 Design notes for the flat task list and the layer that owns it. Verified against
 master `97e7d94` (2026-11-14). Increment 1 built the shape in code: `lib/job.rb`
 (Job) and `lib/registry.rb` (Registry), plus the minimum wiring - the main turn is
-registered as job #0, so the run record is job #0's buffer. What is NOT wired yet
-is the executor: `TaskRunner#run_on_task` still runs a turn rather than awaiting a
-job, and no run builds a Registry for a job other than #0.
+registered as job #0, so the run record is job #0's buffer. Increment 2 wired the
+executor: `TaskRunner#run_on_task` AWAITs the foreground job on the registry, a
+job's task reads the ONE queue instead of its own outbox, and the input path is
+the same read for the idle prompt and a mid-turn note (`lib/input_path.rb`). No
+run builds a Registry for a job other than #0 yet.
 
 Cross-refs: #286 (this), #324, #146, #414, #181, #40, #238, #248, #300.
 Buffer parts and keying rules live in `doc/output_buffer_design.md`; the single
@@ -133,7 +135,8 @@ code. All three are settled; the wiring is what remains.
   first job added is #0, and its buffer is just job #0's buffer.
 - `TaskRunner#run_on_task` stops RUNNING a turn and AWAITS one: the registry is the
   executor, so the CLI asks it to run a job and awaits the result. Decision resolved;
-  `lib/task_runner.rb` still runs the turn directly, so this is the wiring that remains.
+  `lib/task_runner.rb` awaits the foreground job on the registry, falling back to the
+  plain drain loop when the host has no registry (the single-thread I/O rule).
 - **A denied background dialog returns a real answer value** (resolved).
   `DialogTool#execute` blocks on `task.request(:dialog, ...)`, so the denial must come
   back as a value the tool can return to the model - a bare refusal is not an answer it

@@ -147,7 +147,14 @@ class CLI
     print_startup_banner
 
     begin
+      # ONE input path for the whole run (issue #286): the idle prompt and a
+      # mid-turn note are the same read, so the edit state is a state of the
+      # single poll loop. The command handler drains events through it too.
       reader = PromptReader.new(ui: @ui, harness: -> { @harness })
+      @commands.input_path = reader.input_path
+      @commands.input_path.target = -> { @harness.registry.foreground_job }
+      @commands.input_path.registry = -> { @harness.registry }
+
       loop do
         input = reader.read
         break if input.nil?

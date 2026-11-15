@@ -58,6 +58,32 @@ RSpec.describe Job do
     end
   end
 
+  describe 'the awaiting flag (issue #198 FIFO rule)' do
+    it 'is not awaiting until the executor posts a request it waits on' do
+      expect(add(:command).awaiting?).to be false
+    end
+
+    it 'is marked awaiting while a request is unanswered' do
+      job = add(:command)
+      job.mark_awaiting
+      expect(job.awaiting?).to be true
+    end
+  end
+
+  # The value the caller awaits: the block's value lands as the :done event's
+  # result, and the registry's finish is what stores it.
+  describe '#result' do
+    it 'is nil until the job finishes' do
+      expect(add(:main).result).to be_nil
+    end
+
+    it 'is the value the finish was given' do
+      job = add(:main)
+      job.finish('3 findings')
+      expect(job.result).to eq('3 findings')
+    end
+  end
+
   describe '#push_event (fan-in)' do
     it 'pushes onto the registry queue with the job id on the event' do
       job = add(:main)

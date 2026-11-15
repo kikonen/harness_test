@@ -268,6 +268,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/model [name]` | Show or switch the active model |
 | `/param [key [value]]` | Show, override or reset a model parameter |
 | `/ctx` | Show context usage (tokens, %, headroom, auto-compact status) |
+| `/jobs` | List every job on the registry's flat list with the foreground one marked; `/jobs switch <id>` makes another retained job foreground |
 | `/reasoning` | Show the reasoning text of the last response |
 | `/skills [name]` | List the project's skills (`.harness/skills/`), or print one skill's body |
 | `/memory [name|N]` | List the project's memories (`.harness/memories/`), or print one note's body by name or number |

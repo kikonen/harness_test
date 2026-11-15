@@ -1482,6 +1482,15 @@ class Harness
 
     logger.info "output palette restored: #{output_palette.name}"
 
+    # issue #286: which job was foreground travels with the session as an ID, so a
+    # resumed run restores which buffer was active. It is harness state, not
+    # conversation state (the same treatment as the postures). An id this run does
+    # not retain cannot be restored - its job is not rebuilt by the resume.
+    if data[:foreground_job]
+      registry.restore_foreground(data[:foreground_job])
+      logger.info "foreground job restored: ##{registry.foreground}"
+    end
+
     # issue #405: the saved session names the MCP tools its conversation had.
     # THIS run already connected what its own config declared (build_tool_registry
     # runs before this), so the two can be compared: a server the saved
