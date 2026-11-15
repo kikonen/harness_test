@@ -1271,9 +1271,54 @@ RSpec.describe Task do
       t
     end
 
-    # A stream that lies: says tty? but answers no #raw (a fake tty with its
-    # own fileno, like the spec editor-routing tests) - not held.
-    it 'holds nothing for a non-raw tty' do
+    # The host gate decides whether the hold is even attempted; specs run on a
+    # Windows box, so they stub it to exercise both shapes deterministically.
+    def with_host(supported)
+      allow(described_class).to receive(:raw_hold_host_supported?)
+        .and_return(supported)
+    end
+
+    # A fully capable POSIX-tty stdin: raw + tty? + input_pending? (the peek
+    # consumes raw mode). Held ONLY when the host can keep Ctrl+C a signal.
+    def posix_tty_stdin
+      raw_called = false
+      stdin = Object.new
+      stdin.define_singleton_method(:tty?) { true }
+      stdin.define_singleton_method(:raw) { true }
+      stdin.define_singleton_method(:input_pending?) { false }
+      stdin.define_singleton_method(:raw!) { |**_o| raw_called = true }
+      stdin.define_singleton_method(:cooked!) { :cooked }
+      [stdin, -> { raw_called }]
+    end
+
+    # issue #473 Ctrl+C regression, the real cause: msys2 answers EVERY
+    # capability the old #input_pending? gate checked (it IS a pty), yet a
+    # Windows console cannot turn Ctrl+C into SIGINT under raw(intr:true) - the
+    # held 0x03 byte opens the note editor and the turn never aborts. So on a
+    # Windows host the stdin must stay COOKED (pre-#473 Ctrl+C behaviour) even
+    # for a tty that answers every capability.
+    it 'holds nothing on a host where Ctrl+C cannot abort, fully capable tty included' do
+      with_host(false)
+      stdin, raw_called = posix_tty_stdin
+
+      expect(described_class.hold_raw_stdin(task_with_stdin(stdin))).to be_nil
+      expect(raw_called.call).to be(false)
+    end
+
+    # On a POSIX host (Linux/KDE) the same tty IS held: that is the steering fix.
+    it 'holds a fully capable tty when the host supports the hold' do
+      with_host(true)
+      stdin, raw_called = posix_tty_stdin
+
+      held = described_class.hold_raw_stdin(task_with_stdin(stdin))
+      expect(held).to equal(stdin)
+      expect(raw_called.call).to be(true)
+      expect(held.cooked!).to eq(:cooked)
+    end
+
+    # Capability guards still apply even when the host gate would allow it.
+    it 'holds nothing for a non-raw tty even on a supporting host' do
+      with_host(true)
       stdin = Object.new
       def stdin.tty? = true
       # no #raw defined
@@ -1287,46 +1332,14 @@ RSpec.describe Task do
       expect(described_class.hold_raw_stdin(task_with_stdin(stdin))).to be_nil
     end
 
-    it 'holds nothing for a StringIO (no #raw, no #tty?); the note suite stays untouched' do
+    it 'holds nothing for a StringIO (no #raw, no #tty?); note suite untouched' do
       expect(described_class.hold_raw_stdin(task_with_stdin(StringIO.new))).to be_nil
-    end
-
-    # A Linux/KDE tty: raw + tty? + input_pending? (the peek consumes raw mode).
-    it 'holds a real raw-capable tty with a peek path and returns it for #cooked!' do
-      raw_called = false
-      stdin = Object.new
-      stdin.define_singleton_method(:tty?) { true }
-      stdin.define_singleton_method(:raw) { true }
-      stdin.define_singleton_method(:input_pending?) { false }
-      stdin.define_singleton_method(:raw!) { |**_o| raw_called = true }
-      stdin.define_singleton_method(:cooked!) { :cooked }
-
-      held = described_class.hold_raw_stdin(task_with_stdin(stdin))
-      expect(held).to equal(stdin)
-      expect(raw_called).to be(true)
-      expect(held.cooked!).to eq(:cooked)
-    end
-
-    # issue #473 Ctrl+C regression: the Windows mingw shape answers #raw && #tty?
-    # but has NO #input_pending? (the peek never runs). It must NOT be held in
-    # raw mode - that raw(intr:true) hold is what broke Ctrl+C while the peek it
-    # serves never fired there.
-    it 'holds nothing for a raw tty with no input_pending? peek (the Windows shape)' do
-      raw_called = false
-      stdin = Object.new
-      stdin.define_singleton_method(:tty?) { true }
-      stdin.define_singleton_method(:raw) { true }
-      # deliberately no #input_pending?
-      stdin.define_singleton_method(:raw!) { |**_o| raw_called = true }
-      stdin.define_singleton_method(:cooked!) { :cooked }
-
-      expect(described_class.hold_raw_stdin(task_with_stdin(stdin))).to be_nil
-      expect(raw_called).to be(false)
     end
 
     # A tty whose mode change raises (some PTYs): steering degrades to the
     # pre-fix behaviour rather than taking the turn down with it.
     it 'returns nil when a tty refuses the raw mode change' do
+      with_host(true)
       stdin = Object.new
       stdin.define_singleton_method(:tty?) { true }
       stdin.define_singleton_method(:raw) { true }
