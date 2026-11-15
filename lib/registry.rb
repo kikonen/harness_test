@@ -174,6 +174,9 @@ class Registry
     target = job(id)
     return nil if target.nil?
 
+    # The answer IS the delivery, so the FIFO flag clears with it: a job that has
+    # been answered is no longer waiting for one.
+    target.mark_awaiting(false)
     target.deliver(value)
   end
 

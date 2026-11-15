@@ -1385,5 +1385,72 @@ RSpec.describe Task do
 
       expect(background.poll(0)).to eq(Job::DENIED_ANSWER)
     end
+
+    # A dialog is serviced on the MAIN thread (the only code that reads stdin).
+    # read_dialog is what holds the @dialog_open guard so the spinner does not
+    # clear the prompt lines a Choice prompt on stdin would erase.
+    it 'reads a foreground dialog through the @dialog_open guard' do
+      registry = Registry.new
+      main = registry.add_job(kind: :main)
+      task = Task.new(buffer: nil, registry:, job: main) { }
+      task.ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
+
+      # The stand-in records the state AT the read, so the pins are that the
+      # guard is held during the stdin read and that the task's own console
+      # serves it (the single-thread I/O rule).
+      seen = {}
+      dialog = UI::Dialog.new(title: 'pick',
+                              options: [UI::Dialog::Option.new(title: 'Yes', value: :yes)])
+      dialog.define_singleton_method(:perform_direct) do |ui:|
+        seen[:open] = task.dialog_open?
+        seen[:ui] = ui
+        :yes
+      end
+
+      Task.handle_request(task, { type: :__request__, kind: :dialog,
+                                  job: main.id, dialog: })
+
+      expect(seen[:open]).to be true
+      expect(task.dialog_open?).to be false
+      expect(seen[:ui]).to equal(task.ui)
+      expect(main.poll(0)).to eq(:yes)
+    end
+
+    # The main thread registers the job (it is the single poller and the only
+    # stdin reader), so the spawn happens in the drain loop - the tool only
+    # asked. The request is NOT answered at spawn: the answer IS the job's
+    # finish delivery, which lands through requested_by.
+    it 'registers a sub-agent job for the requester instead of answering at spawn' do
+      registry = Registry.new
+      main = registry.add_job(kind: :main)
+      task = Task.new(buffer: nil, registry:, job: main) { }
+      # The round's client blocks until the spec releases it, so the pin reads
+      # the state the dispatch produced BEFORE any delivery could happen.
+      release = Thread::Queue.new
+      client = Class.new do
+        define_method(:initialize) { |q| @q = q }
+        define_method(:chat) do |*, **|
+          @q.pop
+          { choices: [{ message: { content: 'done', tool_calls: nil } }] }
+        end
+      end.new(release)
+      task.harness = Class.new do
+        define_method(:client) { client }
+        define_method(:build_system_prompt) { 'sub agent' }
+        define_method(:sub_agent_max_iterations) { 3 }
+      end.new
+      Task.handle_request(task, { type: :__request__, kind: :sub_agent,
+                                  job: main.id, instruction: 'find the callers',
+                                  registry: ToolRegistry.new })
+
+      spawned = registry.jobs.last
+      expect(spawned.kind).to eq(:sub_agent)
+      expect(spawned.requested_by).to equal(main)
+      # Not answered at spawn time: the inbox is empty until the round delivers.
+      expect(main.inbox.empty?).to be true
+
+      release << :go
+    end
+
   end
 end

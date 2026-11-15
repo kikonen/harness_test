@@ -178,6 +178,13 @@ class HarnessConfig
       tasks_kept:    int_or_nil(data.dig(:output, :tasks_kept))
     }
 
+    # Sub-agent limits (issue #286 phase 1). max_iterations bounds the rounds one
+    # sub-agent may run: the cap is enforced in code (SubAgent#run_rounds), never
+    # by asking the model to be short, which is what keeps the main context small.
+    @agent = {
+      max_iterations: int_or_nil(data.dig(:agent, :max_iterations))
+    }
+
     @retry = {
       count: int_or_nil(data.dig(:retry, :count)),
       delay: float_or_nil(data.dig(:retry, :delay))
@@ -418,6 +425,14 @@ class HarnessConfig
   # is the first consumer of the key.
   def output_tasks_kept
     @output[:tasks_kept]
+  end
+
+  # Max LLM rounds one sub-agent may run (issue #286 phase 1). nil = the
+  # built-in default (SubAgent::DEFAULT_MAX_ITERATIONS). Config-only: no CLI
+  # flag, because the cap exists to bound the main context, so a mistyped flag
+  # must not be able to raise it.
+  def agent_max_iterations
+    @agent[:max_iterations]
   end
 
   # Total retry attempts for transient network errors (or nil).

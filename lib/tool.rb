@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "requester"
+
 # -- Tool system ----------------------------------------------------------
 
 class Tool
@@ -69,10 +71,16 @@ class Tool
   # no-op. The label travels as the event's ORIGIN so the buffer entry alone is
   # enough to re-render the line.
   def self.push_status(label:, verdict:, message:)
-    task = defined?(Task) ? Task.current : nil
-    return nil unless task
+    # A sub-agent round is a requester too, so a tool run inside one still has
+    # somewhere to drain to. Task is checked first (Requester.current), so every
+    # existing pin that stubs Task.current holds.
+    requester = Requester.current
+    return nil unless requester
 
-    task.push_event(type: status_type(verdict), origin: label.to_s, content: message.to_s)
+    requester.push_event(
+      type: status_type(verdict),
+      origin: label.to_s,
+      content: message.to_s)
   end
 
   # Status line of THIS tool: the label is the tool's own name.

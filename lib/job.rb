@@ -18,6 +18,8 @@ class Job
 
   # A reply equal to STOP is not an answer, so a job must stop rather than read
   # it as a dialog result.
+  # ONE sentinel for the whole model: a task and a round block on the same job
+  # inbox, so two distinct objects could not both recognize the stop.
   STOP = Object.new.freeze
 
   # Same timeout as the drain loop, so a poll costs the same everywhere.
@@ -100,6 +102,9 @@ class Job
 
     @status = :finished
     @result = result
+    # A finished job is not waiting for an answer, so the FIFO flag clears with
+    # the delivery (the answer IS the delivery).
+    @awaiting = false
     requested_by&.deliver(result)
     registry.retain(self)
     result

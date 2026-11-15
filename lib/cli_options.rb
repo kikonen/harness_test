@@ -311,6 +311,9 @@ class CLIOptions
     # is the registry's retention limit (issue #286 increment 1): its first consumer.
     opts[:output_tail_memory] = config.output_tail_memory
     opts[:output_tasks_kept] = config.output_tasks_kept
+    # Config-only, no CLI flag: the cap bounds the MAIN context, so it is a
+    # policy of the project rather than a per-run toggle.
+    opts[:agent_max_iterations] = config.agent_max_iterations
     # The saved window is the existing 'resume: replay_entries' key, not a second
     # key: it is already what a session save writes.
     opts[:output_saved_entries] = config.resume_replay_entries

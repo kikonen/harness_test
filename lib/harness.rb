@@ -67,6 +67,8 @@ require_relative "state_migrator"
 require_relative "safety_check"
 require_relative "text_normalizer"
 require_relative "error_text"
+require_relative "sub_agent"
+require_relative "tools/agent_explore_tool"
 require_relative "mcp/manager"
 require_relative "sandbox_gemfile"
 require_relative "tool_result"
@@ -388,6 +390,9 @@ class Harness
     # just count them. Read-only, over the run's own SessionLocator (the single
     # place that knows where sessions live) - no Harness, no resume, no delete.
     registry.register(Tools::SessionsSearchTool.new(@locator))
+    # Registered on the MAIN registry only: AgentToolset excludes it, so a
+    # phase-1 sub-agent cannot nest.
+    registry.register(Tools::AgentExploreTool.new(self))
     @mcp.load(registry, options[:mcp_servers])
     registry
   end
@@ -420,6 +425,13 @@ class Harness
 
   def max_tool_iterations
     options[:max_tool_iterations] || MAX_TOOL_ITERATIONS
+  end
+
+  # Options first so a run built by a spec resolves the same way; nil falls
+  # back to SubAgent's own built-in default. The cap is enforced in code by
+  # SubAgent#run_rounds, so it never depends on the model agreeing to be short.
+  def sub_agent_max_iterations
+    options[:agent_max_iterations] || SubAgent::DEFAULT_MAX_ITERATIONS
   end
 
   # The rendered-output palette for this run (issue #303). Always a
@@ -1407,7 +1419,9 @@ class Harness
   # truncated: the request that produced this call was cut by the token budget.
   # A parse failure is then reported as truncation - the honest cause - instead
   # of a malformed call the model is invited to repeat.
-  def execute_tool_call(tool_call, truncated: false)
+  # registry: the tool set to run against. A sub-agent runs against its own
+  # READ-ONLY set, so the same execution path serves both without a copy.
+  def execute_tool_call(tool_call, truncated: false, registry: nil)
     func_name = tool_call[:function][:name]
     args, parse_error = parse_tool_arguments(tool_call[:function][:arguments])
     if parse_error
@@ -1421,7 +1435,7 @@ class Harness
       return "error: tool call arguments are not valid JSON (#{parse_error})"
     end
 
-    tool = tool_registry.get(func_name)
+    tool = (registry || tool_registry).get(func_name)
     unless tool
       return "error: unknown tool '#{func_name}'"
     end

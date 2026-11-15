@@ -136,6 +136,35 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  # issue #286 phase 1: the sub-agent round cap is config-settable because it
+  # bounds the MAIN context, so it is a policy of the project, not a per-run
+  # toggle (there is no CLI flag for it).
+  describe '#agent_max_iterations (issue #286)' do
+    it 'defaults to nil when the key is absent (built-in default applies)' do
+      expect(described_class.new({}).agent_max_iterations).to be_nil
+    end
+
+    it 'reads the agent.max_iterations key' do
+      expect(described_class.new(agent: { max_iterations: 5 }).agent_max_iterations).to eq(5)
+    end
+
+    it 'coerces an integer-valued string to an integer' do
+      expect(described_class.new(agent: { max_iterations: '5' }).agent_max_iterations).to eq(5)
+    end
+
+    it 'raises on a non-integer value' do
+      expect { described_class.new(agent: { max_iterations: 'many' }) }
+        .to raise_error(HarnessError, /expected an integer/)
+    end
+
+    it 'mentions the key in the default template (commented out)' do
+      # 'max_tool_iterations' would match a plain substring, so the pin names
+      # the commented agent block itself.
+      expect(template).to include('# agent:')
+      expect(template).to include('#   max_iterations: 12')
+    end
+  end
+
   # issue #435: the note cap is config-settable so a project can raise or lower
   # its memory store without a code change. nil (absent) = built-in default.
   describe '#max_memories (issue #435)' do

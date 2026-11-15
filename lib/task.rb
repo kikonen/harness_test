@@ -6,6 +6,8 @@
 require "io/console"
 require_relative "job"
 require_relative "input_path"
+require_relative "requester"
+require_relative "sub_agent"
 require_relative "output_buffer"
 require_relative "ui/renderer"
 require_relative "ui/editor"
@@ -13,6 +15,8 @@ require_relative "ui/spinner"
 require_relative "error_text"
 
 class Task
+  include Requester
+
   # Default spinner message while the runner waits for the task thread.
   # Any :spinner_detail event may override it (and its suffix) for the
   # rest of the wait.
@@ -20,7 +24,9 @@ class Task
 
   # Sentinel pushed to inbox when #stop is called, to unblock a pending
   # #request so the task thread can exit cleanly.
-  STOP = Object.new.freeze
+  # ONE sentinel for the whole model. A task and a sub-agent round can block on
+  # the SAME job inbox, so two distinct objects could not both recognize the stop.
+  STOP = Job::STOP
 
   # Timeout (seconds) for polling the outbox in the drain loop.
   DEFAULT_POLL_TIMEOUT = 0.1
@@ -35,7 +41,7 @@ class Task
   # ([:__request__], answered on the main thread).
   CONTROL_EVENTS = %i[error_ctrl __request__].freeze
 
-  attr_reader :thread, :buffer, :ui, :renderer, :job, :registry, :input_path
+  attr_reader :thread, :buffer, :ui, :renderer, :job, :registry, :input_path, :inbox
 
   # Set by #run from the harness's configured palette; the constructor's own
   # renderer colors nothing, which is what a Task without a harness needs.
@@ -155,13 +161,6 @@ class Task
     @outbox.empty?
   end
 
-  # Reply to a pending request (called from the main thread). Unblocks the
-  # task thread's #request call with the given value.
-  def respond(value)
-    @job&.mark_awaiting(false)
-    @inbox << value
-  end
-
   # True when the task thread has been started and has not yet exited.
   def alive?
     !@thread.nil? && @thread.alive?
@@ -196,19 +195,6 @@ class Task
     event[:job] = @job.id if @job
     (@registry || @outbox) << event
     event
-  end
-
-  # Blocks until the main thread answers with #respond.
-  def request(type, **payload)
-    # While a request is unanswered, an input event must queue BEHIND the answer
-    # it gets, so the job is marked awaiting (issue #198 FIFO rule).
-    @job&.mark_awaiting(true)
-    push_event(type: :__request__, kind: type, **payload)
-    reply = @inbox.pop
-    if reply.equal?(STOP)
-      raise "task was stopped while waiting for response to '#{type}'"
-    end
-    reply
   end
 
   # -- Task-thread output helpers --------------------------------------------
@@ -576,31 +562,56 @@ class Task
   end
 
   def self.handle_request(task, msg)
-    return task.respond(nil) unless msg[:kind] == :dialog
+    case msg[:kind]
+    when :dialog then handle_dialog(task, msg)
+    when :sub_agent then handle_sub_agent(task, msg)
+    else task.respond(nil)
+    end
+  end
 
+  # The main thread registers the job (it is the single poller and the only stdin
+  # reader), so the spawn happens HERE - the tool only asked. The request is NOT
+  # answered at spawn time: the answer IS the job's finish delivery, which lands on
+  # the requester's inbox through requested_by. Answering here would let the tool
+  # return before the round had any result.
+  def self.handle_sub_agent(task, msg)
+    registry = task.registry
+    harness  = task.harness
+    return task.respond("error: no registry to register the job on") if registry.nil?
+    return task.respond("error: no harness to run the round with") if harness.nil?
+
+    job = registry.add_job(kind: :sub_agent, requested_by: task.job)
+    SubAgent.new(
+      harness:,
+      job:,
+      registry: msg[:registry],
+      instruction: msg[:instruction],
+      max_iterations: harness.respond_to?(:sub_agent_max_iterations) ?
+        harness.sub_agent_max_iterations : SubAgent::DEFAULT_MAX_ITERATIONS).start
+    nil
+  end
+
+  def self.handle_dialog(task, msg)
     dialog = msg[:dialog]
-    # A job outside the foreground cannot be shown a dialog, so it gets an
-    # answer VALUE the tool can return to the model. Grant dialogs are excepted:
-    # denying one would stop the job from working at all.
-    target = task.registry&.job(msg[:job])
-    if task.registry&.denied?(target, dialog)
-      task.respond(Job::DENIED_ANSWER)
-      return
-    end
+    registry = task.registry
+    target = registry&.job(msg[:job])
+    answer = registry&.denied?(target, dialog) ? Job::DENIED_ANSWER : read_dialog(task, dialog)
+    # Answer the requester the EVENT names. Over the registry that is the job's own
+    # inbox - which is how a background round gets its answer instead of the
+    # foreground turn (the registry routes answers to the RIGHT inbox).
+    registry ? registry.answer(msg[:job], answer) : task.respond(answer)
+  end
 
+  # A dialog is serviced on the MAIN thread - the only code that reads stdin
+  # (single-thread I/O rule). @dialog_open keeps the spinner from clearing the
+  # prompt lines a Choice prompt on stdin would erase. The task's OWN console
+  # serves it: same stdout/stdin pair the drain loop renders to, and it already
+  # carries the run's presentation (issue #388).
+  def self.read_dialog(task, dialog)
     task.instance_variable_set(:@dialog_open, true)
-    begin
-      # No reader thread during the turn, so the dialog can read stdin with
-      # nothing to race for the keyboard. The task's OWN console serves the
-      # dialog: it is the same stdout/stdin pair the drain loop renders to
-      # (single-thread order) and it already carries the run's presentation,
-      # so nothing here has to know how a dialog renders or which palette a
-      # turn chose (issue #388).
-      answer = dialog.perform_direct(ui: task.ui)
-      task.respond(answer)
-    ensure
-      task.instance_variable_set(:@dialog_open, false)
-    end
+    dialog.perform_direct(ui: task.ui)
+  ensure
+    task.instance_variable_set(:@dialog_open, false)
   end
 
   # Store one output event into the OutputBuffer (structured log) and render

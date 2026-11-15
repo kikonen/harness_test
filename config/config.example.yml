@@ -78,6 +78,16 @@ compact:
 #   tail_memory: 4096
 #   tasks_kept: 20
 
+# Sub-agent limits (issue #286 phase 1, the read-only agent.explore tool).
+# max_iterations bounds how many LLM rounds ONE sub-agent may run before it
+# fails. The cap is enforced in code, not by asking the model to be short: the
+# whole point of a sub-agent is that the MAIN context stays small, so a bigger
+# cap does not make the answer better, it grows the main turn's context.
+# Config-only (no CLI flag): a context policy of the project, not a per-run
+# toggle. Omit the key for the built-in default (12).
+# agent:
+#   max_iterations: 12
+
 # Auto-save the session at every prompt boundary (crash-proof, issue #107).
 auto_save: true
 

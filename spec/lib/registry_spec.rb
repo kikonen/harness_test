@@ -233,6 +233,24 @@ RSpec.describe Registry do
       expect(main.inbox.pop(true)).to eq('yes')
     end
 
+    # The answer IS the delivery, so the FIFO flag clears with it: an input
+    # event that arrived while the request was pending queues behind the answer
+    # only for as long as the answer is still owed.
+    it 'clears the awaiting flag when it answers' do
+      main = registry.add_job(kind: :main)
+      background = registry.add_job(kind: :command, requested_by: main)
+      background.mark_awaiting
+
+      registry.answer(background.id, 'allow')
+
+      expect(background.awaiting?).to be false
+      # A note that arrives now is delivered, not queued behind an answer.
+      registry.route_input(background.id, registry.note_event('later note'))
+      expect(background.inbox.pop(true)).to eq('allow')
+      expect(background.inbox.pop(true)).to eq({ type: :note, content: 'later note' })
+    end
+
+
     # A denied background dialog must come back as a VALUE the tool can return
     # to the model - DialogTool#execute blocks on task.request(:dialog, ...), so
     # a bare refusal is not an answer it can act on.
