@@ -16,10 +16,13 @@ class Job
   # denying one would stop the job from working at all.
   DENIED_ANSWER = "error: dialog denied (background job)"
 
-  # A reply equal to STOP is not an answer, so a job must stop rather than read
-  # it as a dialog result.
+  # What an interrupted turn delivers to a request it still owes: STOP is not an
+  # answer, so a blocked requester needs a value a tool can hand back.
+  INTERRUPTED_ANSWER = "cancelled: the turn was interrupted"
+
   # ONE sentinel for the whole model: a task and a round block on the same job
-  # inbox, so two distinct objects could not both recognize the stop.
+  # inbox, so two distinct objects could not both recognize the stop. A reply
+  # equal to it is not an answer, so a consumer must test identity, never read it.
   STOP = Object.new.freeze
 
   # Same timeout as the drain loop, so a poll costs the same everywhere.
@@ -76,6 +79,13 @@ class Job
 
   def mark_awaiting(value = true)
     @awaiting = value
+  end
+
+  # The one primitive an answer is delivered through: the awaiting flag clears
+  # with it, so no input event queues behind an answer that already landed.
+  def respond(value)
+    mark_awaiting(false)
+    deliver(value)
   end
 
   # A job thread never writes a stream or its own buffer (the single-thread I/O

@@ -24,8 +24,7 @@ module Requester
   # Main thread only. The awaiting flag clears WITH the answer, so a request is
   # never answered after an input event has already been delivered to the inbox.
   def respond(value)
-    job&.mark_awaiting(false)
-    inbox << value
+    job ? job.respond(value) : inbox << value
   end
 
   # Implemented by Task and SubAgent: the job the requester runs for, the inbox an

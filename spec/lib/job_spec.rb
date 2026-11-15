@@ -79,6 +79,17 @@ RSpec.describe Job do
 
       expect(job.awaiting?).to be false
     end
+
+    # The answer IS the delivery, so respond clears the flag with it: this is
+    # the one primitive every requester's answer routes through.
+    it 'clears with the answer a respond delivers' do
+      job = add(:command)
+      job.mark_awaiting
+      job.respond('allow')
+
+      expect(job.awaiting?).to be false
+      expect(job.inbox.pop(true)).to eq('allow')
+    end
   end
 
   # The value the caller awaits: the block's value lands as the :done event's

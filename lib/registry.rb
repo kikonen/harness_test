@@ -172,12 +172,11 @@ class Registry
 
   def answer(id, value)
     target = job(id)
-    return nil if target.nil?
+    # An id it does not retain has no inbox to answer, which is a caller error:
+    # returning nil silently is how an answer went computed-but-never-delivered.
+    raise ArgumentError, "job ##{id} is not retained" if target.nil?
 
-    # The answer IS the delivery, so the FIFO flag clears with it: a job that has
-    # been answered is no longer waiting for one.
-    target.mark_awaiting(false)
-    target.deliver(value)
+    target.respond(value)
   end
 
   # -- Retention (tasks_kept) -------------------------------------------------

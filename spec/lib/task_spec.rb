@@ -1452,5 +1452,55 @@ RSpec.describe Task do
       release << :go
     end
 
+    # The route is ONE path: the inbox of the requester the EVENT names. A
+    # request naming no retained job (a requester with no job of its own) has no
+    # other inbox, so it is answered on the servicing task - a registry-or-task
+    # fork computed the answer and delivered nothing.
+    it 'answers a request that names no job on the servicing task' do
+      registry = Registry.new
+      registry.add_job(kind: :main)
+      task = Task.new(buffer: OutputBuffer.new, registry:) { }
+      task.ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new("1\n"))
+      dialog = UI::Dialog.new(title: 'pick',
+                              options: [UI::Dialog::Option.new(title: 'Yes', value: :yes)],
+                              grant: true)
+
+      Task.handle_request(task, { type: :__request__, kind: :dialog,
+                                  job: nil, dialog: })
+
+      expect(task.inbox.pop(true)).to eq(:yes)
+    end
+
+    # Ctrl+C while a dialog is open: the turn is force-stopped, and STOP is not
+    # an answer - a requester blocked on that request would raise on it. The
+    # interrupted turn answers what it owes with a value a tool can return.
+    it 'answers an owed request when the turn is force-stopped' do
+      registry = Registry.new
+      main = registry.add_job(kind: :main)
+      task = Task.new(buffer: nil, registry:, job: main) { }
+      main.mark_awaiting
+      task.stop(0.1)
+
+      answer = main.inbox.pop(true)
+      expect(answer).to eq(Job::INTERRUPTED_ANSWER)
+      expect(answer).not_to equal(Job::STOP)
+      expect(main.awaiting?).to be false
+    end
+
+    # A request owed by ANOTHER job (a background round) is answered too, and
+    # the stopping thread still gets its own STOP so it exits cleanly.
+    it 'answers another job owed request and still stops its own thread' do
+      registry = Registry.new
+      main = registry.add_job(kind: :main)
+      background = registry.add_job(kind: :sub_agent, requested_by: main)
+      task = Task.new(buffer: nil, registry:, job: main) { }
+      background.mark_awaiting
+      task.stop(0.1)
+
+      expect(background.inbox.pop(true)).to eq(Job::INTERRUPTED_ANSWER)
+      # The servicing task's own inbox is not that job's, so it still gets STOP.
+      expect(task.inbox.pop(true)).to equal(Job::STOP)
+    end
+
   end
 end

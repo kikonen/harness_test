@@ -31,6 +31,9 @@ class Task
   # Timeout (seconds) for polling the outbox in the drain loop.
   DEFAULT_POLL_TIMEOUT = 0.1
 
+  # Grace the force-stop gives the task thread before killing it.
+  DEFAULT_STOP_JOIN_TIMEOUT = 0.5
+
   # Raised by the drain loop when the note editor saw EOF (Ctrl-D pressed
   # inside it while editing a mid-turn note): aborts the running turn like
   # Ctrl+C (Task.run stops the task and returns normally).
@@ -166,10 +169,15 @@ class Task
     !@thread.nil? && @thread.alive?
   end
 
-  # Force-stop: signal the inbox (unblocking any pending request) and join
-  # with a timeout. Kills the thread if it is still alive after the timeout.
-  def stop(timeout = 5)
-    @inbox << STOP
+  # Force-stop: answer what the turn owes, signal the inbox, and join with a
+  # short grace. Kills the thread if it is still alive after the timeout.
+  def stop(timeout = DEFAULT_STOP_JOIN_TIMEOUT)
+    # An interrupted turn answers every request it still owes (STOP is not an
+    # answer, so a blocked requester would raise on it). STOP then only breaks
+    # the stopping thread's own pending pop when no answer already hit that inbox.
+    owed = (@registry&.jobs || []).select(&:awaiting?)
+    owed.each { |job| job.respond(Job::INTERRUPTED_ANSWER) }
+    inbox << STOP unless owed.any? { |job| job.inbox.equal?(inbox) }
     @thread&.join(timeout)
     @thread&.kill if @thread&.alive?
     @thread = nil
@@ -565,8 +573,14 @@ class Task
     case msg[:kind]
     when :dialog then handle_dialog(task, msg)
     when :sub_agent then handle_sub_agent(task, msg)
-    else task.respond(nil)
+    else responder_for(task, msg).respond(nil)
     end
+  end
+
+  # The requester an event came from: the job the EVENT names, else the servicing
+  # task. ONE route, so an answer is never sent to the wrong inbox - or to none.
+  def self.responder_for(task, msg)
+    task.registry&.job(msg[:job]) || task
   end
 
   # The main thread registers the job (it is the single poller and the only stdin
@@ -577,8 +591,9 @@ class Task
   def self.handle_sub_agent(task, msg)
     registry = task.registry
     harness  = task.harness
-    return task.respond("error: no registry to register the job on") if registry.nil?
-    return task.respond("error: no harness to run the round with") if harness.nil?
+    responder = responder_for(task, msg)
+    return responder.respond("error: no registry to register the job on") if registry.nil?
+    return responder.respond("error: no harness to run the round with") if harness.nil?
 
     job = registry.add_job(kind: :sub_agent, requested_by: task.job)
     SubAgent.new(
@@ -596,10 +611,7 @@ class Task
     registry = task.registry
     target = registry&.job(msg[:job])
     answer = registry&.denied?(target, dialog) ? Job::DENIED_ANSWER : read_dialog(task, dialog)
-    # Answer the requester the EVENT names. Over the registry that is the job's own
-    # inbox - which is how a background round gets its answer instead of the
-    # foreground turn (the registry routes answers to the RIGHT inbox).
-    registry ? registry.answer(msg[:job], answer) : task.respond(answer)
+    (target || task).respond(answer)
   end
 
   # A dialog is serviced on the MAIN thread - the only code that reads stdin

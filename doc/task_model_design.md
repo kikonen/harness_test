@@ -43,6 +43,18 @@ excludes `ui.note` (state mixing with the main session) and `agent.explore`
 (nesting). A sub-agent request is always buffered: the streaming posture belongs
 to the foreground turn and a background job has no spinner to feed.
 
+**The answer route is ONE path** (increment 3b fix). A request event carries the
+id of the job its requester runs for; the answer is delivered to THAT job's inbox
+(the servicing task's own inbox when the event names no retained job - a requester
+with no job of its own has no other). `Job#respond` is the single primitive (it
+clears the awaiting flag with the delivery). The earlier `registry ? answer :
+respond` fork was the bug: when the event named no retained job, `Registry#answer`
+found nothing and returned nil silently, so the answer was computed and delivered
+to no inbox and the requester blocked until its turn pushed STOP. `Registry#answer`
+now raises on an id it does not retain - a caller error, never silence. A turn
+force-stopped with a request still owed answers it with `Job::INTERRUPTED_ANSWER`,
+not STOP (STOP is not an answer - see `doc/task_design.md` Ctrl+C).
+
 ---
 
 ## Naming (owner decision, 2026-11-14)

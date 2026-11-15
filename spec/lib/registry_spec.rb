@@ -324,8 +324,12 @@ RSpec.describe Registry do
       expect(main.poll(0)).to eq(note2)
     end
 
-    it 'answers nothing for a job it does not retain' do
-      expect(registry.answer(9, 'x')).to be_nil
+    # A job it does not retain has no inbox to answer, so the answer was
+    # computed for nothing: that must be loud, not a silent nil the caller
+    # never notices (the bug that left a requester blocked to its turn's STOP).
+    it 'names the unretained job instead of answering nothing' do
+      expect { registry.answer(9, 'x') }
+        .to raise_error(ArgumentError, 'job #9 is not retained')
     end
   end
 
