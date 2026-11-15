@@ -4,6 +4,8 @@ require 'spec_helper'
 require 'task'
 require 'ui/console'
 require 'stringio'
+require 'requester'
+require 'registry'
 
 # The Dialog suite (issue #74): the class lives in the `UI` namespace.
 # Behavior is asserted for the current contract (issue #72 unified design):
@@ -14,6 +16,23 @@ require 'stringio'
 # selectable alongside ANY options and Cancel, entered as a multi-line
 # block (blank line finishes, Ctrl-D cancels), riding along as
 # [FREE_TEXT, text]; out-of-range numbers re-prompt (issue #73).
+
+# A concrete requester stands in for a sub-agent round (a requester that is NOT
+# a Task), so the route can be asserted without building a whole round.
+class SpecRound
+  include Requester
+
+  attr_reader :job
+
+  def initialize(job)
+    @job = job
+  end
+
+  def push_event(**event)
+    event
+  end
+end
+
 RSpec.describe UI::Dialog do
   let(:options) do
     [
@@ -73,6 +92,33 @@ RSpec.describe UI::Dialog do
       it 'passes ui: nil straight to the task request protocol' do
         task = Task.current
         expect(task).to receive(:request).with(:dialog, dialog: dialog).and_return(:yes)
+        expect(dialog.show(ui: nil)).to eq(:yes)
+      end
+    end
+
+    # A sub-agent round is a requester but NOT a Task, so the route resolves
+    # through Requester.current: hardcoding Task.current would raise for a round
+    # instead of posting its request, which is what keeps the consent path live
+    # for a background job.
+    context 'on a sub-agent round thread (Thread.current[:harness_sub_agent] set)' do
+      around do |example|
+        old = Thread.current[:harness_task]
+        Thread.current[:harness_task] = nil # a round is not a Task
+        Thread.current[:harness_sub_agent] = SpecRound.new(Registry.new.add_job(kind: :sub_agent))
+        example.run
+      ensure
+        Thread.current[:harness_task] = old
+        Thread.current[:harness_sub_agent] = nil
+      end
+
+      it 'routes through the requester and rejects a named console' do
+        expect { dialog.show(ui: console) }
+          .to raise_error(ArgumentError, /pass ui: nil/)
+      end
+
+      it 'posts the dialog request for the round job' do
+        round = Requester.current
+        expect(round).to receive(:request).with(:dialog, dialog: dialog).and_return(:yes)
         expect(dialog.show(ui: nil)).to eq(:yes)
       end
     end

@@ -3,6 +3,7 @@
 require_relative "editor"
 require_relative "text_wrap"
 require "tins"
+require_relative "../requester"
 
 # -- UI::Dialog ---------------------------------------------------------------
 #
@@ -249,19 +250,17 @@ module UI
     # caller wants to use - deliberately no defaults and no global lookup:
     # a dialog never silently talks to some stream nobody passed in.
     def show(ui: nil)
-      # Guard keeps the load order independent: dialog can be loaded before
-      # task (they only meet at runtime on the main thread).
-      task = defined?(Task) ? Task.current : nil
+      requester = Requester.current
 
-      if task
-        raise ArgumentError, "dialog routed through a Task: pass ui: nil" \
+      if requester
+        raise ArgumentError, "dialog routed through a requester: pass ui: nil" \
           unless ui.nil?
 
         # Route through the main thread: post a request and block until
         # the main thread processes the dialog and responds.
-        task.request(:dialog, dialog: self)
+        requester.request(:dialog, dialog: self)
       else
-        raise ArgumentError, "no Task active: show requires an explicit ui: console" \
+        raise ArgumentError, "no requester active: show requires an explicit ui: console" \
           if ui.nil?
 
         perform_direct(ui:)

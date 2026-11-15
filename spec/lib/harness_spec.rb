@@ -846,6 +846,29 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #286: a sub-agent runs against its OWN read-only set, so the same
+  # execution path serves both without a copy of the tool loop. A tool that
+  # exists only on the passed set must be found there, and a tool missing from
+  # it must NOT be resolved through the run registry.
+  describe '#execute_tool_call with a sub-agent registry (issue #286)' do
+    it 'resolves the call against the registry it is given' do
+      h = build_harness
+      own = ToolRegistry.new
+      own.register(Tools::EchoTool.new)
+      call = { id: 'c1', function: { name: 'test.echo', arguments: '{"text":"own"}' } }
+
+      expect(h.send(:execute_tool_call, call, registry: own)).to eq('own')
+    end
+
+    it 'does not fall back to the run registry for a tool the set excludes' do
+      h = build_harness
+      own = ToolRegistry.new
+      call = { id: 'c1', function: { name: 'test.echo', arguments: '{"text":"x"}' } }
+      # test.echo is on the run registry but not on the sub-agent set.
+      expect(h.send(:execute_tool_call, call, registry: own)).to include('unknown tool')
+    end
+  end
+
   describe '#record_note (issue #138)' do
     def note_call(text)
       { id: 'c1', function: { name: 'ui.note', arguments: JSON.dump(text: text) } }
@@ -1292,6 +1315,17 @@ RSpec.describe Harness do
       harness.options[:max_tool_iterations] = 2
 
       expect { harness.call_llm }.to raise_error(ToolLoopError, /exceeded max tool iterations \(2\)/)
+    end
+  end
+
+  # issue #286 phase 1: the round cap a sub-agent runs under.
+  describe '#sub_agent_max_iterations (issue #286)' do
+    it 'defaults to the SubAgent built-in when the option is not set' do
+      expect(build_harness.sub_agent_max_iterations).to eq(SubAgent::DEFAULT_MAX_ITERATIONS)
+    end
+
+    it 'reads from options when set' do
+      expect(build_harness(agent_max_iterations: 4).sub_agent_max_iterations).to eq(4)
     end
   end
 
@@ -2777,6 +2811,24 @@ RSpec.describe Harness do
 
       expect(out).to include(id)
       expect(out).to include('refactor the parser')
+    end
+  end
+
+  # issue #286 phase 1: the read-only sub-agent tool is registered on the MAIN
+  # registry only. AgentToolset deliberately excludes agent.explore, so a
+  # phase-1 sub-agent cannot nest.
+  describe 'agent.explore (issue #286)' do
+    it 'is registered in every run over this harness' do
+      h = build_harness
+      tool = h.tool_registry.get('agent.explore')
+
+      expect(tool).to be_a(Tools::AgentExploreTool)
+      expect(h.tool_registry.names).to include('agent.explore')
+      expect(tool.instance_variable_get(:@harness)).to equal(h)
+    end
+
+    it 'is not part of the read-only set a sub-agent gets' do
+      expect(AgentToolset::READ_ONLY).not_to include('agent.explore')
     end
   end
 

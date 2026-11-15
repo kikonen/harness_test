@@ -135,6 +135,16 @@ drain loop, not a random thread. The task thread is force-stopped (no
 background work survives the turn) and the Interrupt is re-raised for the CLI's
 cleanup path.
 
+`Task#stop` answers what the turn OWES before stopping it. A requester blocked
+on a request the turn was servicing (an open dialog) is waiting on its inbox,
+and STOP is not an answer - delivering STOP there raises
+"requester was stopped while waiting for response". So an interrupted turn
+delivers `Job::INTERRUPTED_ANSWER` to every job it left awaiting, and only
+pushes STOP to break the stopping thread's own pending pop. The join grace is
+short (`DEFAULT_STOP_JOIN_TIMEOUT`, 0.5s): a task thread blocked in a long call
+(the LLM read) never reads STOP, so a long join was why Ctrl+C stalled ~5s
+before killing it.
+
 ## Mid-turn user notes - no reader thread
 
 Each drain tick PEEKS `stdin.input_pending?` (nil on streams that do not

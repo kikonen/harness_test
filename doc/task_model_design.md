@@ -13,6 +13,48 @@ Cross-refs: #286 (this), #324, #146, #414, #181, #40, #238, #248, #300.
 Buffer parts and keying rules live in `doc/output_buffer_design.md`; the single
 turn loop in `doc/task_design.md`.
 
+## Increment 3 (in code, 2026-11-15): the first non-main job kind
+
+`lib/requester.rb` (Requester) is the shared request/respond half of a turn and a
+round, so no tool has to know which kind it runs inside: a Task and a SubAgent
+both resolve through the thread. It is the reason `push_status` and `show` still
+work inside a background round. Two rules this increment had to settle:
+
+- **One STOP sentinel for the whole model** (`Job::STOP`, which `Task::STOP` now
+  aliases). A task and a round can block on the SAME job inbox, so two distinct
+  sentinels could not both recognize the stop.
+- **The awaiting flag clears with the answer**, because the answer IS the
+  delivery: a job that has been answered is no longer waiting for one, so an
+  input event that arrived meanwhile is delivered rather than queued behind an
+  answer that can never come.
+
+The requester that asks BLOCKS on its inbox, so a round that delivered nothing
+would hang it forever - every exit path of `SubAgent` must deliver (findings on
+success, an error value on failure). The main thread registers the job (it is the
+single poller and the only stdin reader); the tool only asked, and the answer is
+the job's finish delivery through `requested_by`.
+
+Phase-1 shape (owner, 2026-11-14): content pins are `tools:readonly`,
+`return:findings`, `iters:config` (default 12). The iteration and findings caps
+are enforced in code, never by asking the model to be short - keeping the main
+context small is the whole point of a sub-agent. `AgentToolset` reuses the run's
+tool instances so the run's single FileList and its grant rules still apply, and
+excludes `ui.note` (state mixing with the main session) and `agent.explore`
+(nesting). A sub-agent request is always buffered: the streaming posture belongs
+to the foreground turn and a background job has no spinner to feed.
+
+**The answer route is ONE path** (increment 3b fix). A request event carries the
+id of the job its requester runs for; the answer is delivered to THAT job's inbox
+(the servicing task's own inbox when the event names no retained job - a requester
+with no job of its own has no other). `Job#respond` is the single primitive (it
+clears the awaiting flag with the delivery). The earlier `registry ? answer :
+respond` fork was the bug: when the event named no retained job, `Registry#answer`
+found nothing and returned nil silently, so the answer was computed and delivered
+to no inbox and the requester blocked until its turn pushed STOP. `Registry#answer`
+now raises on an id it does not retain - a caller error, never silence. A turn
+force-stopped with a request still owed answers it with `Job::INTERRUPTED_ANSWER`,
+not STOP (STOP is not an answer - see `doc/task_design.md` Ctrl+C).
+
 ---
 
 ## Naming (owner decision, 2026-11-14)
