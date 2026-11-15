@@ -141,6 +141,47 @@ RSpec.describe Task do
       task.stop(2)
       expect(task.thread).to be_nil
     end
+
+    # Ctrl+C: the default join grace is short, not 5s. A task thread blocked in
+    # a long call (the LLM read) never reads STOP, so the old 5s join was why an
+    # interrupted turn stalled ~5s before killing it.
+    it 'uses a short default join grace (Ctrl+C must not stall on a blocked thread)' do
+      expect(described_class::DEFAULT_STOP_JOIN_TIMEOUT).to be <= 1.0
+    end
+
+    # A force-stopped turn answers every request it still owes with a VALUE, not
+    # STOP: STOP is not an answer, so a requester blocked on that request would
+    # raise on it. Here the owed request belongs to another job (a background
+    # round), so it is answered and the stopping thread still gets its own STOP.
+    it 'answers another job owed request and still stops its own thread' do
+      registry = Registry.new
+      main = registry.add_job(kind: :main)
+      background = registry.add_job(kind: :command, requested_by: main)
+      task = described_class.new(buffer: nil, registry:, job: main) { }
+      background.mark_awaiting
+
+      task.stop(0.1)
+
+      expect(background.inbox.pop(true)).to eq(Job::INTERRUPTED_ANSWER)
+      expect(main.inbox.pop(true)).to equal(Task::STOP)
+    end
+
+    # When the owed request is the stopping thread's OWN inbox, the interrupted
+    # answer already lands there, so no STOP is pushed on top of it.
+    it 'does not push STOP over the answer it just delivered to its own inbox' do
+      registry = Registry.new
+      main = registry.add_job(kind: :main)
+      task = described_class.new(buffer: nil, registry:, job: main) { }
+      main.mark_awaiting
+
+      task.stop(0.1)
+
+      answer = main.inbox.pop(true)
+      expect(answer).to eq(Job::INTERRUPTED_ANSWER)
+      expect(answer).not_to equal(Job::STOP)
+      expect(main.awaiting?).to be false
+      expect(main.inbox).to be_empty
+    end
   end
 
   describe 'Task.puts (single event queue)' do

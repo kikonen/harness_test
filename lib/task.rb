@@ -25,6 +25,9 @@ class Task
   # Timeout (seconds) for polling the outbox in the drain loop.
   DEFAULT_POLL_TIMEOUT = 0.1
 
+  # Grace the force-stop gives the task thread before killing it.
+  DEFAULT_STOP_JOIN_TIMEOUT = 0.5
+
   # Raised by the drain loop when the note editor saw EOF (Ctrl-D pressed
   # inside it while editing a mid-turn note): aborts the running turn like
   # Ctrl+C (Task.run stops the task and returns normally).
@@ -167,10 +170,17 @@ class Task
     !@thread.nil? && @thread.alive?
   end
 
-  # Force-stop: signal the inbox (unblocking any pending request) and join
-  # with a timeout. Kills the thread if it is still alive after the timeout.
-  def stop(timeout = 5)
-    @inbox << STOP
+  # Force-stop: answer what the turn owes, signal the inbox, and join with a
+  # short grace. Kills the thread if it is still alive after the timeout.
+  def stop(timeout = DEFAULT_STOP_JOIN_TIMEOUT)
+    # An interrupted turn answers every request it still owes (STOP is not an
+    # answer, so a blocked requester would raise on it). STOP then only breaks
+    # this thread's own pending pop when no answer already hit that inbox.
+    owed = (@registry&.jobs || []).select(&:awaiting?)
+    owed.each { |job| job.respond(Job::INTERRUPTED_ANSWER) }
+    # @inbox IS the foreground job's inbox (set in #initialize), so an answered
+    # foreground request needs no STOP - it already got the interrupted answer.
+    @inbox << STOP unless owed.any? { |job| job.inbox.equal?(@inbox) }
     @thread&.join(timeout)
     @thread&.kill if @thread&.alive?
     @thread = nil
