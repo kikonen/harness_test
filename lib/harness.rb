@@ -72,6 +72,7 @@ require_relative "sandbox_gemfile"
 require_relative "tool_result"
 require_relative "image_store"
 require_relative "image_delivery"
+require_relative "system_settings"
 
 require_relative "text_tool_call_parser"
 # -- Harness --------------------------------------------------------------
@@ -184,11 +185,12 @@ class Harness
     note
   end
 
-  def initialize(options, file_list, session_id: nil, resume_data: nil)
+  def initialize(options, file_list, session_id: nil, resume_data: nil, settings: nil)
     @options       = options
     @file_list     = file_list
     @locator       = SessionLocator.new(file_list.workdir)
     @skills        = Skills.new(file_list.workdir)
+    @settings      = settings || SystemSettings.from_options(options)
 
     # The project's durable notes (issue #10): one reader for the store, shared by
     # memory.* and /memory so the two sides cannot drift. The note cap is the
@@ -256,21 +258,11 @@ class Harness
     @session_manager = SessionManager.new(self, file_list)
 
     # Postures and the two consent flags are NOT constructor inputs and are no
-    # longer read from options: the creator (the CLI) applies them after
-    # Harness.new, and a resumed run's session-persisted postures are restored
-    # by #apply_resume_state at the end of this constructor. Each starts at the
-    # conservative default so a Harness with no creator is safe. Ownership:
-    # doc/harness_job_design.md.
-    @command_safety_auto_approve = false
-    # issue #389: the denylist half of command_safety_auto_approve (config-only,
-    # no live toggle). Getter read by the CLI banner. doc/denylist_safe_approve_design.md.
-    @denylist_safe_approve = false
-    @yolo      = false
-    @stream    = false
-    @markdown  = false
-    @plan      = false
-    # Always a UI::Palette: a creator that sets none gets the default palette.
-    @output_palette  = UI::Palette.fetch(nil)
+    # longer held here: they live in SystemSettings (owned by the creator, read
+    # once from options here as a fallback for a Harness built without one), and
+    # a resumed run's session-persisted postures are applied over them by
+    # #apply_resume_state at the end of this constructor. The Harness methods
+    # below are thin delegators to @settings. Ownership: doc/harness_job_design.md.
     @stream_preview  = nil
 
     # The same posture the shell consent reads live (issue #274): a lambda, so a
@@ -416,152 +408,111 @@ class Harness
     options[:max_tool_iterations] || MAX_TOOL_ITERATIONS
   end
 
-  # The rendered-output palette for this run (issue #303). Always a
-  # UI::Palette: an absent option resolves to the default one, and 'none'
-  # paints nothing.
+  # The posture/consent state lives in SystemSettings (@settings, #286); these
+  # are thin delegators so the existing consumers - the commands, Poller, Task,
+  # SessionManager and the CLI banner - keep one read surface on the Harness.
+  # The toggle methods return the new mode label (the badge shape). Ownership
+  # and the static-vs-runtime split: doc/harness_job_design.md.
   def output_palette
-    @output_palette
+    @settings.output_palette
   end
 
-  # /palette switches it mid-session. Resolved and validated HERE, not in the
-  # command, so every route (the CLI applying it after construction, /palette,
-  # a resumed session) goes through the same name check. The Harness is the
-  # only owner of the live palette; the creator supplies the initial name.
   def output_palette=(name)
-    palette = UI::Palette.fetch(name)
-    @output_palette = palette
+    @settings.output_palette = name
   end
 
   def command_safety_check
-    options[:command_safety_check] == true
+    @settings.command_safety_check
   end
 
   def command_safety_auto_approve
-    @command_safety_auto_approve
+    @settings.command_safety_auto_approve
   end
 
   def command_safety_auto_approve=(val)
-    @command_safety_auto_approve = (val == true)
+    @settings.command_safety_auto_approve = val
   end
 
   def command_safety_auto_approve_effective?
-    command_safety_check && command_safety_auto_approve
+    @settings.command_safety_auto_approve_effective?
   end
 
   def yolo?
-    @yolo
+    @settings.yolo?
   end
 
   def yolo=(val)
-    @yolo = (val == true)
+    @settings.yolo = val
   end
 
   def toggle_yolo
-    @yolo = !@yolo
-    yolo_mode_label
+    @settings.toggle_yolo
   end
 
   def command_mode_label
-    return "YOLO" if @yolo
-    return "AUTO-APPROVE" if command_safety_auto_approve_effective?
-
-    "MANUAL"
+    @settings.command_mode_label
   end
 
   def yolo_mode_label
-    @yolo ? "YOLO ON" : "YOLO OFF"
+    @settings.yolo_mode_label
   end
 
-  # issue #389: the denylist-safe override (config-only, no live toggle). It is NOT
-  # part of command_mode_label: it is not a third posture, it changes what a
-  # "safe:" verdict may decide for a DENYLISTED command, and it is only
-  # meaningful while the safety check is on. Rationale:
-  # doc/denylist_safe_approve_design.md.
   def denylist_safe_approve?
-    @denylist_safe_approve
+    @settings.denylist_safe_approve?
   end
 
   def denylist_safe_approve=(val)
-    @denylist_safe_approve = (val == true)
+    @settings.denylist_safe_approve = val
   end
 
-  # -- Streaming posture (issue #28) -----------------------------------------
-
   def stream?
-    @stream
+    @settings.stream?
   end
 
   def stream=(val)
-    @stream = (val == true)
+    @settings.stream = val
   end
 
   def toggle_stream
-    @stream = !@stream
-    stream_mode_label
+    @settings.toggle_stream
   end
 
-  # Badge label only when streaming is ON: the badge names a NON-default
-  # posture (the same rule as YOLO / AUTO-APPROVE), and buffered is the
-  # default. /stream status reports the off state.
   def stream_mode_label
-    @stream ? "STREAM" : nil
+    @settings.stream_mode_label
   end
-
-  # -- Markdown rendering posture (issue #106) -------------------------------
-  #
-  # An OUTPUT posture (like the palette, not like stream/plan): it decides how
-  # the assistant answer is rendered, not how the model behaves, so it carries
-  # NO spinner badge. Read when a Task builds its renderer, so a /markdown
-  # toggle lands on the next turn (the same as /palette).
 
   def markdown?
-    @markdown
+    @settings.markdown?
   end
 
   def markdown=(val)
-    @markdown = (val == true)
+    @settings.markdown = val
   end
 
-  # Returns the new state as a label (the same shape as toggle_stream /
-  # toggle_plan), not a boolean.
   def toggle_markdown
-    self.markdown = !@markdown
-    markdown? ? "MARKDOWN ON" : "MARKDOWN OFF"
+    @settings.toggle_markdown
   end
 
-  # The table-width basis for markdown rendering (issue #106): an explicit column
-  # count from --markdown-width / the config 'markdown_max_width' key, or nil for
-  # the renderer's default (80% of the detected terminal). Config-derived for the
-  # whole run - NOT a live toggle like markdown? itself - so it is read when a
-  # Task builds its renderer, the same as the palette.
+  # Static config (slice B: not a live posture): read once, applied when a Task
+  # builds its renderer, so a --markdown-width change needs a restart.
   def markdown_max_width
     options[:markdown_max_width]
   end
 
-  # -- Planning posture (issue #359) -----------------------------------------
-  #
-  # Advisory by the owner's decision: the mode gates NO tool. What it does is
-  # name itself (the [PLAN] badge), point at one stored plan, and record one
-  # note in the chain when it turns on. Enforcement strength and the loop:
-  # doc/planning_mode_design.md.
-
   def plan?
-    @plan
+    @settings.plan?
   end
 
   def plan=(val)
-    @plan = (val == true)
+    @settings.plan = val
   end
 
   def toggle_plan
-    @plan = !@plan
-    plan_mode_label
+    @settings.toggle_plan
   end
 
-  # Badge label only when planning is ON: the badge names a NON-default
-  # posture (the same rule as STREAM / YOLO). /plan status reports the off state.
   def plan_mode_label
-    @plan ? "PLAN" : nil
+    @settings.plan_mode_label
   end
 
   # -- Tool-result images (issue #449) --------------------------------------
@@ -1451,15 +1402,13 @@ class Harness
     @session_manager.param_overrides.load(data[:param_overrides])
     @session_manager.param_overrides.restore!
 
-    self.yolo = data[:yolo] == true
+    # The four session-persisted postures (yolo/stream/markdown/palette) are
+    # applied over the resolved settings by SystemSettings#restore_persisted;
+    # a key the session does not carry keeps its config value (a session saved
+    # before the posture existed falls back to the default, #28/#106/#303).
+    @settings.restore_persisted(data)
     logger.info "yolo posture restored: #{yolo? ? 'ON' : 'OFF'}"
-
-    self.stream = data[:stream] == true
     logger.info "streaming posture restored: #{stream? ? 'ON' : 'OFF'}"
-
-    # issue #106: the markdown rendering posture (a harness posture, like
-    # streaming). A session saved markdown-rendered resumes markdown-rendered.
-    self.markdown = data[:markdown] == true
     logger.info "markdown posture restored: #{markdown? ? 'ON' : 'OFF'}"
 
     # #285: the saved per-request performance (#251) is a server measurement, so
@@ -1468,13 +1417,6 @@ class Harness
     saved_rate = LLM::UsageStats.recent_generation_rate(data.dig(:last_stats, :performance), nil)
     @last_rate = saved_rate if saved_rate
     logger.info "recent generation rate restored: #{last_rate_segment}" if saved_rate
-
-    # issue #303: the palette the session was saved with. Unknown names are
-    # NOT fatal here (a session saved by another build may name a palette this
-    # one does not have) - HarnessConfig/CLI validate a name the user typed,
-    # a stored name only has to be usable.
-    restored = UI::Palette.names.include?(data[:output_palette].to_s) ? data[:output_palette] : nil
-    self.output_palette = restored
 
     logger.info "output palette restored: #{output_palette.name}"
 
