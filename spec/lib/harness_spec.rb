@@ -78,7 +78,23 @@ RSpec.describe Harness do
     # out of the options hash and passed where they belong.
     session_id  = opts.delete(:session_id)
     resume_data = opts.delete(:resume_data)
-    described_class.new(opts, file_list, session_id: session_id, resume_data: resume_data)
+    harness = described_class.new(opts, file_list,
+                                  session_id: session_id, resume_data: resume_data)
+    # The Harness no longer seeds postures/consent from options: this helper,
+    # like CLI#apply_initial_postures, applies them AFTER construction. A resumed
+    # run already restored the session-persisted postures in
+    # Harness#apply_resume_state, so they are NOT overwritten here (the saved
+    # choice wins over config); the config-only flags apply either way.
+    harness.command_safety_auto_approve = options[:command_safety_auto_approve]
+    harness.denylist_safe_approve       = options[:command_safety_denylist_safe_approve]
+    harness.plan                        = options[:plan]
+    unless resume_data
+      harness.yolo           = options[:yolo]
+      harness.stream         = options[:stream]
+      harness.markdown       = options[:markdown]
+      harness.output_palette = options[:output_palette]
+    end
+    harness
   end
 
   # The on-disk path of a session id in this spec's workdir (#207 layout).
@@ -1307,7 +1323,7 @@ RSpec.describe Harness do
       expect(build_harness(output_palette: 'none').output_palette.name).to eq('none')
     end
 
-    it 'rejects an unknown name at construction, before any LLM call' do
+    it 'rejects an unknown name when the creator applies it, before any LLM call' do
       expect { build_harness(output_palette: 'crayola') }
         .to raise_error(HarnessError, /unknown output palette/)
     end
@@ -2310,16 +2326,14 @@ RSpec.describe Harness do
       expect(harness.markdown?).to be(false)
     end
 
-    it 'coerces the markdown setter to a boolean and records it in options' do
+    it 'coerces the markdown setter to a boolean' do
       harness = build_harness
       harness.markdown = 'yes'
 
       expect(harness.markdown?).to be(false)
-      expect(harness.options[:markdown]).to be(false)
 
       harness.markdown = true
       expect(harness.markdown?).to be(true)
-      expect(harness.options[:markdown]).to be(true)
     end
   end
 

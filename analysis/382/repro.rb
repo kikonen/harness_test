@@ -198,10 +198,11 @@ def harness_with_check(dir, yolo)
   options = {
     system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE,
     num_ctx: 65_536,
-    command_safety_check: true,
-    yolo:
+    command_safety_check: true
   }
-  Harness.new(options, FileList.new([], workdir: dir))
+  harness = Harness.new(options, FileList.new([], workdir: dir))
+  harness.yolo = yolo
+  harness
 end
 
 [[false, "MANUAL / AUTO-APPROVE"], [true, "YOLO"]].each do |yolo, label|

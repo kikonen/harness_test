@@ -59,10 +59,11 @@ def build_harness(dir)
     {
       model: "test-model",
       num_ctx: 65_536,
-      stream: true,
       system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE
     },
     FileList.new([], workdir: dir))
+  # The stream posture is applied by the creator, not read from options.
+  harness.stream = true
   harness.instance_variable_set(:@client, StreamingScriptedClient.new)
   harness.session.add_user("write the file")
   harness
