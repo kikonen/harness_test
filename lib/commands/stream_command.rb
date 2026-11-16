@@ -27,13 +27,13 @@ module Commands
       when "status"
         report
       when "on"
-        @harness.stream = true
+        @settings.stream = true
         report
       when "off"
-        @harness.stream = false
+        @settings.stream = false
         report
       when "", "toggle"
-        report(@harness.toggle_stream)
+        report(@settings.toggle_stream)
       else
         render_usage
       end
@@ -43,11 +43,11 @@ module Commands
 
     # label defaults to the CURRENT state (used by /stream status). A nil
     # label means the posture is off - the badge only names a non-default.
-    def report(label = @harness.stream_mode_label)
+    def report(label = @settings.stream_mode_label)
       emit_role(:ack, label || "BUFFERED")
       # The whole report body is contiguous prose -> ONE note call, one paragraph
       # per array entry. No aligned-column block here to keep verbatim.
-      paras = if @harness.stream?
+      paras = if @settings.stream?
                 [
                   "Responses stream in: the spinner shows the answer " \
                     "as it arrives with the rate it is arriving at, and [STREAM] " \

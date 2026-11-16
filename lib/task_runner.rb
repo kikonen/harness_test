@@ -122,9 +122,14 @@ module TaskRunner
   end
 
   def main_thread_renderer
-    width = harness.respond_to?(:markdown_max_width) ? harness.markdown_max_width : nil
+    # Palette and table width now live in SystemSettings (#286); read them from
+    # the settings this host carries, falling back to Harness (a host that has
+    # one but no settings, e.g. CommandRunner).
+    width = respond_to?(:settings) ? settings&.markdown_max_width : nil
+    width ||= harness.respond_to?(:markdown_max_width) ? harness.markdown_max_width : nil
     UI::Renderer.new(
-      palette: UI::Renderer.palette_for(ui:, harness:),
+      palette: UI::Renderer.palette_for(
+        ui:, harness:, settings: (respond_to?(:settings) ? settings : nil)),
       ui:,
       markdown_max_width: width)
   end

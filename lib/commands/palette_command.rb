@@ -9,7 +9,7 @@ module Commands
   # /palette [name|status] - show or switch the rendered-output palette for this
   # session. The switch lands on the NEXT turn (a Task builds its renderer once
   # at Task#run); the choice is saved with the session. Validation is not here -
-  # it is Harness#output_palette=. Rules: doc/output_rendering_design.md.
+  # it is SystemSettings#output_palette=. Rules: doc/output_rendering_design.md.
   class PaletteCommand < Command
     HELP = CommandHelp.new(
       usage: "palette [name|status]",
@@ -56,9 +56,9 @@ module Commands
     private
 
     def set(name)
-      previous = @harness.output_palette&.name
-      @harness.output_palette = name
-      current = @harness.output_palette
+      previous = @settings.output_palette&.name
+      @settings.output_palette = name
+      current = @settings.output_palette
 
       # Same shape as /yolo: the bare bracketed label is the ack.
       changed = current.name != previous
@@ -77,7 +77,7 @@ module Commands
     end
 
     def report
-      current = @harness.output_palette
+      current = @settings.output_palette
       emit_role(:note, "Output palette: #{current ? current.name : 'none'}")
       emit_roles(current)
       print_sample(current)

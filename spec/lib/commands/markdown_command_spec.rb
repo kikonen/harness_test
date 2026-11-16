@@ -3,36 +3,22 @@
 require 'spec_helper'
 require 'stringio'
 require 'commands/markdown_command'
+require 'system_settings'
 
 # issue #106: /markdown flips the markdown rendering posture. Like /palette it is
 # an OUTPUT posture (no spinner badge), changes USER-side harness state only, and
 # is saved with the session.
 RSpec.describe Commands::MarkdownCommand do
-  # Stand-in for Harness exposing the posture surface the command uses.
-  def build_harness(markdown: false)
-    Class.new do
-      attr_writer :markdown
-
-      def initialize(markdown)
-        @markdown = markdown
-      end
-
-      def markdown?
-        @markdown
-      end
-
-      def toggle_markdown
-        @markdown = !@markdown
-        markdown? ? 'MARKDOWN ON' : 'MARKDOWN OFF'
-      end
-    end.new(markdown)
+  # The command talks to SystemSettings directly (#286): use the real one.
+  def build_settings(markdown: false)
+    SystemSettings.new(markdown: markdown)
   end
 
   let(:io) { StringIO.new }
   let(:ui) { UI::Console.new(stdout: io) }
 
-  def command(harness = build_harness)
-    described_class.new(harness: harness, file_list: nil, options: nil, ui: ui)
+  def command(settings = build_settings)
+    described_class.new(settings: settings, file_list: nil, options: nil, ui: ui)
   end
 
   describe 'the help entry (issue #323 contract)' do
@@ -50,41 +36,41 @@ RSpec.describe Commands::MarkdownCommand do
   end
 
   it 'toggles the posture on a bare /markdown and acks the new state' do
-    harness = build_harness
-    command(harness).handle('')
+    settings = build_settings
+    command(settings).handle('')
 
-    expect(harness.markdown?).to be(true)
+    expect(settings.markdown?).to be(true)
     expect(io.string).to include('[markdown: ON]')
   end
 
   it 'toggles back off with a second /markdown' do
-    harness = build_harness(markdown: true)
-    command(harness).handle('')
+    settings = build_settings(markdown: true)
+    command(settings).handle('')
 
-    expect(harness.markdown?).to be(false)
+    expect(settings.markdown?).to be(false)
     expect(io.string).to include('[markdown: OFF]')
     expect(io.string).to include('shown verbatim')
   end
 
   it 'sets the posture explicitly with on and off' do
-    harness = build_harness
-    command(harness).handle('on')
-    expect(harness.markdown?).to be(true)
+    settings = build_settings
+    command(settings).handle('on')
+    expect(settings.markdown?).to be(true)
 
-    command(harness).handle('off')
-    expect(harness.markdown?).to be(false)
+    command(settings).handle('off')
+    expect(settings.markdown?).to be(false)
   end
 
   it 'reports the current posture with status without changing it' do
-    harness = build_harness(markdown: true)
-    command(harness).handle('status')
+    settings = build_settings(markdown: true)
+    command(settings).handle('status')
 
-    expect(harness.markdown?).to be(true)
+    expect(settings.markdown?).to be(true)
     expect(io.string).to include('[markdown: ON]')
   end
 
   it 'states the palette seeding and the next-turn effect' do
-    command(build_harness(markdown: true)).handle('status')
+    command(build_settings(markdown: true)).handle('status')
 
     expect(io.string).to include('seeded from the output palette')
     expect(io.string).to include('Effective from the next turn')
@@ -92,7 +78,7 @@ RSpec.describe Commands::MarkdownCommand do
   end
 
   it 'shows usage for an argument that is not a posture keyword' do
-    command(build_harness).handle('bogus')
+    command(build_settings).handle('bogus')
 
     expect(io.string).to include('usage: /markdown')
   end

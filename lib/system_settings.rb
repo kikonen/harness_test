@@ -18,7 +18,10 @@ require_relative "ui/palette"
 # (doc/harness_job_design.md).
 class SystemSettings
   # The posture + consent state. Output palette is always a UI::Palette.
-  attr_reader :output_palette
+  # markdown_max_width is static config (read once, never toggled live) but
+  # lives here so a posture command that reports it (markdown) needs no
+  # Harness. Output palette is always a UI::Palette.
+  attr_reader :output_palette, :markdown_max_width
 
   # Read the run-wide values out of the resolved CLI options hash. A hand-built
   # hash (specs, library users) works the same way a CLI-resolved one does.
@@ -34,6 +37,7 @@ class SystemSettings
     @markdown  = options[:markdown] == true
     @plan      = options[:plan] == true
     @output_palette = UI::Palette.fetch(options[:output_palette])
+    @markdown_max_width = options[:markdown_max_width]
 
     @command_safety_check             = options[:command_safety_check] == true
     @command_safety_auto_approve      = options[:command_safety_auto_approve] == true

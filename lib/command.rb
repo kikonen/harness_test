@@ -18,7 +18,7 @@ require_relative "ui/help_renderer"
 class Command
   include TaskRunner
 
-  attr_reader :harness, :file_list, :options, :ui, :help_renderer
+  attr_reader :harness, :settings, :file_list, :options, :ui, :help_renderer
 
   # Every command class declares its own HELP (a CommandHelp). /help renders it
   # from the dispatch registry, so a command that has no help entry fails loudly
@@ -46,7 +46,15 @@ class Command
   # of the run (CLI) can do that, so the action arrives as a callable
   # instead of the command reaching for a live Harness to mutate. nil for
   # every other command.
-  def initialize(harness:, file_list:, options:, ui:, on_resume: nil, help_renderer: nil)
+  def initialize(
+    harness: nil,
+    file_list:,
+    options:,
+    ui:,
+    on_resume: nil,
+    help_renderer: nil,
+    settings: nil
+  )
     @harness    = harness
     @file_list  = file_list
     @options    = options
@@ -54,6 +62,9 @@ class Command
     @on_resume  = on_resume
     # Only /help renders it; every other command ignores it.
     @help_renderer = help_renderer
+    # The run-wide posture/consent state (#286). A posture command reads and
+    # writes it directly instead of routing through Harness.
+    @settings = settings
   end
 
   # Print this command's usage on a bad argument (issue #471) from its own HELP

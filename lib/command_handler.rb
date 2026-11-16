@@ -48,7 +48,8 @@ class CommandHandler
   attr_reader :harness,
     :file_list,
     :ui,
-    :options
+    :options,
+    :settings
 
   # Registry: command name (without slash) -> class
   COMMANDS = {
@@ -87,10 +88,14 @@ class CommandHandler
     file_list:,
     options:,
     ui:,
-    on_resume: nil)
+    on_resume: nil,
+    settings: nil)
     @harness   = harness
     @file_list = file_list
     @options   = options
+    # The run-wide posture/consent state (#286): posture commands read and
+    # write it directly instead of routing through Harness.
+    @settings  = settings
     @exiting   = false
     @ui        = ui
     @on_resume = on_resume
@@ -184,7 +189,8 @@ class CommandHandler
       options:,
       ui:,
       on_resume: @on_resume,
-      help_renderer: @help_renderer)
+      help_renderer: @help_renderer,
+      settings: @settings)
   end
 
   # issue #129: `! cmd` runs a shell command locally, bypassing the model.
