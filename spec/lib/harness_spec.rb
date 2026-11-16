@@ -78,23 +78,13 @@ RSpec.describe Harness do
     # out of the options hash and passed where they belong.
     session_id  = opts.delete(:session_id)
     resume_data = opts.delete(:resume_data)
-    harness = described_class.new(opts, file_list,
-                                  session_id: session_id, resume_data: resume_data)
-    # The Harness no longer seeds postures/consent from options: this helper,
-    # like CLI#apply_initial_postures, applies them AFTER construction. A resumed
-    # run already restored the session-persisted postures in
-    # Harness#apply_resume_state, so they are NOT overwritten here (the saved
-    # choice wins over config); the config-only flags apply either way.
-    harness.command_safety_auto_approve = options[:command_safety_auto_approve]
-    harness.denylist_safe_approve       = options[:command_safety_denylist_safe_approve]
-    harness.plan                        = options[:plan]
-    unless resume_data
-      harness.yolo           = options[:yolo]
-      harness.stream         = options[:stream]
-      harness.markdown       = options[:markdown]
-      harness.output_palette = options[:output_palette]
-    end
-    harness
+    # Mirror CLI: SystemSettings is resolved from the run's options (the posture/
+    # consent state lives there now) and passed to the Harness. For a resumed run
+    # the four session-persisted postures are applied over it by
+    # Harness#apply_resume_state (SystemSettings#restore_persisted), so the saved
+    # choice wins over the config (#221); the config-only flags stay as resolved.
+    described_class.new(opts, file_list, session_id: session_id, resume_data: resume_data,
+                        settings: SystemSettings.from_options(opts))
   end
 
   # The on-disk path of a session id in this spec's workdir (#207 layout).

@@ -20,6 +20,7 @@ require_relative "ui"
 class CLI
   attr_reader :options,
     :harness,
+    :settings,
     :file_list,
     :session_id,
     :commands,
@@ -74,9 +75,15 @@ class CLI
     @file_list = build_file_list if resume_id
 
     replaced = @harness
+    # SystemSettings is resolved from the run's options here (the owner of the
+    # posture/consent state) and handed to the Harness, which delegates to it.
+    # The four session-persisted postures are applied over it by the Harness
+    # for a resumed run (#221: the saved choice wins over the config), so the
+    # CLI no longer applies postures after construction. Ownership:
+    # doc/harness_job_design.md.
+    @settings = SystemSettings.from_options(@options)
     @harness  = Harness.new(@options, @file_list,
-                            session_id:, resume_data:)
-    apply_initial_postures(resume_data:)
+                            session_id:, resume_data:, settings: @settings)
 
     @history  = HistoryManager.new(@file_list.workdir, session_id:)
     @harness.history = @history
@@ -359,27 +366,6 @@ class CLI
   # gets the same default as the config would: on.
   def grant_workdir?
     @options.fetch(:grant_workdir, true) != false
-  end
-
-  # The creator applies the run's starting postures and consent flags AFTER
-  # Harness.new: the Harness no longer seeds them from options (ownership:
-  # doc/harness_job_design.md). command_safety_auto_approve, the denylist flag
-  # and plan are config-only (never saved with a session), so the current
-  # config decides them even for a resumed run. yolo/stream/markdown/palette ARE
-  # session-persisted: a resumed run already restored them from its own session
-  # file in Harness#apply_resume_state, and that saved choice wins over the
-  # config (#221 - resuming a YOLO session must not re-arm the prompts the user
-  # opted out of), so only a fresh run takes them from options.
-  def apply_initial_postures(resume_data:)
-    @harness.command_safety_auto_approve = @options[:command_safety_auto_approve]
-    @harness.denylist_safe_approve       = @options[:command_safety_denylist_safe_approve]
-    @harness.plan                        = @options[:plan]
-    return if resume_data
-
-    @harness.yolo           = @options[:yolo]
-    @harness.stream         = @options[:stream]
-    @harness.markdown       = @options[:markdown]
-    @harness.output_palette = @options[:output_palette]
   end
 
   # issue #189: the log path relative to the workdir (absolute paths would
