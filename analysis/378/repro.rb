@@ -34,7 +34,9 @@ at_exit { FileUtils.remove_entry(workdir) if File.directory?(workdir) }
 
 file_list = FileList.new([], workdir:)
 harness   = Harness.new(
-  { system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE, stream: true }, file_list)
+  { system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE }, file_list)
+# The stream posture is applied by the creator, not read from options.
+harness.stream = true
 client = CallbackKeeper.new
 harness.instance_variable_set(:@client, client)
 harness.session.add_user("go")

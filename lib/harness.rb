@@ -254,13 +254,24 @@ class Harness
     @text_tool_call_parser = TextToolCallParser.new(@tool_registry)
     @client = LLMClient.new(options, @logger)
     @session_manager = SessionManager.new(self, file_list)
-    @command_safety_auto_approve = options[:command_safety_auto_approve] == true
-    @yolo = options[:yolo] == true
 
-    # issue #389: the denylist half of command_safety_auto_approve. Config-derived
-    # for the whole run (no live toggle); the getter exists so the banner can name
-    # a relaxed floor. Rationale: doc/denylist_safe_approve_design.md.
-    @denylist_safe_approve = options[:command_safety_denylist_safe_approve] == true
+    # Postures and the two consent flags are NOT constructor inputs and are no
+    # longer read from options: the creator (the CLI) applies them after
+    # Harness.new, and a resumed run's session-persisted postures are restored
+    # by #apply_resume_state at the end of this constructor. Each starts at the
+    # conservative default so a Harness with no creator is safe. Ownership:
+    # doc/harness_job_design.md.
+    @command_safety_auto_approve = false
+    # issue #389: the denylist half of command_safety_auto_approve (config-only,
+    # no live toggle). Getter read by the CLI banner. doc/denylist_safe_approve_design.md.
+    @denylist_safe_approve = false
+    @yolo      = false
+    @stream    = false
+    @markdown  = false
+    @plan      = false
+    # Always a UI::Palette: a creator that sets none gets the default palette.
+    @output_palette  = UI::Palette.fetch(nil)
+    @stream_preview  = nil
 
     # The same posture the shell consent reads live (issue #274): a lambda, so a
     # /yolo at the idle prompt or a mid-turn flip applies to the very next tool
@@ -268,23 +279,6 @@ class Harness
     # stores a grant from it, so a resume cannot turn it into a standing grant.
     @file_list.posture      = -> { yolo? }
     @file_list.audit_logger = @logger
-    self.output_palette = options[:output_palette]
-
-    # Streaming posture (issue #28): the initial value comes from the config
-    # (global key or a profile's own key); /stream switches it for the rest of
-    # the session. Read per request, so a mid-turn toggle applies to the next.
-    @stream = options[:stream] == true
-    @stream_preview = nil
-
-    # Markdown rendering posture (issue #106): opt-in, default off. The initial
-    # value comes from the config like streaming; /markdown switches it live
-    # (it lands on the next turn, the same as /palette).
-    @markdown = options[:markdown] == true
-
-    # Planning posture (issue #359): advisory by the owner's decision, so it
-    # gates nothing. The initial value comes from the config like streaming;
-    # /plan switches it live.
-    @plan = options[:plan] == true
 
     # The blob store for tool-result images (issue #449): the harness' own
     # content dir under THIS session's id, so a path a saved session names still
@@ -430,13 +424,12 @@ class Harness
   end
 
   # /palette switches it mid-session. Resolved and validated HERE, not in the
-  # command, so every route (CLI flag, config key, /palette, resume) goes
-  # through the same name check. options keeps the name so a later rebuild of
-  # the Harness (a mid-run /resume) reproduces the choice.
+  # command, so every route (the CLI applying it after construction, /palette,
+  # a resumed session) goes through the same name check. The Harness is the
+  # only owner of the live palette; the creator supplies the initial name.
   def output_palette=(name)
     palette = UI::Palette.fetch(name)
     @output_palette = palette
-    options[:output_palette] = palette.name
   end
 
   def command_safety_check
@@ -488,6 +481,10 @@ class Harness
     @denylist_safe_approve
   end
 
+  def denylist_safe_approve=(val)
+    @denylist_safe_approve = (val == true)
+  end
+
   # -- Streaming posture (issue #28) -----------------------------------------
 
   def stream?
@@ -523,7 +520,6 @@ class Harness
 
   def markdown=(val)
     @markdown = (val == true)
-    options[:markdown] = @markdown
   end
 
   # Returns the new state as a label (the same shape as toggle_stream /
