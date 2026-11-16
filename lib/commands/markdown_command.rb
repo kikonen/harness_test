@@ -28,13 +28,13 @@ module Commands
       when "status"
         report
       when "on"
-        @harness.markdown = true
+        @settings.markdown = true
         report
       when "off"
-        @harness.markdown = false
+        @settings.markdown = false
         report
       when "", "toggle"
-        @harness.toggle_markdown
+        @settings.toggle_markdown
         report
       else
         render_usage
@@ -44,7 +44,7 @@ module Commands
     private
 
     def report
-      if @harness.markdown?
+      if @settings.markdown?
         emit_role(:ack, "markdown: ON")
         paras = [
           "The assistant's answer is rendered as markdown: " \
@@ -71,12 +71,9 @@ module Commands
 
     # The table-width basis line: an explicit column count when configured, else
     # the renderer's default (80% of the terminal). Content only - the :note role
-    # adds the indent. A harness double in a spec may not answer
-    # #markdown_max_width, so it reads as the default.
+    # adds the indent.
     def width_basis_line
-      width = if @harness.respond_to?(:markdown_max_width)
-                @harness.markdown_max_width
-              end
+      width = @settings&.markdown_max_width
       return "Table width basis: 80% of the terminal width " \
         "(set it with --markdown-width N or 'markdown_max_width:')." if width.nil?
 

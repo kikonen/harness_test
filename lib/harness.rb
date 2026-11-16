@@ -494,9 +494,10 @@ class Harness
   end
 
   # Static config (slice B: not a live posture): read once, applied when a Task
-  # builds its renderer, so a --markdown-width change needs a restart.
+  # builds its renderer, so a --markdown-width change needs a restart. Read
+  # through @settings (SystemSettings owns it).
   def markdown_max_width
-    options[:markdown_max_width]
+    @settings.markdown_max_width
   end
 
   def plan?

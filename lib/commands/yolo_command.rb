@@ -6,7 +6,7 @@ require_relative "../command_allowlist"
 module Commands
   # /yolo - toggle the YOLO shell-consent posture (issue #221).
   #
-  # What it flips (Harness#yolo?): with YOLO ON the run.command tool runs
+  # What it flips (SystemSettings#yolo?): with YOLO ON the run.command tool runs
   # EVERY command without the consent dialog and without a model safety
   # check (issue #238) - the direct answer to "tired of being an ENTER presser"
   # (#221 / #254). What it does NOT change:
@@ -25,7 +25,7 @@ module Commands
   #   * the audit trail: every auto-approved run prints a status line and
   #     is written to harness.log.
   #
-  # The state is persisted with the session (SessionManager#save_session),
+  # The state lives in SystemSettings and is persisted with the session,
   # so a resumed session keeps the posture the user chose.
   class YoloCommand < Command
     HELP = CommandHelp.new(
@@ -52,7 +52,7 @@ module Commands
       when "off"
         set_yolo(false)
       when "", "toggle"
-        label = @harness.toggle_yolo
+        label = @settings.toggle_yolo
         report(label)
       else
         render_usage
@@ -62,13 +62,13 @@ module Commands
     private
 
     def set_yolo(on)
-      @harness.yolo = on
-      report(@harness.yolo_mode_label)
+      @settings.yolo = on
+      report(@settings.yolo_mode_label)
     end
 
     # label defaults to the CURRENT state (used by /yolo status).
-    def report(label = @harness.yolo_mode_label)
-      on = @harness.yolo?
+    def report(label = @settings.yolo_mode_label)
+      on = @settings.yolo?
       # The bare bracketed label is the ack - a "cmd:" prefix says nothing
       # the brackets do not already say (issue #221 review).
       emit_role(:ack, label)

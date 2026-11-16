@@ -31,13 +31,13 @@ module Commands
       when "status"
         report
       when "on"
-        @harness.plan = true
+        @settings.plan = true
         report
       when "off"
-        @harness.plan = false
+        @settings.plan = false
         report
       when "", "toggle"
-        report(@harness.toggle_plan)
+        report(@settings.toggle_plan)
       else
         render_usage
       end
@@ -47,11 +47,11 @@ module Commands
 
     # label defaults to the CURRENT state (used by /plan status). A nil label
     # means the posture is off - the badge only names a non-default.
-    def report(label = @harness.plan_mode_label)
+    def report(label = @settings.plan_mode_label)
       emit_role(:ack, label || "PLANNING OFF")
       # The whole body is contiguous prose -> ONE note call, one paragraph per
       # array entry. No aligned-column block here to keep verbatim.
-      paras = if @harness.plan?
+      paras = if @settings.plan?
                 [
                   "Planning mode is on: draft and iterate a plan with " \
                     "plan.add before modifying code, and keep it in the durable store.",

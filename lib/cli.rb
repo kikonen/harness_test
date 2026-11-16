@@ -93,7 +93,8 @@ class CLI
       file_list: @file_list,
       options: @options,
       ui: @ui,
-      on_resume: ->(id) { setup(resume_id: id) })
+      on_resume: ->(id) { setup(resume_id: id) },
+      settings: @settings)
 
     if resume_id
       @harness.logger.info "session resumed: #{session_id}"

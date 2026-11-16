@@ -150,10 +150,12 @@ module UI
     # Harness exists still honors a mid-session /palette switch. Terminal output
     # stays byte-identical (the CLI console's palette IS the harness palette)
     # and "paint nothing" is the automatic behavior of a non-paintable sink.
-    def self.palette_for(ui:, harness: nil)
+    def self.palette_for(ui:, harness: nil, settings: nil)
       return nil unless ui.respond_to?(:palette)
 
-      ui.palette || (harness.respond_to?(:output_palette) ? harness.output_palette : nil)
+      ui.palette ||
+        (settings.respond_to?(:output_palette) ? settings.output_palette : nil) ||
+        (harness.respond_to?(:output_palette) ? harness.output_palette : nil)
     end
 
     attr_reader :palette
