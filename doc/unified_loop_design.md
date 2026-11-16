@@ -4,6 +4,9 @@ Target design for the task/job/registry division of work (issue #286). Verified
 against the Poller-extraction baseline `3739f17` (2026-11). Cross-refs:
 #286, #36/#198 (steering notes), #221 (the /yolo gesture hack), #267 (its tech
 debt, #424. Read `doc/task_model_design.md` and `doc/task_design.md` first.
+This doc assumes the run-wide `Harness` may be mutated by any command; the
+ownership model that assumption rests on is being replaced - read
+`doc/harness_job_design.md` (the god-object -> per-job tool-loop split) first.
 
 ---
 
