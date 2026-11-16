@@ -24,21 +24,33 @@ class CLI
     :session_id,
     :commands,
     :history,
-    :ui
+    :ui,
+    :render_settings
 
   # Defaults keep the entry point (`CLI.new.run`) unchanged; the tests inject
   # pre-parsed options and a stubbed UI instead.
   def initialize(options = nil, ui = nil)
     @options   = options || CLIOptions.parse
 
+    # The run's display settings (palette, markdown posture, table width). The
+    # CLI owns this one object and injects it into every consumer - the Console
+    # sink, the Harness (which holds it and delegates the display getters, but
+    # is not the source of truth), and the resume-replay renderer. A presentation
+    # concern the fully-background harness does not own (doc/unified_loop_design.md
+    # Step A).
+    @render_settings = UI::RenderSettings.new(
+      palette: @options[:output_palette],
+      markdown: @options[:markdown] == true,
+      markdown_max_width: @options[:markdown_max_width])
+
     # This console is the single sink every dialog and status line reaches (a
     # Task's drain loop renders to it, and the Poller serves a dialog
-    # on it). It is built BEFORE the Harness that resolves the palette, and
-    # /palette + a mid-run Harness rebuild can change it, so the palette is
-    # declared as a live reader (issue #388).
+    # on it). It is built BEFORE the Harness, and /palette + a mid-run Harness
+    # rebuild can change the palette, so it is read live from the CLI-owned
+    # RenderSettings the Harness shares (issue #388).
     @ui = ui || UI::Console.new(
       stdout: $stdout, stdin: $stdin,
-      palette: -> { @harness&.output_palette })
+      palette: -> { @render_settings.palette })
 
     @file_list = build_file_list
     @locator = SessionLocator.new(@options[:workdir])
@@ -75,7 +87,8 @@ class CLI
 
     replaced = @harness
     @harness  = Harness.new(@options, @file_list,
-                            session_id:, resume_data:)
+                            session_id:, resume_data:,
+                            render_settings: @render_settings)
     @history  = HistoryManager.new(@file_list.workdir, session_id:)
     @harness.history = @history
 
@@ -384,9 +397,9 @@ class CLI
     return if tail.empty?
 
     renderer = UI::Renderer.new(
-      palette: harness.output_palette,
-      markdown: harness.markdown?,
-      markdown_max_width: harness.markdown_max_width)
+      palette: @render_settings.palette,
+      markdown: @render_settings.markdown?,
+      markdown_max_width: @render_settings.markdown_max_width)
     # The replay sits between this run's startup facts on BOTH sides, so a
     # block-width rule on each side (the same width the render loop uses for a
     # block boundary, and wider than the 40-dash prompt-loop separator) keeps
