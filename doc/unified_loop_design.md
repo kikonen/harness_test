@@ -116,6 +116,128 @@ acceptable; pick when the first slice needs an answer:
 - `Poller` owns the drain loop + spinner + note path (this commit), so the
   loop's mid-turn logic is already in one class to edit.
 
+## The dependency cleanup that must precede the loop unification
+
+Owner decision (2026-11): a **Task is a generic async thread runner**, not a
+harness-specific object. "Harness" is one *thing you run in* a Task, not a type a
+Task depends on. The current deps point the wrong way (the worker-side harness
+defining presentation), and they block increment 4/5, so they are cleaned first,
+as three PRs (A -> B -> C), each rubocop + full-suite gated.
+
+### The deps today (what Task.run / Poller pull off the harness)
+
+| pulled off harness | real concern | belongs to |
+|---|---|---|
+| `output_palette`, `markdown?`, `markdown_max_width` (`task.rb:335-343`, baked into a per-turn renderer) | presentation | the **UI sink** |
+| `output_log` (`task.rb:326`) | the record | the **registry** (job buffer) |
+| `command_mode_label` / `stream_mode_label` / `plan_mode_label` (`poller.rb:153-174`) | posture | a narrow **posture** interface |
+| `user_note_text=` (`poller.rb:256`) | live-turn input | a narrow **input-sink** interface |
+| `logger` (`task.rb:217`, task-thread error frames) | logging | a **logger** role object |
+
+`attr_accessor :harness` on Task (`task.rb:49`) is public and read at
+`task.rb:331`, `poller.rb:152/197/256` - only 4 real sites, so the strip is small.
+The generic handle `Thread.current[:harness_task]` (`task.rb:110/259`) leaks
+"harness" into a generic mechanism; `Task.current` itself is used correctly by
+`command_runner`/`tool`/`task_runner`/`dialog` only to push onto the running task's
+queue - keep that method, rename only the Thread key.
+
+### Step A - presentation deps -> the sink
+
+`UI::Renderer.palette_for(ui:, harness:)` ALREADY prefers `ui.palette` over
+`harness.output_palette` (`renderer.rb:153`), and `Console#palette` can be a live
+callable that lazily resolves the harness palette (`console.rb:34`). So the palette
+is already half-moved: owned-by-harness, read-through-sink. Finish it: the sink
+(UI layer) is the source of truth for palette, markdown, and table width;
+`Task.run` builds its renderer through the sink, not by reading three display
+getters off the harness. The harness becomes a *config source that configures the
+sink*, not something the worker path reads directly.
+
+**Ownership (owner, 2026-11): the CLI owns it.** A small `UI::RenderSettings`
+holds the `(palette, markdown, markdown_max_width)` tuple that `UI::Renderer.new`
+already takes. The CLI builds it once (from `options`/config) and injects it into
+every consumer. The harness does NOT own render state - it is fully background and
+renders nothing - so it must stop being the holder or the session round-trip hop.
+
+**Shipped (CLI owns + injects + harness delegates).** The CLI builds ONE
+`UI::RenderSettings` from `options` and:
+- makes the `Console` palette callable read it live (the
+  `-> { @render_settings.palette }` passed to `UI::Console.new`);
+- injects it into every `Harness` it builds through the new
+  `Harness#initialize(render_settings:)` kwarg, so a mid-run `/resume` reuses the
+  SAME object the sink already reads (a restored palette lands on it);
+- uses it for the resume-replay renderer (`CLI#print_resume_replay`).
+
+The harness no longer holds palette/markdown state of its own. It keeps
+`output_palette`, `output_palette=`, `markdown?`, `markdown=`, `markdown_max_width`
+as thin DELEGATORS onto the one settings object (the `attr_accessor :render_settings`
+set in `#initialize`). That keeps the session round-trip (save reads the delegators,
+`apply_resume_state` writes them) and every existing harness-double spec green,
+while the single source of truth is the CLI-owned object. Construction stays
+eagerly validating the palette NAME: `#initialize` builds the default
+`RenderSettings` when none is injected, so an unknown `--palette` raises before any
+LLM call - the boundary the old `@output_palette` assignment enforced.
+
+**Deferred to Step C - repointing the worker path.** `task.rb`'s per-turn renderer,
+`task_runner.rb#main_thread_renderer`, and `command_handler.rb` still read the three
+getters off `harness`. That is not a wrong-way dependency to fix here: it is the
+SAME `harness.<x>` read Step C removes when it replaces `attr_accessor :harness` with
+the narrow sink handle. Repointing them to `harness.render_settings.<x>` now would
+change no coupling and force rewriting the ~9 spec doubles that answer the three
+getters - it belongs with the handle replacement, not before it.
+
+### Step B - the incoming queue: one honest thing (blocks increment 4)
+
+`Task#@inbox` is literally `job.inbox` (`task.rb:59`) - a borrowed alias called the
+"task's inbox." Its only reader, `Job#poll` (`job.rb:136`), has NO production
+caller. The LIVE note channel is a different mechanism: `poller.rb:256` writes the
+shared `harness.user_note_text` ivar, and `Harness#request_chain` (the model's tool
+loop) drains `@user_note` at the request boundary (`harness.rb:863`). So today two
+similarly-named "incoming" channels exist and only the ivar one is live. Resolve
+this into ONE documented incoming path BEFORE increment 4 adds control events, or
+inc4 gets a confusing third channel.
+
+### Step C - strip harness out of Task/Poller (the generic-runner payoff)
+
+Replace `attr_accessor :harness` with the narrow role objects the table names
+(sink, posture-source, input-sink, logger); rename the Thread handle to a neutral
+key. After this, a Task is harness-agnostic, and increment 5 (the non-blocking
+unified read loop, where a worker is an optional thing the loop drives) becomes
+coherent instead of fighting harness coupling.
+
+## Increment 4: control events drained at the request boundary
+
+The note already works this way and increment 4 just generalizes it. There is NO
+inbox-reading loop in the task block: a steering note is a SHARED Harness ivar.
+`Poller#commit_note` writes `harness.user_note_text = note`; the model's own tool
+loop, `Harness#request_chain`, drains `@user_note` at the top of the NEXT request
+and injects it as a user message (see the `if @user_note` block in
+`request_chain`). So the injection seam is per-request and already live.
+
+Generalize that one ivar into a small queue of pending control events the same
+way: `harness.enqueue_control(type:, payload:)` (a thread-safe append), drained by
+`request_chain` at the same boundary. `/retry` and `/compact` then stop being
+refused mid-turn: `run_mid_turn` enqueues a control for the live task instead of
+erroring. `/compact` is the first concrete consumer - it mirrors the compaction
+`request_chain` ALREADY does at this boundary (`check_inloop_compaction`), so a
+user `/compact` drains into the same code path the loop uses for itself.
+`/stream`/`/yolo`/`/plan` stay direct Harness state writes (posture is re-read per
+request; no queue needed).
+
+Scope (owner 2026-11): increment 4 is a PoC carrying ONE command, `/compact`.
+`/retry` is NOT wired as a mid-turn event - it is a failed-session concept (the
+connection to the model was lost, so there is no live tool loop to inject into),
+and sending it as an event into a live task accomplishes nothing. `/retry` stays
+refused mid-turn; revisit only when increment 5 changes the worker's shape and the
+"restart the in-flight request" question is real.
+
+This is why increment 4 is the safe ramp to increment 5: it moves model/rebuild
+commands onto the live-turn event path WITHOUT touching `cli.rb`'s loop or the
+task-thread lifecycle yet. The hazard it removes is only the nested `run_on_task`
+drain loop; the worker thread stays exactly as it is (one-shot per turn).
+
+The streaming invariant survives unchanged: a drained control applies at the
+request boundary it is drained at, never to a connection already in flight.
+
 ## Suggested increments (small, each shippable)
 
 1. Add a mode/state to the poll loop (spinner vs edit) without changing routing

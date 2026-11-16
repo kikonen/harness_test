@@ -184,9 +184,21 @@ class Harness
     note
   end
 
-  def initialize(options, file_list, session_id: nil, resume_data: nil)
+  def initialize(options, file_list,
+                 session_id: nil, resume_data: nil,
+                 render_settings: nil)
     @options       = options
     @file_list     = file_list
+    # The CLI owns one RenderSettings and injects it into every Harness it builds
+    # (a mid-run /resume reuses it, so a restored palette lands on the object the
+    # sink already reads). Built here from options when not injected: this is the
+    # one eager step that validates the palette NAME, so an unknown --palette /
+    # config key raises HarnessError at construction, before any LLM call (the
+    # same boundary the old @output_palette assignment enforced).
+    @render_settings = render_settings || UI::RenderSettings.new(
+      palette: options[:output_palette],
+      markdown: options[:markdown] == true,
+      markdown_max_width: options[:markdown_max_width])
     @locator       = SessionLocator.new(file_list.workdir)
     @skills        = Skills.new(file_list.workdir)
 
@@ -268,18 +280,15 @@ class Harness
     # stores a grant from it, so a resume cannot turn it into a standing grant.
     @file_list.posture      = -> { yolo? }
     @file_list.audit_logger = @logger
-    self.output_palette = options[:output_palette]
-
     # Streaming posture (issue #28): the initial value comes from the config
     # (global key or a profile's own key); /stream switches it for the rest of
     # the session. Read per request, so a mid-turn toggle applies to the next.
     @stream = options[:stream] == true
     @stream_preview = nil
 
-    # Markdown rendering posture (issue #106): opt-in, default off. The initial
-    # value comes from the config like streaming; /markdown switches it live
-    # (it lands on the next turn, the same as /palette).
-    @markdown = options[:markdown] == true
+    # Display settings (palette, markdown posture) live in the RenderSettings
+    # set at the top of this method; /markdown and /palette switch them live,
+    # landing on the next turn.
 
     # Planning posture (issue #359): advisory by the owner's decision, so it
     # gates nothing. The initial value comes from the config like streaming;
@@ -426,7 +435,7 @@ class Harness
   # UI::Palette: an absent option resolves to the default one, and 'none'
   # paints nothing.
   def output_palette
-    @output_palette
+    render_settings.palette
   end
 
   # /palette switches it mid-session. Resolved and validated HERE, not in the
@@ -434,10 +443,17 @@ class Harness
   # through the same name check. options keeps the name so a later rebuild of
   # the Harness (a mid-run /resume) reproduces the choice.
   def output_palette=(name)
-    palette = UI::Palette.fetch(name)
-    @output_palette = palette
-    options[:output_palette] = palette.name
+    render_settings.palette = name
+    # Read the RESOLVED palette back (fetch maps an unknown/nil name to default).
+    options[:output_palette] = render_settings.palette.name
   end
+
+  # The run's display settings (palette, markdown posture, table width) - a
+  # presentation concern the CLI owns and injects; the harness holds it and
+  # delegates the display getters below, but is not the source of truth for it
+  # (doc/unified_loop_design.md Step A). Always set in #initialize (the CLI's
+  # instance when injected, a default built from options otherwise).
+  attr_accessor :render_settings
 
   def command_safety_check
     options[:command_safety_check] == true
@@ -518,18 +534,18 @@ class Harness
   # toggle lands on the next turn (the same as /palette).
 
   def markdown?
-    @markdown
+    render_settings.markdown?
   end
 
   def markdown=(val)
-    @markdown = (val == true)
-    options[:markdown] = @markdown
+    render_settings.markdown = val
+    options[:markdown] = render_settings.markdown?
   end
 
   # Returns the new state as a label (the same shape as toggle_stream /
   # toggle_plan), not a boolean.
   def toggle_markdown
-    self.markdown = !@markdown
+    self.markdown = !markdown?
     markdown? ? "MARKDOWN ON" : "MARKDOWN OFF"
   end
 
@@ -539,7 +555,7 @@ class Harness
   # whole run - NOT a live toggle like markdown? itself - so it is read when a
   # Task builds its renderer, the same as the palette.
   def markdown_max_width
-    options[:markdown_max_width]
+    render_settings.markdown_max_width
   end
 
   # -- Planning posture (issue #359) -----------------------------------------
