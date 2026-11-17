@@ -9,6 +9,7 @@ require_relative "cli_options"
 require_relative "harness"
 require_relative "file_list"
 require_relative "error_text"
+require_relative "job_registry"
 require_relative "history_manager"
 require_relative "session_locator"
 require_relative "command_handler"
@@ -21,6 +22,7 @@ class CLI
   attr_reader :options,
     :harness,
     :settings,
+    :registry,
     :file_list,
     :session_id,
     :commands,
@@ -85,11 +87,34 @@ class CLI
     @harness  = Harness.new(@options, @file_list,
                             session_id:, resume_data:, settings: @settings)
 
+    # The run record and its job list belong to the RUN, not to the single-LLM
+    # turn engine (#286): the CLI owns the registry, builds it from the
+    # resolved buffer limits, and registers the main turn first (job #0).
+    # A resumed run seeds the record from the saved tail and restores which
+    # job was foreground.
+    @registry = JobRegistry.new(
+      max_memory: @settings.output_tail_memory || OutputBuffer::DEFAULT_MAX_MEMORY,
+      max_saved: @settings.resume_replay_entries,
+      tasks_kept: @settings.output_tasks_kept)
+    @registry.add_job(kind: :main)
+    if resume_data
+      @registry.restore_replay_tail(resume_data[:replay_tail])
+      saved_fg = resume_data[:foreground_job]
+      if saved_fg
+        @registry.restore_foreground(saved_fg)
+        @harness.logger.info "foreground job restored: ##{@registry.foreground}"
+      end
+    end
+    # The save side records from the registry the RUN owns (#286): SessionManager
+    # is built by Harness, which holds no registry, so its owner injects it.
+    @harness.session_manager.registry = @registry
+
     @history  = HistoryManager.new(@file_list.workdir, session_id:)
     @harness.history = @history
 
     @commands = CommandHandler.new(
       harness: @harness,
+      registry: @registry,
       file_list: @file_list,
       options: @options,
       ui: @ui,
@@ -162,8 +187,8 @@ class CLI
       # single poll loop. The command handler drains events through it too.
       reader = PromptReader.new(ui: @ui, harness: -> { @harness })
       @commands.input_path = reader.input_path
-      @commands.input_path.target = -> { @harness.registry.foreground_job }
-      @commands.input_path.registry = -> { @harness.registry }
+      @commands.input_path.target = -> { @registry.foreground_job }
+      @commands.input_path.registry = -> { @registry }
       # The poll loop dispatches a "/command" submitted mid-turn through this
       # handler (doc/unified_loop_design.md). A callable so a /resume rebuild
       # repoints it, like target/registry above.
@@ -390,7 +415,7 @@ class CLI
   # conversation a resumed chain would otherwise show. An empty tail (a
   # session saved by an older build, or replay_entries: 0) prints nothing.
   def print_resume_replay
-    tail = harness.output_log.replay_tail
+    tail = @registry.foreground_buffer.replay_tail
     return if tail.empty?
 
     renderer = UI::Renderer.new(

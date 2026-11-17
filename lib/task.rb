@@ -317,13 +317,15 @@ class Task
     registry: nil,
     job: nil,
     input_path: nil,
+    buffer: nil,
     &block
   )
     # A task built for a job uses that job's buffer and inbox through the
-    # registry; otherwise the harness' run buffer is the single record. The
-    # drain loop is the single main-thread writer, so every put lands in the
-    # same record a save reads.
-    task = Task.new(buffer: harness.output_log, registry:, job:, input_path:, &block)
+    # registry; otherwise the caller hands the buffer the record lives in
+    # (#286: the run record is the registry's, not the harness'). The drain
+    # loop is the single main-thread writer, so every put lands in the same
+    # record a save reads.
+    task = Task.new(buffer:, registry:, job:, input_path:, &block)
     task.ui = ui
     # The input path is the ONE reader the main thread's poll loop shares with
     # the idle prompt. It only PEEKS stdin until typing starts, so nothing races

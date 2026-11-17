@@ -64,7 +64,7 @@ RSpec.describe HarnessConfig do
   end
 
   # issue #458: how many OutputBuffer entries a RESUMED run redraws at startup.
-  # nil (key absent) = the built-in default (Harness::DEFAULT_RESUME_REPLAY_ENTRIES);
+  # nil (key absent) = the built-in default (SystemSettings::DEFAULT_RESUME_REPLAY_ENTRIES);
   # 0 is a legitimate value that disables the redraw, so it must survive as 0.
   describe '#resume_replay_entries (issue #458)' do
     it 'defaults to nil when the key is absent (the built-in default applies)' do

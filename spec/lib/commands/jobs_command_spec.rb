@@ -11,9 +11,7 @@ require 'commands/jobs_command'
 RSpec.describe Commands::JobsCommand do
   def run(args, registry)
     io = StringIO.new
-    h = Object.new
-    h.define_singleton_method(:registry) { registry }
-    described_class.new(harness: h, file_list: nil, options: nil,
+    described_class.new(harness: Object.new, registry:, file_list: nil, options: nil,
                         ui: UI::Console.new(stdout: io)).handle(args)
     io.string
   end

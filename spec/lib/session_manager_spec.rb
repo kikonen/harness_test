@@ -575,9 +575,9 @@ RSpec.describe SessionManager do
 
   # issue #458: the run OutputBuffer tail (what the user SAW - their prompts as
   # :user entries plus the model/tool side) travels with the session so a resumed
-  # run can redraw it. It is written only when the harness answers
-  # replay_tail_for_save (a harness-side record, like mcp_connected), and a
-  # harness double that does not answer it must not break the save.
+  # run can redraw it. It is written only when the manager has an injected
+  # registry (a run-side record, like mcp_connected), and a SessionManager
+  # built without one must not break the save.
   describe 'resume replay tail round trip (issue #458)' do
     def save_with_replay(dir, tail)
       harness_double = Class.new do
@@ -587,16 +587,17 @@ RSpec.describe SessionManager do
           @options = { num_ctx: 65_536, auto_save: false }
           @logger  = Logger.new(File::NULL)
         end
-        def replay_tail_for_save = @tail || []
-        def tail=(v); @tail = v; end
         def output_palette = UI::Palette.fetch(nil)
         def mcp_connected_summary = []
         def yolo? = false
         def stream? = false
         def markdown? = false
       end.new(session)
-      harness_double.tail = tail
       manager = described_class.new(harness_double, FileList.new([], workdir: dir))
+      registry = JobRegistry.new
+      registry.add_job(kind: :main)
+      registry.foreground_buffer.restore(tail)
+      manager.registry = registry
       session.add_user('hello')
       manager.save_session
       JSON.parse(File.read(manager.session_file_path(session.session_id)), symbolize_names: true)
@@ -608,7 +609,8 @@ RSpec.describe SessionManager do
       Dir.mktmpdir do |dir|
         data = save_with_replay(dir, tail)
         # JSON round trip keeps the keys symbol (symbolize_names) but the
-        # type/origin values come back as strings; Harness#restore re-symbols them.
+        # type/origin values come back as strings; the registry re-symbols them
+        # on a resumed run.
         expect(data[:replay_tail]).to eq(
           tail.map { |e| e.merge(type: e[:type].to_s, origin: e[:origin].to_s) }
         )
@@ -618,8 +620,8 @@ RSpec.describe SessionManager do
 
   # issue #286: the foreground job travels with the session as an ID (harness
   # state, like the postures). The save side is guarded by respond_to? so a
-  # harness double with no registry still saves; the RESUME side is
-  # Harness#apply_resume_state, covered in harness_spec.rb.
+  # harness double with no injected registry still saves; the RESUME side is
+  # CLI#setup, covered in cli_spec.rb.
   describe 'foreground job round trip (issue #286)' do
     def save_with_registry(dir, registry)
       # A local for the session: a singleton block is instance_exec'd on the
@@ -629,15 +631,15 @@ RSpec.describe SessionManager do
       double.define_singleton_method(:session) { sess }
       double.define_singleton_method(:options) { { auto_save: false } }
       double.define_singleton_method(:logger) { Logger.new(File::NULL) }
-      double.define_singleton_method(:registry) { registry }
       double.define_singleton_method(:output_palette) { UI::Palette.fetch(nil) }
       double.define_singleton_method(:mcp_connected_summary) { [] }
       double.define_singleton_method(:yolo?) { false }
       double.define_singleton_method(:stream?) { false }
       double.define_singleton_method(:markdown?) { false }
-      double.define_singleton_method(:replay_tail_for_save) { [] }
 
-      described_class.new(double, FileList.new([], workdir: dir)).save_session
+      manager = described_class.new(double, FileList.new([], workdir: dir))
+      manager.registry = registry
+      manager.save_session
       JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
                                      'session.json')), symbolize_names: true)
     end

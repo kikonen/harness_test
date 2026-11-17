@@ -89,7 +89,8 @@ class CommandHandler
     options:,
     ui:,
     on_resume: nil,
-    settings: nil)
+    settings: nil,
+    registry: nil)
     @harness   = harness
     @file_list = file_list
     @options   = options
@@ -106,6 +107,9 @@ class CommandHandler
       ui:,
       harness:)
     HelpTopics.validate!(COMMANDS.keys)
+    # The JobRegistry the run owns (#286), exposed through TaskRunner#registry;
+    # it is passed to every command built here (build_command).
+    self.registry = registry
   end
 
   def exiting?
@@ -190,7 +194,8 @@ class CommandHandler
       ui:,
       on_resume: @on_resume,
       help_renderer: @help_renderer,
-      settings: @settings)
+      settings: @settings,
+      registry:)
   end
 
   # issue #129: `! cmd` runs a shell command locally, bypassing the model.
@@ -252,8 +257,9 @@ class CommandHandler
   # The shared wrapper lives in TaskRunner (issue #235: /retry reuses it).
   def run_direct_prompt(text)
     # The user's own line is one side of the exchange the resume replay
-    # redraws; the harness records it in the run OutputBuffer (issue #458).
-    @harness.record_user_prompt(text) if @harness.respond_to?(:record_user_prompt)
+    # redraws; the run's JobRegistry records it in the foreground buffer
+    # (issue #458, #286: the run record is not the single-turn-engine's).
+    registry&.record_user_prompt(text)
     run_on_task do |_t|
       @harness.session_manager.run_prompt(text)
     end

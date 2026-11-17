@@ -168,6 +168,46 @@ class JobRegistry
     foreground_job&.buffer
   end
 
+  # -- Run record (issue #458 / #286) ---------------------------------------
+  #
+  # The run record is the FOREGROUND job's buffer, and the registry - not the
+  # per-LLM turn engine - is its owner. Main-thread only. The max_saved guard
+  # is the disable: resume_replay_entries 0 records nothing.
+
+  # Record the user's own submitted line. It is a first-class ROLE (type
+  # :user, not plain :text) so UI::Renderer labels it 'user:' on the resume
+  # redraw - the both-sides record #146 asks for.
+  def record_user_prompt(text)
+    return if @max_saved.zero?
+
+    record_report(type: :user, origin: :user, content: text.to_s)
+  end
+
+  # Record a main-thread slash-command report so a resumed run redraws it
+  # (#474). A structured :list payload is stored AS the structure, not a
+  # pre-rendered line (issue #146).
+  def record_report_output(type:, origin:, content:)
+    return if @max_saved.zero?
+
+    record_report(type:, origin:, content:)
+  end
+
+  # The saved form of the tail (Entry#to_h hashes) for the session JSON.
+  def replay_tail_for_save
+    return [] if @max_saved.zero?
+
+    Array(foreground_buffer&.replay_tail(@max_saved)).map(&:to_h)
+  end
+
+  # A resumed run seeds its record from the saved tail so the startup banner
+  # can redraw the last topic. restore() normalizes the JSON's string
+  # type/origin back to symbols. A disabled window (max_saved 0) seeds nothing.
+  def restore_replay_tail(entries)
+    return if @max_saved.zero?
+
+    foreground_buffer&.restore(entries)
+  end
+
   # -- Inbox routing ----------------------------------------------------------
 
   def answer(id, value)
@@ -194,5 +234,14 @@ class JobRegistry
 
   def to_s
     "registry: #{@jobs.map(&:to_s).join(', ')} (foreground job ##{@foreground})"
+  end
+
+  private
+
+  # Write one entry into the foreground buffer and enforce the saved window -
+  # the same pair every tail put through #record does.
+  def record_report(type:, origin:, content:)
+    foreground_buffer&.put(type:, origin:, content:)
+    foreground_buffer&.keep_window
   end
 end

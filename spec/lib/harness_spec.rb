@@ -466,34 +466,6 @@ RSpec.describe Harness do
       expect(harness.output_palette.name).to eq('default')
     end
 
-    # issue #286: the foreground job travels with the session as an ID, so a
-    # resumed run restores which buffer was active. The registry this run built
-    # retains job #0 plus whatever it rebuilds, so a saved id it holds wins over
-    # the default; an id it does not hold cannot be restored.
-    it 'restores the saved foreground id through its own registry' do
-      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-      seed_saved_session(id, foreground_job: 1)
-      registry = JobRegistry.new
-      registry.add_job(kind: :main)
-      node = registry.add_job(kind: :command, requested_by: registry.jobs.first)
-      allow(JobRegistry).to receive(:new).and_return(registry)
-
-      harness = build_harness(session_id: id, resume_data: saved_data(id))
-
-      expect(harness.registry).to equal(registry)
-      expect(harness.registry.foreground).to eq(node.id)
-      expect(harness.output_log).to equal(node.buffer)
-    end
-
-    it 'leaves the default foreground for a saved id it does not retain' do
-      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-      seed_saved_session(id, foreground_job: 4)
-
-      harness = build_harness(session_id: id, resume_data: saved_data(id))
-
-      expect(harness.registry.foreground).to eq(0)
-    end
-
     # issue #188: a run that changed postures but sent no prompt now saves a
     # session whose chain is JUST the system prompt. The resume side must
     # restore those postures (not choke on the empty conversation) so
@@ -622,7 +594,7 @@ RSpec.describe Harness do
     # Task's outbox (single event queue) via Task.emit. Set the thread-local
     # task so Task.emit finds it, then drain the outbox to assert on the
     # lines - exactly what the real drain loop does.
-    let(:task) { Task.new(buffer: harness.output_log) { } }
+    let(:task) { Task.new(buffer: OutputBuffer.new) { } }
     around do |example|
       @old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
@@ -714,7 +686,7 @@ RSpec.describe Harness do
 
   describe '#execute_tool_call spinner_detail (issue #40)' do
     let(:harness) { build_harness }
-    let(:task) { Task.new(buffer: harness.output_log) { } }
+    let(:task) { Task.new(buffer: OutputBuffer.new) { } }
     def drain_outbox(t)
       ms = []
       loop do
@@ -1023,7 +995,7 @@ RSpec.describe Harness do
 
     it 'says on the console that the late note was NOT applied (issue #430)' do
       harness, = late_note_harness
-      task = Task.new(buffer: harness.output_log) { }
+      task = Task.new(buffer: OutputBuffer.new) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1048,7 +1020,7 @@ RSpec.describe Harness do
     end
 
     it 'leaves the "sent to model" ack when the note WAS injected' do
-      task = Task.new(buffer: harness.output_log) { }
+      task = Task.new(buffer: OutputBuffer.new) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1064,7 +1036,7 @@ RSpec.describe Harness do
     end
 
     it 'says nothing when no note is pending at the final answer' do
-      task = Task.new(buffer: harness.output_log) { }
+      task = Task.new(buffer: OutputBuffer.new) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1079,7 +1051,7 @@ RSpec.describe Harness do
 
     describe '#discard_pending_user_note (issue #430)' do
       it 'returns nil and emits nothing when nothing is pending' do
-        task = Task.new(buffer: harness.output_log) { }
+        task = Task.new(buffer: OutputBuffer.new) { }
         old_current = Thread.current[:harness_task]
         Thread.current[:harness_task] = task
         begin
@@ -1103,7 +1075,7 @@ RSpec.describe Harness do
       end
 
       it 'names the leftover case differently from the late one' do
-        task = Task.new(buffer: harness.output_log) { }
+        task = Task.new(buffer: OutputBuffer.new) { }
         old_current = Thread.current[:harness_task]
         Thread.current[:harness_task] = task
         begin
@@ -1123,7 +1095,7 @@ RSpec.describe Harness do
     end
 
     it 'shows a console ack that the note was sent to the model (issue #198)' do
-      task = Task.new(buffer: harness.output_log) { }
+      task = Task.new(buffer: OutputBuffer.new) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1140,7 +1112,7 @@ RSpec.describe Harness do
     end
 
     it 'shows no "sent to model" ack when there is no note' do
-      task = Task.new(buffer: harness.output_log) { }
+      task = Task.new(buffer: OutputBuffer.new) { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1574,7 +1546,7 @@ RSpec.describe Harness do
       client = scripted(h, [echo.call('c1'), echo.call('c2'), pwned, { content: 'final' }])
       h.session.add_user('do the thing')
 
-      task = Task.new(buffer: h.output_log) { }
+      task = Task.new(buffer: OutputBuffer.new) { }
       old = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       events = []
@@ -3022,180 +2994,6 @@ RSpec.describe Harness do
       before = File.read(prompt_path)
       h.tools_payload
       expect(File.read(prompt_path)).to eq(before)
-    end
-  end
-
-  # issue #458: the harness' run-level OutputBuffer is the durable record a
-  # resumed session redraws. The user's own line is one side of it (role :user),
-  # the model/tool side the other, and both land through the single main-thread
-  # writer. 0 disables the whole path.
-  describe 'run OutputBuffer / resume replay (issue #458)' do
-    it 'records a user prompt as a :user/:user entry (the renderer labels it)' do
-      harness = build_harness
-      harness.record_user_prompt('fix the parser')
-
-      tail = harness.output_log.replay_tail
-      expect(tail.map { |e| [e.type, e.origin, e.content] }).to eq(
-        [[:user, :user, 'fix the parser']]
-      )
-    end
-
-    it 'caps the window at replay_entries (oldest prompts drop)' do
-      harness = build_harness(resume_replay_entries: 2)
-      harness.record_user_prompt('one')
-      harness.record_user_prompt('two')
-      harness.record_user_prompt('three')
-
-      expect(harness.output_log.replay_tail.map(&:content)).to eq(['two', 'three'])
-    end
-
-    # The config reaches the run buffer: the saved window is replay_entries, and the
-    # RAM limit comes from output: tail_memory (issue #286). Both fall back to the
-    # built-in default when unset, so a spec-built Harness still works.
-    it 'builds the run buffer from the config tail limits' do
-      harness = build_harness(output_tail_memory: 200, resume_replay_entries: 30)
-      expect(harness.output_log.max_memory).to eq(200)
-      expect(harness.output_log.max_saved).to eq(30)
-    end
-
-    # Minimum wiring for issue #286 increment 1: the Harness owns the JobRegistry, and
-    # the run record is the buffer of the FIRST job it registers - the main turn,
-    # job #0 - so every single-writer pin still resolves to the same object.
-    it 'the run record is the buffer of the registry job #0 (the main turn)' do
-      harness = build_harness
-      main = harness.registry.jobs.first
-
-      expect(harness.registry.job(0)).to equal(main)
-      expect(main.kind).to eq(:main)
-      expect(harness.output_log).to equal(harness.registry.foreground_buffer)
-      expect(harness.output_log).to equal(main.buffer)
-    end
-
-    # output: tasks_kept is enforced by the harness' own registry, its first
-    # consumer, so the value the CLI carries reaches the object that trims.
-    it 'the harness registry is built with the config tasks_kept value' do
-      harness = build_harness(output_tasks_kept: 4)
-      expect(harness.registry.tasks_kept).to eq(4)
-    end
-
-    # One buffer (issue #286): the model/tool side lands through the same single
-    # writer as the user side, so there is no harvest step. :spinner_detail is
-    # animated, never a rendered line, so it stays in the head.
-    it 'records the model/tool side through the single writer, the spinner stays in the head' do
-      harness = build_harness
-      harness.record_report_output(type: :response, origin: 'session_manager', content: 'the answer')
-      harness.record_report_output(type: :spinner_detail, origin: :harness,
-                                   content: { message: 'Working' })
-      harness.record_report_output(type: :status_ok, origin: 'file.read', content: 'ok')
-
-      expect(harness.output_log.replay_tail.map(&:type)).to eq(%i[response status_ok])
-      expect(harness.output_log.head.map(&:type)).to eq([:spinner_detail])
-    end
-
-    it 'replay_tail_for_save is the Entry#to_h form of the window' do
-      harness = build_harness
-      harness.record_user_prompt('do the thing')
-
-      expect(harness.replay_tail_for_save).to eq(
-        [{ type: :user, origin: :user, content: 'do the thing' }]
-      )
-    end
-
-    it 'records nothing when replay_entries is 0 (the disable)' do
-      harness = build_harness(resume_replay_entries: 0)
-      harness.record_user_prompt('ignored')
-      harness.record_report_output(type: :response, origin: 'session_manager', content: 'ignored too')
-
-      expect(harness.output_log.replay_tail).to be_empty
-    end
-
-    # A resumed run seeds its run OutputBuffer from the saved tail so the banner
-    # redraws the previous topic; restore() normalizes the JSON's string
-    # type/origin back to symbols.
-    it 'seeds the run OutputBuffer from a saved replay_tail on resume' do
-      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-      FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
-      File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate({
-        session_id: id, created_at: Time.now.iso8601, system_prompt: 'saved prompt',
-        messages: [{ role: 'system', content: 'saved prompt' },
-                   { role: 'user', content: 'earlier' }],
-        replay_tail: [{ type: 'user', origin: 'user', content: 'do the thing' },
-                      { type: 'response', origin: 'session_manager', content: 'done' }]
-      }))
-      data = JSON.parse(File.read(session_path(id, SessionLocator::SESSION_FILE)),
-                        symbolize_names: true)
-
-      harness = build_harness(session_id: id, resume_data: data)
-
-      expect(harness.output_log.replay_tail.map { |e| [e.type, e.origin, e.content] }).to eq(
-        [[:user, :user, 'do the thing'], [:response, :session_manager, 'done']]
-      )
-    end
-
-    # replay_entries: 0 must also skip the resume seed (a saved tail is not drawn).
-    it 'does not seed the run OutputBuffer when replay_entries is 0' do
-      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-      FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
-      File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate({
-        session_id: id, created_at: Time.now.iso8601, system_prompt: 'saved prompt',
-        messages: [{ role: 'system', content: 'saved prompt' }],
-        replay_tail: [{ type: 'user', origin: 'user', content: 'should not appear' }]
-      }))
-      data = JSON.parse(File.read(session_path(id, SessionLocator::SESSION_FILE)),
-                        symbolize_names: true)
-
-      harness = build_harness(session_id: id, resume_data: data, resume_replay_entries: 0)
-
-      expect(harness.output_log.replay_tail).to be_empty
-    end
-
-    # issue #474: a slash-command report is now a structured :list entry in the
-    # record (title/columns/items), NOT a fused row string. record_report_output
-    # is the main-thread seam that writes it; the content survives the save ->
-    # resume round trip symbol-keyed so a resumed run redraws the structure.
-    it 'records a command report as a :list entry holding the structure' do
-      harness = build_harness
-      payload = {
-        title: 'Hosts:', kind: :bullet, columns: [:value],
-        items: [{ value: 'a.example' }, { value: 'b.example' }]
-      }
-      harness.record_report_output(type: :list, origin: 'grant', content: payload)
-
-      entry = harness.output_log.replay_tail.first
-      expect(entry.type).to eq(:list)
-      expect(entry.origin).to eq(:grant)
-      expect(entry.content).to be_a(Hash)
-      expect(entry.content[:items]).to eq([{ value: 'a.example' }, { value: 'b.example' }])
-    end
-
-    it 'skips the report when replay_entries is 0' do
-      harness = build_harness(resume_replay_entries: 0)
-      harness.record_report_output(type: :list, origin: 'grant',
-                                   content: { title: 'Hosts:', items: [] })
-      expect(harness.output_log.replay_tail).to be_empty
-    end
-
-    # The full round trip a resumed run takes: Entry#to_h -> session JSON ->
-    # symbolize_names restore -> redraw through UI::Renderer. A :list must come
-    # back as the structure (symbol-keyed), not a pre-rendered line.
-    it 'redraws a saved :list report through the renderer on resume' do
-      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-      FileUtils.mkdir_p(File.dirname(session_path(id, SessionLocator::SESSION_FILE)))
-      File.write(session_path(id, SessionLocator::SESSION_FILE), JSON.generate({
-        session_id: id, created_at: Time.now.iso8601, system_prompt: 'saved prompt',
-        messages: [{ role: 'system', content: 'saved prompt' }],
-        replay_tail: [{ type: 'list', origin: 'grant',
-                        content: { title: 'Hosts:', kind: :bullet, columns: [:value],
-                                   items: [{ value: 'api.example.com' }] } }]
-      }))
-      data = JSON.parse(File.read(session_path(id, SessionLocator::SESSION_FILE)),
-                        symbolize_names: true)
-
-      harness = build_harness(session_id: id, resume_data: data)
-      entry = harness.output_log.replay_tail.first
-      expect(entry.type).to eq(:list)
-      line = UI::Renderer.new.line(type: entry.type, content: entry.content, origin: entry.origin)
-      expect(line).to eq("Hosts:\n  - api.example.com")
     end
   end
 end

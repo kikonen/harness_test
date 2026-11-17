@@ -34,7 +34,7 @@ RSpec.describe TaskRunner do
   it 'runs the block inside Task.run with the host harness and ui' do
     setup_host
     captured = {}
-    allow(Task).to receive(:run) do |harness:, ui:, &blk|
+    allow(Task).to receive(:run) do |harness:, ui:, buffer:, &blk|
       captured[:harness] = harness
       captured[:ui]      = ui
       captured[:result]  = blk.call(nil)
@@ -54,9 +54,8 @@ RSpec.describe TaskRunner do
   describe 'run_on_task awaits the registry job' do
     def registry_host
       registry = JobRegistry.new
-      host.harness = Object.new.tap do |h|
-        h.define_singleton_method(:registry) { registry }
-      end
+      host.harness = Object.new
+      host.registry = registry
       host.ui = ui
       [host, registry, registry.add_job(kind: :main)]
     end
@@ -83,11 +82,11 @@ RSpec.describe TaskRunner do
     end
 
     # A host with no registry (a spec harness double) keeps the plain drain loop.
-    it 'falls back to Task.run when the harness has no registry' do
+    it 'falls back to Task.run when the host has no registry' do
       # The block's value is what the no-registry path returns, so the pin
       # captures it from the block itself.
       captured = nil
-      allow(Task).to receive(:run) { |harness:, ui:, &blk| [nil, captured = blk.call(nil)] }
+      allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| [nil, captured = blk.call(nil)] }
       host.harness = harness
       host.ui = ui
       host.do_thing
@@ -102,7 +101,7 @@ RSpec.describe TaskRunner do
   it 'states the task error as the :kind role, the bracket being the renderer shape' do
     setup_host
     allow(Task).to receive(:current).and_return(nil)
-    allow(Task).to receive(:run) { |harness:, ui:, &blk| ['boom', nil] }
+    allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| ['boom', nil] }
 
     host.do_thing
 
@@ -123,7 +122,7 @@ RSpec.describe TaskRunner do
       end
     end.new
     allow(Task).to receive(:current).and_return(fake_task)
-    allow(Task).to receive(:run) { |harness:, ui:, &blk| ['boom', nil] }
+    allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| ['boom', nil] }
 
     host.do_thing
 
@@ -138,7 +137,7 @@ RSpec.describe TaskRunner do
 
   it 'prints blank lines before and after the task output' do
     setup_host
-    allow(Task).to receive(:run) { |harness:, ui:, &blk| [nil, nil] }
+    allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| [nil, nil] }
 
     host.do_thing
 
@@ -150,7 +149,7 @@ RSpec.describe TaskRunner do
   # event queue, never straight to a stream (single-thread I/O rule, #40).
   it 'writes emit_line to the console when no task is active' do
     setup_host
-    allow(Task).to receive(:run) { |harness:, ui:, &blk| blk.call(nil); [nil, nil] }
+    allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| blk.call(nil); [nil, nil] }
     allow(Task).to receive(:current).and_return(nil)
     host.instance_eval { run_on_task { emit_line 'hello' } }
 
@@ -167,7 +166,7 @@ RSpec.describe TaskRunner do
     end.new
 
     allow(Task).to receive(:current).and_return(fake_task)
-    allow(Task).to receive(:run) do |harness:, ui:, &blk|
+    allow(Task).to receive(:run) do |harness:, ui:, buffer:, &blk|
       blk.call(nil)
       [nil, nil]
     end
@@ -221,20 +220,19 @@ RSpec.describe TaskRunner do
     expect(io.string).to eq("  just one paragraph\n")
   end
   # issue #474: a command report's structure reaches the durable record. The
-  # renderer draws the row layout; harness.record_report_output receives the
+  # renderer draws the row layout; the run registry's record_report_output takes
   # STRUCTURED payload (title/columns/items), not a pre-rendered string. A
-  # harness double that lacks record_report_output (a plain command spec) must
-  # still print fine, so the recording is guarded by respond_to?.
+  # host without a registry (a plain command spec) still prints fine.
   describe 'emit_list (issue #474: structured command report)' do
     it 'renders the bullet list AND records the payload as structure' do
       recorded = []
-      # Plain object (not a strict double): main_thread_renderer asks the harness
-      # whether it answers #output_palette too, so respond_to? must answer both.
-      h = Object.new
-      h.define_singleton_method(:record_report_output) do |type:, origin:, content:|
+      host.harness = Object.new
+      host.ui = ui
+      reg = Object.new
+      reg.define_singleton_method(:record_report_output) do |type:, origin:, content:|
         recorded << { type:, origin:, content: }
       end
-      host.harness = h
+      host.registry = reg
       host.ui = ui
       allow(Task).to receive(:current).and_return(nil)
       host.emit_list(title: 'Hosts:', items: [{ value: 'a' }, { value: 'b' }],
@@ -250,8 +248,7 @@ RSpec.describe TaskRunner do
       expect(entry[:content][:items]).to eq([{ value: 'a' }, { value: 'b' }])
     end
 
-    it 'renders without a record path when harness has no record_report_output' do
-      # An object with NO record_report_output: a plain command spec's harness.
+    it 'renders without a record path when the host has no registry' do
       host.harness = Object.new
       host.ui = ui
       allow(Task).to receive(:current).and_return(nil)
@@ -265,18 +262,19 @@ RSpec.describe TaskRunner do
   # RAW stored markdown rather than the printed line, so a replay redraws it through
   # the renderer (the same #146 rule :list follows). The console line is the render.
   describe 'emit_role(:body) - the record holds the raw text, not the render' do
-    def recording_harness
+    def recording_registry
       recorded = []
-      h = Object.new
-      h.define_singleton_method(:record_report_output) do |type:, origin:, content:|
+      reg = Object.new
+      reg.define_singleton_method(:record_report_output) do |type:, origin:, content:|
         recorded << { type:, origin:, content: }
       end
-      [h, recorded]
+      [reg, recorded]
     end
 
     it 'records the stored markdown while printing the rendered line' do
-      harness, recorded = recording_harness
-      host.harness = harness
+      registry, recorded = recording_registry
+      host.harness = Object.new
+      host.registry = registry
       host.ui = UI::Console.new(stdout: io, palette: UI::Palette.fetch('default'))
       allow(Task).to receive(:current).and_return(nil)
       host.emit_role(:body, '# Title' + "\n\nRun **bin/rspec** first.", origin: 'plans')
@@ -295,6 +293,7 @@ RSpec.describe TaskRunner do
 
     it 'still prints when harness has no record path' do
       host.harness = Object.new
+      host.registry = nil
       host.ui = ui
       allow(Task).to receive(:current).and_return(nil)
       host.emit_role(:body, '# Title', origin: 'plans')
