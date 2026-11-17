@@ -196,5 +196,4 @@ after a read grant on the zone, `file.list '.git/**/*'` is still refused, and
   more than that names the file, and the model reaches it with `file.read` - which
   goes through the grant model, as it should.
 - No mtime watcher: skills are read at call time, so an edit takes effect on the next
-  `skills.read`. Nothing needs reloading, which is why `/reload` still only covers the
-  system prompt.
+  `skills.read`.

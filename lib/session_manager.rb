@@ -542,17 +542,6 @@ class SessionManager
     true
   end
 
-  # Explicitly reload the system prompt (called by /reload command). This
-  # re-reads BOTH the base prompt file and harness.md (issue #223): the base
-  # file is read on demand by build_system_prompt, so an edit to either file
-  # takes effect without a restart.
-  def reload_rules
-    new_prompt = build_system_prompt
-    @rules_mtime = current_rules_mtime
-    @harness.logger.info "system prompt reloaded (base file + harness.md, manual /reload)"
-    new_prompt
-  end
-
   # -- Model management ----------------------------------------------------
 
   # The profile the active model resolved to (nil when no profiles are
@@ -707,7 +696,7 @@ class SessionManager
     # the mode is on. This is the whole point of the mode: the USER already knows
     # they are planning; the value is that the model knows too and holds back from
     # editing. It lives HERE (rebuilt every turn) rather than in the system prompt
-    # so it survives both compaction paths and a /reload, and disappears the
+    # so it survives both compaction paths and a rules re-read, and disappears the
     # moment the mode is off. config/system_prompt.txt is never touched by a
     # posture. Advisory: it states an expectation, it gates no tool.
     if @harness.plan?

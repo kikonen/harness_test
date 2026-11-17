@@ -258,7 +258,6 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/session` | Show a summary of the current session |
 | `/session-clear` | Drop all conversation messages |
 | `/compact` | Summarize the conversation to free context |
-| `/reload` | Force-reload `harness.md` into the system prompt |
 | `/save` | Save the session (conversation + access list) now |
 | `/sessions` | List saved sessions |
 | `/tools` | List available tools |

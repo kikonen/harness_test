@@ -133,7 +133,7 @@ section telling the model to draft and iterate a plan with `plan.add` before
 editing. This is the mode's whole value - the user already knows they are
 planning; the point is that the model knows too and holds back. It lives in the
 per-turn prompt (rebuilt every turn) rather than the system prompt, so it
-survives both compaction paths and a `/reload`, disappears when the mode is off,
+survives both compaction paths and a rules re-read, disappears when the mode is off,
 and `config/system_prompt.txt` is never touched by a posture.
 
 ## Active plan: one per agent, pointing into the durable store

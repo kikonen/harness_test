@@ -212,7 +212,7 @@ class CLIOptions
     # built-in default (config/system_prompt.txt). issue #223: the config
     # references a FILE, it does not embed the prompt text in YAML.
     # The file is read on demand by Harness#build_system_prompt so a
-    # /reload after editing it takes effect without a restart.
+    # later edit to it takes effect without a restart.
     opts[:system_file] ||= config.system_prompt_file
 
     # issue #224: opt-in model self-check for unapproved shell commands

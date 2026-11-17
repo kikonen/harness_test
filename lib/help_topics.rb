@@ -147,10 +147,9 @@ module HelpTopics
         "If a harness.md file exists in the working directory its content is " \
           "appended to the system prompt as project-specific rules.",
         "It is re-read automatically when its modification time changes " \
-          "(checked before each prompt), and /reload forces a re-read of both " \
-          "the base prompt file and harness.md."
+          "(checked before each prompt), so an edit takes effect without a restart."
       ],
-      see_also: %w[reload]),
+      see_also: %w[]),
     "procedures" => Topic.new(
       name: "procedures",
       title: "Skills (written-down procedures)",
@@ -169,7 +168,7 @@ module HelpTopics
           "and deletable through the normal file tools (with a grant, as everywhere). " \
           "A .env* name inside it stays blocked."
       ],
-      see_also: %w[skills reload rules access]),
+      see_also: %w[skills rules access]),
     "input" => Topic.new(
       name: "input",
       title: "Multiline input and the submit key",
