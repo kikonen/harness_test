@@ -128,9 +128,6 @@ class Harness
     :session,
     :session_manager,
     :client,
-    :skills,
-    :memories,
-    :plans,
     :rules_repair_note,
     :mcp,
     :image_store,
@@ -173,18 +170,9 @@ class Harness
     @options       = options
     @file_list     = file_list
     @locator       = SessionLocator.new(file_list.workdir)
-    @skills        = Skills.new(file_list.workdir)
     @settings      = settings || SystemSettings.from_options(options)
 
-    # The project's durable notes (issue #10): one reader for the store, shared by
-    # memory.* and /memory so the two sides cannot drift. The note cap is the
-    # config 'max_memories:' key (issue #435); nil falls back to the default.
-    @memories      = Memories.new(file_list.workdir, max_memories: options[:max_memories])
     @session       = Session.new(build_system_prompt, session_id:)
-
-    # The project's durable plans (issue #359): one reader for the store, shared
-    # by plan.* and /plans so the two sides cannot drift apart.
-    @plans         = Plans.new(file_list.workdir)
 
     if resume_data
       saved_id = resume_data[:session_id]
@@ -326,17 +314,26 @@ class Harness
       harness: self))
     registry.register(Tools::ToolsListTool.new(registry))
     registry.register(Tools::ToolsSearchTool.new(registry))
-    registry.register(Tools::SkillsListTool.new(@skills))
-    registry.register(Tools::SkillsReadTool.new(@skills))
-    registry.register(Tools::MemoryListTool.new(@memories))
-    registry.register(Tools::MemoryReadTool.new(@memories))
-    registry.register(Tools::MemoryAddTool.new(@memories))
-    registry.register(Tools::MemoryDeleteTool.new(@memories))
-    registry.register(Tools::PlanListTool.new(@plans))
-    registry.register(Tools::PlanReadTool.new(@plans))
-    registry.register(Tools::PlanAddTool.new(@plans))
-    registry.register(Tools::PlanDeleteTool.new(@plans))
-    registry.register(Tools::PlanSearchTool.new(@plans))
+    # The FS-backed stores (memories, plans, skills) are not Harness state: each
+    # is a stateless reader over its on-disk dir, so the tools that serve them get
+    # their own instance built here from the run's workdir. /memory, /plans and
+    # /skills build the same store from the same workdir - the dir is the single
+    # source of truth, so the tool side and the command side cannot drift (#286).
+    # The note cap is the config 'max_memories:' key (#435); nil -> the default.
+    skills    = Skills.new(@file_list.workdir)
+    memories  = Memories.new(@file_list.workdir, max_memories: options[:max_memories])
+    plans     = Plans.new(@file_list.workdir)
+    registry.register(Tools::SkillsListTool.new(skills))
+    registry.register(Tools::SkillsReadTool.new(skills))
+    registry.register(Tools::MemoryListTool.new(memories))
+    registry.register(Tools::MemoryReadTool.new(memories))
+    registry.register(Tools::MemoryAddTool.new(memories))
+    registry.register(Tools::MemoryDeleteTool.new(memories))
+    registry.register(Tools::PlanListTool.new(plans))
+    registry.register(Tools::PlanReadTool.new(plans))
+    registry.register(Tools::PlanAddTool.new(plans))
+    registry.register(Tools::PlanDeleteTool.new(plans))
+    registry.register(Tools::PlanSearchTool.new(plans))
     # issue #279: let the model FIND a saved session by what it was ABOUT, not
     # just count them. Read-only, over the run's own SessionLocator (the single
     # place that knows where sessions live) - no Harness, no resume, no delete.

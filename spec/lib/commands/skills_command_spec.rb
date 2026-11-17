@@ -5,31 +5,30 @@ require 'stringio'
 require 'tmpdir'
 require 'fileutils'
 require 'skills'
+require 'file_list'
 require 'commands/skills_command'
 
 RSpec.describe Commands::SkillsCommand do
-  def harness_with(dir)
-    skills = Skills.new(dir)
-    h = Object.new
-    h.define_singleton_method(:skills) { skills }
-    h
+  # The command builds its own FS-backed store from the run's FileList workdir
+  # (#286), so the harness double no longer answers .skills - the real FileList
+  # carries the workdir instead.
+  def file_list_with(dir)
+    FileList.new([], workdir: dir)
   end
 
   # A harness that answers a palette is the real-run shape (Harness#output_palette
   # is ALWAYS a palette there), and it is what lets the renderer render the body as
   # markdown (#474): the emitter states the RAW stored text, the markers are consumed
   # by the render.
-  def harness_with_palette(dir, name = 'default')
-    skills = Skills.new(dir)
+  def harness_with_palette(_dir, name = 'default')
     h = Object.new
-    h.define_singleton_method(:skills) { skills }
     h.define_singleton_method(:output_palette) { UI::Palette.new(name) }
     h
   end
 
   def run_command(dir, args = '')
     stdout = StringIO.new
-    described_class.new(harness: harness_with(dir), file_list: nil, options: nil,
+    described_class.new(harness: Object.new, file_list: file_list_with(dir), options: nil,
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string
   end
@@ -37,7 +36,7 @@ RSpec.describe Commands::SkillsCommand do
   def run_with_palette(dir, args = '', palette = 'default')
     stdout = StringIO.new
     described_class.new(harness: harness_with_palette(dir, palette),
-                        file_list: nil, options: nil,
+                        file_list: file_list_with(dir), options: nil,
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string
   end

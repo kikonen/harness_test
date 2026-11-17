@@ -5,14 +5,15 @@ require 'stringio'
 require 'tmpdir'
 require 'fileutils'
 require 'memories'
+require 'file_list'
 require 'commands/memory_command'
 
 RSpec.describe Commands::MemoryCommand do
-  def harness_with(dir)
-    memories = Memories.new(dir)
-    h = Object.new
-    h.define_singleton_method(:memories) { memories }
-    h
+  # The command builds its own FS-backed store from the run's FileList workdir
+  # (#286), so the harness double no longer answers .memories - the real FileList
+  # carries the workdir instead.
+  def file_list_with(dir)
+    FileList.new([], workdir: dir)
   end
 
   # A harness that answers a palette is the real-run shape (Harness#output_palette
@@ -20,17 +21,15 @@ RSpec.describe Commands::MemoryCommand do
   # markdown (#474): the emitter states the RAW stored text, the markers are consumed
   # by the render. palette 'none' renders structure with no ANSI; a double that
   # answers no palette prints the body as stored.
-  def harness_with_palette(dir, name = 'default')
-    memories = Memories.new(dir)
+  def harness_with_palette(_dir, name = 'default')
     h = Object.new
-    h.define_singleton_method(:memories) { memories }
     h.define_singleton_method(:output_palette) { UI::Palette.new(name) }
     h
   end
 
   def run_command(dir, args = '')
     stdout = StringIO.new
-    described_class.new(harness: harness_with(dir), file_list: nil, options: nil,
+    described_class.new(harness: Object.new, file_list: file_list_with(dir), options: nil,
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string
   end
@@ -38,7 +37,7 @@ RSpec.describe Commands::MemoryCommand do
   def run_with_palette(dir, args = '', palette = 'default')
     stdout = StringIO.new
     described_class.new(harness: harness_with_palette(dir, palette),
-                        file_list: nil, options: nil,
+                        file_list: file_list_with(dir), options: nil,
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string
   end
@@ -247,7 +246,7 @@ RSpec.describe Commands::MemoryCommand do
     end
   end
 
-  it 'reads harness.memories, the same store memory.* writes (issue #10)' do
+  it 'reads the store memory.* writes, via its own FS instance (#286, issue #10)' do
     Dir.mktmpdir do |dir|
       Memories.new(dir).add('written-by-model', 'body')
 

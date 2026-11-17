@@ -43,7 +43,7 @@ module Commands
     private
 
     def plans
-      @harness.plans
+      Plans.new(@file_list.workdir)
     end
 
     # The listing IS the numbering: the number printed here is the number
