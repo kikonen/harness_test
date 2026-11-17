@@ -10,7 +10,7 @@ module Commands
       summary: "Start a fresh conversation (drops the messages; the saved " \
         "session file on disk is left alone)",
       group: :session,
-      see_also: %w[session compact save resume conversation])
+      see_also: %w[session compact save conversation])
 
     def handle(_args)
       @harness.session.clear

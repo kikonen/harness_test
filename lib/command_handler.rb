@@ -18,7 +18,6 @@ require_relative "commands/ctx_command"
 require_relative "commands/jobs_command"
 require_relative "commands/reload_command"
 require_relative "commands/save_command"
-require_relative "commands/resume_command"
 require_relative "commands/reasoning_command"
 require_relative "commands/sessions_command"
 require_relative "commands/tools_command"
@@ -64,7 +63,6 @@ class CommandHandler
     "reload"        => Commands::ReloadCommand,
     "save"          => Commands::SaveCommand,
     "reasoning"     => Commands::ReasoningCommand,
-    "resume"        => Commands::ResumeCommand,
     "sessions"      => Commands::SessionsCommand,
     "tools"         => Commands::ToolsCommand,
     "mcp"           => Commands::McpCommand,
@@ -88,7 +86,6 @@ class CommandHandler
     file_list:,
     options:,
     ui:,
-    on_resume: nil,
     settings: nil,
     registry: nil)
     @harness   = harness
@@ -99,7 +96,6 @@ class CommandHandler
     @settings  = settings
     @exiting   = false
     @ui        = ui
-    @on_resume = on_resume
     # One renderer for the whole run: it reads the registry this class owns,
     # so /help can never list a different set than /dispatch accepts.
     @help_renderer = UI::HelpRenderer.new(
@@ -114,11 +110,6 @@ class CommandHandler
 
   def exiting?
     @exiting
-  end
-
-  # Build the command line to resume a saved session in a new harness run.
-  def resume_command(id)
-    Commands::ResumeCommand.new(harness:, file_list:, options:, ui:).resume_cli_string(id)
   end
 
   # Dispatch a single line of input. Slash-commands go through the registry;
@@ -192,7 +183,6 @@ class CommandHandler
       file_list:,
       options:,
       ui:,
-      on_resume: @on_resume,
       help_renderer: @help_renderer,
       settings: @settings,
       registry:)

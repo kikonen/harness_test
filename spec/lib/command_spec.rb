@@ -9,7 +9,6 @@ require 'commands/stream_command'
 require 'commands/plan_command'
 require 'commands/retry_command'
 require 'commands/compact_command'
-require 'commands/resume_command'
 require 'commands/exit_command'
 
 RSpec.describe Command do
@@ -68,7 +67,6 @@ RSpec.describe Command do
     it 'is false for commands that drive an LLM round or rebuild the run' do
       expect(Commands::RetryCommand.mid_turn_safe?).to be false
       expect(Commands::CompactCommand.mid_turn_safe?).to be false
-      expect(Commands::ResumeCommand.mid_turn_safe?).to be false
       expect(Commands::ExitCommand.mid_turn_safe?).to be false
     end
   end
@@ -87,18 +85,10 @@ RSpec.describe Command do
       expect(cmd.ui).to equal(ui)
     end
 
-    it 'defaults the two CLI-only collaborators to nil' do
+    it 'defaults the CLI-only collaborator to nil' do
       cmd = build(described_class)
 
-      expect(cmd.instance_variable_get(:@on_resume)).to be_nil
       expect(cmd.help_renderer).to be_nil
-    end
-
-    it 'accepts an on_resume callable (only /resume uses it)' do
-      callable = ->(_id) { :resumed }
-      cmd = build(described_class, on_resume: callable)
-
-      expect(cmd.instance_variable_get(:@on_resume)).to equal(callable)
     end
 
     it 'accepts a help_renderer (only /help uses it)' do

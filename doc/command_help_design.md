@@ -88,7 +88,7 @@ the spec asserts the same thing for every entry, without running the renderer.
 `CommandHelp.suggestions` is a plain Levenshtein ranking with `max_distance: 2`,
 measured over this command set: at 3 an unrelated name qualifies (`helo` ->
 `yolo`), at 1 only the single nearest survives. A prefix counts as exact, so
-`/res` is treated as an abbreviation of `/resume`, not as a misspelling.
+`/sav` is treated as an abbreviation of `/save`, not as a misspelling.
 
 ## Not in this issue
 

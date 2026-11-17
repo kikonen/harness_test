@@ -49,6 +49,6 @@ RSpec.describe Commands::SessionClearCommand do
 
     expect(help.usage).to eq('session-clear')
     expect(help.group).to eq(:session)
-    expect(help.see_also).to include('session', 'resume')
+    expect(help.see_also).to include('session')
   end
 end

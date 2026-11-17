@@ -62,7 +62,7 @@ RSpec.describe Commands::SessionsCommand do
     expect(lines).to include(a_string_matching(/\A\| [-| ]+\|\z/)) # the markdown rule row
     row = lines.find { |l| l.include?(sid) }
     expect(split_table_row(row)).to eq([sid, '2026-01-01 10:00:00', '1', '1', workdir])
-    expect(lines.last).to include('/resume <id>')
+    expect(lines.last).to include('--resume <id>')
   end
 
   it 'names the sessions dir when nothing is saved' do

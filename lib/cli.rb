@@ -37,8 +37,8 @@ class CLI
     # This console is the single sink every dialog and status line reaches (a
     # Task's drain loop renders to it, and the Poller serves a dialog
     # on it). It is built BEFORE the Harness that resolves the palette, and
-    # /palette + a mid-run Harness rebuild can change it, so the palette is
-    # declared as a live reader (issue #388).
+    # /palette can change it, so the palette is declared as a live reader
+    # (issue #388).
     @ui = ui || UI::Console.new(
       stdout: $stdout, stdin: $stdin,
       palette: -> { @harness&.output_palette })
@@ -58,25 +58,17 @@ class CLI
     setup
   end
 
-  # The heavy construction, split out so it can be RUN AGAIN: a mid-run
-  # /resume (#280) re-runs this with a resume_id and gets a FRESH Harness
-  # instead of mutating the live one. Identity stays first (#276) and a
-  # re-run keeps the id this run owns - it never mints a throwaway one.
-  def setup(resume_id: nil)
-    @session_id = if resume_id
-                    @locator.resolve_id(resume: resume_id)
-                  else
-                    @session_id ||
-                      @locator.resolve_id(resume: @options[:resume],
-                                          newest: !!@options[:continue])
-                  end
-    resume_data = (resume_id || resumed_run?) ? @locator.read_session(session_id) : nil
+  # The heavy construction. Identity stays first (#276): the id is resolved
+  # BEFORE Harness.new, so a bad --resume id cannot leave a half-built run
+  # behind. The only resume this run supports is the STARTUP one (--resume /
+  # --continue), whose conversation and grants Harness#restore applies while
+  # building the session. There is no mid-run rebuild.
+  def setup
+    @session_id ||= @locator.resolve_id(
+      resume: @options[:resume],
+      newest: !!@options[:continue])
+    resume_data = resumed_run? ? @locator.read_session(session_id) : nil
 
-    # A resumed run takes its grants from the session file onto an object of
-    # its own: the tools of the run being replaced keep their own list.
-    @file_list = build_file_list if resume_id
-
-    replaced = @harness
     # SystemSettings is resolved from the run's options here (the owner of the
     # posture/consent state) and handed to the Harness, which delegates to it.
     # The four session-persisted postures are applied over it by the Harness
@@ -118,17 +110,8 @@ class CLI
       file_list: @file_list,
       options: @options,
       ui: @ui,
-      on_resume: ->(id) { setup(resume_id: id) },
       settings: @settings)
 
-    if resume_id
-      @harness.logger.info "session resumed: #{session_id}"
-      replaced&.logger&.close
-
-      # issue #48: the run being replaced owns its own MCP subprocesses; close
-      # them so a mid-run /resume does not leak the old server processes.
-      replaced&.close_mcp
-    end
     @harness
   end
 
@@ -190,8 +173,7 @@ class CLI
       @commands.input_path.target = -> { @registry.foreground_job }
       @commands.input_path.registry = -> { @registry }
       # The poll loop dispatches a "/command" submitted mid-turn through this
-      # handler (doc/unified_loop_design.md). A callable so a /resume rebuild
-      # repoints it, like target/registry above.
+      # handler (doc/unified_loop_design.md).
       reader.input_path.command_handler = -> { @commands }
 
       loop do
@@ -252,7 +234,7 @@ class CLI
     ui.puts "Goodbye."
     if id
       ui.puts "Session saved as #{id} (#{harness.session_manager.session_file_path(id)})."
-      ui.puts "Resume it later with: #{commands.resume_command(id)}"
+      ui.puts "Resume it later with: #{resume_cli_string(id)}"
     end
     0
   end
@@ -349,8 +331,8 @@ class CLI
     ui.puts
   end
 
-  # Each run owns its grant list: startup and a mid-run /resume build it the
-  # same way, so a mid-run resume is not a second kind of run.
+  # Each run owns its grant list: a startup --resume run builds it the same way
+  # as a fresh run, then Harness#restore overlays the grants the session saved.
   #
   # issue #384: the list starts with a STANDING grant on the working directory
   # (config 'grant_workdir:', default on) - every path inside the project is
@@ -399,6 +381,14 @@ class CLI
   def session_log_path_display
     id = harness.session.session_id
     File.join(SessionLocator::SESSIONS_DIR, id, SessionLocator::SESSION_LOG_FILE)
+  end
+
+  # The command line that resumes a saved session in a NEW harness run
+  # (--resume is a startup option; there is no mid-run resume command).
+  def resume_cli_string(id)
+    parts = ["ruby harness.rb", "-m #{@options[:model]}", "--resume #{id}"]
+    parts << "-d #{@file_list.workdir}" unless @file_list.workdir == Dir.pwd
+    parts.join(" ")
   end
 
   # True when this startup resolved an EXISTING session (--resume / --continue,

@@ -118,10 +118,10 @@ module HelpTopics
         "A failed request also leaves a pending prompt in the session - " \
           "/session reports it and /retry consumes it."
       ],
-      see_also: %w[retry session session-clear compact ctx save resume sessions]),
+      see_also: %w[retry session session-clear compact ctx save sessions]),
     "saving" => Topic.new(
       name: "saving",
-      title: "Saving and resuming sessions",
+      title: "Saving sessions and resuming them at startup",
       paragraphs: [
         "The session (conversation history AND the access list) is auto-saved " \
           "to its own directory (.harness/sessions/<session-id>/session.json) " \
@@ -130,16 +130,16 @@ module HelpTopics
         "/save stores it manually at any time and prints the id plus the " \
           "command line that resumes it. Disable auto-save with --no-auto-save " \
           "or 'auto_save: false' in the config.",
-        "/sessions lists saved sessions and /resume <id> restores one: the " \
-          "whole run is rebuilt under that id (conversation, grants, log and " \
-          "history file). Starting the harness with --continue picks up the " \
-          "newest saved session in this working directory.",
-        "What a resume restores: the conversation and access list, the model " \
+        "/sessions lists saved sessions. Resume one by STARTING a new run: " \
+          "ruby harness.rb -m <model> --resume <id>, or --continue to pick up " \
+          "the newest saved session in this working directory. There is no " \
+          "in-run resume command.",
+        "What a resumed run restores: the conversation and access list, the model " \
           "profile and parameter overrides, the YOLO posture and the output " \
           "palette, and the streaming posture (/stream) the session was saved " \
           "with."
       ],
-      see_also: %w[save sessions resume]),
+      see_also: %w[save sessions]),
     "rules" => Topic.new(
       name: "rules",
       title: "Project rules (harness.md)",

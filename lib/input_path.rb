@@ -11,9 +11,9 @@ class InputPath
   # running turn without a closed editor reading as a submission.
   ROUND_TRIP = %i[edited cancelled empty].freeze
 
-  # Both accept a callable so a mid-run /resume can swap the run, and so the
-  # TARGET can be read live: a foreground switch changes which job the input
-  # event goes to without rebuilding the reader.
+  # Read live so the TARGET can point at another foreground job without
+  # rebuilding the reader: a foreground switch changes which job an input
+  # event goes to.
   attr_accessor :registry, :target, :command_handler
   attr_accessor :edit_state
 

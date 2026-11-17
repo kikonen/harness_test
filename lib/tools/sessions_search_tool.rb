@@ -19,7 +19,7 @@ module Tools
           "content (case-insensitive substring over each session's message text " \
           "and id). Returns the matching sessions newest-first with a snippet " \
           "around a hit - the way to find 'the session where I was doing X'. " \
-          "Resume a match with /resume <id> (or the --resume flag).",
+          "Resume a match by starting a new run with the --resume <id> flag.",
         parameters: {
           type: "object",
           properties: {
@@ -50,7 +50,7 @@ module Tools
 
       status(:info, "#{matches.size} session(s) match #{query.inspect}")
       header = "Sessions matching #{query.inspect} (#{matches.size}), " \
-        "newest first; resume one with /resume <id>:"
+        "newest first; resume one at startup with: ruby harness.rb --resume <id>:"
       rows = matches.map do |m|
         detail = "  #{m[:id]}  saved #{m[:saved_at].strftime('%Y-%m-%d %H:%M:%S')}  " \
           "#{m[:messages]} messages, #{m[:hits]} hit(s)  [workdir: #{m[:workdir]}]"
