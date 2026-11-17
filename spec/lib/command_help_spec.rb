@@ -50,7 +50,7 @@ RSpec.describe CommandHelp do
   describe '.suggestions (typo band)' do
     let(:registry) do
       %w[grant clear yolo palette retry session session-clear compact ctx
-         reload save reasoning sessions tools models model param help exit]
+         save reasoning sessions tools models model param help exit]
     end
 
     it 'names the command a one-typo spelling lands on' do

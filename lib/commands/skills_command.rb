@@ -15,7 +15,7 @@ module Commands
       forms: ["skills", "skills <name>"],
       summary: "List the project's skills (.harness/skills/), or print one skill's body",
       group: :session,
-      see_also: %w[reload tools])
+      see_also: %w[tools])
 
     def handle(args)
       skills = Skills.new(@file_list.workdir)

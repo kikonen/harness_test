@@ -1212,7 +1212,7 @@ RSpec.describe Harness do
 
     # The mid-session shape the issue calls WORSE: the file goes bad while the run
     # is live, so the failure surfaced on the NEXT prompt (run_prompt calls
-    # check_rules_reload) or on /reload. utime keeps the mtime change deterministic.
+    # check_rules_reload). utime keeps the mtime change deterministic.
     it 'survives a harness.md that turned invalid mid-session (reload path)' do
       File.write(File.join(workdir, 'harness.md'), "rule one\n")
       harness = build_harness
