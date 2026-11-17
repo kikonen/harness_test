@@ -39,6 +39,14 @@ The three targets:
   holds ZERO registry references. Buffer rules: `doc/output_buffer_design.md`;
   the job/queue model: `doc/task_model_design.md`.
 
+- **FS-backed stores (memories/plans/skills) -> the tools/commands.** Each is a
+  stateless reader over its on-disk dir, so it is not Harness's own state.
+  `build_tool_registry` now builds one instance per store as a local and hands
+  it to the tools; `/memory`, `/plans` and `/skills` build their own from the
+  same `FileList` workdir. The dir is the single source of truth, so the tool
+  side and the command side cannot drift. Harness holds no `@skills`,
+  `@memories` or `@plans` and exposes no reader for them.
+
 ## What is still in Harness (deferred)
 
 The SessionManager split (per-LLM loop vs persistence/profile catalogue) and

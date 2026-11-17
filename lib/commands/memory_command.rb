@@ -7,9 +7,11 @@ require_relative "store_listing"
 module Commands
   # /memory - list the project's memories, or print one note's body.
   #
-  # The same data the model sees through memory.list / memory.read: one reader
-  # (Memories) behind both sides, so what the owner inspects and what the model
-  # reads cannot drift apart (the same shape as /skills). Issue #10.
+  # The same data the model sees through memory.list / memory.read. Memories is a
+  # stateless reader over the on-disk dir, so this command builds its own instance
+  # from the run's workdir and both sides read the SAME dir - the dir is the single
+  # source of truth, so they cannot drift (#286: it reaches the FS directly, not
+  # through Harness). Issue #10.
   #
   # The listing is a :table with its own number column and an entry opens by name
   # or by that number (#474, increment 20); the row/selector/rule shape is shared
@@ -38,7 +40,7 @@ module Commands
     private
 
     def memories
-      @harness.memories
+      Memories.new(@file_list.workdir, max_memories: @options && @options[:max_memories])
     end
 
     def list_memories

@@ -6,8 +6,9 @@ require_relative "../skills"
 module Commands
   # /skills - list the project's skills, or print one skill's body.
   #
-  # The same data the model sees through skills.list / skills.read: one renderer for
-  # both sides, so what the user checks and what the model reads cannot drift apart.
+  # The same data the model sees through skills.list / skills.read. Skills is a
+  # stateless reader over the on-disk dir, so this command builds its own instance
+  # from the run's workdir - the dir is the single source of truth (#286).
   class SkillsCommand < Command
     HELP = CommandHelp.new(
       usage: "skills [name]",
@@ -17,7 +18,7 @@ module Commands
       see_also: %w[reload tools])
 
     def handle(args)
-      skills = @harness.skills
+      skills = Skills.new(@file_list.workdir)
       name   = args.to_s.strip
 
       return list_skills(skills) if name.empty?

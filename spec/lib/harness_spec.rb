@@ -2657,15 +2657,19 @@ RSpec.describe Harness do
     end
   end
 
-  describe '#skills (issue #12)' do
-    # The loader is built from the workdir at construction, so the tools the
-    # registry got and /skills read point at the SAME directory the harness owns.
+  describe 'the skills store (issue #12, #286)' do
+    # The store is built in build_tool_registry from the run's workdir and handed
+    # straight to the tools; Harness no longer holds it (#286), so read it via a tool.
+    def skills_store(h)
+      h.tool_registry.get('skills.list').instance_variable_get(:@skills)
+    end
+
     it 'points at .harness/skills under this run\'s workdir' do
       h = build_harness
 
-      expect(h.skills.dir).to eq(File.join(workdir, '.harness', 'skills'))
-      expect(h.skills.exist?).to be false
-      expect(h.skills.all).to eq([])
+      expect(skills_store(h).dir).to eq(File.join(workdir, '.harness', 'skills'))
+      expect(skills_store(h).exist?).to be false
+      expect(skills_store(h).all).to eq([])
     end
 
     it 'registers skills.list and skills.read over that same loader' do
@@ -2675,9 +2679,9 @@ RSpec.describe Harness do
 
       expect(list).not_to be_nil
       expect(read).not_to be_nil
-      expect(list.instance_variable_get(:@skills)).to equal(h.skills)
-      expect(read.instance_variable_get(:@skills)).to equal(h.skills)
-      expect(h.skills.dir).to eq(File.join(workdir, '.harness', 'skills'))
+      # Both tools read the SAME store instance built once in build_tool_registry.
+      expect(read.instance_variable_get(:@skills)).to equal(list.instance_variable_get(:@skills))
+      expect(skills_store(h).dir).to eq(File.join(workdir, '.harness', 'skills'))
     end
   end
 
@@ -2756,16 +2760,21 @@ RSpec.describe Harness do
     end
   end
 
-  # Issue #10: the store is one reader (Memories) shared by memory.* and /memory,
-  # and the harness hands that ONE object to every tool, so the two sides cannot
-  # disagree about which notes exist.
-  describe '#memories (issue #10)' do
+  # Issue #10: the store is a stateless reader over the on-disk dir, built once
+  # in build_tool_registry and handed to every memory tool as the SAME object, so
+  # the tools cannot disagree about which notes exist. Harness no longer holds it
+  # (#286): read it via a tool.
+  describe 'the memories store (issue #10, #286)' do
+    def memories_store(h)
+      h.tool_registry.get('memory.list').instance_variable_get(:@memories)
+    end
+
     it 'points at .harness/memories under this run\'s workdir' do
       h = build_harness
 
-      expect(h.memories.dir).to eq(File.join(workdir, '.harness', 'memories'))
-      expect(h.memories.exist?).to be false
-      expect(h.memories.all).to eq([])
+      expect(memories_store(h).dir).to eq(File.join(workdir, '.harness', 'memories'))
+      expect(memories_store(h).exist?).to be false
+      expect(memories_store(h).all).to eq([])
     end
 
     it 'registers the four memory tools over that same store' do
@@ -2774,7 +2783,7 @@ RSpec.describe Harness do
 
       expect(tools.compact.size).to eq(4)
       tools.each do |tool|
-        expect(tool.instance_variable_get(:@memories)).to equal(h.memories)
+        expect(tool.instance_variable_get(:@memories)).to equal(memories_store(h))
       end
     end
 
@@ -2787,7 +2796,7 @@ RSpec.describe Harness do
 
       later = build_harness
       expect(later.session.session_id).not_to eq(first.session.session_id)
-      expect(later.memories.body('cross-session')).to eq('a fact')
+      expect(memories_store(later).body('cross-session')).to eq('a fact')
       expect(later.tool_registry.get('memory.read').execute('name' => 'cross-session')).to eq('a fact')
     end
 
@@ -2803,7 +2812,7 @@ RSpec.describe Harness do
 
       log = File.read(h.session_log_path)
       expect(log).to include("tool memory.add → ok: saved memory 'logged-note'")
-      expect(h.memories.body('logged-note')).to eq('a fact')
+      expect(memories_store(h).body('logged-note')).to eq('a fact')
     end
 
     # issue #435: the config 'max_memories:' cap reaches the store this run
@@ -2811,16 +2820,16 @@ RSpec.describe Harness do
     it 'threads the max_memories option into the store' do
       capped = build_harness(max_memories: 4)
 
-      expect(capped.memories.max_memories).to eq(4)
-      # The four memory tools all read the SAME store object the harness built.
+      expect(memories_store(capped).max_memories).to eq(4)
+      # The four memory tools all read the SAME store object the registry built.
       %w[memory.add memory.list].each do |name|
         tool = capped.tool_registry.get(name)
-        expect(tool.instance_variable_get(:@memories)).to equal(capped.memories)
+        expect(tool.instance_variable_get(:@memories)).to equal(memories_store(capped))
       end
     end
 
     it 'leaves the built-in default cap when no max_memories option is set' do
-      expect(build_harness.memories.max_memories).to eq(Memories::MAX_MEMORIES)
+      expect(memories_store(build_harness).max_memories).to eq(Memories::MAX_MEMORIES)
     end
   end
 
