@@ -125,6 +125,7 @@ class Harness
     :sandbox_gemfile,
     :tool_registry,
     :file_list,
+    :settings,
     :session,
     :session_manager,
     :client,

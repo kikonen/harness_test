@@ -555,11 +555,6 @@ class SessionManager
 
   # -- Model management ----------------------------------------------------
 
-  # All configured model profiles (array of hashes), or [] when none.
-  def model_profiles
-    Array(@harness.options[:model_profiles])
-  end
-
   # The profile the active model resolved to (nil when no profiles are
   # configured, or the model was set by -m to a raw id). issue #449.
   def active_profile
@@ -580,11 +575,6 @@ class SessionManager
     (active_profile&.dig(:mcp_images)) ||
       @harness.options[:mcp_image_limits] ||
       HarnessConfig::MCP_IMAGE_LIMIT_DEFAULTS
-  end
-
-  # Name (or id) of the configured default model, or nil.
-  def default_model_name
-    @harness.options[:default_model]
   end
 
   # Name (or id) of the currently active model, or nil.
@@ -613,7 +603,7 @@ class SessionManager
     # run will do.
     @harness.forget_last_rate
 
-    profiles = model_profiles
+    profiles = @harness.settings.model_profiles
     if profiles.empty?
       @harness.options[:model]        = name
       @harness.options[:active_model] = name
@@ -630,7 +620,9 @@ class SessionManager
 
   # Find a configured profile by its name or raw model id (nil when absent).
   def find_profile(name)
-    model_profiles.find { |p| p[:name] == name || p[:model] == name }
+    # The catalogue is run-wide static config (#286); the active-model name
+    # that feeds it is runtime state owned here.
+    @harness.settings.find_profile(name)
   end
 
   # Apply a model profile's settings to options in place.
@@ -816,7 +808,7 @@ class SessionManager
   rescue HarnessError => e
     Task.emit(:error, origin: :session_manager, content: e.message)
 
-    default = default_model_name
+    default = @harness.settings.default_model
     raise HarnessError,
       "#{e.message} - and no default model is configured either" unless default
 

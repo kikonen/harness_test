@@ -101,6 +101,27 @@ class SystemSettings
     "MANUAL"
   end
 
+  # -- Model catalogue (static config, issue #286) -------------------------
+
+  # All configured profiles (array of hashes), or [] when none. Read live off
+  # @options (the catalogue is fixed config, but @options is the one hash the
+  # whole run shares and a profile switch may touch it after construction).
+  def model_profiles
+    Array(@options[:model_profiles])
+  end
+
+  # Name (or id) of the configured default model, or nil.
+  def default_model
+    @options[:default_model]
+  end
+
+  # A configured profile by its label (:name) or raw model id (:model), or nil
+  # when absent. Lookup over the fixed catalogue; the active-model pointer that
+  # feeds it is runtime state owned by SessionManager.
+  def find_profile(name)
+    model_profiles.find { |p| p[:name] == name || p[:model] == name }
+  end
+
   def yolo_mode_label
     @yolo ? "YOLO ON" : "YOLO OFF"
   end

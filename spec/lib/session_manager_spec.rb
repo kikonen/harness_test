@@ -7,6 +7,7 @@ require 'param_overrides'
 require 'ui/spinner'
 require 'output_buffer'
 require 'session_manager'
+require 'system_settings'
 require 'job_registry'
 require 'fileutils'
 require 'tmpdir'
@@ -1291,11 +1292,12 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
 
   def manager_with(options)
     harness = Class.new do
-      attr_reader :options, :logger, :session, :client, :history
+      attr_reader :options, :settings, :logger, :session, :client, :history
       def initialize(session, client, options)
         @session = session
         @client  = client
         @options = options
+        @settings = SystemSettings.from_options(options)
         @logger  = Logger.new(File::NULL)
         @history = nil
       end

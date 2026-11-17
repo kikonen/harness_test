@@ -14,7 +14,10 @@ module Commands
       see_also: %w[model param])
 
     def handle(_args)
-      profiles = @harness.session_manager.model_profiles
+      # The catalogue is static run-wide config (#286), read straight from the
+      # settings the way a posture command does - not routed through
+      # SessionManager. Only the ACTIVE model name is runtime, so it stays here.
+      profiles = @settings.model_profiles
       current  = @harness.session_manager.active_model_name
 
       if profiles.empty?
@@ -29,7 +32,7 @@ module Commands
         return
       end
 
-      default_name = @harness.session_manager.default_model_name
+      default_name = @settings.default_model
 
       # issue #474: emit the listing as STRUCTURE (title + per-profile fields),
       # not a fused row string, so the run record and a future remote sink carry
