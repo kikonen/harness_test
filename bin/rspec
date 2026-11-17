@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+
 # Test runner. Bare invocation runs the whole suite across processes; anything
 # with arguments is plain serial rspec, exactly as typed. Mode rules, the
 # measured numbers and why: doc/dev_environment.md (issue #396).
@@ -10,41 +11,59 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Non-interactive shells may not have rbenv set up (no shims on PATH).
 export RBENV_DIR="$ROOT_DIR"
 if [ -d "$HOME/.rbenv/bin" ]; then
-  export PATH="$HOME/.rbenv/bin:$PATH"
+    export PATH="$HOME/.rbenv/bin:$PATH"
 fi
 if command -v rbenv >/dev/null 2>&1; then
-  eval "$(rbenv init - bash)"
+    eval "$(rbenv init - bash)"
 fi
 
 # bundle exec looks for the Gemfile in the CWD; point it at the one
 # that lives in the project root so it works from any directory.
 if [ -f "$ROOT_DIR/Gemfile" ]; then
-  export BUNDLE_GEMFILE="$ROOT_DIR/Gemfile"
+    export BUNDLE_GEMFILE="$ROOT_DIR/Gemfile"
 fi
 
 # rspec resolves spec/ relative to the CWD; run from the project root so
 # the suite is found no matter where the script is invoked from.
 cd "$ROOT_DIR"
 
-if [ "$#" -eq 0 ]; then
-  # A whole-suite run picks its format by destination: piped output goes to
-  # run.command, which keeps only the FIRST `limit` lines, and documentation
-  # output runs to ~3000 of them - the run's own summary would never reach the
-  # model. A TTY keeps .rspec's format.
-  if [ -t 1 ]; then
-    FORMAT=(--format documentation)
-  else
-    FORMAT=(--format progress)
-  fi
-  if [ "${PARALLEL:-parallel}" = "false" ]; then
-    exec bundle exec rspec "${FORMAT[@]}"
-  fi
-  # parallel_tests assumes a bin/rspec binstub is RUBY and runs `ruby --
-  # bin/rspec`; ours is bash, so its PARALLEL_TESTS_EXECUTABLE hook must name
-  # the worker or every worker dies in a LoadError. Its own options come
-  # before rspec's, so rspec's go between the two `--`.
-  export PARALLEL_TESTS_EXECUTABLE="bundle exec rspec"
-  exec bundle exec parallel_rspec -- "${FORMAT[@]}" -- spec/
+# Split the command-line args: test paths all live under spec/, so anything
+# starting with it goes after parallel_rspec's last `--` for distribution;
+# everything else (options and their values) goes to rspec.
+RSPEC_ARGS=()
+FILES=()
+for arg in "$@"; do
+    case "$arg" in
+        spec*|./spec*) FILES+=("$arg") ;;
+        *)             RSPEC_ARGS+=("$arg") ;;
+    esac
+done
+[ ${#FILES[@]} -eq 0 ] && FILES=(spec)
+
+# Piped output gets compact, uncolored defaults; an explicit format or color
+# option on the command line overrides its default. A TTY keeps .rspec's.
+DEFAULTS=()
+if [ ! -t 1 ]; then
+    want_format=true want_color=true
+    for arg in ${RSPEC_ARGS[@]+"${RSPEC_ARGS[@]}"}; do
+        case "$arg" in
+            -f*|--format|--format=*) want_format=false ;;
+            -c|--*color)             want_color=false ;;
+        esac
+    done
+    $want_format && DEFAULTS+=(--format progress)
+    $want_color  && DEFAULTS+=(--no-color)
 fi
 
-exec bundle exec rspec "$@"
+if [ "${PARALLEL:-parallel}" = "false" ]; then
+    exec bundle exec rspec ${DEFAULTS[@]+"${DEFAULTS[@]}"} \
+         ${RSPEC_ARGS[@]+"${RSPEC_ARGS[@]}"} "${FILES[@]}"
+fi
+
+# parallel_tests assumes a bin/rspec binstub is RUBY and runs `ruby --
+# bin/rspec`; ours is bash, so its PARALLEL_TESTS_EXECUTABLE hook must name
+# the worker or every worker dies in a LoadError. Its own options come
+# before rspec's, so rspec's go between the two `--`.
+export PARALLEL_TESTS_EXECUTABLE="bundle exec rspec"
+exec bundle exec parallel_rspec -- ${DEFAULTS[@]+"${DEFAULTS[@]}"} \
+     ${RSPEC_ARGS[@]+"${RSPEC_ARGS[@]}"} -- "${FILES[@]}"
