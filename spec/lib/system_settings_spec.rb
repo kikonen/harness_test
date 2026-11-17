@@ -170,4 +170,26 @@ RSpec.describe SystemSettings do
       expect(s.plan?).to be(true)
     end
   end
+
+  # The static model catalogue now lives here (#286): it is fixed config, but
+  # read live off the shared @options so a profile switch that touches options
+  # after construction is still seen (no stale snapshot).
+  describe 'model catalogue (static config, issue #286)' do
+    it 'is empty when no profiles are configured' do
+      s = build
+
+      expect(s.model_profiles).to eq([])
+      expect(s.default_model).to be_nil
+      expect(s.find_profile('anything')).to be_nil
+    end
+
+    it 'finds a profile by its label or its raw model id' do
+      s = build(model_profiles: [{ name: 'local', model: 'qwen' }], default_model: 'local')
+
+      expect(s.model_profiles.size).to eq(1)
+      expect(s.default_model).to eq('local')
+      expect(s.find_profile('local')[:model]).to eq('qwen')
+      expect(s.find_profile('qwen')[:name]).to eq('local')
+    end
+  end
 end
