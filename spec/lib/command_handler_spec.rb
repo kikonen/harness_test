@@ -237,12 +237,11 @@ RSpec.describe CommandHandler do
       expect(stdout.string).to include('/retry is not available while a turn is running')
     end
 
-    it 'refuses a run-rebuilding command (resume) and an exit' do
+    it 'refuses a run-ending command (exit) while a turn runs' do
       stdout = StringIO.new
-      mid_handler(stdout).run_mid_turn('/resume abc')
-      mid_handler(StringIO.new).run_mid_turn('/exit')
+      mid_handler(stdout).run_mid_turn('/exit')
 
-      expect(stdout.string).to include('/resume is not available while a turn is running')
+      expect(stdout.string).to include('/exit is not available while a turn is running')
     end
 
     it 'names an unknown slash command like the idle path' do

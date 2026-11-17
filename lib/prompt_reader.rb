@@ -11,8 +11,8 @@ require_relative "ui"
 # path, and re-prompt until the user submits a command (returned) or hits
 # Ctrl-D on an empty buffer (nil => quit). The draft persists for the reader's
 # life so an Esc'd or edited buffer is prefilled at the next prompt. The harness
-# is a live reader (a callable) because a mid-run /resume swaps the Harness the
-# modeline reads. Key model and rationale: doc/reline_cursor_and_enter_handling.md.
+# is a live reader (a callable) so the modeline always reads the current Harness.
+# Key model and rationale: doc/reline_cursor_and_enter_handling.md.
 class PromptReader
   # The prompt the idle read uses (the input path's own default is the note
   # prompt; the two are the SAME read, only the label differs).
@@ -22,7 +22,7 @@ class PromptReader
 
   def initialize(ui:, harness:, input_path: nil)
     @ui = ui
-    @harness = harness # a callable: a mid-run /resume swaps the Harness
+    @harness = harness # a live reader: the modeline reads the current Harness
     @draft = nil
     @input_path = input_path || InputPath.new(ui:, prompt: PROMPT)
   end

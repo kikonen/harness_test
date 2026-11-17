@@ -64,7 +64,7 @@ RSpec.describe CLI do
   end
 
   # A saved session WITH grants, so a resumed run has something to restore onto
-  # its own FileList. Shared by the /resume specs and the standing-grant specs
+  # its own FileList. Used by the startup-resume and standing-grant specs
   # (issue #384), so it lives at the top level like #seed_saved_session.
   def seed_saved_session_with_grants(id)
     dir  = File.join(workdir, '.harness', 'sessions', id)
@@ -233,146 +233,35 @@ RSpec.describe CLI do
     end
   end
 
-  # issue #282: the heavy construction lives in #setup, so it can be RUN
-  # AGAIN with a different id (the shape issue #280 needs for a mid-run
-  # /resume: build a FRESH Harness instead of mutating the live one). The
-  # identity-first order (#276) is now the order INSIDE setup.
+  # issue #282: the heavy construction lives in #setup. A resumed run is one
+  # built at STARTUP under an id resolved from --resume/--continue (#276): the
+  # id is settled BEFORE Harness.new, so its conversation is restored during
+  # construction. There is no mid-run resume - a live run never swaps identity.
   describe '#setup (issue #282)' do
-    it 'a second setup with a resume id builds a FRESH Harness under that id' do
+    # A startup --resume run resumes under the saved id and restores its
+    # conversation (the only resume path), with log/history under that id.
+    it 'a startup --resume run resumes the saved conversation under its id' do
       saved = 'aabbccdd-1111-2222-3333-444444444444'
       seed_saved_session(saved)
 
-      cli    = build_cli
-      before = cli.harness
-      built  = cli.setup(resume_id: saved)
+      cli = described_class.new(options.merge(resume: saved), ui)
 
-      expect(built).to be_a(Harness)
-      expect(built).not_to equal(before)
-      expect(built.session.session_id).to eq(saved)
-      # Every holder is repointed at the fresh object (the repoint #280 needs).
-      expect(cli.harness).to equal(built)
-      expect(cli.commands.harness).to equal(built)
+      expect(cli.harness.session.session_id).to eq(saved)
+      expect(cli.harness.session.messages.map { |m| m[:content] }).to include('earlier prompt')
       expect(cli.history.history_file).to eq(
         File.join(workdir, '.harness', 'sessions', saved, 'harness_history')
       )
     end
 
-    # The identity-first guarantee, asserted through setup: the id is resolved
-    # BEFORE Harness.new, so a bad id cannot leave a half-built run behind -
-    # the previous Harness, history file and commands are still in place.
-    it 'a failing setup resolves the id before constructing anything' do
-      cli    = build_cli
-      before = cli.harness
-      before_history = cli.history
-      before_commands = cli.commands
-
-      expect {
-        cli.setup(resume_id: 'deadbeef')
-      }.to raise_error(HarnessError, /no saved session matching 'deadbeef'/)
-
-      expect(cli.harness).to equal(before)
-      expect(cli.history).to equal(before_history)
-      expect(cli.commands).to equal(before_commands)
-    end
-
-    # A re-run must never mint a throwaway id (issues #123 / #135): the id
-    # this run owns is kept, whatever the startup flags were.
-    it 'setup without a resume id keeps the id this run already owns' do
+    # setup is idempotent about identity: a second call keeps the id the run
+    # already owns and never mints a throwaway one (issues #123 / #135).
+    it 'setup keeps the id this run already owns' do
       cli = build_cli                    # fresh run: its own random id
       id  = cli.harness.session.session_id
 
       cli.setup
       expect(cli.harness.session.session_id).to eq(id)
       expect(session_dirs).to eq([id])
-    end
-
-    it 'setup without a resume id keeps a --continue id too' do
-      saved = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-      seed_saved_session(saved)
-
-      cli = described_class.new(options.merge(continue: true), ui)
-      expect(cli.harness.session.session_id).to eq(saved)
-
-      cli.setup
-      expect(cli.harness.session.session_id).to eq(saved)
-      expect(session_dirs).to eq([saved])
-    end
-  end
-
-  # issue #280: a mid-run /resume re-runs #setup (through the on_resume action
-  # injected into the CommandHandler) and the WHOLE run is rebuilt under the
-  # resumed id - nothing of the replaced run is patched in place.
-  describe 'mid-run /resume (issue #280)' do
-    def log_path(id)
-      File.join(workdir, '.harness', 'sessions', id, 'harness.log')
-    end
-
-    # ResumeCommand reports through the UI (the run's own console).
-    before { allow(ui).to receive(:puts) }
-
-    it 'rebuilds the run under the resumed id and repoints every holder' do
-      saved  = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-      seed_saved_session_with_grants(saved)
-      cli       = build_cli
-      old       = cli.harness
-      first_id  = cli.harness.session.session_id
-      old_fl    = cli.file_list
-      old_cmds  = cli.commands
-      old_hist  = cli.history
-
-      cli.commands.handle("/resume #{saved[0, 8]}")
-
-      # Identity: the whole run is the saved session's now.
-      expect(cli.session_id).to eq(saved)
-      expect(cli.harness).not_to equal(old)
-      expect(cli.harness.session.session_id).to eq(saved)
-      contents = cli.harness.session.messages.map { |m| m[:content] }
-      expect(contents).to include('earlier prompt')
-      expect(cli.harness.yolo?).to be(true)
-      # Holders repointed (Task.harness comes from CommandHandler#harness at
-      # every run_on_task, so this is the one wiring that matters).
-      expect(cli.commands).not_to equal(old_cmds)
-      expect(cli.commands.harness).to equal(cli.harness)
-      expect(cli.history).not_to equal(old_hist)
-      expect(cli.history.history_file).to eq(
-        File.join(workdir, '.harness', 'sessions', saved, 'harness_history')
-      )
-      # No throwaway id: only the run's first session and the resumed one.
-      expect(session_dirs).to eq([first_id, saved].sort)
-      # The resume is reported on the NEW session's log (#113 was about the
-      # log following the id; now the log is simply built under it).
-      expect(File.read(log_path(saved))).to include('session resumed')
-      # Grants restored onto a FileList of its own.
-      expect(cli.file_list).not_to equal(old_fl)
-      expect(cli.harness.file_list).to equal(cli.file_list)
-      stored = cli.file_list.accessible_paths
-      expect(stored[:both][:files]).to eq([File.expand_path('lib/foo.rb', workdir)])
-      expect(stored[:read][:dirs]).to eq([File.expand_path('spec/lib', workdir)])
-      # The resumed session was saved with YOLO ON, and since #274 the same
-      # posture covers file access too - so coverage must not be confused with
-      # the restored grants above: local/ is outside it even here.
-      expect(cli.harness.yolo?).to be(true)
-      expect(cli.file_list.writable?('lib/other.rb')).to be true
-      expect(cli.file_list.writable?('local/notes.md')).to be false
-    end
-
-    it 'closes the replaced run\'s logger and gives the fresh one its own client' do
-      saved = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-      seed_saved_session_with_grants(saved)
-      cli   = build_cli
-      old   = cli.harness
-      before = File.read(log_path(old.session.session_id))
-
-      cli.commands.handle("/resume #{saved}")
-
-      # The old logdev is closed: a late write cannot append to it.
-      old.logger.info('late write to the replaced session')
-      expect(File.read(log_path(old.session.session_id))).to eq(before)
-      # A fresh client built under the resumed id, logging to the fresh logger
-      # (the #197 wiring - the backend holds the logger - with no setter).
-      expect(cli.harness.client).not_to equal(old.client)
-      expect(cli.harness.client.backend.logger).to equal(cli.harness.logger)
-      expect(cli.harness.session_log_path).to eq(log_path(saved))
     end
   end
 

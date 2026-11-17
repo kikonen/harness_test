@@ -50,7 +50,7 @@ RSpec.describe CommandHelp do
   describe '.suggestions (typo band)' do
     let(:registry) do
       %w[grant clear yolo palette retry session session-clear compact ctx
-         reload save resume reasoning sessions tools models model param help exit]
+         reload save reasoning sessions tools models model param help exit]
     end
 
     it 'names the command a one-typo spelling lands on' do
@@ -59,7 +59,7 @@ RSpec.describe CommandHelp do
     end
 
     it 'treats a prefix as the intended name, not as a typo' do
-      expect(described_class.suggestions('res', registry)).to eq(['resume'])
+      expect(described_class.suggestions('sav', registry)).to eq(['save'])
     end
 
     it 'offers nothing for a name that is simply not close to one' do

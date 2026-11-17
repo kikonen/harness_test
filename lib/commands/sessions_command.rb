@@ -16,7 +16,7 @@ module Commands
       summary: "List saved sessions in this working directory (id, saved-at, " \
                "message and grant counts)",
       group: :session,
-      see_also: %w[resume save saving])
+      see_also: %w[save saving])
 
     def handle(_args)
       locator  = SessionLocator.new(@file_list.workdir)
@@ -26,8 +26,7 @@ module Commands
         return
       end
 
-      footer_text = "Resume one with: /resume <id>  " \
-                    "(or: ruby harness.rb -m <model> --resume <id>)"
+      footer_text = "Resume one in a new run: ruby harness.rb -m <model> --resume <id>"
       emit_list(
         title: "Saved sessions (#{sessions.size}):",
         kind: :table,

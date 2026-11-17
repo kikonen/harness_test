@@ -36,22 +36,16 @@ class Command
   # while a turn is live: one that drives an LLM round (#run_on_task) would start
   # a nested drain loop over the single queue (double render, lost events) -
   # refused until it becomes an event to the live task - and one that rebuilds or
-  # ends the whole run (resume/exit) has no live loop to act in.
+  # ends the whole run (exit) has no live loop to act in.
   def self.mid_turn_safe?
     true
   end
 
-  # on_resume: the mid-run /resume action (issue #280) - a callable that
-  # takes a session id and rebuilds the whole run under it. Only the owner
-  # of the run (CLI) can do that, so the action arrives as a callable
-  # instead of the command reaching for a live Harness to mutate. nil for
-  # every other command.
   def initialize(
     harness: nil,
     file_list:,
     options:,
     ui:,
-    on_resume: nil,
     help_renderer: nil,
     settings: nil,
     registry: nil
@@ -60,7 +54,6 @@ class Command
     @file_list  = file_list
     @options    = options
     @ui         = ui
-    @on_resume  = on_resume
     # Only /help renders it; every other command ignores it.
     @help_renderer = help_renderer
     # The run-wide posture/consent state (#286). A posture command reads and

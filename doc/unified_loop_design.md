@@ -49,9 +49,8 @@ The first routing step is in. A submitted block in the poll loop
 
 - a `"/"`-prefixed submit (edit mode) goes to the run's `CommandHandler` through
   the shared `InputPath#command_handler` (a callable wired by the CLI like
-  `target`/`registry`, so a `/resume` rebuild repoints it). The handler is a
-  loop-level collaborator, NOT on the Harness - the model layer must not own the
-  CLI dispatcher.
+  `target`/`registry`). The handler is a loop-level collaborator, NOT on the
+  Harness - the model layer must not own the CLI dispatcher.
 - bare text keeps the note route exactly (`route_input` + `commit_note`), byte
   for byte.
 
@@ -62,8 +61,8 @@ thread (the poll loop IS the main thread), gated by `Command.mid_turn_safe?`:
   cannot run safely while a turn is live. The hazard is `#run_on_task` - driving
   an LLM round would start a SECOND drain loop over the single queue (double
   render, lost events) - so `/retry` and `/compact` opt out and are refused with
-  a hint. `/resume` and `/exit` opt out: they rebuild/quit the run, with no live
-  loop to act in. The posture toggles (`/yolo`, `/stream`, `/plan`) are pure
+  a hint. `/exit` opts out: it quits the run, with no live loop to act in. The
+  posture toggles (`/yolo`, `/stream`, `/plan`) are pure
   Harness state writes and stay safe.
 
 This is what deleted `Poller#yolo_note_action` and the `commit_note` gesture
@@ -90,10 +89,9 @@ logic for various commands" the owner wants):
 |          | the current main-thread implementation)                 |
 | /retry   | push event to the task, or restart its thread, per the  |
 |          | task-thread lifecycle chosen below                      |
-| /resume  | likely REMOVED - owner sees no use case for it          |
 
-(`resume` is flagged, not yet removed. Confirm before deleting the command and
-its specs.)
+(The `/resume` slash command has since been REMOVED: resuming a saved session is
+a startup option only - `--resume <id>` / `--continue`.)
 
 ## Task-thread lifecycle (both open, undecided)
 

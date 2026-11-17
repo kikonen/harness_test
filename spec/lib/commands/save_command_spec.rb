@@ -32,9 +32,9 @@ RSpec.describe Commands::SaveCommand do
     end
   end
 
-  it 'prints the in-harness resume line (/resume <id>)' do
+  it 'prints the startup --resume command line that resumes the saved id' do
     Dir.mktmpdir do |dir|
-      expect(run_command(FileList.new([], workdir: dir))).to include('Resume it later with: /resume abc123')
+      expect(run_command(FileList.new([], workdir: dir))).to include('--resume abc123')
     end
   end
 
