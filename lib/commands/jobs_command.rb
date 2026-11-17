@@ -20,7 +20,6 @@ module Commands
       see_also: %w[help session])
 
     def handle(args)
-      registry = @harness.respond_to?(:registry) ? @harness.registry : nil
       return emit_role(:note, "No registry - nothing to list.") if registry.nil?
 
       name, arg = args.to_s.strip.split(" ", 2)

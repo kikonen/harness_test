@@ -51,7 +51,7 @@ RSpec.describe Commands::CompactCommand do
   # protocol contract: the block must perform the compaction.
   def run_with_captured_block
     block = nil
-    allow(Task).to receive(:run) do |harness:, ui:, &blk|
+    allow(Task).to receive(:run) do |harness:, ui:, buffer:, &blk|
       block = blk
       blk.call(nil)
       [nil, nil]
@@ -92,7 +92,7 @@ RSpec.describe Commands::CompactCommand do
   end
 
   it 'reports a task error as a [task error] line' do
-    allow(Task).to receive(:run) { |harness:, ui:, &blk| ['boom', nil] }
+    allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| ['boom', nil] }
 
     command.handle('')
 
@@ -108,7 +108,7 @@ RSpec.describe Commands::CompactCommand do
     end.new
 
     allow(Task).to receive(:current).and_return(fake_task)
-    allow(Task).to receive(:run) do |harness:, ui:, &blk|
+    allow(Task).to receive(:run) do |harness:, ui:, buffer:, &blk|
       blk.call(nil)
       [nil, nil]
     end

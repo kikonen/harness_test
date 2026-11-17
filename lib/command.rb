@@ -53,7 +53,8 @@ class Command
     ui:,
     on_resume: nil,
     help_renderer: nil,
-    settings: nil
+    settings: nil,
+    registry: nil
   )
     @harness    = harness
     @file_list  = file_list
@@ -65,6 +66,9 @@ class Command
     # The run-wide posture/consent state (#286). A posture command reads and
     # writes it directly instead of routing through Harness.
     @settings = settings
+    # The JobRegistry the run owns (#286): TaskRunner#run_on_task awaits its
+    # job and TaskRunner records main-thread reports into it.
+    self.registry = registry
   end
 
   # Print this command's usage on a bad argument (issue #471) from its own HELP

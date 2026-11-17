@@ -19,23 +19,28 @@ module TaskRunner
   # so the edit state is one state of the poll loop and not two mechanisms.
   attr_accessor :input_path
 
-  # Issue #286: the registry is the executor, so this AWAITs a job rather than
-  # running a turn itself - the CLI asks the registry to run a job and reads the
-  # result back. A caller with no registry (a spec harness double, a run built
-  # without one) still goes through the drain loop, so the single-thread I/O
-  # rule and the drain-loop pins are unchanged.
+  # Issue #286: the JobRegistry the RUN owns is the executor and the home of the
+  # run record, so this AWAITs a job there rather than running a turn itself.
+  # A host with no registry (a spec host, a library caller) still goes through
+  # the drain loop with its own buffer, so the single-thread I/O rule and the
+  # drain-loop pins are unchanged.
+  attr_accessor :registry
+
   def run_on_task(job: nil)
     emit_role(:gap, "")
-    registry = harness.respond_to?(:registry) ? harness.registry : nil
     job ||= registry&.foreground_job
     error, _task, result =
       if registry
         registry.run(job:, harness:, ui:, **input_kwargs) { |_t| yield }
       else
         # No job, so no registry result: the block's own value is what the
-        # caller gets back.
+        # caller gets back, and the drain loop needs a buffer to write its
+        # single record into.
         value = nil
-        error, _t = Task.run(harness:, ui:, **input_kwargs) { |_t| value = yield }
+        buffer = OutputBuffer.new
+        error, _t = Task.run(harness:, ui:, buffer:, **input_kwargs) do |_t|
+          value = yield
+        end
         [error, nil, value]
       end
     emit_role(:kind, error, origin: "task error") if error
@@ -88,8 +93,8 @@ module TaskRunner
       gap:
     }
     ui.puts(main_thread_renderer.line(type: :list, content: payload))
-    if harness.respond_to?(:record_report_output)
-      harness.record_report_output(type: :list, content: payload, origin:)
+    if registry
+      registry.record_report_output(type: :list, content: payload, origin:)
     end
   end
 
@@ -115,8 +120,8 @@ module TaskRunner
       ui.puts(line)
       # :body is the one main-thread role whose RECORD is the raw text, not the
       # printed line, so a replay redraws it through the renderer (#146).
-      if type == :body && harness.respond_to?(:record_report_output)
-        harness.record_report_output(type: :body, origin:, content: text)
+      if type == :body && registry
+        registry.record_report_output(type: :body, origin:, content: text)
       end
     end
   end

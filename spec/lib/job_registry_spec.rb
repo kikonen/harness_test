@@ -401,6 +401,108 @@ RSpec.describe JobRegistry do
     end
   end
 
+  # issue #458 / #286: the run record lives on the registry (the FOREGROUND job's
+  # buffer), not on the single-turn engine. The user's own line is one side of it
+  # (role :user), the model/command side the other, and both land through the
+  # single main-thread writer. max_saved 0 disables the whole path.
+  describe 'run record / resume replay (issue #458)' do
+    def recorded(reg) = reg.foreground_buffer.replay_tail
+
+    it 'records a user prompt as a :user/:user entry (the renderer labels it)' do
+      reg = JobRegistry.new
+      reg.add_job(kind: :main)
+      reg.record_user_prompt('fix the parser')
+
+      expect(recorded(reg).map { |e| [e.type, e.origin, e.content] }).to eq(
+        [[:user, :user, 'fix the parser']]
+      )
+    end
+
+    it 'caps the window at max_saved (oldest prompts drop)' do
+      reg = JobRegistry.new(max_saved: 2)
+      reg.add_job(kind: :main)
+      reg.record_user_prompt('one')
+      reg.record_user_prompt('two')
+      reg.record_user_prompt('three')
+
+      expect(recorded(reg).map(&:content)).to eq(['two', 'three'])
+    end
+
+    it 'records the model/tool side through the single writer, spinner stays in the head' do
+      reg = JobRegistry.new
+      reg.add_job(kind: :main)
+      reg.record_report_output(type: :response, origin: 'session_manager', content: 'the answer')
+      reg.record_report_output(type: :spinner_detail, origin: :harness,
+                               content: { message: 'Working' })
+      reg.record_report_output(type: :status_ok, origin: 'file.read', content: 'ok')
+
+      expect(recorded(reg).map(&:type)).to eq(%i[response status_ok])
+      expect(reg.foreground_buffer.head.map(&:type)).to eq([:spinner_detail])
+    end
+
+    it 'replay_tail_for_save is the Entry#to_h form of the window' do
+      reg = JobRegistry.new
+      reg.add_job(kind: :main)
+      reg.record_user_prompt('do the thing')
+
+      expect(reg.replay_tail_for_save).to eq(
+        [{ type: :user, origin: :user, content: 'do the thing' }]
+      )
+    end
+
+    it 'records nothing when max_saved is 0 (the disable)' do
+      reg = JobRegistry.new(max_saved: 0)
+      reg.add_job(kind: :main)
+      reg.record_user_prompt('ignored')
+      reg.record_report_output(type: :response, origin: 'session_manager', content: 'ignored too')
+
+      expect(recorded(reg)).to be_empty
+      expect(reg.replay_tail_for_save).to eq([])
+    end
+
+    # A resumed run seeds its record from the saved tail so the startup banner can
+    # redraw the last topic; restore() re-symbols the JSON's string type/origin.
+    it 'seeds the run record from a saved replay_tail' do
+      reg = JobRegistry.new
+      reg.add_job(kind: :main)
+      reg.restore_replay_tail([
+        { type: 'user', origin: 'user', content: 'do the thing' },
+        { type: 'response', origin: 'session_manager', content: 'done' }
+      ])
+
+      expect(recorded(reg).map { |e| [e.type, e.origin, e.content] }).to eq(
+        [[:user, :user, 'do the thing'], [:response, :session_manager, 'done']]
+      )
+    end
+
+    it 'does not seed the run record when max_saved is 0' do
+      reg = JobRegistry.new(max_saved: 0)
+      reg.add_job(kind: :main)
+      reg.restore_replay_tail([{ type: 'user', origin: 'user', content: 'should not appear' }])
+
+      expect(recorded(reg)).to be_empty
+    end
+
+    # issue #474: a slash-command report is a structured :list entry (title/
+    # columns/items), NOT a fused row string. The payload survives the save ->
+    # resume round trip symbol-keyed so a resumed run redraws the structure.
+    it 'records a command report as a :list entry holding the structure' do
+      reg = JobRegistry.new
+      reg.add_job(kind: :main)
+      payload = {
+        title: 'Hosts:', kind: :bullet, columns: [:value],
+        items: [{ value: 'a.example' }, { value: 'b.example' }]
+      }
+      reg.record_report_output(type: :list, origin: 'grant', content: payload)
+
+      entry = recorded(reg).first
+      expect(entry.type).to eq(:list)
+      expect(entry.origin).to eq(:grant)
+      expect(entry.content).to be_a(Hash)
+      expect(entry.content[:items]).to eq([{ value: 'a.example' }, { value: 'b.example' }])
+    end
+  end
+
   describe '#to_s' do
     it 'lists the jobs and names the foreground one' do
       main = registry.add_job(kind: :main)

@@ -376,9 +376,42 @@ RSpec.describe CLI do
     end
   end
 
-  # issue #221 review (bug 2): the shell consent posture is stated in the
-  # startup banner so the run's approval behavior is visible from the first
-  # line (YOLO ON must never look like "nothing ever asks").
+  # issue #286: the JobRegistry is the run's own (the CLI builds it, registers the
+  # main turn as job #0, and seeds/restore it from a resumed session's record).
+  describe 'the run registry (issue #286)' do
+    it 'builds the registry with the main turn as job #0' do
+      cli = build_cli
+
+      expect(cli.registry).not_to be_nil
+      expect(cli.registry.jobs.map(&:kind)).to eq([:main])
+      expect(cli.registry.foreground).to eq(0)
+    end
+
+    it 'seeds the registry record and restores the foreground from a resumed session' do
+      saved  = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      dir    = File.join(workdir, '.harness', 'sessions', saved)
+      FileUtils.mkdir_p(dir)
+      File.write(File.join(dir, 'session.json'), JSON.generate({
+        session_id: saved, created_at: Time.now.iso8601,
+        system_prompt: 'saved prompt',
+        messages: [{ role: 'system', content: 'saved prompt' },
+                   { role: 'user', content: 'earlier' }],
+        foreground_job: 0,
+        replay_tail: [{ type: 'user', origin: 'user', content: 'do the thing' },
+                      { type: 'list', origin: 'grant',
+                        content: { title: 'Hosts:', items: [{ value: 'api.example' }] } }]
+      }))
+
+      cli = described_class.new(options.merge(resume: saved), ui)
+      tail = cli.registry.foreground_buffer.replay_tail
+
+      expect(tail.map { |e| [e.type, e.origin] }).to eq([[:user, :user], [:list, :grant]])
+      expect(cli.harness.session_manager.registry).to equal(cli.registry)
+    end
+  end
+
+  # issue #221 review (bug 2): the shell consent posture is stated in the startup
+  # banner so the run's approval behavior is visible from the first line.
   describe 'startup banner - command consent posture' do
     it 'names the MANUAL posture and how to change it' do
       cli = build_cli

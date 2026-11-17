@@ -4,6 +4,7 @@ require 'logger'
 require 'poller'
 require 'task'
 require 'harness'
+require 'job_registry'
 require 'ui/spinner'
 require 'stringio'
 

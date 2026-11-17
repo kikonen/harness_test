@@ -43,6 +43,11 @@ class SessionManager
     @last_autosave = 0
   end
 
+  # The JobRegistry the RUN owns (#286: the run record and its job list are
+  # run state, not single-turn-engine state). nil for a Harness built without
+  # an owner that injects one - a save then writes neither run-record key.
+  attr_accessor :registry
+
   # -- Prompt flow ---------------------------------------------------------
 
   # Appends a new user prompt to the session and sends the chain to the LLM.
@@ -774,10 +779,10 @@ class SessionManager
 
     # issue #286: which job was foreground is harness state, not conversation
     # state (the same treatment as the postures), so it travels as an id and
-    # apply_resume_state restores it on the registry this run built. Guarded by
-    # respond_to? so a harness double with no registry still saves.
-    if @harness.respond_to?(:registry)
-      data[:foreground_job] = @harness.registry.foreground
+    # CLI#setup restores it on the registry that run owns. Guarded so a
+    # SessionManager built without an injected registry still saves.
+    if registry
+      data[:foreground_job] = registry.foreground
     end
 
     # issue #405: what a session's conversation actually had tools from. The
@@ -792,8 +797,8 @@ class SessionManager
     # issue #458: the tail of the run's OutputBuffer (the both-sides record of
     # what the user saw - their prompts as :user entries plus the model/tool
     # side). A resumed run redraws it at startup so the last topic is visible.
-    # A harness-side record (like mcp_connected), not conversation state.
-    data[:replay_tail] = @harness.replay_tail_for_save if @harness.respond_to?(:replay_tail_for_save)
+    # A run-record key (like mcp_connected), not conversation state.
+    data[:replay_tail] = registry.replay_tail_for_save if registry
 
     json = JSON.generate(data)
 

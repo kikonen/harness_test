@@ -23,7 +23,7 @@ RSpec.describe Commands::RetryCommand do
   # protocol contract: the block must perform the re-send.
   def run_with_captured_block
     block = nil
-    allow(Task).to receive(:run) do |harness:, ui:, &blk|
+    allow(Task).to receive(:run) do |harness:, ui:, buffer:, &blk|
       block = blk
       blk.call(nil)
       [nil, nil]
@@ -40,7 +40,7 @@ RSpec.describe Commands::RetryCommand do
   end
 
   it 'reports a task error as a [task error] line' do
-    allow(Task).to receive(:run) { |harness:, ui:, &blk| ['boom', nil] }
+    allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| ['boom', nil] }
 
     command.handle('')
 

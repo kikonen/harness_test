@@ -13,11 +13,9 @@ require_relative "tool"
 require_relative "llm_client"
 require_relative "file_list"
 require_relative "session"
-require_relative "output_buffer"
 require_relative "memories"
 require_relative "session_locator"
 require_relative "plans"
-require_relative "job_registry"
 require_relative "task"
 require_relative "llm/stream_preview"
 require_relative "llm/usage_stats"
@@ -86,11 +84,6 @@ class Harness
   # After this many consecutive tool-call iterations, force-break and return whatever we have
   TOOL_LOOP_HARD_LIMIT = 20
 
-  # How many entries of the run's OutputBuffer tail are saved with a session
-  # and redrawn when that session is resumed (issue #458). 0 disables the
-  # replay entirely. Overridden by the config 'resume: replay_entries:' key.
-  DEFAULT_RESUME_REPLAY_ENTRIES = 30
-
   # The two NORMAL ends of an answer; every other value a server reports
   # ('length', 'content_filter', one this harness has never seen) gets a line.
   # What each endpoint reports: doc/truncation_design.md.
@@ -145,15 +138,6 @@ class Harness
 
   attr_accessor :history
 
-  # Each retained job owns its own buffer; the design is in doc/task_model_design.md.
-  attr_reader :registry
-
-  # Main-thread output goes to the FOREGROUND job's buffer, so a foreground switch
-  # changes which buffer the single writer writes.
-  def output_log
-    registry.foreground_buffer
-  end
-
   # Only one note is in flight: a new assignment replaces the note that has
   # not been injected yet - the latest line wins.
   def user_note_text=(text)
@@ -202,22 +186,6 @@ class Harness
     # by plan.* and /plans so the two sides cannot drift apart.
     @plans         = Plans.new(file_list.workdir)
 
-    # The run record is the registry's foreground job buffer (issue #286): the
-    # single drain loop is its only writer, main-thread only. A resumed run seeds
-    # its tail from the saved session so the banner can redraw the last topic.
-    @replay_limit = resume_replay_entries
-    # The registry's buffers get the two tail limits from the config (issue #286):
-    # max_memory gates the consumed-front trim, max_saved is the window a save
-    # writes. Both fall back to the buffer's built-in default when unset. The saved
-    # window is the existing 'resume: replay_entries' value, not a second key.
-    # The registry owns the buffers now (issue #286 increment 1), so the run record
-    # is the buffer of the job the registry registers FIRST - the main turn, job #0.
-    @registry = JobRegistry.new(
-      max_memory: output_tail_memory || OutputBuffer::DEFAULT_MAX_MEMORY,
-      max_saved: @replay_limit,
-      tasks_kept: output_tasks_kept)
-    @registry.add_job(kind: :main)
-
     if resume_data
       saved_id = resume_data[:session_id]
       if saved_id && saved_id != session_id
@@ -225,7 +193,6 @@ class Harness
           "session file says id #{saved_id} but it is stored under #{session_id}"
       end
       @session.restore(resume_data, @file_list)
-      output_log.restore(resume_data[:replay_tail]) if @replay_limit.positive?
     end
 
     @user_note     = nil
@@ -1159,61 +1126,7 @@ class Harness
     @mcp.connected_summary
   end
 
-  # -- Run OutputBuffer (issue #458) ----------------------------------------
-  #
-  # The buffer is the record, not a mechanism: a user line is just another
-  # entry, and replay is a redraw of the tail. Main-thread only.
-
-  # Record the user's own submitted line in the run's OutputBuffer. It is a
-  # first-class ROLE (type :user, not a plain :text) so UI::Renderer labels it
-  # 'user:' on the replay redraw - the both-sides record #146 asks for.
-  def record_user_prompt(text)
-    return if @replay_limit.zero?
-
-    output_log.put(type: :user, origin: :user, content: text.to_s)
-    output_log.keep_window
-  end
-
-  # Record a main-thread slash-command report in the run OutputBuffer so a
-  # resumed run redraws it (#474). Slash commands run on the main thread with
-  # no Task, so their output was recorded here directly (issue #458) - a structured
-  # :list payload is stored AS the structure (not a pre-rendered line), which
-  # is what lets a future remote sink lay it out from the fields (#146). The
-  # replay_limit guard and keep_window match record_user_prompt.
-  def record_report_output(type:, origin:, content:)
-    return if @replay_limit.zero?
-
-    output_log.put(type:, origin:, content:)
-    output_log.keep_window
-  end
-
-  # The saved form of the tail (Entry#to_h hashes), written to the session JSON
-  # so a resumed run can redraw the last topic.
-  def replay_tail_for_save
-    output_log.replay_tail(@replay_limit).map(&:to_h)
-  end
-
   private
-
-  # The configured replay size (config 'resume: replay_entries:'); nil falls
-  # back to the built-in default. 0 disables the run OutputBuffer entirely.
-  def resume_replay_entries
-    n = options[:resume_replay_entries]
-    n.nil? ? DEFAULT_RESUME_REPLAY_ENTRIES : n.to_i
-  end
-
-  # How much of a buffer's tail lives in RAM (config 'output: tail_memory:'); nil
-  # falls back to the buffer's built-in default. Read through options like every
-  # other config value, so a spec-built Harness that only sets options works.
-  def output_tail_memory
-    options[:output_tail_memory]
-  end
-
-  # Read through options like every other config value, so a spec-built Harness
-  # that only sets options works. nil = nothing dropped.
-  def output_tasks_kept
-    options[:output_tasks_kept]
-  end
 
   # One LLM request. The streaming posture applies to THIS request only, so a
   # streamed turn publishes its live tail for the spinner. The preview is
@@ -1420,15 +1333,6 @@ class Harness
     logger.info "recent generation rate restored: #{last_rate_segment}" if saved_rate
 
     logger.info "output palette restored: #{output_palette.name}"
-
-    # issue #286: which job was foreground travels with the session as an ID, so a
-    # resumed run restores which buffer was active. It is harness state, not
-    # conversation state (the same treatment as the postures). An id this run does
-    # not retain cannot be restored - its job is not rebuilt by the resume.
-    if data[:foreground_job]
-      registry.restore_foreground(data[:foreground_job])
-      logger.info "foreground job restored: ##{registry.foreground}"
-    end
 
     # issue #405: the saved session names the MCP tools its conversation had.
     # THIS run already connected what its own config declared (build_tool_registry

@@ -17,11 +17,21 @@ require_relative "ui/palette"
 # dedicated mutable object is a later step of this refactor
 # (doc/harness_job_design.md).
 class SystemSettings
+  # How many entries of the run record a session saves and a resumed run
+  # redraws (issue #458). 0 disables the run record entirely. Overridden by
+  # the config 'resume: replay_entries:' key.
+  DEFAULT_RESUME_REPLAY_ENTRIES = 30
+
   # The posture + consent state. Output palette is always a UI::Palette.
   # markdown_max_width is static config (read once, never toggled live) but
   # lives here so a posture command that reports it (markdown) needs no
-  # Harness. Output palette is always a UI::Palette.
-  attr_reader :output_palette, :markdown_max_width
+  # Harness. The three output-buffer limits are static config too (issue #286):
+  # the run's owner (CLI) builds the JobRegistry from them.
+  attr_reader :output_palette,
+    :markdown_max_width,
+    :output_tail_memory,
+    :output_tasks_kept,
+    :resume_replay_entries
 
   # Read the run-wide values out of the resolved CLI options hash. A hand-built
   # hash (specs, library users) works the same way a CLI-resolved one does.
@@ -38,6 +48,14 @@ class SystemSettings
     @plan      = options[:plan] == true
     @output_palette = UI::Palette.fetch(options[:output_palette])
     @markdown_max_width = options[:markdown_max_width]
+
+    # Buffer limits pass through UNresolved (nil = the buffer/registry's own
+    # built-in default) except resume_replay_entries, whose default is the
+    # saved-window semantics stated above.
+    @output_tail_memory = options[:output_tail_memory]
+    @output_tasks_kept = options[:output_tasks_kept]
+    entries = options[:resume_replay_entries]
+    @resume_replay_entries = entries.nil? ? DEFAULT_RESUME_REPLAY_ENTRIES : entries.to_i
 
     @command_safety_check             = options[:command_safety_check] == true
     @command_safety_auto_approve      = options[:command_safety_auto_approve] == true

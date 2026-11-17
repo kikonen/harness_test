@@ -116,16 +116,20 @@ buffer tail through the same `UI::Renderer` the live drain loop uses, so the
 redrawn exchange looks like the original one (labels, colors, markdown posture
 all respected).
 
-Ownership at the run level: there is ONE `OutputBuffer` (`#output_log`) per run,
-held by the Harness as its temporary home. `Task.run` hands the task that buffer,
-so the drain loop's output already lands in the record a save reads - there is NO
-harvest step (`#absorb_turn` is
-gone, it existed only to copy between two stores). The single writer records each
-user prompt directly (`#record_user_prompt`) and enforces the buffer's own saved
-window right after a tail put (`#keep_window`). `save_session` writes
-that window's tail (`#replay_tail_for_save`, the `Entry#to_h` form) into the
-session JSON; a resumed Harness rehydrates it with `OutputBuffer#restore` before
-the drain loop first runs, and the CLI banner redraws it.
+Ownership at the run level (issue #286): the run record is the FOREGROUND job's
+`OutputBuffer`, held by the `JobRegistry` - not by the Harness, which is a
+single-LLM turn engine and "cannot be both". The CLI owns the registry, builds
+it from the resolved buffer limits and registers the main turn as job #0.
+`Task.run` is handed the buffer (or a job's own buffer under the registry), so
+the drain loop's output already lands in the record a save reads - there is NO
+harvest step (`#absorb_turn` is gone, it existed only to copy between two
+stores). The single main-thread writer records each user prompt directly
+(`JobRegistry#record_user_prompt`) and enforces the buffer's own saved window
+right after a tail put (`#keep_window`). `save_session` (given the run's
+registry) writes that window's tail (`JobRegistry#replay_tail_for_save`, the
+`Entry#to_h` form) into the session JSON; a resumed run rehydrates it with
+`JobRegistry#restore_replay_tail` (an `OutputBuffer#restore`) before the drain
+loop first runs, and the CLI banner redraws it.
 
 - Replay reads the **tail** only, so the head is never replayed: a spinner
   re-point and a still-growing stream are live state, not part of the durable
