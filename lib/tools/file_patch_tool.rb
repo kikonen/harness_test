@@ -52,12 +52,12 @@ module Tools
   class FilePatchTool < Tool
     SEARCH_WINDOW = 50 # lines to search above/below the declared position
 
-    def initialize(file_list, session = nil)
+    def initialize(file_list, file_cache = nil)
       @file_list = file_list
-      # issue #170: optional Session - when given, the digest cache is used
-      # for external-change detection and refreshed after a successful patch.
+      # issue #170: optional digest cache - when given, it is used for
+      # external-change detection and refreshed after a successful patch.
       # nil only for specs without a prior read (nothing to detect).
-      @session   = session
+      @file_cache = file_cache
       super(
         name: "file.patch",
         description: "Applies a standard unified diff patch to a file. " \
@@ -98,9 +98,9 @@ module Tools
       # issue #170: external-change detection - same rules as file.write.
       # A read-in-session file whose on-disk digest no longer matches the
       # cache was changed outside us; re-read (or file.touch) first.
-      if @session
+      if @file_cache
         current = FileList.sha256(path)
-        cached  = @session.file_cache.digest(path, workdir: @file_list.workdir)
+        cached  = @file_cache.digest(path, workdir: @file_list.workdir)
         if cached && current != cached
           status(:fail, "#{shown} (externally changed since last read)")
           return "error: '#{shown}' has changed externally since you last read it. " \
@@ -157,9 +157,9 @@ module Tools
 
       # issue #170: our own patch refreshes the cache (the file is now in
       # the exact state we wrote it).
-      if @session
+      if @file_cache
         sha = FileList.sha256(path)
-        @session.file_cache.record(path, sha, workdir: @file_list.workdir) if sha
+        @file_cache.record(path, sha, workdir: @file_list.workdir) if sha
       end
 
       status(:ok, "#{shown} (#{applied} hunk(s) applied)")

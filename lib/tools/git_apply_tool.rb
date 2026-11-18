@@ -15,9 +15,9 @@ require_relative "../git_runner"
 #   three_way - if the direct apply fails, retry with a 3-way merge
 #               (requires the blob objects to be present in the repo)
 #
-# issue #170: takes an optional trailing `session` argument - when given,
-# patched files are checked against the digest cache (external-change
-# detection) and their new digests are recorded on success.
+# issue #170: takes an optional trailing `file_cache` argument - when given,
+# patched files are checked against it (external-change detection) and their
+# new digests are recorded on success.
 # issue #171: the diff is normalized before git sees it (CRLF -> LF and
 # trailing whitespace stripped from every line), which absorbs the two
 # most common model output quirks. Hunk line numbers are treated as
@@ -28,9 +28,9 @@ require_relative "../git_runner"
 module Tools
 
   class GitApplyTool < GitRunner
-    def initialize(file_list, session = nil)
+    def initialize(file_list, file_cache = nil)
       @file_list = file_list
-      @session   = session
+      @file_cache = file_cache
       super(
         name: "git.apply",
         description: "Applies a unified diff patch to the working tree (like `git apply`). " \
@@ -173,14 +173,14 @@ module Tools
     # match the on-disk bytes, otherwise someone changed it outside us.
     # Returns an error string for the first offending file, else nil.
     def external_change_guard(files)
-      return nil unless @session && files.any?
+      return nil unless @file_cache && files.any?
 
       files.each do |rel|
         path = resolve_path(rel)
         next unless File.file?(path)
 
         current = FileList.sha256(path)
-        cached  = @session.file_cache.digest(path, workdir:)
+        cached  = @file_cache.digest(path, workdir:)
         next unless cached && current != cached
 
         shown = @file_list.display_path(path)
@@ -195,14 +195,14 @@ module Tools
     # issue #170: our own patch refreshes the cache for every touched
     # file (new files get an entry; missing ones are left alone).
     def record_cache(files)
-      return unless @session
+      return unless @file_cache
 
       files.each do |rel|
         path = resolve_path(rel)
         next unless File.file?(path)
 
         sha = FileList.sha256(path)
-        @session.file_cache.record(path, sha, workdir:) if sha
+        @file_cache.record(path, sha, workdir:) if sha
       end
     end
 

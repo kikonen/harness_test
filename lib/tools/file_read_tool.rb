@@ -7,12 +7,12 @@ require_relative "../text_normalizer"
 module Tools
 
   class FileReadTool < Tool
-    def initialize(file_list, session = nil)
+    def initialize(file_list, file_cache = nil)
       @file_list = file_list
-      # issue #170: optional Session - when given, files read by the model
-      # are recorded in its digest cache (external-change detection for
-      # later write/patch). nil is only used by specs that never write.
-      @session   = session
+      # issue #170: optional digest cache - when given, files read by the model
+      # are recorded in it (external-change detection for later write/patch).
+      # nil is only used by specs that never write.
+      @file_cache = file_cache
       super(
         name: "file.read",
         description: "Reads the contents of a file. " \
@@ -53,11 +53,11 @@ module Tools
       content = content.gsub("\r\n", "\n")
 
       # issue #170: remember what the model just read so a later write/patch
-      # can detect EXTERNAL changes (the cache lives in the Session and is
-      # part of its persistence).
-      if @session
+      # can detect EXTERNAL changes (the cache is part of the session's
+      # persistence).
+      if @file_cache
         sha = FileList.sha256(path)
-        @session.file_cache.record(path, sha, workdir: @file_list.workdir) if sha
+        @file_cache.record(path, sha, workdir: @file_list.workdir) if sha
       end
 
       status(:ok, shown)

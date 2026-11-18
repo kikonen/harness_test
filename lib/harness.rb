@@ -283,19 +283,19 @@ class Harness
     registry.register(Tools::DialogTool.new)
     registry.register(Tools::GetTimeTool.new)
     registry.register(Tools::FileListTool.new(@file_list))
-    registry.register(Tools::FileReadTool.new(@file_list, @session))
+    registry.register(Tools::FileReadTool.new(@file_list, @session.file_cache))
     registry.register(Tools::FileImageTool.new(@file_list))
-    registry.register(Tools::FileWriteTool.new(@file_list, @session))
-    registry.register(Tools::FileRenameTool.new(@file_list, @session))
-    registry.register(Tools::FileDeleteTool.new(@file_list, @session))
+    registry.register(Tools::FileWriteTool.new(@file_list, @session.file_cache))
+    registry.register(Tools::FileRenameTool.new(@file_list, @session.file_cache))
+    registry.register(Tools::FileDeleteTool.new(@file_list, @session.file_cache))
     registry.register(Tools::FileSearchTool.new(@file_list))
-    registry.register(Tools::FilePatchTool.new(@file_list, @session))
+    registry.register(Tools::FilePatchTool.new(@file_list, @session.file_cache))
     registry.register(Tools::FileCopyTool.new(@file_list))
     registry.register(Tools::FileInfoTool.new(@file_list))
     registry.register(Tools::DirCreateTool.new(@file_list))
     registry.register(Tools::DirDeleteTool.new(
       @file_list,
-      session: @session,
+      file_cache: @session.file_cache,
       harness: self
     ))
     registry.register(Tools::NoteTool.new)
@@ -304,7 +304,7 @@ class Harness
     registry.register(Tools::GitStatusTool.new(@file_list))
     registry.register(Tools::GitLogTool.new(@file_list))
     registry.register(Tools::GitGrepTool.new(@file_list))
-    registry.register(Tools::GitApplyTool.new(@file_list, @session))
+    registry.register(Tools::GitApplyTool.new(@file_list, @session.file_cache))
     registry.register(Tools::RunCommandTool.new(
       @file_list,
       @options,

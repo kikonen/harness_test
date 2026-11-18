@@ -8,11 +8,11 @@ require_relative "../file_list"
 module Tools
 
   class FileDeleteTool < Tool
-    def initialize(file_list, session = nil)
+    def initialize(file_list, file_cache = nil)
       @file_list = file_list
-      # issue #170: optional Session - when given, the digest cache entry
-      # is dropped when the file is deleted.
-      @session   = session
+      # issue #170: optional digest cache - when given, its entry is dropped
+      # when the file is deleted.
+      @file_cache = file_cache
       super(
         name: "file.delete",
         description: "Deletes a file from disk. " \
@@ -55,8 +55,7 @@ module Tools
       # re-created path of the same name needs a fresh consent decision.
       @file_list.revoke_grants(path)
       # issue #170: the file is gone - drop its cache entry.
-      # &. guards only the next send, so BOTH hops carry one.
-      @session&.file_cache&.clear(path, workdir: @file_list.workdir)
+      @file_cache&.clear(path, workdir: @file_list.workdir)
 
       "ok: file '#{shown}' has been deleted"
     end

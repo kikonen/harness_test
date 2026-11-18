@@ -20,7 +20,7 @@ RSpec.describe Tools::FileWriteTool do
   def tool_for(dir, name, session: nil)
     list = FileList.new(workdir: dir)
     list.add_file(name, :rw)
-    described_class.new(list, session)
+    described_class.new(list, session&.file_cache)
   end
 
   describe '#execute' do

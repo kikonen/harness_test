@@ -31,7 +31,7 @@ RSpec.describe Tools::FileDeleteTool do
       list = file_list(dir)
       list.add_file('gone.txt', :d)
 
-      out = described_class.new(list, session).execute('path' => 'gone.txt')
+      out = described_class.new(list, session.file_cache).execute('path' => 'gone.txt')
       expect(out).to eq("ok: file 'gone.txt' has been deleted")
       expect(File.exist?(File.join(dir, 'gone.txt'))).to be false
     end
@@ -47,7 +47,7 @@ RSpec.describe Tools::FileDeleteTool do
       list.add_file('gone.txt', :rw)
       list.add_file('gone.txt', :d)
 
-      described_class.new(list, session).execute('path' => 'gone.txt')
+      described_class.new(list, session.file_cache).execute('path' => 'gone.txt')
 
       expect(list.deletable?('gone.txt')).to be(false)
       expect(list.writable?('gone.txt')).to be(false)
@@ -81,7 +81,7 @@ RSpec.describe Tools::FileDeleteTool do
       list.add_dir('tmp/keep/9', :d)
 
       expect(UI::Dialog).not_to receive(:new)
-      result = described_class.new(list, session).execute('path' => 'tmp/keep/9/x.txt')
+      result = described_class.new(list, session.file_cache).execute('path' => 'tmp/keep/9/x.txt')
       expect(result).to start_with('ok: file')
     end
   end
@@ -147,7 +147,7 @@ RSpec.describe Tools::FileDeleteTool do
 
       list = file_list(dir)
       list.add_file('a.txt', :d)
-      described_class.new(list, sess).execute('path' => 'a.txt')
+      described_class.new(list, sess.file_cache).execute('path' => 'a.txt')
 
       expect(sess.file_cache.known?(path, workdir: dir)).to be false
       expect(sess.file_cache.to_h).to be_empty
@@ -178,7 +178,7 @@ RSpec.describe Tools::FileDeleteTool do
       list = file_list(dir)
       list.add_file('a.txt', :d)
 
-      expect { described_class.new(list, session).execute('path' => 'a.txt') }.not_to output.to_stdout
+      expect { described_class.new(list, session.file_cache).execute('path' => 'a.txt') }.not_to output.to_stdout
     end
   end
 
