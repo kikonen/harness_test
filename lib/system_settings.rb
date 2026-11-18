@@ -115,6 +115,13 @@ class SystemSettings
     @options[:default_model]
   end
 
+  # Name (or id) of the model THIS run is using, or nil. Live runtime state
+  # (a /model switch writes @options[:active_model] / [:model]); kept here so a
+  # command reads every model fact from the settings, not through Harness.
+  def active_model_name
+    @options[:active_model] || @options[:model]
+  end
+
   # A configured profile by its label (:name) or raw model id (:model), or nil
   # when absent. Lookup over the fixed catalogue; the active-model pointer that
   # feeds it is runtime state owned by SessionManager.
