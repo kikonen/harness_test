@@ -14,11 +14,10 @@ module Commands
       see_also: %w[model param])
 
     def handle(_args)
-      # The catalogue is static run-wide config (#286), read straight from the
-      # settings the way a posture command does - not routed through
-      # SessionManager. Only the ACTIVE model name is runtime, so it stays here.
+      # Every model fact - the catalogue and the active-model name - is run-wide
+      # state read straight from the settings (#286), not routed through Harness.
       profiles = @settings.model_profiles
-      current  = @harness.session_manager.active_model_name
+      current  = @settings.active_model_name
 
       if profiles.empty?
         # Contiguous prose -> ONE note call, two paragraphs (the renderer owns
