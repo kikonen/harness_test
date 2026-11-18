@@ -13,64 +13,22 @@ require_relative "tool"
 require_relative "llm_client"
 require_relative "file_list"
 require_relative "session"
-require_relative "memories"
+require_relative "session_file_cache"
 require_relative "session_locator"
-require_relative "plans"
 require_relative "task"
 require_relative "llm/stream_preview"
 require_relative "llm/usage_stats"
-require_relative "tools/echo_tool"
-require_relative "tools/notify_tool"
-require_relative "tools/dialog_tool"
-require_relative "tools/get_time_tool"
-require_relative "tools/file_read_tool"
-require_relative "tools/file_image_tool"
-require_relative "tools/file_write_tool"
-require_relative "tools/file_rename_tool"
-require_relative "tools/file_delete_tool"
-require_relative "tools/file_list_tool"
-require_relative "tools/file_search_tool"
-require_relative "tools/file_patch_tool"
-require_relative "tools/file_copy_tool"
-require_relative "tools/file_info_tool"
-require_relative "tools/note_tool"
-require_relative "tools/dir_create_tool"
-require_relative "tools/dir_delete_tool"
-require_relative "tools/git_diff_tool"
-require_relative "tools/git_show_tool"
-require_relative "tools/git_status_tool"
-require_relative "tools/git_log_tool"
-require_relative "tools/git_grep_tool"
-require_relative "tools/git_apply_tool"
-require_relative "tools/run_command_tool"
-require_relative "tools/web_fetch_tool"
-require_relative "tools/tools_list_tool"
-require_relative "tools/tools_search_tool"
-require_relative "skills"
-require_relative "tools/skills_list_tool"
-require_relative "tools/skills_read_tool"
-require_relative "tool_registry"
-require_relative "tools/memory_list_tool"
-require_relative "tools/memory_read_tool"
-require_relative "tools/memory_add_tool"
-require_relative "tools/plan_list_tool"
-require_relative "tools/plan_read_tool"
-require_relative "tools/plan_add_tool"
-require_relative "tools/plan_delete_tool"
-require_relative "tools/plan_search_tool"
-require_relative "tools/memory_delete_tool"
-require_relative "tools/sessions_search_tool"
 require_relative "session_manager"
 require_relative "state_migrator"
 require_relative "safety_check"
 require_relative "text_normalizer"
 require_relative "error_text"
-require_relative "mcp/manager"
 require_relative "sandbox_gemfile"
 require_relative "tool_result"
 require_relative "image_store"
 require_relative "image_delivery"
 require_relative "system_settings"
+require_relative "tool_registry_builder"
 
 require_relative "text_tool_call_parser"
 # -- Harness --------------------------------------------------------------
@@ -173,7 +131,13 @@ class Harness
     @locator       = SessionLocator.new(file_list.workdir)
     @settings      = settings || SystemSettings.from_options(options)
 
-    @session       = Session.new(build_system_prompt, session_id:)
+    # The digest cache is SHARED (#286): this run builds ONE SessionFileCache
+    # and hands the same object to Session and to the tool registry, so the
+    # digests a tool records on read/write are exactly the ones this session
+    # compares a later write against. Ownership sits with the run, not Session.
+    @file_cache = SessionFileCache.new
+
+    @session       = Session.new(build_system_prompt, session_id:, file_cache: @file_cache)
 
     if resume_data
       saved_id = resume_data[:session_id]
@@ -203,10 +167,20 @@ class Harness
                    "(a starter gem is absent on this box) - bundle install it"
     end
 
-    # The MCP machinery (issue #48) lives in its own object; build_tool_registry
-    # asks it to connect the declared servers and register their tools.
-    @mcp = Mcp::Manager.new(@logger)
-    @tool_registry = build_tool_registry
+    # The tool registry and the MCP machinery are built by ToolRegistryBuilder
+    # from collaborators handed in (#286), not from Harness state: it owns the
+    # Mcp::Manager it connects and exposes it, so Harness only reads it back.
+    builder = ToolRegistryBuilder.new(
+      file_list: @file_list,
+      file_cache: @file_cache,
+      options: @options,
+      settings: @settings,
+      logger: @logger,
+      locator: @locator,
+      harness: self
+    )
+    @tool_registry = builder.build
+    @mcp           = builder.mcp
     # issue #461: recovers a tool call a model wrote as text instead of a
     # structured tool_calls array (see doc/text_tool_call_design.md).
     @text_tool_call_parser = TextToolCallParser.new(@tool_registry)
@@ -274,73 +248,6 @@ class Harness
       "#{datetime.strftime('%Y-%m-%d %H:%M:%S')} [#{severity}] #{msg}\n"
     }
     logger
-  end
-
-  def build_tool_registry
-    registry = ToolRegistry.new
-    registry.register(Tools::EchoTool.new)
-    registry.register(Tools::NotifyTool.new)
-    registry.register(Tools::DialogTool.new)
-    registry.register(Tools::GetTimeTool.new)
-    registry.register(Tools::FileListTool.new(@file_list))
-    registry.register(Tools::FileReadTool.new(@file_list, @session.file_cache))
-    registry.register(Tools::FileImageTool.new(@file_list))
-    registry.register(Tools::FileWriteTool.new(@file_list, @session.file_cache))
-    registry.register(Tools::FileRenameTool.new(@file_list, @session.file_cache))
-    registry.register(Tools::FileDeleteTool.new(@file_list, @session.file_cache))
-    registry.register(Tools::FileSearchTool.new(@file_list))
-    registry.register(Tools::FilePatchTool.new(@file_list, @session.file_cache))
-    registry.register(Tools::FileCopyTool.new(@file_list))
-    registry.register(Tools::FileInfoTool.new(@file_list))
-    registry.register(Tools::DirCreateTool.new(@file_list))
-    registry.register(Tools::DirDeleteTool.new(
-      @file_list,
-      file_cache: @session.file_cache,
-      harness: self
-    ))
-    registry.register(Tools::NoteTool.new)
-    registry.register(Tools::GitDiffTool.new(@file_list))
-    registry.register(Tools::GitShowTool.new(@file_list))
-    registry.register(Tools::GitStatusTool.new(@file_list))
-    registry.register(Tools::GitLogTool.new(@file_list))
-    registry.register(Tools::GitGrepTool.new(@file_list))
-    registry.register(Tools::GitApplyTool.new(@file_list, @session.file_cache))
-    registry.register(Tools::RunCommandTool.new(
-      @file_list,
-      @options,
-      harness: self))
-    registry.register(Tools::WebFetchTool.new(
-      @file_list,
-      @options,
-      harness: self))
-    registry.register(Tools::ToolsListTool.new(registry))
-    registry.register(Tools::ToolsSearchTool.new(registry))
-    # The FS-backed stores (memories, plans, skills) are not Harness state: each
-    # is a stateless reader over its on-disk dir, so the tools that serve them get
-    # their own instance built here from the run's workdir. /memory, /plans and
-    # /skills build the same store from the same workdir - the dir is the single
-    # source of truth, so the tool side and the command side cannot drift (#286).
-    # The note cap is the config 'max_memories:' key (#435); nil -> the default.
-    skills    = Skills.new(@file_list.workdir)
-    memories  = Memories.new(@file_list.workdir, max_memories: options[:max_memories])
-    plans     = Plans.new(@file_list.workdir)
-    registry.register(Tools::SkillsListTool.new(skills))
-    registry.register(Tools::SkillsReadTool.new(skills))
-    registry.register(Tools::MemoryListTool.new(memories))
-    registry.register(Tools::MemoryReadTool.new(memories))
-    registry.register(Tools::MemoryAddTool.new(memories))
-    registry.register(Tools::MemoryDeleteTool.new(memories))
-    registry.register(Tools::PlanListTool.new(plans))
-    registry.register(Tools::PlanReadTool.new(plans))
-    registry.register(Tools::PlanAddTool.new(plans))
-    registry.register(Tools::PlanDeleteTool.new(plans))
-    registry.register(Tools::PlanSearchTool.new(plans))
-    # issue #279: let the model FIND a saved session by what it was ABOUT, not
-    # just count them. Read-only, over the run's own SessionLocator (the single
-    # place that knows where sessions live) - no Harness, no resume, no delete.
-    registry.register(Tools::SessionsSearchTool.new(@locator))
-    @mcp.load(registry, options[:mcp_servers])
-    registry
   end
 
   # EVERY request - the live turn and both advisory forks - must send THIS same
@@ -1333,8 +1240,8 @@ class Harness
     logger.info "output palette restored: #{output_palette.name}"
 
     # issue #405: the saved session names the MCP tools its conversation had.
-    # THIS run already connected what its own config declared (build_tool_registry
-    # runs before this), so the two can be compared: a server the saved
+    # THIS run already connected what its own config declared (the tool-registry
+    # builder runs before this), so the two can be compared: a server the saved
     # conversation used that this run cannot reach is stated out loud rather than
     # left as a tool set the model quietly lost. The notes land in the startup
     # banner next to the run's own MCP lines.

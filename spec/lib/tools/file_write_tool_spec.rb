@@ -17,10 +17,10 @@ RSpec.describe Tools::FileWriteTool do
     end
   end
 
-  def tool_for(dir, name, session: nil)
+  def tool_for(dir, name, file_cache: nil)
     list = FileList.new(workdir: dir)
     list.add_file(name, :rw)
-    described_class.new(list, session&.file_cache)
+    described_class.new(list, file_cache)
   end
 
   describe '#execute' do
@@ -44,9 +44,9 @@ RSpec.describe Tools::FileWriteTool do
       Dir.mktmpdir do |dir|
         target  = File.join(dir, 'f.txt')
         File.binwrite(target, "a\nb\n")
-        session = Session.new('sw')
-        tool    = tool_for(dir, 'f.txt', session: session)
-        session.file_cache.record(target, FileList.sha256(target), workdir: dir)
+        file_cache = SessionFileCache.new
+        tool       = tool_for(dir, 'f.txt', file_cache: file_cache)
+        file_cache.record(target, FileList.sha256(target), workdir: dir)
 
         expect(tool.execute('path' => 'f.txt', 'content' => "a\nb2\n")).to start_with('ok: wrote')
         expect(tool.execute('path' => 'f.txt', 'content' => "a\nb3\n")).to start_with('ok: wrote')
@@ -57,9 +57,9 @@ RSpec.describe Tools::FileWriteTool do
       Dir.mktmpdir do |dir|
         target  = File.join(dir, 'f.txt')
         File.binwrite(target, "a\nb\n")
-        session = Session.new('sw')
-        tool    = tool_for(dir, 'f.txt', session: session)
-        session.file_cache.record(target, FileList.sha256(target), workdir: dir)
+        file_cache = SessionFileCache.new
+        tool       = tool_for(dir, 'f.txt', file_cache: file_cache)
+        file_cache.record(target, FileList.sha256(target), workdir: dir)
 
         File.binwrite(target, "a\nb-external\n")
         expect(tool.execute('path' => 'f.txt', 'content' => "a\nb2\n"))

@@ -129,6 +129,21 @@ class SystemSettings
     model_profiles.find { |p| p[:name] == name || p[:model] == name }
   end
 
+  # -- Tool-registry config (static, read once) ----------------------------
+
+  # The note cap for the run's memory store (config 'max_memories:', issue #435).
+  # Passes through UNresolved (nil -> the store's own built-in default) so the
+  # tool registry reads every run setting off the settings, not the options bag.
+  def max_memories
+    @options[:max_memories]
+  end
+
+  # The declared MCP servers (config 'mcp_servers:'), or nil when none. The
+  # tool-registry builder hands these to Mcp::Manager#load.
+  def mcp_servers
+    @options[:mcp_servers]
+  end
+
   def yolo_mode_label
     @yolo ? "YOLO ON" : "YOLO OFF"
   end

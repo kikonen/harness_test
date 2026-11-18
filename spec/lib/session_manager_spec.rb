@@ -17,7 +17,7 @@ require 'tmpdir'
 # would race with a pending dialog (ui.dialog / grant prompt) for stdin and
 # swallow the user's answer as a cancel.
 RSpec.describe SessionManager do
-  let(:session) { Session.new('system prompt') }
+  let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
   let(:file_list) { FileList.new([], workdir: Dir.pwd) }
   let(:logger) { Logger.new(File::NULL) }
 
@@ -724,7 +724,7 @@ RSpec.describe SessionManager do
 end
 
 RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
-  let(:session) { Session.new('system prompt') }
+  let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
   let(:file_list) { FileList.new([], workdir: Dir.pwd) }
   let(:backend) { double('backend', api_type: :openai, endpoint_path: '/chat/completions') }
   let(:client) { double('client', chat: nil, backend: backend) }
@@ -808,7 +808,7 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
   end
 end
 RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
-  let(:session) { Session.new('system prompt') }
+  let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
   let(:file_list) { FileList.new([], workdir: Dir.pwd) }
   let(:backend) { double('backend', api_type: :openai, endpoint_path: '/chat/completions') }
   let(:client) { double('client', chat: nil, backend: backend) }
@@ -1085,7 +1085,7 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
   let(:logger) { Logger.new(log_io) }
 
   describe '#compact_session (end-of-turn)' do
-    let(:session) { Session.new('system prompt') }
+    let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
     # issue #178: summary longer than the old ~80-char preview cut, so a
     # regression to truncated logging would fail this expectation.
     let(:long_summary) { 'x' * 120 }
@@ -1115,7 +1115,7 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
   end
 
   describe '#check_inloop_compaction (mid-turn)' do
-    let(:session) { Session.new('system prompt') }
+    let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
     let(:client) { double('client', chat: { choices: [{ message: { content: 'HANDOFF' } }] }) }
     let(:options) { { num_ctx: 1000 } }
     let(:harness) do
@@ -1157,7 +1157,7 @@ end
 # trailing user prompt counted as "pending" and /retry replayed the prompt
 # from zero ("give continue and figure out what you were doing yourself").
 RSpec.describe SessionManager, '#retry (issue #208)' do
-  let(:session) { Session.new('system prompt') }
+  let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
   let(:file_list) { FileList.new([], workdir: Dir.pwd) }
   let(:backend) { double('backend', api_type: :openai, endpoint_path: '/chat/completions') }
   let(:client) { double('client', chat: nil, backend: backend) }
@@ -1285,7 +1285,7 @@ end
 # next tool result does with its image. No profiles configured = a raw model id
 # the harness knows nothing about = text-only (the safe reading of an unknown).
 RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
-  let(:session) { Session.new('system prompt') }
+  let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
   let(:file_list) { FileList.new([], workdir: Dir.pwd) }
   let(:backend) { double('backend', api_type: :openai, endpoint_path: '/chat/completions') }
   let(:client) { double('client', chat: nil, backend: backend) }

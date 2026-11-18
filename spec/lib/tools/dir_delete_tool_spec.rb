@@ -23,11 +23,9 @@ RSpec.describe Tools::DirDeleteTool do
     stdout
   end
 
-  def harness_with_log
+  def logger_with_log
     log = StringIO.new
-    harness = Class.new { attr_accessor :logger }.new
-    harness.logger = Logger.new(log)
-    [harness, log]
+    [Logger.new(log), log]
   end
 
   # A nested tree: dir/a.txt, dir/sub/b.txt, dir/sub/deep/c.txt, dir/empty/.
@@ -54,8 +52,8 @@ RSpec.describe Tools::DirDeleteTool do
     junction && File.symlink?(link)
   end
 
-  def build(list, file_cache: nil, harness: nil)
-    described_class.new(list, file_cache: file_cache, harness: harness)
+  def build(list, file_cache: nil, logger: Logger.new(File::NULL))
+    described_class.new(list, file_cache: file_cache, logger: logger)
   end
 
   describe 'recursive deletion (issue #290)' do
@@ -64,9 +62,8 @@ RSpec.describe Tools::DirDeleteTool do
         tree   = seed_tree(dir)
         list   = FileList.new(workdir: dir)
         list.add_dir('tree', :d) # recursive DELETE grant, no dialog
-        harness, = harness_with_log
 
-        out = build(list, harness: harness).execute('path' => 'tree')
+        out = build(list).execute('path' => 'tree')
 
         expect(out).to start_with("ok: directory 'tree' and its contents have been deleted")
         expect(out).to include('3 file(s), 3 dir(s)')
@@ -85,9 +82,8 @@ RSpec.describe Tools::DirDeleteTool do
         list = FileList.new(workdir: dir)
         list.add_dir('tree', :d)
         list.add_file('tree/a.txt', :d)
-        harness, = harness_with_log
 
-        build(list, harness: harness).execute('path' => 'tree')
+        build(list).execute('path' => 'tree')
 
         expect(list.deletable?('tree')).to be(false)
         expect(list.deletable?('tree/a.txt')).to be(false)
@@ -189,9 +185,9 @@ RSpec.describe Tools::DirDeleteTool do
         seed_scratch_zone(dir)
         list = FileList.new(workdir: dir)
         list.add_dir('tmp/keep/318', :d)
-        harness, log = harness_with_log
+        logger, log = logger_with_log
 
-        out = build(list, harness: harness).execute('path' => 'tmp/keep/318')
+        out = build(list, logger: logger).execute('path' => 'tmp/keep/318')
 
         expect(out).to start_with("ok: directory 'tmp/keep/318' and its contents")
         expect(File.exist?(File.join(dir, 'tmp/keep/318'))).to be(false)
@@ -286,9 +282,9 @@ RSpec.describe Tools::DirDeleteTool do
         seed_tree(dir)
         list = FileList.new(workdir: dir)
         list.add_dir('tree', :d)
-        harness, log = harness_with_log
+        logger, log = logger_with_log
 
-        build(list, harness: harness).execute('path' => 'tree')
+        build(list, logger: logger).execute('path' => 'tree')
 
         # Logger adds its own timestamp/level prefix; the payload is what
         # matters (harness.log is the authoritative record of the deletion).
@@ -303,46 +299,13 @@ RSpec.describe Tools::DirDeleteTool do
       end
     end
 
-    it 'still deletes (and says the paths are unlogged) when no harness is attached' do
-      Dir.mktmpdir do |dir|
-        tree = seed_tree(dir)
-        list = FileList.new(workdir: dir)
-        list.add_dir('tree', :d)
-
-        out = build(list).execute('path' => 'tree')
-
-        expect(out).to start_with("ok: directory 'tree'")
-        expect(File.exist?(tree)).to be(false)
-      end
-    end
-
-    it 'reads the logger live so the harness swapped in by /resume is followed' do
-      Dir.mktmpdir do |dir|
-        FileUtils.mkdir_p(File.join(dir, 'one'))
-        list = FileList.new(workdir: dir)
-        list.add_dir('one', :d)
-        log_a = StringIO.new
-        log_b = StringIO.new
-        harness = Class.new do
-          attr_accessor :logger
-        end.new
-        harness.logger = Logger.new(log_a)
-
-        tool = build(list, harness: harness)
-        harness.logger = Logger.new(log_b) # the fresh harness of a resumed run
-        tool.execute('path' => 'one')
-
-        expect(log_a.string).to be_empty
-        expect(log_b.string).to include('dir.delete: deleted directory one')
-      end
-    end
   end
 
   describe 'the session file cache (issue #170)' do
     it 'drops the digest entry of every deleted file' do
       Dir.mktmpdir do |dir|
         seed_tree(dir)
-        session = Session.new('sys')
+        session = Session.new('sys', file_cache: SessionFileCache.new)
         session.file_cache.record(File.join(dir, 'tree/a.txt'), 'deadbeef',
                                   workdir: dir)
         list = FileList.new(workdir: dir)

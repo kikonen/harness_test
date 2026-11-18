@@ -2851,7 +2851,7 @@ RSpec.describe Harness do
 
       expect(tool.instance_variable_get(:@options)).to equal(h.options)
       expect(tool.instance_variable_get(:@workdir)).to eq(workdir)
-      expect(tool.instance_variable_get(:@harness)).to equal(h)
+      expect(tool.instance_variable_get(:@logger)).to equal(h.logger)
     end
 
     it 'refuses a private address with no config, whatever the model asks' do

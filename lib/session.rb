@@ -62,16 +62,14 @@ class Session
   # fact has to chase all of them again. A caller that has already resolved
   # identity (CLI, via SessionLocator) passes it in; the default exists for
   # standalone construction in specs.
-  def initialize(system_prompt, session_id: nil)
+  def initialize(system_prompt, session_id: nil, file_cache:)
     @system_prompt = system_prompt
     @created_at    = Time.now
     @session_id    = session_id || SecureRandom.uuid
     @user_prompts  = 0
     @last_stats    = nil
     @last_reasoning = nil
-    # issue #170: one cache per session - restored with a resumed session,
-    # untouched by compaction (a compacted file is still the same file).
-    @file_cache    = SessionFileCache.new
+    @file_cache    = file_cache
     @messages      = [system_message]
     # issue #216: anchor for live estimates (set when the server reports
     # prompt tokens for the chain as it was at that moment).

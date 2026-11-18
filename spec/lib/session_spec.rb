@@ -5,7 +5,7 @@ require 'json'
 require 'tmpdir'
 
 RSpec.describe Session do
-  let(:session) { described_class.new('system prompt') }
+  let(:session) { described_class.new('system prompt', file_cache: SessionFileCache.new) }
 
   describe '#context_used' do
     it 'returns nil when there is no conversation yet' do
@@ -161,7 +161,7 @@ RSpec.describe Session do
     end
 
     it 'is nil when there is no conversation yet' do
-      expect(described_class.new('sys').context_pct(65_536)).to be_nil
+      expect(described_class.new('sys', file_cache: SessionFileCache.new).context_pct(65_536)).to be_nil
     end
 
     it 'is nil for an invalid window size' do
@@ -354,7 +354,7 @@ RSpec.describe Session do
     def round_trip(saved_from, new_prompt)
       saved = JSON.parse(JSON.generate(saved_from.to_h(FileList.new([], workdir: '.'))),
                          symbolize_names: true)
-      [saved, described_class.new(new_prompt).restore(saved, FileList.new([], workdir: '.'))]
+      [saved, described_class.new(new_prompt, file_cache: SessionFileCache.new).restore(saved, FileList.new([], workdir: '.'))]
     end
 
     it 'does not store the system prompt in the serialized session' do
@@ -380,7 +380,7 @@ RSpec.describe Session do
       legacy = { created_at: Time.now.iso8601, system_prompt: 'OLD',
                  messages: [{ role: 'system', content: 'OLD' },
                             { role: 'user', content: 'a' }] }
-      restored = described_class.new('rebuilt prompt')
+      restored = described_class.new('rebuilt prompt', file_cache: SessionFileCache.new)
                                 .restore(legacy, FileList.new([], workdir: '.'))
 
       expect(restored.system_prompt).to eq('rebuilt prompt')
@@ -488,7 +488,7 @@ RSpec.describe Session do
       begin
         saved = JSON.parse(JSON.generate(session.to_h(FileList.new([], workdir: workdir))),
                            symbolize_names: true)
-        restored = described_class.new('sys').restore(saved, FileList.new([], workdir: workdir))
+        restored = described_class.new('sys', file_cache: SessionFileCache.new).restore(saved, FileList.new([], workdir: workdir))
       ensure
         FileUtils.remove_entry(workdir)
       end
@@ -506,7 +506,7 @@ RSpec.describe Session do
           created_at: Time.now.iso8601,
           messages:   [{ role: 'system' }, { role: 'user', content: 'go' }] }
       ), symbolize_names: true)
-      restored = described_class.new('sys').restore(saved, FileList.new([], workdir: Dir.mktmpdir))
+      restored = described_class.new('sys', file_cache: SessionFileCache.new).restore(saved, FileList.new([], workdir: Dir.mktmpdir))
 
       expect(value_for(restored.summary, 'Last request')).not_to include('tok/s')
     end

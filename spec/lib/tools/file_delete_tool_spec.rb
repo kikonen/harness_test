@@ -4,7 +4,7 @@ require 'spec_helper'
 require 'stringio'
 require 'tmpdir'
 require 'file_list'
-require 'session'
+require 'session_file_cache'
 require 'tools/file_delete_tool'
 
 RSpec.describe Tools::FileDeleteTool do
@@ -21,8 +21,8 @@ RSpec.describe Tools::FileDeleteTool do
     FileList.new([], workdir: dir)
   end
 
-  def session
-    Session.new('sys prompt')
+  def cache
+    SessionFileCache.new
   end
 
   it 'deletes the file when a DELETE grant is given' do
@@ -31,7 +31,7 @@ RSpec.describe Tools::FileDeleteTool do
       list = file_list(dir)
       list.add_file('gone.txt', :d)
 
-      out = described_class.new(list, session.file_cache).execute('path' => 'gone.txt')
+      out = described_class.new(list, cache).execute('path' => 'gone.txt')
       expect(out).to eq("ok: file 'gone.txt' has been deleted")
       expect(File.exist?(File.join(dir, 'gone.txt'))).to be false
     end
@@ -47,7 +47,7 @@ RSpec.describe Tools::FileDeleteTool do
       list.add_file('gone.txt', :rw)
       list.add_file('gone.txt', :d)
 
-      described_class.new(list, session.file_cache).execute('path' => 'gone.txt')
+      described_class.new(list, cache).execute('path' => 'gone.txt')
 
       expect(list.deletable?('gone.txt')).to be(false)
       expect(list.writable?('gone.txt')).to be(false)
@@ -81,7 +81,7 @@ RSpec.describe Tools::FileDeleteTool do
       list.add_dir('tmp/keep/9', :d)
 
       expect(UI::Dialog).not_to receive(:new)
-      result = described_class.new(list, session.file_cache).execute('path' => 'tmp/keep/9/x.txt')
+      result = described_class.new(list, cache).execute('path' => 'tmp/keep/9/x.txt')
       expect(result).to start_with('ok: file')
     end
   end
@@ -137,28 +137,25 @@ RSpec.describe Tools::FileDeleteTool do
   # Issue #170: a deleted file has no digest to keep - the cache entry goes with
   # it, so a later read of a NEW file at the same path is not compared against
   # the dead one.
-  it 'drops the digest cache entry when a session is attached' do
+  it 'drops the digest cache entry when a cache is attached' do
     Dir.mktmpdir do |dir|
       path = File.join(dir, 'a.txt')
       File.write(path, "one\n")
-      sess = session
-      sess.file_cache.record(path, 'deadbeef', workdir: dir)
-      expect(sess.file_cache.known?(path, workdir: dir)).to be true
+      sess = cache
+      sess.record(path, 'deadbeef', workdir: dir)
+      expect(sess.known?(path, workdir: dir)).to be true
 
       list = file_list(dir)
       list.add_file('a.txt', :d)
-      described_class.new(list, sess.file_cache).execute('path' => 'a.txt')
+      described_class.new(list, sess).execute('path' => 'a.txt')
 
-      expect(sess.file_cache.known?(path, workdir: dir)).to be false
-      expect(sess.file_cache.to_h).to be_empty
+      expect(sess.known?(path, workdir: dir)).to be false
+      expect(sess.to_h).to be_empty
     end
   end
 
-  # session is OPTIONAL here, and dropping a cache entry is a Session's own
-  # business, so no session means nothing to drop. The one-hop guard
-  # @session&.file_cache called .clear on nil AFTER the file was already deleted
-  # (&. covers only the NEXT send), so the model was told a successful delete had
-  # failed (issue #335).
+  # The cache is OPTIONAL here, so no cache means nothing to drop - the tool
+  # must still report a successful delete (issue #335).
   it 'deletes fine with no session at all (the cache step is optional)' do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, 'a.txt'), "x\n")
@@ -178,7 +175,7 @@ RSpec.describe Tools::FileDeleteTool do
       list = file_list(dir)
       list.add_file('a.txt', :d)
 
-      expect { described_class.new(list, session.file_cache).execute('path' => 'a.txt') }.not_to output.to_stdout
+      expect { described_class.new(list, cache).execute('path' => 'a.txt') }.not_to output.to_stdout
     end
   end
 

@@ -13,7 +13,7 @@ require 'commands/compact_command'
 # the task thread. Specs stub Task.run and execute the block synchronously,
 # so the block sees no active Task and emit_line writes to the console.
 RSpec.describe Commands::CompactCommand do
-  let(:session) { Session.new('system prompt') }
+  let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
   let(:result) do
     {
       summary: 'summary text',
