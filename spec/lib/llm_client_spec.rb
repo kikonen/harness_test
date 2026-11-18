@@ -2,14 +2,16 @@
 
 require 'spec_helper'
 require 'logger'
+require 'model_config'
 require 'llm_client'
 
 RSpec.describe LLMClient do
   let(:logger) { Logger.new(File::NULL) }
 
+  # LLMClient reads its per-connection live state from a ModelConfig (#286).
   def client_with(options = {})
     base  = { base_url: 'http://127.0.0.1:11434', model: 'test-model' }
-    described_class.new(base.merge(options), logger)
+    described_class.new(ModelConfig.new(base.merge(options)), logger)
   end
 
   describe 'backend selection' do
@@ -26,11 +28,12 @@ RSpec.describe LLMClient do
     end
 
     it 'rebuilds the backend when options[:api] changes (a /model switch)' do
-      options = { base_url: 'http://127.0.0.1:11434', model: 'test-model' }
-      client  = described_class.new(options, logger)
+      config = ModelConfig.new(
+        { base_url: 'http://127.0.0.1:11434', model: 'test-model' })
+      client  = described_class.new(config, logger)
       expect(client.backend).to be_a(LLM::OpenAIBackend)
 
-      options[:api] = 'ollama'
+      config.api = 'ollama'
       expect(client.backend).to be_a(LLM::OllamaBackend)
     end
   end
@@ -50,7 +53,7 @@ RSpec.describe LLMClient do
   # all, and a failed request logged nothing.
   describe 'error logging' do
     let(:options) { { base_url: 'http://127.0.0.1:11434', model: 'test-model' } }
-    let(:client)  { described_class.new(options, logger) }
+    let(:client)  { described_class.new(ModelConfig.new(options), logger) }
 
     def stub_error!(code, body)
       resp = double('resp', is_a?: false, code: code.to_s, body: body)
@@ -91,7 +94,7 @@ RSpec.describe LLMClient do
   # in that split so the log stays followable without the flag.
   describe 'raw response logging' do
     let(:options) { { base_url: 'http://127.0.0.1:11434', model: 'test-model' } }
-    let(:client)  { described_class.new(options, logger) }
+    let(:client)  { described_class.new(ModelConfig.new(options), logger) }
     let(:resp_body) do
       JSON.generate(choices: [{ message: { role: 'assistant', content: 'hi' } }])
     end

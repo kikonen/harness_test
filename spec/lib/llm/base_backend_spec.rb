@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'logger'
 require 'stringio'
 require 'json'
+require 'model_config'
 require 'llm/base_backend'
 
 # Request/response logging in the shared backend machinery: one REQ line per
@@ -24,7 +25,7 @@ RSpec.describe LLM::BaseBackend do
     private
 
     def build_body(messages, _tools, stream: false)
-      { model: @options[:model], messages: messages, stream: stream }
+      { model: @config.model, messages: messages, stream: stream }
     end
 
     # Returns the raw JSON so the usage of either wire shape is visible.
@@ -69,7 +70,7 @@ RSpec.describe LLM::BaseBackend do
     { base_url: 'http://127.0.0.1:11434/v1', model: 'test-model', api: 'openai',
       retry_count: 2, retry_delay: 0 }
   end
-  let(:backend) { MinimalBackend.new(options, logger) }
+  let(:backend) { MinimalBackend.new(ModelConfig.new(options), logger) }
   let(:http_stub) { StubHTTP.new([StubResponse.new(200, '{"usage":{}}')]) }
 
   before { allow(KeepAliveHTTP).to receive(:new).and_return(http_stub) }

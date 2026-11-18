@@ -14,7 +14,9 @@ require_relative "harness_error"
 # back to the profile value.
 #
 # Kept as its own object (rather than inlined in SessionManager) so the
-# parameter-override logic has a single, testable home.
+# parameter-override logic has a single, testable home. It writes into a
+# Harness' own ModelConfig (per-connection live state), so a /param on one
+# agent never changes another agent's parameters.
 class ParamOverrides
   # The adjustable parameters and how their values are parsed. The two
   # strings 'default' (reset) and 'off' (reasoning_effort: use the server's
@@ -39,14 +41,14 @@ class ParamOverrides
   LIST_TITLE = "Model parameters (adjust with /param <key> <value>, " \
     "reset with 'default'):"
 
-  attr_reader :options
+  attr_reader :config
 
-  # options: the shared options hash - mutated in place so the LLM call and
-  # the compact trigger (which both read options) see changes immediately.
+  # config: this Harness' ModelConfig - mutated in place so the backend and the
+  # compact trigger (which both read it) see changes immediately.
   # profile: a callable returning the active profile's value hash (or nil when
   # no profile is configured) - the source of the "default" value.
-  def initialize(options, profile:)
-    @options   = options
+  def initialize(config, profile:)
+    @config    = config
     @profile   = profile
     @overrides = {}
   end
@@ -115,12 +117,12 @@ class ParamOverrides
 
     if resetting
       @overrides.delete(key)
-      @options[key] = profile_value(key)
+      @config.param_set(key, profile_value(key))
       return "#{key}: reset to #{display_value(profile_value(key))} (profile default)"
     end
 
     @overrides[key] = { value: parsed, raw: value.to_s }
-    @options[key]   = parsed
+    @config.param_set(key, parsed)
     "#{key}: #{display_value(parsed)} (session override)"
   end
 
@@ -135,10 +137,11 @@ class ParamOverrides
   end
 
   # The active profile's own value for key (nil when the profile leaves it
-  # unset, so the server default applies).
+  # unset, so the server default applies). With no profile configured the
+  # ModelConfig's own seed value stands in.
   def profile_value(key)
     prof = @profile.call
-    prof ? prof[key.to_sym] : @options[key.to_sym]
+    prof ? prof[key.to_sym] : @config.param(key)
   end
 
   # The reasoning effort to show in the status line (issue #219): the
@@ -154,8 +157,8 @@ class ParamOverrides
     value.nil? ? "default" : value.to_s
   end
 
-  # Re-apply every override into options (after a profile change / resume)
-  # so the overrides keep winning over the newly-applied profile values.
+  # Re-apply every override into the ModelConfig (after a profile change /
+  # resume) so the overrides keep winning over the newly-applied profile values.
   def restore!
     @overrides.each { |key, rec| apply_one(key, rec[:value]) }
   end
@@ -184,6 +187,6 @@ class ParamOverrides
     return unless overrideable?(key)
     return if value.nil?
 
-    @options[key.to_sym] = value
+    @config.param_set(key, value)
   end
 end

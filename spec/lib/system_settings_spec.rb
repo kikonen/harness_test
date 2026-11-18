@@ -15,19 +15,17 @@ RSpec.describe SystemSettings do
       expect(s.yolo?).to be(false)
       expect(s.stream?).to be(false)
       expect(s.markdown?).to be(false)
-      expect(s.plan?).to be(false)
       expect(s.command_safety_auto_approve).to be(false)
       expect(s.denylist_safe_approve?).to be(false)
       expect(s.output_palette.name).to eq('default')
     end
 
     it 'coerces truthy junk to OFF (only a literal true is ON)' do
-      s = build(yolo: 'yes', stream: 1, markdown: 'true', plan: 'x')
+      s = build(yolo: 'yes', stream: 1, markdown: 'true')
 
       expect(s.yolo?).to be(false)
       expect(s.stream?).to be(false)
       expect(s.markdown?).to be(false)
-      expect(s.plan?).to be(false)
     end
   end
 
@@ -120,14 +118,6 @@ RSpec.describe SystemSettings do
       expect(s.markdown?).to be(false)
     end
 
-    it 'toggle_plan reports the badge only when ON, nil when OFF' do
-      s = build
-
-      expect(s.toggle_plan).to eq('PLAN')
-      expect(s.plan_mode_label).to eq('PLAN')
-      expect(s.toggle_plan).to be_nil
-      expect(s.plan_mode_label).to be_nil
-    end
   end
 
   # Invariant #221: a resumed run's session-persisted postures win over the
@@ -160,14 +150,13 @@ RSpec.describe SystemSettings do
       expect(s.output_palette.name).to eq('default')
     end
 
-    it 'never touches the config-only flags (auto-approve, denylist, plan)' do
+    it 'never touches the config-only flags (auto-approve, denylist)' do
       s = build(command_safety_auto_approve: true,
-                command_safety_denylist_safe_approve: true, plan: true)
-      s.restore_persisted({ command_safety_auto_approve: false, plan: false })
+                command_safety_denylist_safe_approve: true)
+      s.restore_persisted({ command_safety_auto_approve: false })
 
       expect(s.command_safety_auto_approve).to be(true)
       expect(s.denylist_safe_approve?).to be(true)
-      expect(s.plan?).to be(true)
     end
   end
 

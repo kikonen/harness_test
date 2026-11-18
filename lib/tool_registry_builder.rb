@@ -64,11 +64,16 @@ class ToolRegistryBuilder
   # session's saved servers against it (#48, #405). Built here, not in Harness.
   attr_reader :mcp
 
-  def initialize(file_list:, file_cache:, options:, settings:, logger:, locator:,
-                 harness: nil)
+  def initialize(
+    file_list:,
+    file_cache:,
+    settings:,
+    logger:,
+    locator:,
+    harness: nil
+  )
     @file_list = file_list
     @file_cache = file_cache
-    @options   = options
     @settings  = settings
     @logger    = logger
     @locator   = locator
@@ -108,15 +113,16 @@ class ToolRegistryBuilder
     registry.register(
       Tools::RunCommandTool.new(
         @file_list,
-        @options,
+        @settings,
         harness: @harness))
     registry.register(
       Tools::WebFetchTool.new(
         @file_list,
-        @options,
+        @settings,
         logger: @logger))
     registry.register(Tools::ToolsListTool.new(registry))
     registry.register(Tools::ToolsSearchTool.new(registry))
+
     # The FS-backed stores (memories, plans, skills) are not Harness state: each
     # is a stateless reader over its on-disk dir, so the tools that serve them get
     # their own instance built here from the run's workdir. /memory, /plans and
@@ -126,6 +132,7 @@ class ToolRegistryBuilder
     skills    = Skills.new(@file_list.workdir)
     memories  = Memories.new(@file_list.workdir, max_memories: @settings.max_memories)
     plans     = Plans.new(@file_list.workdir)
+
     registry.register(Tools::SkillsListTool.new(skills))
     registry.register(Tools::SkillsReadTool.new(skills))
     registry.register(Tools::MemoryListTool.new(memories))
@@ -137,13 +144,16 @@ class ToolRegistryBuilder
     registry.register(Tools::PlanAddTool.new(plans))
     registry.register(Tools::PlanDeleteTool.new(plans))
     registry.register(Tools::PlanSearchTool.new(plans))
+
     # issue #279: let the model FIND a saved session by what it was ABOUT, not
     # just count them. Read-only, over the run's own SessionLocator (the single
     # place that knows where sessions live) - no Harness, no resume, no delete.
     registry.register(Tools::SessionsSearchTool.new(@locator))
+
     # MCP last, so a server tool whose name collides with a built-in is skipped
     # (the built-in wins) and the servers connect after the run's own tools exist.
     @mcp.load(registry, @settings.mcp_servers)
+
     registry
   end
 end

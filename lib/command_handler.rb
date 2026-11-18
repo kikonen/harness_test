@@ -214,14 +214,14 @@ class CommandHandler
     # confirmed.
     runner = CommandRunner.new(
       @file_list,
-      @options,
+      @settings,
       label: "shell",
       harness: @harness, # failed commands traced in harness.log (issue #185)
       title_fmt: CommandRunner::BANG_TITLE,
       ui: @ui,
       list: :shell,
       # Default true: bang commands keep the confirmation dialog (issue #221).
-      auto_approve_all: @options[:bang_requires_confirmation] == false)
+      auto_approve_all: @settings.bang_requires_confirmation == false)
     result = runner.run(command).to_s
 
     if result.start_with?("error: user denied")

@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'logger'
+require 'model_config'
 require 'llm/ollama_backend'
 
 RSpec.describe LLM::OllamaBackend do
@@ -9,7 +10,9 @@ RSpec.describe LLM::OllamaBackend do
   let(:options) do
     { base_url: 'http://127.0.0.1:11434', model: 'test-model', api: 'ollama' }
   end
-  let(:backend) { described_class.new(options, logger) }
+  # ModelConfig holds the SAME hash, so the per-example options[:x] mutations
+  # below are still read by the backend on the next request (#286).
+  let(:backend) { described_class.new(ModelConfig.new(options), logger) }
 
   def body(messages, tools: nil, stream: false)
     backend.send(:build_body, messages, tools, stream: stream)

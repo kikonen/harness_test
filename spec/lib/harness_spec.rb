@@ -83,8 +83,8 @@ RSpec.describe Harness do
     # the four session-persisted postures are applied over it by
     # Harness#apply_resume_state (SystemSettings#restore_persisted), so the saved
     # choice wins over the config (#221); the config-only flags stay as resolved.
-    described_class.new(opts, file_list, session_id: session_id, resume_data: resume_data,
-                        settings: SystemSettings.from_options(opts))
+    described_class.new(file_list, settings: SystemSettings.from_options(opts),
+                        session_id: session_id, resume_data: resume_data)
   end
 
   # The on-disk path of a session id in this spec's workdir (#207 layout).
@@ -1267,7 +1267,7 @@ RSpec.describe Harness do
         { content: nil, tool_calls: [{ id: 'c3', function: { name: 'test.echo', arguments: '{"text":"c"}' } }] }
       ]
       harness = build_harness_with_responses(rounds)
-      harness.options[:max_tool_iterations] = 2
+      harness.settings[:max_tool_iterations] = 2
 
       expect { harness.call_llm }.to raise_error(ToolLoopError, /exceeded max tool iterations \(2\)/)
     end
@@ -1760,7 +1760,7 @@ RSpec.describe Harness do
 
     it 'names the configured limit when one is set' do
       h = build_harness_with_responses([{ content: 'partial', finish_reason: 'length' }])
-      h.options[:max_tokens] = 4096
+      h.model_config.max_tokens = 4096
       h.session.add_user('go')
 
       h.call_llm
@@ -1994,7 +1994,7 @@ RSpec.describe Harness do
 
       expect(on.precheck_batch_safety(run_command_calls('echo a', 'echo b')))
         .to be_nil
-      expect(on.options[:safety_verdicts]).to be_nil
+      expect(on.settings.safety_verdicts).to be_nil
       expect(client).not_to have_received(:chat)
       expect(File.read(on.session_log_path))
         .to include('safety pre-check skipped (YOLO consumes no verdicts)')
@@ -2009,7 +2009,7 @@ RSpec.describe Harness do
     it 'is a no-op for a batch with fewer than two run.command calls' do
       expect(harness.precheck_batch_safety(run_command_calls('echo hi')))
         .to be_nil
-      expect(harness.options[:safety_verdicts]).to be_nil
+      expect(harness.settings.safety_verdicts).to be_nil
     end
 
     it 'caches {command => verdict} in options when the batch has two or more' do
@@ -2025,7 +2025,7 @@ RSpec.describe Harness do
 
       expect(verdicts).to eq('ruby -c lib/a.rb' => 'safe: syntax check',
                              'bundle exec rspec' => 'safe: writes to tmp only')
-      expect(harness.options[:safety_verdicts]).to eq(verdicts)
+      expect(harness.settings.safety_verdicts).to eq(verdicts)
     end
 
     # issue #344: the batch consumer binds by the number the model wrote, so an
@@ -2089,7 +2089,7 @@ RSpec.describe Harness do
 
       expect(harness.precheck_batch_safety(
                run_command_calls('a', 'b'))).to be_nil
-      expect(harness.options[:safety_verdicts]).to be_nil
+      expect(harness.settings.safety_verdicts).to be_nil
     end
 
     # issue #241: allowlisted commands never reach a consent dialog (the
@@ -2845,11 +2845,11 @@ RSpec.describe Harness do
       expect(h.tool_registry.names).to include('web.fetch')
     end
 
-    it 'reads this run\'s options and its FileList, not copies' do
+    it 'reads this run\'s settings and its FileList, not copies' do
       h = build_harness
       tool = h.tool_registry.get('web.fetch')
 
-      expect(tool.instance_variable_get(:@options)).to equal(h.options)
+      expect(tool.instance_variable_get(:@options)).to equal(h.settings)
       expect(tool.instance_variable_get(:@workdir)).to eq(workdir)
       expect(tool.instance_variable_get(:@logger)).to equal(h.logger)
     end
@@ -3022,7 +3022,8 @@ RSpec.describe Harness, 'tool-result images (issue #449)' do
              num_ctx: 65_536 }.merge(options)
     session_id  = opts.delete(:session_id)
     resume_data = opts.delete(:resume_data)
-    described_class.new(opts, file_list, session_id: session_id, resume_data: resume_data)
+    described_class.new(file_list, settings: SystemSettings.from_options(opts),
+                        session_id: session_id, resume_data: resume_data)
   end
 
   def image(bytes: 'x' * 100, mime: 'image/png')
@@ -3036,8 +3037,10 @@ RSpec.describe Harness, 'tool-result images (issue #449)' do
   def build_harness_vision(options = {})
     h = build(options)
     # A profile that declares vision (SessionManager#vision? reads the active one).
-    h.options[:model_profiles] = [{ name: 'v', model: 'vis', vision: true }]
-    h.options[:active_model]   = 'v'
+    # model_profiles is run-wide config (settings); active_model is live per-
+    # connection state (#286), so it lands on the Harness' ModelConfig.
+    h.settings[:model_profiles] = [{ name: 'v', model: 'vis', vision: true }]
+    h.model_config.active_model  = 'v'
     h
   end
 

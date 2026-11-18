@@ -4,34 +4,83 @@ require_relative "ui/palette"
 
 # -- SystemSettings -------------------------------------------------------
 
-# The run-wide state the harness and its commands share: the consent/posture
-# flags (and the toggle + label logic that used to live on Harness), plus the
-# resolved config values a consumer reads once at startup. Owned by the CLI and
-# passed around; it is the single home of this state, replacing both the
-# `options` bag and the scattered HarnessConfig getter reads.
+# The run's single source of resolved CONFIG: a typed view + behavior layer over
+# the resolved CLI options hash, which it OWNS. Owned by the CLI and handed to
+# every Harness (sub-agents included) as the one settings object, so no other
+# object carries or reads a raw options hash.
 #
-# Static config is resolved once (from CLIOptions) and never rewritten here.
-# The postures ARE live state: a /yolo flip changes them in place and the next
-# reader sees it (the FileList posture lambda reads yolo? live). The model
-# parameters are still resolved into @options here for now; moving them to a
-# dedicated mutable object is a later step of this refactor
-# (doc/harness_job_design.md).
+# Settings carries the run config and the shared model CATALOGUE; it does NOT
+# carry mutable per-connection state. A #286 sub-agent shares this one object,
+# so the live model / endpoint / sampling values are seeded from settings into
+# each Harness' own ModelConfig and mutated there - /model and /param never
+# write back here, or one switch would change every agent at once.
+#
+# Two access routes, deliberately distinct (#286):
+#   * Harness and its collaborators read NAMED accessors - compact_*, retry_*,
+#     yolo?, and the model SEED values ModelConfig clones. These are read-only
+#     here.
+#   * "Others" (the tools, CommandRunner) read a single key through the
+#     designated [] reader. [] is the single-key reader/writer; there is no
+#     full options accessor, because re-exposing the whole mutable hash is what
+#     smuggling the bag back under a new name would be.
 class SystemSettings
   # How many entries of the run record a session saves and a resumed run
-  # redraws (issue #458). 0 disables the run record entirely. Overridden by
-  # the config 'resume: replay_entries:' key.
+  # redraws (issue #458). 0 disables the run record entirely.
   DEFAULT_RESUME_REPLAY_ENTRIES = 30
 
-  # The posture + consent state. Output palette is always a UI::Palette.
-  # markdown_max_width is static config (read once, never toggled live) but
-  # lives here so a posture command that reports it (markdown) needs no
-  # Harness. The three output-buffer limits are static config too (issue #286):
-  # the run's owner (CLI) builds the JobRegistry from them.
-  attr_reader :output_palette,
-    :markdown_max_width,
-    :output_tail_memory,
-    :output_tasks_kept,
-    :resume_replay_entries
+  # Config read once and never rewritten: the run's owner (CLI) and Harness
+  # access these by name; nothing else needs them.
+  STATIC_KEYS = %i[
+    system_file
+    step_display
+    max_tool_iterations
+    compact_recent
+    compact_auto_threshold
+    compact_reserved
+    compact_max_size
+    auto_save
+    mcp_images_dir
+    verbose
+    web_fetch_allow_private
+    bang_requires_confirmation
+    retry_count
+    retry_delay
+    max_memories
+    default_model
+    output_tail_memory
+    output_tasks_kept
+    markdown_max_width
+  ].freeze
+
+  # The model SEED values: read-only here. Each Harness clones them into its
+  # own ModelConfig, which is where /model and /param mutate them.
+  MODEL_KEYS = %i[
+    model
+    active_model
+    base_url
+    api
+    token
+    vision
+    num_ctx
+    max_tokens
+    num_predict
+    reasoning_effort
+    temperature
+    top_p
+    top_k
+    min_p
+    presence_penalty
+    repeat_penalty
+    mcp_image_limits
+  ].freeze
+
+  STATIC_KEYS.each do |name|
+    define_method(name) { @options[name] }
+  end
+
+  MODEL_KEYS.each do |name|
+    define_method(name) { @options[name] }
+  end
 
   # Read the run-wide values out of the resolved CLI options hash. A hand-built
   # hash (specs, library users) works the same way a CLI-resolved one does.
@@ -41,101 +90,41 @@ class SystemSettings
 
   def initialize(options)
     @options = options
-
-    @yolo      = options[:yolo] == true
-    @stream    = options[:stream] == true
-    @markdown  = options[:markdown] == true
-    @plan      = options[:plan] == true
+    # The palette is the one value resolved (not just passed through): it is
+    # validated here so every route (CLI, /palette, resume) shares the name check.
     @output_palette = UI::Palette.fetch(options[:output_palette])
-    @markdown_max_width = options[:markdown_max_width]
-
-    # Buffer limits pass through UNresolved (nil = the buffer/registry's own
-    # built-in default) except resume_replay_entries, whose default is the
-    # saved-window semantics stated above.
-    @output_tail_memory = options[:output_tail_memory]
-    @output_tasks_kept = options[:output_tasks_kept]
-    entries = options[:resume_replay_entries]
-    @resume_replay_entries = entries.nil? ? DEFAULT_RESUME_REPLAY_ENTRIES : entries.to_i
-
-    @command_safety_check             = options[:command_safety_check] == true
-    @command_safety_auto_approve      = options[:command_safety_auto_approve] == true
-    @command_safety_denylist_safe_approve =
-      options[:command_safety_denylist_safe_approve] == true
   end
 
-  # -- Consent posture -----------------------------------------------------
-
-  def command_safety_check
-    @command_safety_check
+  # Designated single-key reader/writer for consumers that are not Harness or its
+  # collaborators (the tools, CommandRunner). Hands back one key, not the hash.
+  def [](key)
+    @options[key]
   end
 
-  def command_safety_auto_approve
-    @command_safety_auto_approve
+  def []=(key, value)
+    @options[key] = value
   end
 
-  def command_safety_auto_approve=(val)
-    @command_safety_auto_approve = (val == true)
+  # -- Static config with a resolved default -------------------------------
+
+  # The run-record saved-window size; the built-in default applies when absent.
+  def resume_replay_entries
+    entries = @options[:resume_replay_entries]
+    entries.nil? ? DEFAULT_RESUME_REPLAY_ENTRIES : entries.to_i
   end
 
-  def command_safety_auto_approve_effective?
-    command_safety_check && command_safety_auto_approve
-  end
+  # -- Shared model catalogue (fixed config, issue #286) -------------------
 
-  def yolo?
-    @yolo
-  end
-
-  def yolo=(val)
-    @yolo = (val == true)
-  end
-
-  def toggle_yolo
-    @yolo = !@yolo
-    yolo_mode_label
-  end
-
-  def command_mode_label
-    return "YOLO" if @yolo
-    return "AUTO-APPROVE" if command_safety_auto_approve_effective?
-
-    "MANUAL"
-  end
-
-  # -- Model catalogue (static config, issue #286) -------------------------
-
-  # All configured profiles (array of hashes), or [] when none. Read live off
-  # @options (the catalogue is fixed config, but @options is the one hash the
-  # whole run shares and a profile switch may touch it after construction).
+  # All configured profiles (array of hashes), or [] when none.
   def model_profiles
     Array(@options[:model_profiles])
   end
 
-  # Name (or id) of the configured default model, or nil.
-  def default_model
-    @options[:default_model]
-  end
-
-  # Name (or id) of the model THIS run is using, or nil. Live runtime state
-  # (a /model switch writes @options[:active_model] / [:model]); kept here so a
-  # command reads every model fact from the settings, not through Harness.
-  def active_model_name
-    @options[:active_model] || @options[:model]
-  end
-
   # A configured profile by its label (:name) or raw model id (:model), or nil
-  # when absent. Lookup over the fixed catalogue; the active-model pointer that
-  # feeds it is runtime state owned by SessionManager.
+  # when absent. The catalogue is run-wide; applying a profile to one agent's
+  # ModelConfig is that Harness' job, not a settings mutation.
   def find_profile(name)
     model_profiles.find { |p| p[:name] == name || p[:model] == name }
-  end
-
-  # -- Tool-registry config (static, read once) ----------------------------
-
-  # The note cap for the run's memory store (config 'max_memories:', issue #435).
-  # Passes through UNresolved (nil -> the store's own built-in default) so the
-  # tool registry reads every run setting off the settings, not the options bag.
-  def max_memories
-    @options[:max_memories]
   end
 
   # The declared MCP servers (config 'mcp_servers:'), or nil when none. The
@@ -144,8 +133,22 @@ class SystemSettings
     @options[:mcp_servers]
   end
 
-  def yolo_mode_label
-    @yolo ? "YOLO ON" : "YOLO OFF"
+  # -- Consent posture -----------------------------------------------------
+
+  def command_safety_check
+    @options.fetch(:command_safety_check, false)
+  end
+
+  def command_safety_auto_approve
+    @options.fetch(:command_safety_auto_approve, false)
+  end
+
+  def command_safety_auto_approve=(val)
+    @options[:command_safety_auto_approve] = (val == true)
+  end
+
+  def command_safety_auto_approve_effective?
+    command_safety_check && command_safety_auto_approve
   end
 
   # issue #389: the denylist-safe override (config-only, no live toggle). It is
@@ -154,74 +157,111 @@ class SystemSettings
   # meaningful while the safety check is on. Rationale:
   # doc/denylist_safe_approve_design.md.
   def denylist_safe_approve?
-    @command_safety_denylist_safe_approve
+    @options[:command_safety_denylist_safe_approve] == true
   end
 
   def denylist_safe_approve=(val)
-    @command_safety_denylist_safe_approve = (val == true)
+    @options[:command_safety_denylist_safe_approve] = (val == true)
+  end
+
+  def yolo?
+    @options[:yolo] == true
+  end
+
+  def yolo=(val)
+    @options[:yolo] = (val == true)
+  end
+
+  def toggle_yolo
+    self.yolo = !yolo?
+    yolo_mode_label
+  end
+
+  def yolo_mode_label
+    yolo? ? "YOLO ON" : "YOLO OFF"
+  end
+
+  def command_mode_label
+    return "YOLO" if yolo?
+    return "AUTO-APPROVE" if command_safety_auto_approve_effective?
+
+    "MANUAL"
+  end
+
+  # The {command => verdict} cache #precheck_batch_safety writes and
+  # CommandRunner reads. A named store on the settings (not a key both sides
+  # reach through the raw hash) so the two consent consumers share one place.
+  def safety_verdicts
+    @options[:safety_verdicts]
+  end
+
+  def safety_verdicts=(val)
+    @options[:safety_verdicts] = val
   end
 
   # -- Streaming posture (issue #28) ---------------------------------------
 
   def stream?
-    @stream
+    @options[:stream] == true
   end
 
   def stream=(val)
-    @stream = (val == true)
+    @options[:stream] = (val == true)
   end
 
   def toggle_stream
-    @stream = !@stream
+    self.stream = !stream?
     stream_mode_label
   end
 
   # Badge label only when streaming is ON: the badge names a NON-default
   # posture (the same rule as YOLO / AUTO-APPROVE), and buffered is the default.
   def stream_mode_label
-    @stream ? "STREAM" : nil
+    stream? ? "STREAM" : nil
   end
 
   # -- Markdown rendering posture (issue #106) -----------------------------
 
   def markdown?
-    @markdown
+    @options[:markdown] == true
   end
 
   def markdown=(val)
-    @markdown = (val == true)
+    @options[:markdown] = (val == true)
   end
 
   def toggle_markdown
-    self.markdown = !@markdown
+    self.markdown = !markdown?
     markdown? ? "MARKDOWN ON" : "MARKDOWN OFF"
   end
 
-  # -- Planning posture (issue #359) ---------------------------------------
-
-  def plan?
-    @plan
-  end
-
-  def plan=(val)
-    @plan = (val == true)
-  end
-
-  def toggle_plan
-    @plan = !@plan
-    plan_mode_label
-  end
-
-  def plan_mode_label
-    @plan ? "PLAN" : nil
-  end
+  # NOTE: the planning posture (issue #359) is deliberately NOT here. It is
+  # per-conversation Harness state - settings is run-wide and shared with every
+  # agent, so a mutable [PLAN] toggle here would force every sub-agent into
+  # planning mode at once. Harness owns it, seeded from the config value.
 
   # -- Output palette (issue #303) -----------------------------------------
+
+  attr_reader :output_palette
 
   # Resolved and validated HERE so every route (CLI, /palette, resume) goes
   # through the same name check. 'none' paints nothing; nil resolves to default.
   def output_palette=(name)
     @output_palette = UI::Palette.fetch(name)
+  end
+
+  # -- Model SEED helpers (read-only; live mutation lives in ModelConfig) --
+
+  # The seed active-model name (active_model || model), used by the catalogue
+  # display when no per-Harness ModelConfig is in play.
+  def active_model_name
+    active_model || model
+  end
+
+  # The seed value of a model parameter (nil when unset). ModelConfig#param
+  # reads the live per-connection value.
+  def param(key)
+    @options[key.to_sym]
   end
 
   # Restore the session-persisted postures a resumed run saved. Called with the

@@ -25,11 +25,13 @@ class LLMClient
   # (and /model switching) can observe which API type is active.
   def backend = current_backend
 
-  # options: hash with :base_url (server root), :model, :token, :api
-  # ('openai' | 'ollama', default 'openai') and the sampling/retry
-  # parameters (read on every request so model switches take effect).
-  def initialize(options, logger)
-    @options = options
+  # config: this Harness' own ModelConfig - it owns the server root (base_url),
+  # model, token, api ('openai' | 'ollama', default 'openai') and the
+  # sampling/retry parameters. They are read on every request so a live /model
+  # or /param change takes effect without rebuilding the client. Per-Harness,
+  # not the shared settings (a sub-agent may use a different model).
+  def initialize(config, logger)
+    @config  = config
     @backend = build_backend(logger)
   end
 
@@ -46,20 +48,20 @@ class LLMClient
 
   private
 
-  # A /model switch mutates the shared options hash in place (the same
-  # object the backends were built from), so sampling parameters and
-  # base_url always apply - but :api selects the backend class and must
-  # trigger a rebuild. Checked lazily before every request: cheap (a symbol
-  # compare) and keeps the /model wiring untouched.
+  # A /model switch mutates this client's own ModelConfig in place (the same
+  # object the backends were built from), so sampling parameters and base_url
+  # always apply - but api selects the backend class and must trigger a rebuild.
+  # Checked lazily before every request: cheap (a symbol compare) and keeps the
+  # /model wiring untouched.
   def current_backend
-    return @backend if LLM.backend_type(@options[:api]) == @backend.api_type
+    return @backend if LLM.backend_type(@config.api) == @backend.api_type
 
     @backend = build_backend(@backend.logger)
   end
 
   def build_backend(logger)
-    LLM.backend_type(@options[:api]) == LLM::OLLAMA ?
-      LLM::OllamaBackend.new(@options, logger) :
-      LLM::OpenAIBackend.new(@options, logger)
+    LLM.backend_type(@config.api) == LLM::OLLAMA ?
+      LLM::OllamaBackend.new(@config, logger) :
+      LLM::OpenAIBackend.new(@config, logger)
   end
 end

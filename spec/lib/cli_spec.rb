@@ -97,6 +97,8 @@ RSpec.describe CLI do
   describe 'identity-first bootstrap (issue #276)' do
     it 'a fresh run puts log, history and session dir under its own id' do
       cli  = build_cli
+      cli.setup
+
       id   = cli.harness.session.session_id
 
       expect(session_dirs).to eq([id])
@@ -111,6 +113,8 @@ RSpec.describe CLI do
       seed_saved_session(saved)
 
       cli = described_class.new(options.merge(resume: saved[0, 8]), ui)
+      cli.setup
+
       id  = cli.harness.session.session_id
 
       expect(id).to eq(saved)
@@ -132,6 +136,7 @@ RSpec.describe CLI do
                  File.join(workdir, '.harness', 'sessions', older, 'session.json'))
 
       cli = described_class.new(options.merge(continue: true), ui)
+      cli.setup
 
       expect(cli.harness.session.session_id).to eq(newer)
       # Same single id for log, history and the session dir - and only the two
@@ -147,7 +152,8 @@ RSpec.describe CLI do
 
     it 'a typo in --resume raises BEFORE any session directory exists' do
       expect {
-        described_class.new(options.merge(resume: 'deadbeef'), ui)
+        cli = described_class.new(options.merge(resume: 'deadbeef'), ui)
+        cli.setup
       }.to raise_error(HarnessError, /no saved session matching 'deadbeef'/)
 
       # Nothing was built under a random id on the way to the failure.
@@ -164,8 +170,9 @@ RSpec.describe CLI do
       # dispatches the listing and returns the exit status the entry point
       # turns into exit. No SystemExit around CLI.new any more.
       cli = described_class.new(options.merge(list_sessions: true, model: nil), ui)
-      expect(cli.harness).to be_nil
+
       expect(cli.run).to eq(0)
+      expect(cli.harness).to be_nil
 
       expect(ui).to have_received(:puts).with(/Saved sessions \(1\)/)
       expect(ui).to have_received(:puts).with(/#{Regexp.escape(saved)}/)
@@ -190,8 +197,9 @@ RSpec.describe CLI do
       cli = described_class.new(
         options.merge(delete_session: saved[0, 8], model: nil), ui)
 
-      expect(cli.harness).to be_nil
       expect(cli.run).to eq(0)
+      expect(cli.harness).to be_nil
+
       expect(File.directory?(dir)).to be false
       expect(session_dirs).to eq([])
       expect(ui).to have_received(:puts).with(/Deleted session #{Regexp.escape(saved)}/)
@@ -217,7 +225,7 @@ RSpec.describe CLI do
 
       cli = described_class.new(
         options.merge(delete_session: gone, model: nil), ui)
-      cli.run
+      cli.process_args
 
       expect(session_dirs).to eq([keep])
     end
@@ -226,6 +234,8 @@ RSpec.describe CLI do
   describe '#session_log_path_display' do
     it 'is the per-session log path relative to the workdir' do
       cli = build_cli
+      cli.setup
+
       id  = cli.harness.session.session_id
 
       expect(cli.send(:session_log_path_display))
@@ -245,6 +255,7 @@ RSpec.describe CLI do
       seed_saved_session(saved)
 
       cli = described_class.new(options.merge(resume: saved), ui)
+      cli.setup
 
       expect(cli.harness.session.session_id).to eq(saved)
       expect(cli.harness.session.messages.map { |m| m[:content] }).to include('earlier prompt')
@@ -256,10 +267,12 @@ RSpec.describe CLI do
     # setup is idempotent about identity: a second call keeps the id the run
     # already owns and never mints a throwaway one (issues #123 / #135).
     it 'setup keeps the id this run already owns' do
-      cli = build_cli                    # fresh run: its own random id
+      # fresh run: its own random id
+      cli = build_cli
+      cli.setup
+
       id  = cli.harness.session.session_id
 
-      cli.setup
       expect(cli.harness.session.session_id).to eq(id)
       expect(session_dirs).to eq([id])
     end
@@ -270,6 +283,7 @@ RSpec.describe CLI do
   describe 'the run registry (issue #286)' do
     it 'builds the registry with the main turn as job #0' do
       cli = build_cli
+      cli.setup
 
       expect(cli.registry).not_to be_nil
       expect(cli.registry.jobs.map(&:kind)).to eq([:main])
@@ -292,6 +306,8 @@ RSpec.describe CLI do
       }))
 
       cli = described_class.new(options.merge(resume: saved), ui)
+      cli.setup
+
       tail = cli.registry.foreground_buffer.replay_tail
 
       expect(tail.map { |e| [e.type, e.origin] }).to eq([[:user, :user], [:list, :grant]])
@@ -330,6 +346,8 @@ RSpec.describe CLI do
 
     it 'names YOLO with the disaster floor still asking' do
       cli = build_cli
+      cli.setup
+
       stub_prompt_reader
       cli.harness.yolo = true
 
@@ -367,6 +385,7 @@ RSpec.describe CLI do
     it 'says files-only when servers are declared and no profile has vision' do
       allow(Mcp::ServerConnection).to receive(:new).and_return(fake_connection)
       cli = described_class.new(mcp_options, ui)
+
       stub_prompt_reader
 
       expect(ui).to receive(:puts)
@@ -486,6 +505,7 @@ RSpec.describe CLI do
       expect(access[:both][:dirs]).to include(cli.file_list.workdir)
       expect(access[:delete][:dirs]).to include(cli.file_list.workdir)
     end
+
     # The seed runs BEFORE the Harness restores a session (Session#restore
     # clears the list first), so a resumed run ends with exactly the grants its
     # session file saved: a /clear before saving is not silently undone by the
@@ -495,6 +515,8 @@ RSpec.describe CLI do
       seed_saved_session_with_grants(saved)
 
       cli = described_class.new(options.merge(resume: saved), ui)
+      cli.setup
+
       stored = cli.file_list.accessible_paths
 
       expect(stored[:both][:files]).to eq([File.expand_path('lib/foo.rb', workdir)])
@@ -558,6 +580,8 @@ RSpec.describe CLI do
   describe '#run' do
     it 'prints the session id and its log path in the banner' do
       cli = build_cli
+      cli.setup
+
       id  = cli.harness.session.session_id
       stub_prompt_reader
 
@@ -590,6 +614,8 @@ RSpec.describe CLI do
     # MCP tools are available.
     it 'reports MCP status notes in the banner' do
       cli = build_cli
+      cli.setup
+
       allow(cli.harness).to receive(:mcp_status_notes).and_return(
         ["MCP server 'fs' failed to start (RuntimeError: boom)"]
       )
@@ -608,7 +634,10 @@ RSpec.describe CLI do
     # the global stays nil and Ctrl+G is left exactly as Reline has it.
     it 'installs the resolved editor command on UI::Editor' do
       opts = options.merge(editor: 'nvim -R')
+
       cli  = described_class.new(opts, ui)
+      cli.setup
+
       allow(ui).to receive(:puts)
       stub_prompt_reader
 
@@ -632,6 +661,8 @@ RSpec.describe CLI do
     # this session's harness.log via ErrorText.detailed.
     it 'logs a failed auto-save WITH ITS FRAMES in the session log' do
       cli = build_cli
+      cli.setup
+
       cli.harness.session.add_user('keep this turn')
       allow(cli.harness.session_manager).to receive(:save_session)
         .and_raise(RuntimeError, 'save exploded')
@@ -662,9 +693,9 @@ RSpec.describe CLI do
       cli = build_cli
       allow(ui).to receive(:puts)
       stub_prompt_reader
-      id = cli.harness.session.session_id
 
       cli.run
+      id = cli.harness.session.session_id
 
       expect(File.file?(session_json(id))).to be(true)
     end
@@ -674,9 +705,9 @@ RSpec.describe CLI do
       cli = build_cli
       allow(ui).to receive(:puts)
       stub_prompt_reader
-      id = cli.harness.session.session_id
 
       cli.run
+      id = cli.harness.session.session_id
 
       # The session dir exists (the run wrote its harness.log under the id),
       # but no session.json was written for a run that changed nothing.
@@ -686,12 +717,14 @@ RSpec.describe CLI do
     it 'still saves a normal conversation (the empty? path is unchanged)' do
       Reline::HISTORY.clear
       cli = build_cli
+      cli.setup
       cli.harness.session.add_user('a real prompt')
+
       allow(ui).to receive(:puts)
       stub_prompt_reader
-      id = cli.harness.session.session_id
 
       cli.run
+      id = cli.harness.session.session_id
 
       expect(File.file?(session_json(id))).to be(true)
     end

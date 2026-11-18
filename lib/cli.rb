@@ -15,6 +15,7 @@ require_relative "session_locator"
 require_relative "command_handler"
 require_relative "prompt_reader"
 require_relative "ui"
+require_relative "session_logger"
 
 # -- CLI ------------------------------------------------------------------
 
@@ -45,17 +46,16 @@ class CLI
 
     @file_list = build_file_list
     @locator = SessionLocator.new(@options[:workdir])
+  end
 
-    # --list-sessions renders the saved-session list and stops: it needs no
-    # Harness and no session dir (issue #276). The mode is recorded here and
-    # dispatched by #run, so initialize never calls exit (issue #299).
-    @listing = !!@options[:list_sessions]
-    # --delete-session removes one saved session and stops, the same shape:
-    # no Harness, no session dir, dispatched by #run (issue #279).
-    @deleting = !@options[:delete_session].to_s.strip.empty?
-    return if @listing || @deleting
+  # Dispatch the argument-only modes (--list-sessions / --delete-session): run
+  # the one that was requested and hand back its exit status, or nil when this
+  # is a normal conversation run that still needs #setup.
+  def process_args
+    return 0 if list_sessions
+    return 0 if delete_session
 
-    setup
+    nil
   end
 
   # The heavy construction. Identity stays first (#276): the id is resolved
@@ -64,6 +64,10 @@ class CLI
   # --continue), whose conversation and grants Harness#restore applies while
   # building the session. There is no mid-run rebuild.
   def setup
+    return self if @setup_done
+
+    @setup_done = true
+
     @session_id ||= @locator.resolve_id(
       resume: @options[:resume],
       newest: !!@options[:continue])
@@ -76,8 +80,17 @@ class CLI
     # CLI no longer applies postures after construction. Ownership:
     # doc/harness_job_design.md.
     @settings = SystemSettings.from_options(@options)
-    @harness  = Harness.new(@options, @file_list,
-                            session_id:, resume_data:, settings: @settings)
+
+    # The log path is keyed by the session id the CLI resolved above, so the
+    # CLI builds the per-session logger here and injects it (with the settings)
+    # rather than letting the Harness mint its own (#286).
+    logger   = SessionLogger.build(@locator.session_log_path(session_id))
+    @harness = Harness.new(
+      @file_list,
+      settings: @settings,
+      session_id:,
+      resume_data:,
+      logger:)
 
     # The run record and its job list belong to the RUN, not to the single-LLM
     # turn engine (#286): the CLI owns the registry, builds it from the
@@ -88,7 +101,9 @@ class CLI
       max_memory: @settings.output_tail_memory || OutputBuffer::DEFAULT_MAX_MEMORY,
       max_saved: @settings.resume_replay_entries,
       tasks_kept: @settings.output_tasks_kept)
+
     @registry.add_job(kind: :main)
+
     if resume_data
       @registry.restore_replay_tail(resume_data[:replay_tail])
       saved_fg = resume_data[:foreground_job]
@@ -97,6 +112,7 @@ class CLI
         @harness.logger.info "foreground job restored: ##{@registry.foreground}"
       end
     end
+
     # The save side records from the registry the RUN owns (#286): SessionManager
     # is built by Harness, which holds no registry, so its owner injects it.
     @harness.session_manager.registry = @registry
@@ -112,7 +128,7 @@ class CLI
       ui: @ui,
       settings: @settings)
 
-    @harness
+    self
   end
 
   # Render the saved-session list (used by --list-sessions) and return the
@@ -121,12 +137,15 @@ class CLI
   # constructed a whole Harness (client, logger, tool registry) just to read a
   # few JSON files, minting a fresh random id on the way.
   def list_sessions
+    return unless !!@options[:list_sessions]
+
     Commands::SessionsCommand.new(
       harness: nil,
       file_list: @file_list,
       options: @options,
       ui: @ui).handle("")
-    0
+
+    true
   end
 
   # Delete one saved session (--delete-session, issue #279) and return the
@@ -137,19 +156,24 @@ class CLI
   # entry point, which prints "Error: ..." and exits 1); find_session_file
   # already raises on an ambiguous prefix and returns nil when nothing matches.
   def delete_session
-    id   = @options[:delete_session].to_s.strip
+    id = @options[:delete_session].to_s.strip
+    return if id.empty?
+
     path = @locator.find_session_file(id)
     raise HarnessError, "no saved session matching '#{id}' (see /sessions)" unless path
 
     session_dir = File.dirname(path)
     FileUtils.remove_entry(session_dir)
     ui.puts "Deleted session #{File.basename(session_dir)} (#{session_dir})."
-    0
+
+    true
   end
 
   def run
-    return list_sessions if @listing
-    return delete_session if @deleting
+    status = process_args
+    return status if status
+
+    setup
 
     @history.load
 
