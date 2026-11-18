@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'logger'
 require 'stringio'
 require 'socket'
+require 'model_config'
 require 'llm/base_backend'
 
 # The helpers are defined at TOP LEVEL, not inside the example group: a class
@@ -18,7 +19,7 @@ class StreamingBackend < LLM::BaseBackend
   private
 
   def build_body(messages, _tools, stream: false)
-    { model: @options[:model], messages: messages, stream: stream }
+    { model: @config.model, messages: messages, stream: stream }
   end
 
   def parse_response(json) = json
@@ -102,7 +103,8 @@ RSpec.describe "BaseBackend streaming" do
   end
 
   def backend_for(port, opts = {})
-    StreamingBackend.new(options.merge(base_url: "http://127.0.0.1:#{port}").merge(opts), logger)
+    values = options.merge(base_url: "http://127.0.0.1:#{port}").merge(opts)
+    StreamingBackend.new(ModelConfig.new(values), logger)
   end
 
   def logged_lines = log.string.lines.map(&:chomp).reject(&:empty?)

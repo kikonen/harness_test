@@ -5,14 +5,16 @@ require 'stringio'
 require 'tmpdir'
 require 'command_handler'
 require 'command_runner'
+require 'system_settings'
 
 RSpec.describe CommandHandler do
-  def make_handler(dir, console)
+  def make_handler(dir, console, options: {})
     # harness: nil is fine for the bang/prompt routing paths (not touched).
     described_class.new(
       harness: nil,
       file_list: FileList.new([], workdir: dir),
-      options: {},
+      options: options,
+      settings: SystemSettings.from_options(options),
       ui: console
     )
   end
@@ -135,7 +137,7 @@ RSpec.describe CommandHandler do
     describe 'bang confirmation option (issue #221)' do
       def handler_with_options(dir, options)
         handler = make_handler(dir, UI::Console.new(stdout: StringIO.new))
-        handler.instance_variable_set(:@options, options)
+        handler.instance_variable_set(:@settings, SystemSettings.from_options(options))
         handler
       end
 

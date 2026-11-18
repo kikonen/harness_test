@@ -32,8 +32,10 @@ module LLM
   # A usage may also carry the optional performance keys of LLM::UsageStats
   # (doc/llm_stats.md).
   class BaseBackend
-    def initialize(options, logger)
-      @options = options
+    # config: this Harness' own ModelConfig - the per-connection live model /
+    # endpoint / sampling / transport values. Read on every request.
+    def initialize(config, logger)
+      @config  = config
       @logger  = logger
     end
 
@@ -50,7 +52,7 @@ module LLM
     # The base URL this backend sends to, used as-is (no rewriting) with
     # #endpoint_path appended: what is configured is what gets called
     # (openai profiles -> .../v1 base, ollama profiles -> server root).
-    def base_url = @options[:base_url]
+    def base_url = @config.base_url
 
     # No setter: a resume builds a NEW backend under the new session's logger
     # (issue #280) rather than re-pointing this one.
@@ -82,7 +84,7 @@ module LLM
     def build_request(uri, messages, tools, stream = false)
       req = Net::HTTP::Post.new(uri.request_uri)
       req["Content-Type"] = "application/json"
-      req["Authorization"] = "Bearer #{@options[:token]}" if @options[:token]
+      req["Authorization"] = "Bearer #{@config.token}" if @config.token
       body = build_body(serialize_messages(messages), tools, stream:)
       req.body = JSON.generate(body)
       req
@@ -160,7 +162,7 @@ module LLM
         # issue #131: the raw API response body is troubleshooting-only - it
         # goes to harness.log with --verbose, while the parsed reasoning /
         # content sections are ALWAYS logged by SessionManager#log_response.
-        if @options[:verbose]
+        if @config.verbose
           @logger.info "=" * 50
           @logger.info resp.body
           @logger.info "=" * 50
@@ -331,7 +333,7 @@ module LLM
     # vision profile - and it is what keeps a stray payload from being sent to
     # a text model as a megabyte of data URI.
     def images_supported?
-      @options[:vision] == true
+      @config.vision == true
     end
 
     # The image payloads of one message, normalized and filtered, or nil when
@@ -352,17 +354,17 @@ module LLM
     # A config-owned option value. Returns nil when unset: the caller
     # OMITS the key from the request so the server's own default applies
     # (issue #215: no hidden code-side defaults).
-    def cfg(key) = @options[key]
+    def cfg(key) = @config.public_send(key)
 
     # Keep num_ctx sent on the native path even when unset (see NUM_CTX).
     def ctx_window = cfg(:num_ctx) || LLM::NUM_CTX
 
     def retry_count
-      @options[:retry_count] || LLM::RETRY_COUNT
+      @config.retry_count || LLM::RETRY_COUNT
     end
 
     def retry_delay
-      @options[:retry_delay] || LLM::RETRY_DELAY
+      @config.retry_delay || LLM::RETRY_DELAY
     end
 
     # Request duration for the log line: plain seconds with 2dp (the console

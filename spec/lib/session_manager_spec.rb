@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'logger'
 require 'stringio'
 require 'param_overrides'
+require 'model_config'
 require 'ui/spinner'
 require 'output_buffer'
 require 'session_manager'
@@ -57,12 +58,14 @@ RSpec.describe SessionManager do
       def initialize(session, client)
         @session = session
         @client  = client
-        @options = { num_ctx: 65_536, auto_save: false }
         @history = nil
         @logger  = Logger.new(File::NULL)
+        @settings = SystemSettings.from_options(
+          { num_ctx: 65_536, auto_save: false })
+        @model_config = ModelConfig.new({ num_ctx: 65_536, auto_save: false })
       end
 
-      attr_reader :options, :logger
+      attr_reader :settings, :model_config, :logger
 
       def compact_recent_messages
         Session::COMPACT_RECENT_MESSAGES
@@ -78,7 +81,7 @@ RSpec.describe SessionManager do
       end
 
       def compact_trigger_tokens
-        @session.compact_trigger(@options[:num_ctx], compact_auto_threshold,
+        @session.compact_trigger(model_config.num_ctx, compact_auto_threshold,
                                  reserved_tokens: compact_reserved_tokens)
       end
 
@@ -107,7 +110,7 @@ RSpec.describe SessionManager do
         used = @session.context_used
         return nil if used.nil?
 
-        "🧠 ctx #{used[:estimated] ? '~' : ''}#{used[:tokens]}/#{@options[:num_ctx]} (0%)"
+        "🧠 ctx #{used[:estimated] ? '~' : ''}#{used[:tokens]}/#{model_config.num_ctx} (0%)"
       end
 
       # Mirrors Harness#context_indicator_live (issue #126, compact form per
@@ -193,7 +196,7 @@ RSpec.describe SessionManager do
     # verb and only the API TYPE is named (the endpoint path stays in
     # target_display for /model, /models and the startup banner).
     it 'emits exactly one spinner_detail with the model and the api type' do
-      harness.options[:model] = 'qwen2.5-coder:32b'
+      harness.model_config.model = 'qwen2.5-coder:32b'
 
       events = emitted_details
 
@@ -205,14 +208,14 @@ RSpec.describe SessionManager do
     end
 
     it 'names the api type only when the client reports a backend' do
-      harness.options[:model] = 'raw-model'
+      harness.model_config.model = 'raw-model'
       harness.client = Class.new { def chat(*) = nil; }.new
 
       expect(emitted_details.first[:content][:message]).to eq('Sending (raw-model)')
     end
 
     it 'still emits a bare Sending line when no model is configured' do
-      harness.options.delete(:model)
+      harness.model_config.model = nil
 
       expect(emitted_details.first[:content][:message])
         .to eq('Sending (openai)')
@@ -406,7 +409,7 @@ RSpec.describe SessionManager do
       Dir.mktmpdir do |dir|
         file_list = FileList.new([], workdir: dir)
         manager   = described_class.new(harness, file_list)
-        harness.options[:auto_save] = auto_save
+        harness.settings[:auto_save] = auto_save
         yield manager, file_list, dir
       end
     end
@@ -582,11 +585,12 @@ RSpec.describe SessionManager do
   describe 'resume replay tail round trip (issue #458)' do
     def save_with_replay(dir, tail)
       harness_double = Class.new do
-        attr_reader :options, :logger, :session
+        attr_reader :settings, :model_config, :logger, :session
         def initialize(session)
           @session = session
-          @options = { num_ctx: 65_536, auto_save: false }
           @logger  = Logger.new(File::NULL)
+          @settings = SystemSettings.from_options({ auto_save: false })
+          @model_config = ModelConfig.new({ num_ctx: 65_536 })
         end
         def output_palette = UI::Palette.fetch(nil)
         def mcp_connected_summary = []
@@ -630,7 +634,8 @@ RSpec.describe SessionManager do
       sess = session
       double = Object.new
       double.define_singleton_method(:session) { sess }
-      double.define_singleton_method(:options) { { auto_save: false } }
+      double.define_singleton_method(:settings) { SystemSettings.from_options({ auto_save: false }) }
+      double.define_singleton_method(:model_config) { ModelConfig.new({}) }
       double.define_singleton_method(:logger) { Logger.new(File::NULL) }
       double.define_singleton_method(:output_palette) { UI::Palette.fetch(nil) }
       double.define_singleton_method(:mcp_connected_summary) { [] }
@@ -745,11 +750,12 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       def initialize(session, client, options)
         @session = session
         @client  = client
-        @options = options
         @logger  = Logger.new(File::NULL)
         @history = nil
+        @settings = SystemSettings.from_options(options)
+        @model_config = ModelConfig.new(options)
       end
-      attr_reader :options, :logger
+      attr_reader :settings, :model_config, :logger
       # issue #221: stub mirrors Harness#yolo? / yolo= (save/resume).
       attr_writer :yolo
       def yolo?; @yolo == true; end
@@ -767,7 +773,7 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       def compact_auto_threshold; 88; end
       def compact_reserved_tokens; 8192; end
       def compact_trigger_tokens
-        @session.compact_trigger(@options[:num_ctx], compact_auto_threshold,
+        @session.compact_trigger(model_config.num_ctx, compact_auto_threshold,
                                  reserved_tokens: compact_reserved_tokens)
       end
       def compact_max_size; nil; end
@@ -819,11 +825,12 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
       def initialize(session, client)
         @session = session
         @client  = client
-        @options = { num_ctx: 1000, auto_save: false }
         @logger  = Logger.new(File::NULL)
+        @settings = SystemSettings.from_options({ auto_save: false })
+        @model_config = ModelConfig.new({ num_ctx: 1000, auto_save: false })
       end
 
-      attr_reader :options, :logger
+      attr_reader :settings, :model_config, :logger
 
       # issue #405: stub mirrors Harness#mcp_connected_summary (save_session).
       def mcp_connected_summary = []
@@ -843,7 +850,7 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
       end
 
       def compact_trigger_tokens
-        @session.compact_trigger(@options[:num_ctx], compact_auto_threshold,
+        @session.compact_trigger(model_config.num_ctx, compact_auto_threshold,
                                  reserved_tokens: compact_reserved_tokens)
       end
 
@@ -1117,10 +1124,12 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
   describe '#check_inloop_compaction (mid-turn)' do
     let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
     let(:client) { double('client', chat: { choices: [{ message: { content: 'HANDOFF' } }] }) }
-    let(:options) { { num_ctx: 1000 } }
+    let(:model_config) { ModelConfig.new({ num_ctx: 1000 }) }
+    let(:settings) { SystemSettings.from_options({ auto_save: false }) }
     let(:harness) do
       double('harness', session: session, client: client, logger: logger,
-             options: options, compact_trigger_tokens: 1, compact_max_size: nil,
+             model_config: model_config, settings: settings,
+             compact_trigger_tokens: 1, compact_max_size: nil,
              tools_payload: nil)
     end
     let(:manager) { described_class.new(harness, FileList.new([], workdir: Dir.pwd)) }
@@ -1169,12 +1178,13 @@ RSpec.describe SessionManager, '#retry (issue #208)' do
       def initialize(session, client, logger, sent_chains)
         @session = session
         @client  = client
-        @options = { num_ctx: 65_536 }
         @logger  = logger
         @sent    = sent_chains
+        @settings = SystemSettings.from_options({ auto_save: false })
+        @model_config = ModelConfig.new({ num_ctx: 65_536 })
       end
 
-      attr_reader :options
+      attr_reader :settings, :model_config
 
       # issue #405: stub mirrors Harness#mcp_connected_summary (save_session).
       def mcp_connected_summary = []
@@ -1292,12 +1302,13 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
 
   def manager_with(options)
     harness = Class.new do
-      attr_reader :options, :settings, :logger, :session, :client, :history
+      attr_reader :options, :settings, :model_config, :logger, :session, :client, :history
       def initialize(session, client, options)
         @session = session
         @client  = client
         @options = options
         @settings = SystemSettings.from_options(options)
+        @model_config = ModelConfig.new(options)
         @logger  = Logger.new(File::NULL)
         @history = nil
       end

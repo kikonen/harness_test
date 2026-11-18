@@ -3,15 +3,18 @@
 require 'spec_helper'
 require 'stringio'
 require 'param_overrides'
+require 'model_config'
 require 'commands/param_command'
 
 # issue #219: /param shows and adjusts the LLM parameters for this session.
 # The command only talks to the shared ParamOverrides object, so a thin
-# harness double exposing a real one is enough.
+# harness double exposing a real one is enough. ParamOverrides writes into a
+# ModelConfig (the per-connection live parameter state, #286).
 RSpec.describe Commands::ParamCommand do
   let(:opts) { { reasoning_effort: 'medium', num_ctx: 65_536 } }
   let(:profile) { { reasoning_effort: 'medium', num_ctx: 65_536 } }
-  let(:param) { ParamOverrides.new(opts, profile: -> { profile }) }
+  let(:config) { ModelConfig.new(opts) }
+  let(:param) { ParamOverrides.new(config, profile: -> { profile }) }
 
   # Minimal harness double: the command only reads .session_manager.
   let(:harness) do

@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'model_config'
 require 'param_overrides'
 
 # issue #219: session-level overrides for the adjustable LLM parameters.
 # The override object owns the adjustable-parameter set, value parsing, the
-# effective/default lookup, and re-application onto the shared options hash
-# (which the LLM call and the compact trigger both read).
+# effective/default lookup, and re-application onto the Harness' own ModelConfig
+# (per-connection live state, #286) which the LLM call and compact trigger read.
 RSpec.describe ParamOverrides do
   # A profile like the ones SessionManager hands over: a hash of the active
   # model profile's values (nil keys mean "the profile leaves it unset", so
@@ -16,7 +17,7 @@ RSpec.describe ParamOverrides do
   end
 
   def build(opts = {}, prof: profile)
-    described_class.new(opts, profile: -> { prof })
+    described_class.new(ModelConfig.new(opts), profile: -> { prof })
   end
 
   describe '#set / #effective (issue #219)' do
@@ -133,8 +134,8 @@ RSpec.describe ParamOverrides do
       expect(fresh.effective(:num_ctx)).to eq(32_768)
 
       fresh.restore!
-      expect(fresh.options[:reasoning_effort]).to eq('low')
-      expect(fresh.options[:num_ctx]).to eq(32_768)
+      expect(fresh.config.param(:reasoning_effort)).to eq('low')
+      expect(fresh.config.param(:num_ctx)).to eq(32_768)
     end
 
     it 'tolerates a missing or malformed persisted hash' do

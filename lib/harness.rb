@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
 require "json"
-require "logger"
 require "time"
 require "thread"
-require "digest"
 require "fileutils"
 
 require_relative "harness_error"
@@ -28,7 +26,9 @@ require_relative "tool_result"
 require_relative "image_store"
 require_relative "image_delivery"
 require_relative "system_settings"
+require_relative "model_config"
 require_relative "tool_registry_builder"
+require_relative "session_logger"
 
 require_relative "text_tool_call_parser"
 # -- Harness --------------------------------------------------------------
@@ -78,12 +78,12 @@ class Harness
   # (issue #340). doc/sandbox_gemfile_design.md.
   # image_store: the harness' own blob store for tool-result images
   # (issue #449). doc/mcp_images_design.md.
-  attr_reader :options,
-    :logger,
+  attr_reader :logger,
+    :settings,
     :sandbox_gemfile,
+    :model_config,
     :tool_registry,
     :file_list,
-    :settings,
     :session,
     :session_manager,
     :client,
@@ -125,11 +125,10 @@ class Harness
     note
   end
 
-  def initialize(options, file_list, session_id: nil, resume_data: nil, settings: nil)
-    @options       = options
-    @file_list     = file_list
-    @locator       = SessionLocator.new(file_list.workdir)
-    @settings      = settings || SystemSettings.from_options(options)
+  def initialize(file_list, settings:, session_id: nil, resume_data: nil, logger: nil)
+    @file_list = file_list
+    @settings  = settings
+    @locator   = SessionLocator.new(file_list.workdir)
 
     # The digest cache is SHARED (#286): this run builds ONE SessionFileCache
     # and hands the same object to Session and to the tool registry, so the
@@ -137,13 +136,19 @@ class Harness
     # compares a later write against. Ownership sits with the run, not Session.
     @file_cache = SessionFileCache.new
 
-    @session       = Session.new(build_system_prompt, session_id:, file_cache: @file_cache)
+    # The per-session log path is keyed by the session id. The run's owner (CLI)
+    # injects a finished logger; when none is passed Harness builds it from the
+    # id this run resolves, so every consumer reads one logger (#286).
+    log_id  = session_id || @locator.fresh_id
+    @logger = logger || SessionLogger.build(@locator.session_log_path(log_id))
+
+    @session = Session.new(build_system_prompt, session_id: log_id, file_cache: @file_cache)
 
     if resume_data
       saved_id = resume_data[:session_id]
-      if saved_id && saved_id != session_id
+      if saved_id && saved_id != log_id
         raise HarnessError,
-          "session file says id #{saved_id} but it is stored under #{session_id}"
+          "session file says id #{saved_id} but it is stored under #{log_id}"
       end
       @session.restore(resume_data, @file_list)
     end
@@ -151,8 +156,6 @@ class Harness
     @user_note     = nil
     @user_notes    = []
     StateMigrator.run(@file_list.workdir, HARNESS_DIR)
-
-    @logger = build_logger
 
     # Harness-seeded because the model's file tools cannot write the sensitive
     # .harness/. A fresh seed also locks it offline (no network); the outcome is
@@ -173,7 +176,6 @@ class Harness
     builder = ToolRegistryBuilder.new(
       file_list: @file_list,
       file_cache: @file_cache,
-      options: @options,
       settings: @settings,
       logger: @logger,
       locator: @locator,
@@ -184,15 +186,24 @@ class Harness
     # issue #461: recovers a tool call a model wrote as text instead of a
     # structured tool_calls array (see doc/text_tool_call_design.md).
     @text_tool_call_parser = TextToolCallParser.new(@tool_registry)
-    @client = LLMClient.new(options, @logger)
+    # Each Harness owns ONE LLM connection, so its model / endpoint / token /
+    # sampling / context-window parameters are per-Harness live state in a
+    # ModelConfig seeded from the run-wide settings - NOT the shared settings
+    # object (a #286 sub-agent shares settings; writing the model there would
+    # switch every agent's model at once). /model and /param mutate only this
+    # view; settings stays the seed + catalogue carrier. Ownership:
+    # doc/harness_job_design.md.
+    @model_config = ModelConfig.from_settings(settings)
+    @client = LLMClient.new(@model_config, @logger)
     @session_manager = SessionManager.new(self, file_list)
 
-    # Postures and the two consent flags are NOT constructor inputs and are no
-    # longer held here: they live in SystemSettings (owned by the creator, read
-    # once from options here as a fallback for a Harness built without one), and
-    # a resumed run's session-persisted postures are applied over them by
-    # #apply_resume_state at the end of this constructor. The Harness methods
-    # below are thin delegators to @settings. Ownership: doc/harness_job_design.md.
+    # Consent + display postures (yolo/stream/markdown/palette, the two
+    # command-safety flags) are run-wide SystemSettings state; the Harness
+    # methods below are thin delegators to @settings. The planning posture is
+    # the exception - per-conversation Harness state, seeded from the config
+    # only - so a #286 sub-agent is NOT forced into planning mode by a
+    # [PLAN] toggle on the foreground (doc/planning_mode_design.md).
+    @plan = settings[:plan] == true
     @stream_preview  = nil
 
     # The same posture the shell consent reads live (issue #274): a lambda, so a
@@ -230,7 +241,7 @@ class Harness
     content = TextNormalizer.normalize(source).strip
 
     @rules_repair_note = byte_repair_note(source)
-    @logger&.info "harness.md read: #{@rules_repair_note}" if @rules_repair_note
+    logger.info "harness.md read: #{@rules_repair_note}" if @rules_repair_note
     return base if content.empty?
 
     "#{base}\n\n## Project-Specific Rules\n\n#{content}\n"
@@ -238,16 +249,6 @@ class Harness
 
   def session_log_path
     @locator.session_log_path(@session.session_id)
-  end
-
-  def build_logger
-    log_file = session_log_path
-    FileUtils.mkdir_p(File.dirname(log_file))
-    logger = Logger.new(log_file)
-    logger.formatter = proc { |severity, datetime, _progname, msg|
-      "#{datetime.strftime('%Y-%m-%d %H:%M:%S')} [#{severity}] #{msg}\n"
-    }
-    logger
   end
 
   # EVERY request - the live turn and both advisory forks - must send THIS same
@@ -259,25 +260,25 @@ class Harness
   end
 
   def compact_recent_messages
-    options[:compact_recent] || Session::COMPACT_RECENT_MESSAGES
+    settings.compact_recent || Session::COMPACT_RECENT_MESSAGES
   end
 
   def compact_auto_threshold
-    options[:compact_auto_threshold] || Session::AUTO_COMPACT_THRESHOLD
+    settings.compact_auto_threshold || Session::AUTO_COMPACT_THRESHOLD
   end
 
   # The summary call itself needs headroom, so a small window compacts
   # proportionally earlier. nil/0 = percentage trigger only.
   def compact_reserved_tokens
-    options[:compact_reserved] || Session::COMPACT_RESERVED_TOKENS
+    settings.compact_reserved || Session::COMPACT_RESERVED_TOKENS
   end
 
   def compact_max_size
-    options[:compact_max_size]
+    settings.compact_max_size
   end
 
   def max_tool_iterations
-    options[:max_tool_iterations] || MAX_TOOL_ITERATIONS
+    settings.max_tool_iterations || MAX_TOOL_ITERATIONS
   end
 
   # The posture/consent state lives in SystemSettings (@settings, #286); these
@@ -373,19 +374,20 @@ class Harness
   end
 
   def plan?
-    @settings.plan?
+    @plan
   end
 
   def plan=(val)
-    @settings.plan = val
+    @plan = (val == true)
   end
 
   def toggle_plan
-    @settings.toggle_plan
+    self.plan = !plan?
+    plan_mode_label
   end
 
   def plan_mode_label
-    @settings.plan_mode_label
+    plan? ? "PLAN" : nil
   end
 
   # -- Tool-result images (issue #449) --------------------------------------
@@ -413,7 +415,7 @@ class Harness
 
   # Workdir-relative blob dir for one session id.
   def image_content_dir(session_id)
-    base = options[:mcp_images_dir] || ImageStore::DEFAULT_DIR
+    base = settings.mcp_images_dir || ImageStore::DEFAULT_DIR
     File.join(base, session_id.to_s)
   end
 
@@ -516,7 +518,7 @@ class Harness
       origin: :harness,
       content: { message: "Model safety check (#{unapproved.size} commands)" })
 
-    options[:safety_verdicts] = SafetyCheck.run(
+    settings.safety_verdicts = SafetyCheck.run(
       client,
       session.messages,
       unapproved,
@@ -552,7 +554,7 @@ class Harness
 
   # THE single auto-compact trigger for every consumer (SessionManager, /ctx).
   def compact_trigger_tokens
-    window = options[:num_ctx] || LLMClient::NUM_CTX
+    window = model_config.num_ctx || LLMClient::NUM_CTX
     return nil if window.to_i <= 0
 
     @session.compact_trigger(
@@ -594,7 +596,7 @@ class Harness
   # The OpenAI endpoint reads max_tokens, the native one num_predict; an unset
   # key means the SERVER's own default is what cut the answer.
   def budget_note(data)
-    limit = [options[:max_tokens], options[:num_predict]].map(&:to_i).find(&:positive?)
+    limit = [model_config.max_tokens, model_config.num_predict].map(&:to_i).find(&:positive?)
     parts = []
     completion = data.dig(:usage, :completion_tokens)
     parts << "#{completion} completion tokens" if completion
@@ -954,7 +956,7 @@ class Harness
   end
 
   def context_indicator
-    window = options[:num_ctx] || LLMClient::NUM_CTX
+    window = model_config.num_ctx || LLMClient::NUM_CTX
     used = @session.context_used
     return nil if used.nil?
 
@@ -972,7 +974,7 @@ class Harness
   # raw token arithmetic stays in #context_indicator (modeline, stats line)
   # and in the /ctx report.
   def context_indicator_live(messages = nil)
-    window = options[:num_ctx] || LLMClient::NUM_CTX
+    window = model_config.num_ctx || LLMClient::NUM_CTX
     if messages
       tokens  = @session.anchored_estimate(messages)
       label   = "~"
@@ -992,7 +994,7 @@ class Harness
   # /ctx states these fields rather than baking a padded value column. nil when
   # there is nothing to measure yet (the command then answers with the prose note).
   def context_usage
-    window = options[:num_ctx] || LLMClient::NUM_CTX
+    window = model_config.num_ctx || LLMClient::NUM_CTX
     used   = @session.context_used
     return nil if used.nil?
 
@@ -1122,14 +1124,14 @@ class Harness
   end
 
   def step_display_disabled?
-    ENV.fetch("HARNESS_STEP_DISPLAY", "") == "off" || options[:step_display] == false
+    ENV.fetch("HARNESS_STEP_DISPLAY", "") == "off" || settings.step_display == false
   end
 
   # A prompt file is the FIRST message of every chain this harness will ever send
   # or save, so it is a read boundary: an unnormalized one survives until
   # JSON.generate (the request body AND the session save) raises on its bytes.
   def read_system_prompt
-    path = options[:system_file]
+    path = settings.system_file
     return TextNormalizer.normalize(File.read(path)) if path && File.file?(path)
 
     TextNormalizer.normalize(File.read(DEFAULT_SYSTEM_PROMPT_FILE))

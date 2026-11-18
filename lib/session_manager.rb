@@ -73,10 +73,11 @@ class SessionManager
 
     user_prompt = build_user_prompt(instruction)
 
-    if @harness.options[:verbose]
+    if @harness.settings.verbose
       @harness.logger.info "--- system ---\n#{@harness.session.system_prompt}"
       @harness.logger.info "--- user ---\n#{user_prompt}"
-      @harness.logger.info "--- #{@harness.options[:model]} @ #{@harness.options[:base_url]} ---"
+      model = @harness.model_config
+      @harness.logger.info "--- #{model.model} @ #{model.base_url} ---"
     end
 
     @harness.session.add_user(user_prompt)
@@ -108,7 +109,7 @@ class SessionManager
     # The previous attempt may have failed because the context was full:
     # compact first, then re-send.
     if @harness.session.auto_compact_due?(
-      @harness.options[:num_ctx] || LLMClient::NUM_CTX,
+      @harness.model_config.num_ctx || LLMClient::NUM_CTX,
       @harness.compact_auto_threshold,
       reserved_tokens: @harness.compact_reserved_tokens)
 
@@ -144,7 +145,7 @@ class SessionManager
   # success - these saves are routine bookkeeping, not a user action.
   # De-duplicated within a fast round trip via AUTOSAVE_MIN_INTERVAL.
   def maybe_auto_save(tag)
-    return unless @harness.options[:auto_save]
+    return unless @harness.settings.auto_save
     return if @harness.session.empty?
 
     now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -278,7 +279,7 @@ class SessionManager
   # otherwise (not due yet, too small to compact, or the summary call
   # failed - the turn then simply continues with the existing chain).
   def check_inloop_compaction(messages, last_prompt_tokens)
-    window  = @harness.options[:num_ctx] || LLMClient::NUM_CTX
+    window  = @harness.model_config.num_ctx || LLMClient::NUM_CTX
     trigger = compact_trigger_tokens
 
     # issue #151: the trigger depends on the context size - min of the
@@ -373,7 +374,7 @@ class SessionManager
   # streaming it shows the newest text of that answer, otherwise the live
   # context estimate (see Harness#request_wait_suffix, issue #28).
   def request_spinner_detail
-    who = [@harness.options[:model].to_s.strip, api_type_label].reject(&:empty?)
+    who = [@harness.model_config.model.to_s.strip, api_type_label].reject(&:empty?)
     Task.emit(
       :spinner_detail,
       origin: :session_manager,
@@ -451,7 +452,7 @@ class SessionManager
   # the server side and the user can /compact manually.
   def compact_if_due
     return unless @harness.session.auto_compact_due?(
-      @harness.options[:num_ctx] || LLMClient::NUM_CTX,
+      @harness.model_config.num_ctx || LLMClient::NUM_CTX,
       @harness.compact_auto_threshold,
       reserved_tokens: @harness.compact_reserved_tokens)
 
@@ -562,13 +563,13 @@ class SessionManager
   # (HarnessConfig#normalize_mcp_images fills every key).
   def image_limits
     (active_profile&.dig(:mcp_images)) ||
-      @harness.options[:mcp_image_limits] ||
+      @harness.model_config.mcp_image_limits ||
       HarnessConfig::MCP_IMAGE_LIMIT_DEFAULTS
   end
 
   # Name (or id) of the currently active model, or nil.
   def active_model_name
-    @harness.options[:active_model] || @harness.options[:model]
+    @harness.model_config.active_model_name
   end
 
   # Where the active backend actually sends its calls: the API type and the
@@ -594,8 +595,8 @@ class SessionManager
 
     profiles = @harness.settings.model_profiles
     if profiles.empty?
-      @harness.options[:model]        = name
-      @harness.options[:active_model] = name
+      @harness.model_config.model        = name
+      @harness.model_config.active_model = name
       return { name:, model: name }
     end
 
@@ -614,33 +615,13 @@ class SessionManager
     @harness.settings.find_profile(name)
   end
 
-  # Apply a model profile's settings to options in place.
+  # Apply a model profile to this Harness' ModelConfig in place.
   def apply_profile(profile)
-    opts = @harness.options
-    opts[:base_url]         = profile[:url] || opts[:base_url]
-    opts[:api]              = profile[:api]
-    opts[:model]            = profile[:model]
-    opts[:token]            = profile[:token]
-    opts[:num_ctx]          = profile[:num_ctx]
-    opts[:max_tokens]       = profile[:max_tokens]
-    opts[:num_predict]      = profile[:num_predict]
-    opts[:reasoning_effort] = profile[:reasoning_effort]
-    opts[:temperature]      = profile[:temperature]
-    opts[:top_p]            = profile[:top_p]
-    opts[:top_k]            = profile[:top_k]
-    opts[:min_p]            = profile[:min_p]
-    opts[:presence_penalty] = profile[:presence_penalty]
-    opts[:repeat_penalty]   = profile[:repeat_penalty]
-    opts[:active_model]     = profile[:name] || profile[:model]
-    # issue #449: whether THIS model can see images, and the budget a vision
-    # model may be given. Read per turn, so a /model switch between a vision and
-    # a text profile changes what the next tool result does with its image.
-    opts[:vision]           = profile[:vision] == true
-    # A profile with no 'mcp_images:' block says nothing (normalize_models
-    # leaves it nil), so it must inherit the config-level budget rather than
-    # clobber it with nil - #image_limits already prefers the profile's own
-    # block, so only a profile that declares one needs to reach options here.
-    opts[:mcp_image_limits] = profile[:mcp_images] if profile[:mcp_images]
+    # The live per-connection values land in THIS Harness' ModelConfig, never
+    # in the run-wide settings a #286 sub-agent also shares. A profile with no
+    # 'mcp_images:' block says nothing, so ModelConfig#apply_profile leaves the
+    # seeded budget intact.
+    @harness.model_config.apply_profile(profile)
 
     # issue #219: a profile change resets the parameter values above - re-
     # apply any session-level overrides so they keep winning (a /model
@@ -673,7 +654,7 @@ class SessionManager
   # persisted/restored with the session.
   def param_overrides
     @param_overrides ||= ParamOverrides.new(
-      @harness.options,
+      @harness.model_config,
       profile: -> {
         find_profile(active_model_name)
       })
@@ -727,7 +708,7 @@ class SessionManager
     FileUtils.mkdir_p(File.dirname(path))
 
     data = @harness.session.to_h(@file_list)
-    data[:active_model] = @harness.options[:active_model]
+    data[:active_model] = @harness.model_config.active_model
 
     # issue #219: session-level parameter overrides survive a save/resume
     # round trip, like the active model.

@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'logger'
+require 'model_config'
 require 'llm/openai_backend'
 
 RSpec.describe LLM::OpenAIBackend do
@@ -9,7 +10,7 @@ RSpec.describe LLM::OpenAIBackend do
   let(:options) do
     { base_url: 'http://127.0.0.1:11434', model: 'test-model', api: 'openai' }
   end
-  let(:backend) { described_class.new(options, logger) }
+  let(:backend) { described_class.new(ModelConfig.new(options), logger) }
 
   # build_body / parse_response are the backend's contract; test them
   # directly (no network layer). The subclass methods are private - that is
