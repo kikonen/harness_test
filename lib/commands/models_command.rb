@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require_relative "../command"
-require_relative "../cli_options"
 
 module Commands
   # /models - list configured models (marks the default and active one).
@@ -26,7 +25,7 @@ module Commands
           :note,
           [
             "No model profiles configured.",
-            "Current model: #{current} (@ #{@options[:base_url]})"
+            "Current model: #{current} (no endpoint configured)"
           ])
         return
       end
@@ -49,7 +48,7 @@ module Commands
         api = p[:api] || "openai"
         # issue #449: vision is a per-profile fact, so the listing says which
         # models a tool-result image could actually be sent to.
-        url  = p[:url] || CLIOptions::DEFAULT_BASE_URL
+        url  = p[:url]
         tags = p[:vision] ? " (#{api}) [vision]" : " (#{api})"
         { name:, model: p[:model], location: url, note: "#{tags}#{suffix}" }
       end

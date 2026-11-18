@@ -124,7 +124,6 @@ class CLI
       harness: @harness,
       registry: @registry,
       file_list: @file_list,
-      options: @options,
       ui: @ui,
       settings: @settings)
 
@@ -142,7 +141,6 @@ class CLI
     Commands::SessionsCommand.new(
       harness: nil,
       file_list: @file_list,
-      options: @options,
       ui: @ui).handle("")
 
     true
@@ -276,7 +274,7 @@ class CLI
     # issue #217: show WHERE calls go (API type + endpoint path + base url),
     # not just the base url - a profile switch can change the API type.
     ui.puts "Model: #{harness.session_manager.active_model_name} " \
-            "(#{harness.session_manager.target_display} @ #{@options[:base_url]})"
+            "(#{harness.session_manager.target_display} @ #{harness.model_config.base_url})"
     # issue #449: name the image posture, but only when the run can actually
     # receive one - MCP servers are the only source of tool-result images, so a
     # run without them has nothing to say about it. The two cases behave
@@ -410,7 +408,9 @@ class CLI
   # The command line that resumes a saved session in a NEW harness run
   # (--resume is a startup option; there is no mid-run resume command).
   def resume_cli_string(id)
-    parts = ["ruby harness.rb", "-m #{@options[:model]}", "--resume #{id}"]
+    # -m names the active model PROFILE; the live name (not the original -m)
+    # so a session switched with /model resumes on the profile it ended on.
+    parts = ["ruby harness.rb", "-m #{harness.session_manager.active_model_name}", "--resume #{id}"]
     parts << "-d #{@file_list.workdir}" unless @file_list.workdir == Dir.pwd
     parts.join(" ")
   end

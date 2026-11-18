@@ -18,7 +18,7 @@ require_relative "ui/help_renderer"
 class Command
   include TaskRunner
 
-  attr_reader :harness, :settings, :file_list, :options, :ui, :help_renderer
+  attr_reader :harness, :settings, :file_list, :ui, :help_renderer
 
   # Every command class declares its own HELP (a CommandHelp). /help renders it
   # from the dispatch registry, so a command that has no help entry fails loudly
@@ -44,7 +44,6 @@ class Command
   def initialize(
     harness: nil,
     file_list:,
-    options:,
     ui:,
     help_renderer: nil,
     settings: nil,
@@ -52,12 +51,12 @@ class Command
   )
     @harness    = harness
     @file_list  = file_list
-    @options    = options
     @ui         = ui
     # Only /help renders it; every other command ignores it.
     @help_renderer = help_renderer
-    # The run-wide posture/consent state (#286). A posture command reads and
-    # writes it directly instead of routing through Harness.
+    # The run-wide config + posture/consent state (#286). Commands read the
+    # resolved config through settings' named accessors (or []), never a raw
+    # options bag. A posture command reads and writes it directly here.
     @settings = settings
     # The JobRegistry the run owns (#286): TaskRunner#run_on_task awaits its
     # job and TaskRunner records main-thread reports into it.

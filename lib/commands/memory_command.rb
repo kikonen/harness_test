@@ -40,7 +40,7 @@ module Commands
     private
 
     def memories
-      Memories.new(@file_list.workdir, max_memories: @options && @options[:max_memories])
+      Memories.new(@file_list.workdir, max_memories: @settings && @settings.max_memories)
     end
 
     def list_memories

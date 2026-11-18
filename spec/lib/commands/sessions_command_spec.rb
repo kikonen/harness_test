@@ -34,7 +34,7 @@ RSpec.describe Commands::SessionsCommand do
   def run_command
     io      = StringIO.new
     command = described_class.new(harness: nil, file_list: file_list,
-                                  options: nil, ui: UI::Console.new(stdout: io))
+                                  ui: UI::Console.new(stdout: io))
     command.handle('')
     io.string
   end

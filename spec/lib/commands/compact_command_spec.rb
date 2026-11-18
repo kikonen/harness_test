@@ -43,7 +43,7 @@ RSpec.describe Commands::CompactCommand do
   let(:ui) { UI::Console.new(stdout: io) }
 
   def command
-    described_class.new(harness:, file_list: nil, options: nil, ui:)
+    described_class.new(harness:, file_list: nil, ui:)
   end
 
   # Stub Task.run to capture the block it is handed and execute it

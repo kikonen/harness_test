@@ -28,7 +28,7 @@ RSpec.describe Commands::ParamCommand do
 
   def run_command(args = '')
     io = StringIO.new
-    described_class.new(harness: harness, file_list: nil, options: nil,
+    described_class.new(harness: harness, file_list: nil,
                         ui: UI::Console.new(stdout: io)).handle(args)
     io.string
   end

@@ -46,7 +46,6 @@ class CommandHandler
   attr_reader :harness,
     :file_list,
     :ui,
-    :options,
     :settings
 
   # Registry: command name (without slash) -> class
@@ -82,13 +81,11 @@ class CommandHandler
   def initialize(
     harness:,
     file_list:,
-    options:,
     ui:,
     settings: nil,
     registry: nil)
     @harness   = harness
     @file_list = file_list
-    @options   = options
     # The run-wide posture/consent state (#286): posture commands read and
     # write it directly instead of routing through Harness.
     @settings  = settings
@@ -179,7 +176,6 @@ class CommandHandler
     cmd_class.new(
       harness:,
       file_list:,
-      options:,
       ui:,
       help_renderer: @help_renderer,
       settings: @settings,

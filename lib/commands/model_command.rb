@@ -29,7 +29,8 @@ module Commands
           :note,
           [
             "Current model: #{@harness.session_manager.active_model_name} " \
-              "(#{@harness.session_manager.target_display} @ #{@options[:base_url]})",
+              "(#{@harness.session_manager.target_display} " \
+              "@ #{@harness.model_config.base_url})",
             "Tool-result images: #{images}"
           ])
         emit_params
@@ -42,7 +43,7 @@ module Commands
 
       profile = @harness.session_manager.switch_model(name)
       display = profile[:name] || profile[:model]
-      url     = profile[:url] || @options[:base_url]
+      url     = profile[:url] || @harness.model_config.base_url
       # issue #217: the API type can CHANGE with the profile - say it.
       emit_role(
         :note,
