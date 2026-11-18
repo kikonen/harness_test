@@ -3,7 +3,7 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'tools/git_apply_tool'
-require 'session'
+require 'session_file_cache'
 
 RSpec.describe Tools::GitApplyTool do
   # Minimal git repo in a tmp dir: the apply tool runs real git. Identity via
@@ -242,11 +242,11 @@ RSpec.describe Tools::GitApplyTool do
         target = setup_git_repo(dir)
         list   = FileList.new(workdir: dir)
         list.add_file('hello.txt', :rw)
-        session = Session.new('sp')
-        tool    = described_class.new(list, session.file_cache)
+        file_cache = SessionFileCache.new
+        tool    = described_class.new(list, file_cache)
 
         # Seed the cache as if we had just read the file at this state.
-        session.file_cache.record(target, FileList.sha256(target), workdir: dir)
+        file_cache.record(target, FileList.sha256(target), workdir: dir)
 
         # External change after our last read.
         File.write(target, "line1\nline2-external\nline3\n")
@@ -273,10 +273,10 @@ RSpec.describe Tools::GitApplyTool do
         target = setup_git_repo(dir)
         list   = FileList.new(workdir: dir)
         list.add_file('hello.txt', :rw)
-        session = Session.new('sp')
-        tool    = described_class.new(list, session.file_cache)
+        file_cache = SessionFileCache.new
+        tool    = described_class.new(list, file_cache)
 
-        session.file_cache.record(target, FileList.sha256(target), workdir: dir)
+        file_cache.record(target, FileList.sha256(target), workdir: dir)
 
         diff = <<~DIFF
           --- a/hello.txt
@@ -291,7 +291,7 @@ RSpec.describe Tools::GitApplyTool do
         out = tool.execute('diff' => diff)
         expect(out).to start_with('ok: patch applied')
         # Our own patch refreshed the cache entry.
-        expect(session.file_cache.digest(target, workdir: dir))
+        expect(file_cache.digest(target, workdir: dir))
           .to eq(FileList.sha256(target))
       end
     end
@@ -301,8 +301,8 @@ RSpec.describe Tools::GitApplyTool do
         target = setup_git_repo(dir)
         list   = FileList.new(workdir: dir)
         list.add_file('hello.txt', :rw)
-        session = Session.new('sp')
-        tool    = described_class.new(list, session.file_cache)
+        file_cache = SessionFileCache.new
+        tool    = described_class.new(list, file_cache)
 
         diff = <<~DIFF
           --- a/hello.txt
@@ -316,7 +316,7 @@ RSpec.describe Tools::GitApplyTool do
 
         out = tool.execute('diff' => diff, 'dry_run' => true)
         expect(out).to start_with('ok: patch is valid (dry run')
-        expect(session.file_cache.digest(target, workdir: dir)).to be_nil
+        expect(file_cache.digest(target, workdir: dir)).to be_nil
       end
     end
   end

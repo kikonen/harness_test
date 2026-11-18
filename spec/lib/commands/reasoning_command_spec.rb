@@ -7,7 +7,7 @@ require 'commands/reasoning_command'
 # issue #98: /reasoning shows the reasoning text of the last response, which
 # is otherwise only visible in .harness/sessions/<session-id>/harness.log.
 RSpec.describe Commands::ReasoningCommand do
-  let(:session) { Session.new('system prompt') }
+  let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
 
   # A minimal stand-in for Harness providing only what the command uses.
   let(:harness) do

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'logger'
 require 'stringio'
 require 'tmpdir'
 require 'tools/web_fetch_tool'
@@ -50,7 +51,8 @@ RSpec.describe Tools::WebFetchTool do
   end
 
   def tool_in(dir, options = {})
-    described_class.new(FileList.new(workdir: dir), options)
+    described_class.new(FileList.new(workdir: dir), options,
+                        logger: Logger.new(File::NULL))
   end
 
   # A tool whose host grant already exists: the fetch runs with no consent
@@ -425,8 +427,7 @@ RSpec.describe Tools::WebFetchTool do
       Dir.mktmpdir do |dir|
         tool = granted_tool(dir)
         logger = instance_double('logger')
-        harness = instance_double('harness', logger:)
-        tool.instance_variable_set(:@harness, harness)
+        tool.instance_variable_set(:@logger, logger)
         with_fetcher(tool, 'error: could not resolve example.com')
 
         expect(logger).to receive(:warn).with(/web.fetch failed \(example.com\)/)

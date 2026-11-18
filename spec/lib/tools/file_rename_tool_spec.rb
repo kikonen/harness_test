@@ -4,7 +4,7 @@ require 'spec_helper'
 require 'stringio'
 require 'tmpdir'
 require 'file_list'
-require 'session'
+require 'session_file_cache'
 require 'tools/file_rename_tool'
 
 RSpec.describe Tools::FileRenameTool do
@@ -21,8 +21,8 @@ RSpec.describe Tools::FileRenameTool do
     FileList.new([], workdir: dir)
   end
 
-  def session
-    Session.new('sys prompt')
+  def cache
+    SessionFileCache.new
   end
 
   def granted_list(dir, old: 'a.txt', new: 'b.txt')
@@ -37,7 +37,7 @@ RSpec.describe Tools::FileRenameTool do
       File.write(File.join(dir, 'a.txt'), "content\n")
       list = granted_list(dir)
 
-      out = described_class.new(list, session.file_cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
+      out = described_class.new(list, cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
       expect(out).to eq('ok: renamed a.txt to b.txt')
       expect(File.read(File.join(dir, 'b.txt'))).to eq("content\n")
       expect(File.exist?(File.join(dir, 'a.txt'))).to be false
@@ -51,7 +51,7 @@ RSpec.describe Tools::FileRenameTool do
       File.binwrite(File.join(dir, 'a.txt'), "crlf\r\nmixed\nlast")
       list = granted_list(dir)
 
-      described_class.new(list, session.file_cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
+      described_class.new(list, cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
       expect(File.binread(File.join(dir, 'b.txt'))).to eq("crlf\r\nmixed\nlast")
     end
   end
@@ -63,27 +63,27 @@ RSpec.describe Tools::FileRenameTool do
       old = File.join(dir, 'a.txt')
       new = File.join(dir, 'b.txt')
       File.write(old, "content\n")
-      sess = session
+      sess = cache
       digest = FileList.sha256(old)
-      sess.file_cache.record(old, digest, workdir: dir)
+      sess.record(old, digest, workdir: dir)
 
       list = granted_list(dir)
-      described_class.new(list, sess.file_cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
+      described_class.new(list, sess).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
 
-      expect(sess.file_cache.digest(new, workdir: dir)).to eq(digest)
-      expect(sess.file_cache.known?(old, workdir: dir)).to be false
-      expect(sess.file_cache.to_h.keys).to eq(['b.txt'])
+      expect(sess.digest(new, workdir: dir)).to eq(digest)
+      expect(sess.known?(old, workdir: dir)).to be false
+      expect(sess.to_h.keys).to eq(['b.txt'])
     end
   end
 
   it 'renames without a cached entry (nothing to move, no stale key created)' do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, 'a.txt'), "x\n")
-      sess = session
+      sess = cache
       list = granted_list(dir)
 
-      described_class.new(list, sess.file_cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
-      expect(sess.file_cache.to_h).to be_empty
+      described_class.new(list, sess).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
+      expect(sess.to_h).to be_empty
     end
   end
 
@@ -96,7 +96,7 @@ RSpec.describe Tools::FileRenameTool do
       # 'a.txt' is an existing file at the project root: 1=project, 2=this
       # file, 3=cancel. Cancel the write grant on the source.
       drive_dialog(['3'])
-      result = described_class.new(list, session.file_cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
+      result = described_class.new(list, cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
 
       expect(result).to start_with("error: access denied for 'a.txt'")
       expect(File.exist?(File.join(dir, 'a.txt'))).to be true
@@ -112,7 +112,7 @@ RSpec.describe Tools::FileRenameTool do
       list.add_file('a.txt', :w)
 
       out    = drive_dialog(['4 wrong place'])
-      result = described_class.new(list, session.file_cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
+      result = described_class.new(list, cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
 
       expect(result).to start_with("error: write access denied for 'b.txt'")
       expect(result).to include(%{(user's note: "wrong place")})
@@ -128,7 +128,7 @@ RSpec.describe Tools::FileRenameTool do
       list.add_file('a.txt', :w)
 
       expect(UI::Dialog).not_to receive(:new)
-      result = described_class.new(list, session.file_cache).execute('old_path' => 'a.txt', 'new_path' => '.env')
+      result = described_class.new(list, cache).execute('old_path' => 'a.txt', 'new_path' => '.env')
 
       expect(result).to eq("error: new path '.env' is blocked and can never be written")
       expect(File.exist?(File.join(dir, 'a.txt'))).to be true
@@ -139,7 +139,7 @@ RSpec.describe Tools::FileRenameTool do
     Dir.mktmpdir do |dir|
       list = granted_list(dir)
 
-      result = described_class.new(list, session.file_cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
+      result = described_class.new(list, cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
       expect(result).to eq("error: file 'a.txt' does not exist on disk")
     end
   end
@@ -150,7 +150,7 @@ RSpec.describe Tools::FileRenameTool do
       File.write(File.join(dir, 'b.txt'), "keep me\n")
       list = granted_list(dir)
 
-      result = described_class.new(list, session.file_cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
+      result = described_class.new(list, cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
       expect(result).to eq("error: destination 'b.txt' already exists - choose a different new path")
       expect(File.read(File.join(dir, 'a.txt'))).to eq("src\n")
       expect(File.read(File.join(dir, 'b.txt'))).to eq("keep me\n")
@@ -164,7 +164,7 @@ RSpec.describe Tools::FileRenameTool do
       list.add_file('a.txt', :w)
       list.add_dir('sub/deep', :w)
 
-      out = described_class.new(list, session.file_cache).execute('old_path' => 'a.txt',
+      out = described_class.new(list, cache).execute('old_path' => 'a.txt',
                                                        'new_path' => 'sub/deep/b.txt')
       expect(out).to eq('ok: renamed a.txt to sub/deep/b.txt')
       expect(File.file?(File.join(dir, 'sub/deep/b.txt'))).to be true
@@ -194,7 +194,7 @@ RSpec.describe Tools::FileRenameTool do
       list = granted_list(dir)
 
       expect {
-        described_class.new(list, session.file_cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
+        described_class.new(list, cache).execute('old_path' => 'a.txt', 'new_path' => 'b.txt')
       }.not_to output.to_stdout
     end
   end

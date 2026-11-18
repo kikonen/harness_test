@@ -12,13 +12,11 @@ require_relative "../file_list"
 module Tools
 
   class DirDeleteTool < Tool
-    def initialize(file_list, file_cache: nil, harness: nil)
+    def initialize(file_list, file_cache: nil, logger:)
       @file_list  = file_list
       # issue #170: deleted files lose their digest-cache entry.
       @file_cache = file_cache
-      # Read live (#harness&.logger): a mid-run /resume (#280) hands the tools a
-      # NEW harness, so storing a Logger here would write to the replaced run.
-      @harness    = harness
+      @logger     = logger
       super(
         name: "dir.delete",
         description: "Deletes a directory and, when it is not empty, its whole tree " \
@@ -89,7 +87,6 @@ module Tools
       denial = grant_error(path, shown, entries)
       return denial if denial
 
-      warn_unlogged
       files, dirs = delete_tree(entries)
       Dir.rmdir(path)
       # issue #105: the top directory itself (delete_tree only sees its
@@ -173,19 +170,8 @@ module Tools
       [files, dirs]
     end
 
-    # Mandatory audit trail (issue #290): the deletion is only traceable if
-    # each path lands in harness.log.
     def log(line)
-      @harness&.logger&.info "dir.delete: #{line}"
-    end
-
-    # A tool built without a harness (unit specs) has nowhere to write the
-    # audit trail; one console warning is enough - the entry-by-entry variant
-    # would flood the terminal with one line per deleted path.
-    def warn_unlogged
-      return if @harness&.logger
-
-      status(:warn, "no harness attached - deleted paths are not logged")
+      @logger.info "dir.delete: #{line}"
     end
   end
 end

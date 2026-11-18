@@ -4,7 +4,7 @@ require 'spec_helper'
 require 'stringio'
 require 'tmpdir'
 require 'tools/file_patch_tool'
-require 'session'
+require 'session_file_cache'
 
 RSpec.describe Tools::FilePatchTool do
   # Drive the grant dialog without any real I/O: intercept Dialog#show (the
@@ -49,11 +49,11 @@ RSpec.describe Tools::FilePatchTool do
         File.write(target, "line1\nline2\n")
         list   = FileList.new(workdir: dir)
         list.add_file('hello.txt', :rw)
-        session = Session.new('sp')
-        tool    = described_class.new(list, session.file_cache)
+        file_cache = SessionFileCache.new
+        tool    = described_class.new(list, file_cache)
 
         # Seed the cache as if we had just read the file at this state.
-        session.file_cache.record(target, FileList.sha256(target), workdir: dir)
+        file_cache.record(target, FileList.sha256(target), workdir: dir)
 
         # External change after our last read.
         File.write(target, "line1\nline2-external\n")
@@ -78,11 +78,11 @@ RSpec.describe Tools::FilePatchTool do
         File.write(target, "line1\nline2\n")
         list   = FileList.new(workdir: dir)
         list.add_file('hello.txt', :rw)
-        session = Session.new('sp')
-        tool    = described_class.new(list, session.file_cache)
+        file_cache = SessionFileCache.new
+        tool    = described_class.new(list, file_cache)
 
         # Simulate a file.read that records the current digest.
-        session.file_cache.record(target, FileList.sha256(target), workdir: dir)
+        file_cache.record(target, FileList.sha256(target), workdir: dir)
 
         diff = <<~DIFF
           --- a/hello.txt

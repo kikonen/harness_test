@@ -48,10 +48,10 @@ module Tools
       "Output is truncated to a line limit: it enters the context window."
     ].join(" ")
 
-    def initialize(file_list, options, harness: nil)
+    def initialize(file_list, options, logger:)
       @workdir   = file_list.workdir
       @options   = options
-      @harness   = harness
+      @logger    = logger
       @fetcher   = WebFetcher.new(guard: build_guard)
       @allowlist = WebHostAllowlist.new(@workdir)
       super(
@@ -268,7 +268,7 @@ module Tools
     # the model must not retry blindly.
     def failure(host, outcome)
       status(:fail, "#{host} #{outcome}")
-      @harness&.logger&.warn "web.fetch failed (#{host}): #{outcome}"
+      @logger.warn "web.fetch failed (#{host}): #{outcome}"
       outcome
     end
 
