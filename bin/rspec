@@ -24,30 +24,21 @@ fi
 # the suite is found no matter where the script is invoked from.
 cd "$ROOT_DIR"
 
-# Split the command-line args: test paths all live under spec/, so anything
-# starting with it goes after parallel_rspec's last `--` for distribution;
-# everything else (options and their values) goes to rspec. parallel_rspec
-# drops location suffixes (spec/foo_spec.rb:111, [1:2]), so a path with one
-# forces a serial run.
-RSPEC_ARGS=()
-FILES=()
+# Given spec paths, run plain serial rspec: for a few files the process
+# fan-out is pointless overhead, and parallel_rspec also drops location
+# suffixes (spec/foo_spec.rb:111). Without paths, run the whole suite.
 for arg in "$@"; do
     case "$arg" in
-        spec*|./spec*)
-            FILES+=("$arg")
-            case "$arg" in *:*|*\[*) PARALLEL=false ;; esac
-            ;;
-        *)  RSPEC_ARGS+=("$arg") ;;
+        spec*|./spec*) PARALLEL=false; break ;;
     esac
 done
-[ ${#FILES[@]} -eq 0 ] && FILES=(spec)
 
 # Piped output gets compact, uncolored defaults; an explicit format or color
 # option on the command line overrides its default. A TTY keeps .rspec's.
 DEFAULTS=()
 if [ ! -t 1 ]; then
     want_format=true want_color=true
-    for arg in ${RSPEC_ARGS[@]+"${RSPEC_ARGS[@]}"}; do
+    for arg in "$@"; do
         case "$arg" in
             -f*|--format|--format=*) want_format=false ;;
             -c|--*color)             want_color=false ;;
@@ -59,15 +50,13 @@ fi
 
 if [ "${PARALLEL:-parallel}" = "false" ]; then
     echo "mode=SERIAL"
-    exec bundle exec rspec ${DEFAULTS[@]+"${DEFAULTS[@]}"} \
-         ${RSPEC_ARGS[@]+"${RSPEC_ARGS[@]}"} "${FILES[@]}"
+    exec bundle exec rspec ${DEFAULTS[@]+"${DEFAULTS[@]}"} "$@"
 fi
 
 # parallel_tests assumes a bin/rspec binstub is RUBY and runs `ruby --
 # bin/rspec`; ours is bash, so its PARALLEL_TESTS_EXECUTABLE hook must name
 # the worker or every worker dies in a LoadError. Its own options come
 # before rspec's, so rspec's go between the two `--`.
-echo "mode=SERIAL"
+echo "mode=PARALLEL"
 export PARALLEL_TESTS_EXECUTABLE="bundle exec rspec"
-exec bundle exec parallel_rspec -- ${DEFAULTS[@]+"${DEFAULTS[@]}"} \
-     ${RSPEC_ARGS[@]+"${RSPEC_ARGS[@]}"} -- "${FILES[@]}"
+exec bundle exec parallel_rspec -- ${DEFAULTS[@]+"${DEFAULTS[@]}"} "$@" -- spec
