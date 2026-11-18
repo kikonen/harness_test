@@ -12,13 +12,13 @@ require_relative "../file_list"
 module Tools
 
   class DirDeleteTool < Tool
-    def initialize(file_list, session: nil, harness: nil)
-      @file_list = file_list
+    def initialize(file_list, file_cache: nil, harness: nil)
+      @file_list  = file_list
       # issue #170: deleted files lose their digest-cache entry.
-      @session   = session
+      @file_cache = file_cache
       # Read live (#harness&.logger): a mid-run /resume (#280) hands the tools a
       # NEW harness, so storing a Logger here would write to the replaced run.
-      @harness   = harness
+      @harness    = harness
       super(
         name: "dir.delete",
         description: "Deletes a directory and, when it is not empty, its whole tree " \
@@ -166,7 +166,7 @@ module Tools
           File.unlink(entry)
           files += 1
           @file_list.revoke_grants(entry)
-          @session&.file_cache&.clear(entry, workdir: @file_list.workdir)
+          @file_cache&.clear(entry, workdir: @file_list.workdir)
         end
         log("deleted #{dir ? 'directory' : 'file'} #{@file_list.display_path(entry)}")
       end

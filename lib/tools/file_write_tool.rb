@@ -10,13 +10,13 @@ require "fileutils"
 module Tools
 
   class FileWriteTool < Tool
-    def initialize(file_list, session = nil)
+    def initialize(file_list, file_cache = nil)
       @file_list = file_list
-      # issue #170: optional Session - when given, writes are checked
-      # against the digest cache (external-change detection) and record
-      # the new digest on success. nil only for specs that never had a
-      # prior read in-session (nothing to detect).
-      @session   = session
+      # issue #170: optional digest cache - when given, writes are checked
+      # against it (external-change detection) and record the new digest on
+      # success. nil only for specs that never had a prior read in-session
+      # (nothing to detect).
+      @file_cache = file_cache
       super(
         name: "file.write",
         description: "Writes content to a file. " \
@@ -53,9 +53,9 @@ module Tools
       # cached - otherwise someone (or something) changed it OUTSIDE us.
       # This is deliberately NOT a concurrency lock: only changes the
       # harness did not make itself are flagged.
-      if @session && File.file?(path)
+      if @file_cache && File.file?(path)
         current = FileList.sha256(path)
-        cached  = @session.file_cache.digest(path, workdir: @file_list.workdir)
+        cached  = @file_cache.digest(path, workdir: @file_list.workdir)
         if cached && current != cached
           status(:fail, "#{shown} (externally changed since last read)")
           return "error: '#{shown}' has changed externally since you last read it. " \
@@ -81,9 +81,9 @@ module Tools
 
       # issue #170: our own write refreshes the cache (the file is now in
       # the exact state we wrote it).
-      if @session
+      if @file_cache
         sha = FileList.sha256(path)
-        @session.file_cache.record(path, sha, workdir: @file_list.workdir) if sha
+        @file_cache.record(path, sha, workdir: @file_list.workdir) if sha
       end
 
       status(:ok, "#{shown} (#{content.length} chars)")

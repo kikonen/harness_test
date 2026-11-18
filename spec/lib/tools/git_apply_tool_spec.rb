@@ -243,7 +243,7 @@ RSpec.describe Tools::GitApplyTool do
         list   = FileList.new(workdir: dir)
         list.add_file('hello.txt', :rw)
         session = Session.new('sp')
-        tool    = described_class.new(list, session)
+        tool    = described_class.new(list, session.file_cache)
 
         # Seed the cache as if we had just read the file at this state.
         session.file_cache.record(target, FileList.sha256(target), workdir: dir)
@@ -274,7 +274,7 @@ RSpec.describe Tools::GitApplyTool do
         list   = FileList.new(workdir: dir)
         list.add_file('hello.txt', :rw)
         session = Session.new('sp')
-        tool    = described_class.new(list, session)
+        tool    = described_class.new(list, session.file_cache)
 
         session.file_cache.record(target, FileList.sha256(target), workdir: dir)
 
@@ -302,7 +302,7 @@ RSpec.describe Tools::GitApplyTool do
         list   = FileList.new(workdir: dir)
         list.add_file('hello.txt', :rw)
         session = Session.new('sp')
-        tool    = described_class.new(list, session)
+        tool    = described_class.new(list, session.file_cache)
 
         diff = <<~DIFF
           --- a/hello.txt

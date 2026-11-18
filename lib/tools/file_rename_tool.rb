@@ -7,11 +7,11 @@ require "fileutils"
 module Tools
 
   class FileRenameTool < Tool
-    def initialize(file_list, session = nil)
+    def initialize(file_list, file_cache = nil)
       @file_list = file_list
-      # issue #170: optional Session - when given, the digest cache entry
+      # issue #170: optional digest cache - when given, the cache entry
       # travels with the file (contents unchanged).
-      @session   = session
+      @file_cache = file_cache
       super(
         name: "file.rename",
         description: "Renames (moves) a file to a new path. " \
@@ -67,8 +67,7 @@ module Tools
       FileUtils.mv(old_path, new_path)
 
       # issue #170: the digest travels with the file - re-key the cache.
-      # &. guards only the next send, so BOTH hops carry one.
-      @session&.file_cache&.rename(old_path, new_path, workdir: @file_list.workdir)
+      @file_cache&.rename(old_path, new_path, workdir: @file_list.workdir)
 
       status(:ok, "#{old_shown} → #{new_shown}")
       "ok: renamed #{old_shown} to #{new_shown}"

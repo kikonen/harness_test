@@ -54,8 +54,8 @@ RSpec.describe Tools::DirDeleteTool do
     junction && File.symlink?(link)
   end
 
-  def build(list, session: nil, harness: nil)
-    described_class.new(list, session: session, harness: harness)
+  def build(list, file_cache: nil, harness: nil)
+    described_class.new(list, file_cache: file_cache, harness: harness)
   end
 
   describe 'recursive deletion (issue #290)' do
@@ -348,7 +348,7 @@ RSpec.describe Tools::DirDeleteTool do
         list = FileList.new(workdir: dir)
         list.add_dir('tree', :d)
 
-        build(list, session: session).execute('path' => 'tree')
+        build(list, file_cache: session.file_cache).execute('path' => 'tree')
 
         expect(session.file_cache.known?('tree/a.txt', workdir: dir)).to be(false)
       end
