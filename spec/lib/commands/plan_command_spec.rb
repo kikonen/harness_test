@@ -28,7 +28,7 @@ RSpec.describe Commands::PlanCommand do
   let(:ui) { UI::Console.new(stdout: io) }
 
   def command(harness = build_harness)
-    described_class.new(harness: harness, file_list: nil, options: nil, ui: ui)
+    described_class.new(harness: harness, file_list: nil, ui: ui)
   end
 
   describe 'the help entry (issue #323 contract)' do

@@ -13,7 +13,7 @@ require 'commands/exit_command'
 
 RSpec.describe Command do
   def build(klass = described_class, ui: UI::Console.new(stdout: StringIO.new), **extra)
-    klass.new(harness: nil, file_list: nil, options: nil, ui: ui, **extra)
+    klass.new(harness: nil, file_list: nil, ui: ui, **extra)
   end
 
   describe '.help' do
@@ -75,13 +75,11 @@ RSpec.describe Command do
     it 'exposes everything a command needs to run' do
       harness = Object.new
       file_list = Object.new
-      options = Object.new
       ui = UI::Console.new(stdout: StringIO.new)
-      cmd = build(described_class, ui: ui, harness: harness, file_list: file_list, options: options)
+      cmd = build(described_class, ui: ui, harness: harness, file_list: file_list)
 
       expect(cmd.harness).to equal(harness)
       expect(cmd.file_list).to equal(file_list)
-      expect(cmd.options).to equal(options)
       expect(cmd.ui).to equal(ui)
     end
 

@@ -9,7 +9,7 @@ RSpec.describe Commands::CtxCommand do
     harness = Object.new
     harness.define_singleton_method(:context_usage) { usage }
     stdout = StringIO.new
-    described_class.new(harness: harness, file_list: nil, options: nil,
+    described_class.new(harness: harness, file_list: nil,
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string
   end

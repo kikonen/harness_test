@@ -9,7 +9,7 @@ require 'commands/clear_command'
 RSpec.describe Commands::ClearCommand do
   def run_command(list, args = '')
     stdout = StringIO.new
-    described_class.new(harness: nil, file_list: list, options: nil,
+    described_class.new(harness: nil, file_list: list,
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string
   end

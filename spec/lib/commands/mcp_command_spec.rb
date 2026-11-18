@@ -54,7 +54,6 @@ RSpec.describe Commands::McpCommand do
     described_class.new(
       harness: harness,
       file_list: nil,
-      options: nil,
       ui: UI::Console.new(stdout: stdout)).handle('')
     stdout.string
   end

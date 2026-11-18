@@ -20,7 +20,7 @@ RSpec.describe Commands::YoloCommand do
   let(:ui) { UI::Console.new(stdout: io) }
 
   def command(settings = build_settings)
-    described_class.new(settings: settings, file_list: nil, options: nil, ui: ui)
+    described_class.new(settings: settings, file_list: nil, ui: ui)
   end
 
   it 'toggles the posture on a bare /yolo and acks the new label' do

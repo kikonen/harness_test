@@ -30,14 +30,18 @@ RSpec.describe Commands::ModelCommand do
   def harness(manager)
     h = Object.new
     h.define_singleton_method(:session_manager) { manager }
+    # /model reads the live endpoint from THIS harness' ModelConfig (#286),
+    # not from settings - so the double exposes a model_config answering base_url.
+    model_config = Object.new
+    model_config.define_singleton_method(:base_url) { 'http://srv:11434/v1' }
+    h.define_singleton_method(:model_config) { model_config }
     h
   end
 
-  def run_command(args = '', manager: nil, vision: false,
-                  options: { base_url: 'http://srv:11434/v1' })
+  def run_command(args = '', manager: nil, vision: false)
     manager ||= session_manager([{ name: 'qwen', model: 'qwen3:8b' }], 'qwen', vision: vision)
     stdout = StringIO.new
-    described_class.new(harness: harness(manager), file_list: nil, options: options,
+    described_class.new(harness: harness(manager), file_list: nil,
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string
   end

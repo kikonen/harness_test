@@ -9,16 +9,16 @@ require_relative "ui/palette"
 # every Harness (sub-agents included) as the one settings object, so no other
 # object carries or reads a raw options hash.
 #
-# Settings carries the run config and the shared model CATALOGUE; it does NOT
-# carry mutable per-connection state. A #286 sub-agent shares this one object,
-# so the live model / endpoint / sampling values are seeded from settings into
-# each Harness' own ModelConfig and mutated there - /model and /param never
-# write back here, or one switch would change every agent at once.
+# Settings carries the run config and the shared model CATALOGUE (profiles,
+# default, the selected model name); it carries NO per-connection model fields.
+# The live model / endpoint / sampling values live only in each Harness' own
+# ModelConfig, seeded from the resolved profile - a #286 sub-agent shares this
+# one settings object, so putting a per-connection field here would couple every
+# agent to it.
 #
 # Two access routes, deliberately distinct (#286):
 #   * Harness and its collaborators read NAMED accessors - compact_*, retry_*,
-#     yolo?, and the model SEED values ModelConfig clones. These are read-only
-#     here.
+#     yolo?, and the model catalogue/selection. These are read-only here.
 #   * "Others" (the tools, CommandRunner) read a single key through the
 #     designated [] reader. [] is the single-key reader/writer; there is no
 #     full options accessor, because re-exposing the whole mutable hash is what
@@ -47,38 +47,26 @@ class SystemSettings
     retry_delay
     max_memories
     default_model
+    mcp_image_limits
     output_tail_memory
     output_tasks_kept
     markdown_max_width
   ].freeze
 
-  # The model SEED values: read-only here. Each Harness clones them into its
-  # own ModelConfig, which is where /model and /param mutate them.
-  MODEL_KEYS = %i[
-    model
+  # The model SELECTION: the active model PROFILE NAME the CLI chose with
+  # -m/--model (nil = use the config default). The CLI arg names a profile, not
+  # the id sent to the REST API - that id is the profile's own :model. settings
+  # holds no wire id and no per-connection params; Harness looks them up from
+  # the profile this selects and keeps them in its own ModelConfig.
+  SELECTION_KEYS = %i[
     active_model
-    base_url
-    api
-    token
-    vision
-    num_ctx
-    max_tokens
-    num_predict
-    reasoning_effort
-    temperature
-    top_p
-    top_k
-    min_p
-    presence_penalty
-    repeat_penalty
-    mcp_image_limits
   ].freeze
 
   STATIC_KEYS.each do |name|
     define_method(name) { @options[name] }
   end
 
-  MODEL_KEYS.each do |name|
+  SELECTION_KEYS.each do |name|
     define_method(name) { @options[name] }
   end
 
@@ -250,18 +238,27 @@ class SystemSettings
     @output_palette = UI::Palette.fetch(name)
   end
 
-  # -- Model SEED helpers (read-only; live mutation lives in ModelConfig) --
+  # -- Model catalogue/selection helpers (live params live in ModelConfig) --
 
-  # The seed active-model name (active_model || model), used by the catalogue
-  # display when no per-Harness ModelConfig is in play.
+  # The selected model PROFILE NAME: what -m/--model chose, or the config
+  # default when nothing was chosen (active_model nil). nil only when neither
+  # is set. Used by the catalogue display and to look up the profile Harness
+  # seeds its ModelConfig from.
   def active_model_name
-    active_model || model
+    active_model || default_model
   end
 
-  # The seed value of a model parameter (nil when unset). ModelConfig#param
-  # reads the live per-connection value.
-  def param(key)
-    @options[key.to_sym]
+  # The profile the selection resolves to (nil when no model is selected or no
+  # profile matches). Harness reads its per-connection values from here.
+  def active_profile
+    find_profile(active_model_name)
+  end
+
+  # The wire model id of the active profile, or the raw -m id when no profile
+  # is configured. ModelConfig#model sends this to the REST API.
+  def selected_model_id
+    profile = active_profile
+    profile ? profile[:model] : active_model
   end
 
   # Restore the session-persisted postures a resumed run saved. Called with the

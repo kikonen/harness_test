@@ -12,10 +12,10 @@
 # - the exact bug this class removes. A /model switch or a /param tweak
 # therefore reaches only this Harness' connection.
 #
-# Seeded from settings at construction (settings is the single source of the
-# resolved CLI/config values); the model CATALOGUE (profiles, default_model,
-# find_profile) stays run-wide in settings because it is fixed config shared
-# by every agent, not live per-connection state.
+# Seeded from the RESOLVED PROFILE at construction: settings carries only the
+# model CATALOGUE and the selection, never per-connection fields. The profile
+# this run selected supplies the endpoint/sampling values; the catalogue stays
+# run-wide in settings because it is fixed config shared by every agent.
 class ModelConfig
   # The live per-connection keys the backends, LLMClient, SessionManager and
   # ParamOverrides read every request, so a /model switch takes effect without
@@ -69,12 +69,44 @@ class ModelConfig
 
   TRANSPORT_KEYS.each { |name| define_method(name) { @values[name] } }
 
-  # Seed every live key from the run-wide settings (the resolved config). A
-  # hand-built hash (specs, a fresh profile-less run) works the same way.
+  # Seed a fresh connection from the run's settings: the selected model name
+  # and the global image budget come from settings; the wire model id and every
+  # endpoint/sampling value come from the resolved PROFILE. settings carries no
+  # wire id or per-connection field to clone (issue #286) - -m only names a
+  # profile. A profile-less selection (-m with no models configured) keeps the
+  # raw id as the wire model and leaves base_url nil: there is no built-in
+  # endpoint default. A hand-built hash (specs) still works via #new.
   def self.from_settings(settings)
-    new(
-      MODEL_KEYS.to_h { |k| [k, settings.public_send(k)] }
-                .merge(TRANSPORT_KEYS.to_h { |k| [k, settings.public_send(k)] }))
+    values = {
+      model: settings.selected_model_id,
+      active_model: settings.active_model,
+      mcp_image_limits: settings.mcp_image_limits
+    }
+    apply_seed_profile(values, settings.active_profile)
+    new(values.merge(TRANSPORT_KEYS.to_h { |k| [k, settings.public_send(k)] }))
+  end
+
+  # Seed the profile-declared per-connection values into a fresh values hash.
+  # Mirrors #apply_profile but starts from empty, and leaves active_model as
+  # the selection already resolved it (nil when the config default is active).
+  def self.apply_seed_profile(values, profile)
+    return if profile.nil?
+
+    values[:base_url]         = profile[:url] if profile[:url]
+    values[:api]              = profile[:api]
+    values[:token]            = profile[:token]
+    values[:num_ctx]          = profile[:num_ctx]
+    values[:max_tokens]       = profile[:max_tokens]
+    values[:num_predict]      = profile[:num_predict]
+    values[:reasoning_effort] = profile[:reasoning_effort]
+    values[:temperature]      = profile[:temperature]
+    values[:top_p]            = profile[:top_p]
+    values[:top_k]            = profile[:top_k]
+    values[:min_p]            = profile[:min_p]
+    values[:presence_penalty] = profile[:presence_penalty]
+    values[:repeat_penalty]   = profile[:repeat_penalty]
+    values[:vision]           = profile[:vision] == true
+    values[:mcp_image_limits] = profile[:mcp_images] if profile[:mcp_images]
   end
 
   # Specs and non-CLI builders pass the raw values hash directly.

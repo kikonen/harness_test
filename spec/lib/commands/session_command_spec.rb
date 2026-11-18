@@ -11,7 +11,7 @@ RSpec.describe Commands::SessionCommand do
     harness = Object.new
     harness.define_singleton_method(:session) { session }
     stdout = StringIO.new
-    described_class.new(harness: harness, file_list: nil, options: nil,
+    described_class.new(harness: harness, file_list: nil,
                         ui: UI::Console.new(stdout: stdout)).handle('')
     stdout.string
   end

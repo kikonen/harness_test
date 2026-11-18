@@ -18,7 +18,6 @@ RSpec.describe Commands::HelpCommand do
     described_class.new(
       harness: nil,
       file_list: nil,
-      options: nil,
       ui: console,
       help_renderer: renderer
     ).handle(args)

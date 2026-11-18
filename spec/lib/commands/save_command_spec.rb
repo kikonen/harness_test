@@ -7,19 +7,23 @@ require 'file_list'
 require 'commands/save_command'
 
 RSpec.describe Commands::SaveCommand do
-  def harness_with(id, path)
+  # resume_cli_string names the live active model PROFILE (-m names a profile,
+  # not a wire id), so the harness double answers active_model_name like the real
+  # SessionManager does.
+  def harness_with(id, path, active_model: 'qwen3:8b')
     sm = Object.new
     sm.define_singleton_method(:save_session) { id }
     sm.define_singleton_method(:session_file_path) { |session_id| path % session_id }
+    sm.define_singleton_method(:active_model_name) { active_model }
     h = Object.new
     h.define_singleton_method(:session_manager) { sm }
     h
   end
 
-  def run_command(file_list, options: { model: 'qwen3:8b' }, id: 'abc123', path: '.harness/sessions/%s/session.json')
+  def run_command(file_list, id: 'abc123', path: '.harness/sessions/%s/session.json')
     stdout = StringIO.new
     described_class.new(harness: harness_with(id, path), file_list: file_list,
-                        options: options, ui: UI::Console.new(stdout: stdout)).handle('')
+                        ui: UI::Console.new(stdout: stdout)).handle('')
     stdout.string
   end
 
@@ -39,11 +43,10 @@ RSpec.describe Commands::SaveCommand do
   end
 
   describe 'resume_cli_string' do
-    it 'builds the command line with the model and --resume <id>' do
+    it 'builds the command line with the active model and --resume <id>' do
       Dir.mktmpdir do |_dir|
         cli = described_class.new(harness: harness_with('abc123', 'x'),
                                   file_list: FileList.new([], workdir: Dir.pwd),
-                                  options: { model: 'qwen3:8b' },
                                   ui: UI::Console.new(stdout: StringIO.new))
           .resume_cli_string('abc123')
 
@@ -56,11 +59,21 @@ RSpec.describe Commands::SaveCommand do
       end
     end
 
+    it 'names the model the run switched to, not the original -m' do
+      Dir.mktmpdir do |_dir|
+        cli = described_class.new(harness: harness_with('abc123', 'x', active_model: 'big'),
+                                  file_list: FileList.new([], workdir: Dir.pwd),
+                                  ui: UI::Console.new(stdout: StringIO.new))
+          .resume_cli_string('abc123')
+
+        expect(cli).to include('-m big')
+      end
+    end
+
     it 'adds -d <workdir> only when the workdir differs from the current directory' do
       Dir.mktmpdir do |dir|
         cli = described_class.new(harness: harness_with('abc123', 'x'),
                                   file_list: FileList.new([], workdir: dir),
-                                  options: { model: 'qwen3:8b' },
                                   ui: UI::Console.new(stdout: StringIO.new))
           .resume_cli_string('abc123')
 

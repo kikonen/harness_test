@@ -29,7 +29,7 @@ RSpec.describe Commands::MemoryCommand do
 
   def run_command(dir, args = '')
     stdout = StringIO.new
-    described_class.new(harness: Object.new, file_list: file_list_with(dir), options: nil,
+    described_class.new(harness: Object.new, file_list: file_list_with(dir),
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string
   end
@@ -37,7 +37,7 @@ RSpec.describe Commands::MemoryCommand do
   def run_with_palette(dir, args = '', palette = 'default')
     stdout = StringIO.new
     described_class.new(harness: harness_with_palette(dir, palette),
-                        file_list: file_list_with(dir), options: nil,
+                        file_list: file_list_with(dir),
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string
   end

@@ -20,8 +20,9 @@ RSpec.describe CLI do
   let(:options) do
     {
       workdir:   workdir,
-      base_url:  'http://localhost:11434/v1',
-      model:     'test-model',
+      # What CLIOptions.parse hands the CLI: the active model PROFILE NAME
+      # (there are no models: configured here, so it is the raw -m id).
+      active_model: 'test-model',
       system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE
     }
   end
@@ -399,7 +400,7 @@ RSpec.describe CLI do
     it 'says inlined when the active profile declares vision' do
       allow(Mcp::ServerConnection).to receive(:new).and_return(fake_connection)
       cli = described_class.new(
-        mcp_options(model: 'sees',
+        mcp_options(active_model: 'sees',
                     model_profiles: [{ name: 'sees', model: 'vision-model',
                                        vision: true }]), ui)
       stub_prompt_reader

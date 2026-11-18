@@ -13,8 +13,6 @@ require_relative "ui"
 # setting is: CLI flag > config file > built-in. Extracted from CLI so CLI
 # stays about running a session and this class owns argument parsing.
 class CLIOptions
-  DEFAULT_BASE_URL = "http://localhost:11434/v1"
-
   def self.parse
     new.parse
   end
@@ -27,10 +25,9 @@ class CLIOptions
     config = HarnessConfig.load(opts[:config_path], opts[:workdir])
 
     profile = resolve_profile(opts, config)
-    apply_profile(opts, profile)
     apply_model_tracking(opts, profile, config)
     apply_config(opts, config, profile)
-    validate!(opts)
+    validate!(opts, config)
 
     opts
   end
@@ -160,30 +157,6 @@ class CLIOptions
     return nil unless config.models_configured?
 
     config.resolve_model(opts[:model])
-  end
-
-  # A profile carries the endpoint and generation parameters; without one the
-  # base url falls back to the built-in default.
-  def apply_profile(opts, profile)
-    if profile
-      opts[:base_url] = profile[:url] || DEFAULT_BASE_URL
-      opts[:model] ||= profile[:model]
-      opts[:api] = profile[:api]
-      opts[:token] = profile[:token]
-      opts[:num_ctx] = profile[:num_ctx]
-      opts[:max_tokens] = profile[:max_tokens]
-      opts[:num_predict] = profile[:num_predict]
-      opts[:reasoning_effort] = profile[:reasoning_effort]
-      opts[:temperature] = profile[:temperature]
-      opts[:top_p] = profile[:top_p]
-      # issue #449: image support is a property of THIS model, declared in the
-      # profile. It travels into the backend options, which refuse to send an
-      # image payload to a profile that never declared it.
-      opts[:vision] = profile[:vision] == true
-    else
-      opts[:base_url] ||= DEFAULT_BASE_URL
-      opts[:vision] = false
-    end
   end
 
   # Expose the configured model profiles so /models can list them and
@@ -332,8 +305,12 @@ class CLIOptions
     opts[:editor] = opts[:editor_cli] || env_editor
   end
 
-  def validate!(opts)
-    return if opts[:model] || opts[:list_sessions] || opts[:delete_session]
+  # A conversation run needs a model to talk to. -m supplies the active model
+  # PROFILE NAME; without it a configured default_model satisfies the need
+  # (resolve_profile resolved that profile above). list/delete need no model.
+  def validate!(opts, config)
+    return if opts[:list_sessions] || opts[:delete_session]
+    return if opts[:model] || config.default_model
 
     raise HarnessError, "-m / --model is required (or set default_model in the config)"
   end

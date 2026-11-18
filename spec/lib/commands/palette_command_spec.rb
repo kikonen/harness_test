@@ -17,7 +17,7 @@ RSpec.describe Commands::PaletteCommand do
 
   def run_command(args = '', settings = build_settings)
     io = StringIO.new
-    described_class.new(settings: settings, file_list: nil, options: nil,
+    described_class.new(settings: settings, file_list: nil,
                         ui: UI::Console.new(stdout: io)).handle(args)
     io.string
   end

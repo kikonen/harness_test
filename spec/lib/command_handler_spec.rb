@@ -13,7 +13,6 @@ RSpec.describe CommandHandler do
     described_class.new(
       harness: nil,
       file_list: FileList.new([], workdir: dir),
-      options: options,
       settings: SystemSettings.from_options(options),
       ui: console
     )
@@ -213,7 +212,7 @@ RSpec.describe CommandHandler do
       CommandHandler.new(
         harness: ctx_harness,
         file_list: FileList.new([], workdir: Dir.pwd),
-        options: {},
+        settings: SystemSettings.from_options({}),
         ui: UI::Console.new(stdout: stdout, stdin: StringIO.new(''))
       )
     end
