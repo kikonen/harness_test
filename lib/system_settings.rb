@@ -52,10 +52,6 @@ class SystemSettings
     output_tasks_kept
     markdown_max_width
     workdir
-    resume
-    continue
-    list_sessions
-    delete_session
     editor
     double_enter_submit
     protected_dirs
