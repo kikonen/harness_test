@@ -51,6 +51,14 @@ class SystemSettings
     output_tail_memory
     output_tasks_kept
     markdown_max_width
+    workdir
+    resume
+    continue
+    list_sessions
+    delete_session
+    editor
+    double_enter_submit
+    protected_dirs
   ].freeze
 
   # The model SELECTION: the active model PROFILE NAME the CLI chose with
@@ -99,6 +107,13 @@ class SystemSettings
   def resume_replay_entries
     entries = @options[:resume_replay_entries]
     entries.nil? ? DEFAULT_RESUME_REPLAY_ENTRIES : entries.to_i
+  end
+
+  # The standing grant on the working directory (issue #384, config 'grant_workdir:').
+  # A hand-built options hash (specs, library users) gets the same default the config
+  # would: an explicit false is the only thing that turns it off.
+  def grant_workdir?
+    @options.fetch(:grant_workdir, true) != false
   end
 
   # -- Shared model catalogue (fixed config, issue #286) -------------------

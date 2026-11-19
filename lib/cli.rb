@@ -20,8 +20,7 @@ require_relative "session_logger"
 # -- CLI ------------------------------------------------------------------
 
 class CLI
-  attr_reader :options,
-    :settings,
+  attr_reader :settings,
     :registry,
     :file_list,
     :session_id,
@@ -30,9 +29,11 @@ class CLI
     :ui
 
   # Defaults keep the entry point (`CLI.new.run`) unchanged; the tests inject
-  # pre-parsed options and a stubbed UI instead.
+  # pre-parsed options and a stubbed UI instead. The options hash is resolved
+  # into SystemSettings here - the CLI's ONLY run-config holder - so the workdir
+  # is available for the file list and the locator built below.
   def initialize(options = nil, ui = nil)
-    @options   = options || CLIOptions.parse
+    @settings = SystemSettings.from_options(options || CLIOptions.parse)
 
     # This console is the single sink every dialog and status line reaches (a
     # Task's drain loop renders to it, and the Poller serves a dialog
@@ -44,7 +45,7 @@ class CLI
       palette: -> { foreground_harness&.output_palette })
 
     @file_list = build_file_list
-    @locator = SessionLocator.new(@options[:workdir])
+    @locator = SessionLocator.new(@settings.workdir)
   end
 
   # The run's Harness lives INSIDE the foreground job (#286): the CLI builds it,
@@ -76,17 +77,15 @@ class CLI
     @setup_done = true
 
     @session_id ||= @locator.resolve_id(
-      resume: @options[:resume],
-      newest: !!@options[:continue])
+      resume: @settings.resume,
+      newest: !!@settings.continue)
     resume_data = resumed_run? ? @locator.read_session(session_id) : nil
 
-    # SystemSettings is resolved from the run's options here (the owner of the
-    # posture/consent state) and handed to the Harness, which delegates to it.
-    # The four session-persisted postures are applied over it by the Harness
-    # for a resumed run (#221: the saved choice wins over the config), so the
-    # CLI no longer applies postures after construction. Ownership:
+    # SystemSettings was resolved in #initialize (the CLI's single run-config
+    # holder) and is handed to the Harness, which delegates to it. The four
+    # session-persisted postures are applied over it by the Harness for a
+    # resumed run (#221: the saved choice wins over the config). Ownership:
     # doc/harness_job_design.md.
-    @settings = SystemSettings.from_options(@options)
 
     # The log path is keyed by the session id the CLI resolved above, so the
     # CLI builds the per-session logger here and injects it (with the settings)
@@ -146,7 +145,7 @@ class CLI
   # constructed a whole Harness (client, logger, tool registry) just to read a
   # few JSON files, minting a fresh random id on the way.
   def list_sessions
-    return unless !!@options[:list_sessions]
+    return unless @settings.list_sessions
 
     Commands::SessionsCommand.new(
       file_list: @file_list,
@@ -163,7 +162,7 @@ class CLI
   # entry point, which prints "Error: ..." and exits 1); find_session_file
   # already raises on an ambiguous prefix and returns nil when nothing matches.
   def delete_session
-    id = @options[:delete_session].to_s.strip
+    id = @settings.delete_session.to_s.strip
     return if id.empty?
 
     path = @locator.find_session_file(id)
@@ -186,12 +185,12 @@ class CLI
 
     # issue #198: the double-Enter submit switch is process-global and
     # covers every UI::Editor read (idle prompt, notes, dialogs).
-    UI::Editor.submit_on_enter = !!@options[:double_enter_submit]
+    UI::Editor.submit_on_enter = !!@settings.double_enter_submit
 
     # issue #298: same reasoning for the external editor - the command is
     # resolved once, and every multiline read then honours Ctrl+G. nil (no flag,
     # no config key, no EDITOR/VISUAL) leaves the key exactly as Reline has it.
-    UI::Editor.external_editor = @options[:editor]
+    UI::Editor.external_editor = @settings.editor
 
     print_startup_banner
 
@@ -289,7 +288,7 @@ class CLI
     # run without them has nothing to say about it. The two cases behave
     # completely differently (pixels to the model vs. a path to a file under
     # .harness/content) and nothing else at startup says which one this is.
-    if Array(@options[:mcp_servers]).any?
+    if Array(@settings.mcp_servers).any?
       ui.puts "Tool-result images: #{foreground_harness.vision? ? 'inlined to the model' : 'files only (no vision profile)'}"
     end
     ui.puts "Working directory: #{@file_list.workdir}"
@@ -376,8 +375,8 @@ class CLI
   def build_file_list
     file_list = FileList.new(
       [],
-      workdir: @options[:workdir],
-      protected_dirs: @options[:protected_dirs])
+      workdir: @settings.workdir,
+      protected_dirs: @settings.protected_dirs)
     seed_standing_grant(file_list)
     file_list
   end
@@ -391,20 +390,13 @@ class CLI
   # first) - a /clear before saving is not silently undone by the resume, the
   # #105 rule that a grant must never come back from nowhere.
   def seed_standing_grant(file_list)
-    return unless grant_workdir?
+    return unless @settings.grant_workdir?
 
     workdir = file_list.workdir
     return if file_list.sensitive?(workdir)
 
     file_list.add_dir(workdir, :rw)
     file_list.add_dir(workdir, :d)
-  end
-
-  # The key is read from the parsed options (CLIOptions fills it from the
-  # config); a run built from a hand-made options hash (specs, library users)
-  # gets the same default as the config would: on.
-  def grant_workdir?
-    @options.fetch(:grant_workdir, true) != false
   end
 
   # issue #189: the log path relative to the workdir (absolute paths would
@@ -428,7 +420,7 @@ class CLI
   # issue #276): the conversation was restored during construction, so the
   # banner has to say so (there is no separate resume call left to report it).
   def resumed_run?
-    !!@options[:continue] || !@options[:resume].to_s.strip.empty?
+    !!@settings.continue || !@settings.resume.to_s.strip.empty?
   end
 
   # issue #458: redraw the saved OutputBuffer tail of the previous run. The
@@ -488,7 +480,7 @@ class CLI
   # as #consent_posture_display. Both branches name what STILL asks, because
   # "no dialogs for your files" is a claim a user must be able to audit.
   def file_access_display
-    unless grant_workdir?
+    unless @settings.grant_workdir?
       return "per-path consent - every file and directory asks " \
              "(grant_workdir: false)"
     end

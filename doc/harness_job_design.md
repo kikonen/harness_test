@@ -24,8 +24,12 @@ The three targets:
 
 - **Posture / consent state -> SystemSettings.** The yolo/stream/markdown/plan/
   palette postures and the two command-safety flags live in `SystemSettings`,
-  resolved once from the CLI options and handed around. Harness keeps thin
-  delegators so existing consumers keep one read surface. Static config
+  resolved once from the CLI options and handed around. The CLI's ONLY run-config
+  holder is `@settings` - it holds no raw `@options` hash and exposes no `options`
+  reader; every startup fact (workdir, resume/continue, the dispatch modes, the
+  resolved editor and submit key) is read through a settings accessor, so the CLI
+  carries the resolved config, never the bag it was resolved from. Harness keeps
+  thin delegators so existing consumers keep one read surface. Static config
   (`markdown_max_width`, the three output-buffer limits) is read once there too.
   A resumed run applies its saved postures over the settings via
   `SystemSettings#restore_persisted`.
