@@ -9,11 +9,20 @@ require 'system_settings'
 require 'job_registry'
 
 RSpec.describe CommandHandler do
+  # A main job carrying a harness light enough for the bang path (which only
+  # asks the harness for its logger to trace failed commands). #286: the run
+  # always owns a registry with a main job, so the host must too - a command
+  # handler with no registry is not a state the app can reach.
+  def bang_registry
+    JobRegistry.new.tap { |r| r.add_job(kind: :main, harness: (Class.new { def logger = nil; }.new)) }
+  end
+
   def make_handler(dir, console, options: {})
     described_class.new(
       file_list: FileList.new([], workdir: dir),
       settings: SystemSettings.from_options(options),
-      ui: console
+      ui: console,
+      registry: bang_registry
     )
   end
 

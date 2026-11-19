@@ -260,10 +260,10 @@ class Poller
     # body is a :note paragraph the renderer wraps + indents, so a multi-line
     # note no longer spills past the prompt. The buffer stores the RAW note as
     # :note (not a baked :text line) so the resume replay redraws it wrapped too.
-    ack  = task.renderer&.line(type: :kind, content: "got it", origin: "note")
-    body = task.renderer&.line(type: :note, content: note)
-    ui.puts(ack || "  [note] got it")
-    ui.puts(body || "  #{note}")
+    ack  = task.renderer.line(type: :kind, content: "got it", origin: "note")
+    body = task.renderer.line(type: :note, content: note)
+    ui.puts(ack)
+    ui.puts(body)
     task.buffer.put(type: :note, origin: :user_note, content: note)
   end
 
@@ -321,14 +321,12 @@ class Poller
       ensure_spinner_running unless task.visible_spinner
       task.visible_spinner&.update_detail(**payload)
     when :text
-      # For a status type the origin IS the bracket label. A Task with a
-      # stand-in console (specs) may carry no renderer at all.
-      line = task.renderer&.line(type:, content: msg[:content], origin: msg[:origin]) || msg[:content].to_s
+      line = task.renderer.line(type:, content: msg[:content], origin: msg[:origin])
       ui.puts(line)
       task.buffer.put(type: :text, origin: msg[:origin] || :task, content: msg[:content])
       task.buffer.keep_window
     else
-      line = task.renderer&.line(type:, content: msg[:content], origin: msg[:origin]) || msg[:content].to_s
+      line = task.renderer.line(type:, content: msg[:content], origin: msg[:origin])
       ui.puts(line) unless msg[:content].nil?
       task.buffer.put(type: msg[:type], origin: msg[:origin] || :task, content: msg[:content])
       task.buffer.keep_window
