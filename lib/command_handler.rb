@@ -107,7 +107,7 @@ class CommandHandler
   # The dispatcher reaches the Harness through the foreground job the run's
   # registry marks (its #run_direct_prompt), never a global (#286).
   def foreground_harness
-    registry&.foreground_job&.harness
+    registry.foreground_job&.harness
   end
 
   # Dispatch a single line of input. Slash-commands go through the registry;
@@ -245,7 +245,7 @@ class CommandHandler
     # The user's own line is one side of the exchange the resume replay
     # redraws; the run's JobRegistry records it in the foreground buffer
     # (issue #458, #286: the run record is not the single-turn-engine's).
-    registry&.record_user_prompt(text)
+    registry.record_user_prompt(text)
     run_on_task do |_t|
       foreground_harness.session_manager.run_prompt(text)
     end
