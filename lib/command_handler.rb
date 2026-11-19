@@ -92,7 +92,8 @@ class CommandHandler
     # so /help can never list a different set than /dispatch accepts.
     @help_renderer = UI::HelpRenderer.new(
       registry: COMMANDS,
-      ui:)
+      ui:,
+      settings: @settings)
     HelpTopics.validate!(COMMANDS.keys)
     # The JobRegistry the run owns (#286), exposed through TaskRunner#registry;
     # it is passed to every command built here (build_command).

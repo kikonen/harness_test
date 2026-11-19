@@ -20,26 +20,26 @@ RSpec.describe UI::Renderer do
     def console_sink(palette) = Object.new.tap { |o| o.define_singleton_method(:palette) { palette } }
     # A non-paintable sink (a browser console seam): NO #palette method at all.
     def plain_sink = Object.new
-    def harness(palette) = Object.new.tap { |o| o.define_singleton_method(:output_palette) { palette } }
+    def settings(palette) = Object.new.tap { |o| o.define_singleton_method(:output_palette) { palette } }
 
-    it 'a non-paintable sink paints NOTHING even when the harness is colored' do
+    it 'a non-paintable sink paints NOTHING even when the settings palette is colored' do
       # The whole point: a browser sink borrows no terminal palette, so its
       # lines never carry SGR the browser would show as literal text.
-      expect(described_class.palette_for(ui: plain_sink, harness: harness(colored))).to be_nil
+      expect(described_class.palette_for(ui: plain_sink, settings: settings(colored))).to be_nil
     end
 
-    it 'a non-paintable sink paints nothing with no harness either' do
-      expect(described_class.palette_for(ui: plain_sink, harness: nil)).to be_nil
+    it 'a non-paintable sink paints nothing with no settings either' do
+      expect(described_class.palette_for(ui: plain_sink, settings: nil)).to be_nil
     end
 
-    it 'a palette-aware sink with its own palette wins over the harness' do
+    it 'a palette-aware sink with its own palette wins over the settings palette' do
       expect(described_class.palette_for(ui: console_sink(colored),
-                                         harness: harness(nil))).to equal(colored)
+                                         settings: settings(nil))).to equal(colored)
     end
 
-    it 'a palette-aware sink with no palette falls back to the harness (terminal keeps colors)' do
+    it 'a palette-aware sink with no palette falls back to the settings palette (terminal keeps colors)' do
       expect(described_class.palette_for(ui: console_sink(nil),
-                                         harness: harness(colored))).to equal(colored)
+                                         settings: settings(colored))).to equal(colored)
     end
   end
 

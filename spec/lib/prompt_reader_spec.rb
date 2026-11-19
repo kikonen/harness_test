@@ -2,11 +2,13 @@
 
 require 'spec_helper'
 require 'stringio'
+require 'job_registry'
 require 'prompt_reader'
 
 # PromptReader owns the idle-prompt read: modeline + UI::Editor read + draft.
-# A stub harness is enough (Task.mode_badge is covered in task_spec); the
-# harness is passed as a callable because a mid-run /resume swaps it.
+# A stub harness is enough (Poller.mode_badge is covered in poller_spec); the
+# reader holds the run's JobRegistry and reads the modeline off the foreground
+# job's Harness (#286) - the same path every command uses.
 RSpec.describe PromptReader do
   let(:ui) { instance_double(UI::Console) }
   let(:editor) { instance_double(UI::Editor) }
@@ -31,7 +33,9 @@ RSpec.describe PromptReader do
   end
 
   def build_reader(harness = harness_stub)
-    described_class.new(ui: ui, harness: -> { harness })
+    registry = JobRegistry.new
+    registry.add_job(kind: :main, harness:)
+    described_class.new(ui: ui, registry:)
   end
 
   def editor_result(text, status, note = nil)

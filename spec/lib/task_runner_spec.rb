@@ -17,7 +17,7 @@ RSpec.describe TaskRunner do
   let(:host) do
     Class.new do
       include TaskRunner
-      attr_accessor :foreground_harness, :ui
+      attr_accessor :foreground_harness, :ui, :settings
 
       def do_thing
         run_on_task { |_t| :work_done }

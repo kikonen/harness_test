@@ -20,7 +20,8 @@ RSpec.describe CommandHandler do
   def drive_bang(dir, *dialog_lines)
     stdin  = StringIO.new(dialog_lines.join("\n"))
     stdout = StringIO.new
-    console = UI::Console.new(stdout: stdout, stdin: stdin)
+    console = UI::Console.new(stdout: stdout, stdin: stdin,
+                              palette: UI::Palette.fetch('none'))
     [make_handler(dir, console), stdout]
   end
 
