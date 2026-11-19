@@ -17,7 +17,7 @@ module Commands
         title: nil,
         kind: :table,
         columns: %i[field value],
-        items: @harness.session.summary,
+        items: foreground_harness.session.summary,
         origin: "session")
     end
   end

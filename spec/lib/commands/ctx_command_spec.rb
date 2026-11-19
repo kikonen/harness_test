@@ -2,14 +2,18 @@
 
 require 'spec_helper'
 require 'stringio'
+require 'job_registry'
 require 'commands/ctx_command'
 
 RSpec.describe Commands::CtxCommand do
   def run_command(usage, args = '')
     harness = Object.new
     harness.define_singleton_method(:context_usage) { usage }
+    harness.define_singleton_method(:markdown_max_width) { nil }
     stdout = StringIO.new
-    described_class.new(harness: harness, file_list: nil,
+    registry = JobRegistry.new
+    registry.add_job(kind: :main, harness:)
+    described_class.new(registry:, file_list: nil,
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string
   end

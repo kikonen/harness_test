@@ -27,8 +27,11 @@ class Job
   # Same timeout as the drain loop, so a poll costs the same everywhere.
   DEFAULT_POLL_TIMEOUT = 0.1
 
+  # The Harness that lives INSIDE this job (#286): a Harness is one LLM
+  # tool-loop, so it belongs to a job rather than to a global. A job the run
+  # never drives (a bare registry in a spec, a not-yet-serviced job) carries nil.
   attr_reader :id, :kind, :status, :result, :registry, :buffer, :inbox
-  attr_reader :dependencies, :requested_by
+  attr_reader :dependencies, :requested_by, :harness
 
   # The buffer comes from the registry: its limits belong to the buffer, and the
   # fan-in queue is shared by all jobs.
@@ -38,7 +41,8 @@ class Job
     registry:,
     buffer:,
     dependencies: [],
-    requested_by: nil
+    requested_by: nil,
+    harness: nil
   )
     raise ArgumentError, "unknown job kind: #{kind}" unless Job::KINDS.include?(kind)
 
@@ -49,6 +53,7 @@ class Job
     @inbox        = Thread::Queue.new
     @dependencies = dependencies
     @requested_by = requested_by
+    @harness      = harness
     @status       = :pending
     @awaiting     = false
   end

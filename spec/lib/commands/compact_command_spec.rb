@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'stringio'
+require 'job_registry'
 require 'commands/compact_command'
 
 # issue #70: /compact must report the resulting context size so the user can
@@ -10,8 +11,10 @@ require 'commands/compact_command'
 # issue #253: the summary is an LLM round, so it must run on a Task thread
 # (the single-thread I/O rule, issue #40). Output lines are emitted through
 # the task event queue (TaskRunner#emit_line), not written to a stream from
-# the task thread. Specs stub Task.run and execute the block synchronously,
-# so the block sees no active Task and emit_line writes to the console.
+# the task thread. The command reaches the Harness through the foreground
+# job's harness (#286), so the spec carries the harness on a real registry's
+# main job; the round itself is run by a stubbed registry.run (the executor)
+# that executes the block synchronously.
 RSpec.describe Commands::CompactCommand do
   let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
   let(:result) do
@@ -42,21 +45,35 @@ RSpec.describe Commands::CompactCommand do
   let(:io) { StringIO.new }
   let(:ui) { UI::Console.new(stdout: io) }
 
-  def command
-    described_class.new(harness:, file_list: nil, ui:)
+  # A real registry whose main job carries the harness (#286): the command reads
+  # the harness through registry.foreground_job.harness.
+  def registry_with_harness
+    JobRegistry.new.tap { |r| r.add_job(kind: :main, harness:) }
   end
 
-  # Stub Task.run to capture the block it is handed and execute it
-  # synchronously. The spec does not need a real task thread - only the
-  # protocol contract: the block must perform the compaction.
+  def command
+    described_class.new(registry: registry_with_harness, file_list: nil, ui:)
+  end
+
+  # Stub the registry executor to capture the block it is handed and execute it
+  # synchronously. The spec does not need a real task thread - only the protocol
+  # contract: the block must perform the compaction.
+  def stub_run(cmd, error: nil, result_value: nil)
+    allow(cmd.registry).to receive(:run) do |job:, ui:, &blk|
+      blk.call(nil)
+      [error, nil, result_value]
+    end
+  end
+
   def run_with_captured_block
+    cmd = command
     block = nil
-    allow(Task).to receive(:run) do |harness:, ui:, buffer:, &blk|
+    allow(cmd.registry).to receive(:run) do |job:, ui:, &blk|
       block = blk
       blk.call(nil)
-      [nil, nil]
+      [nil, nil, nil]
     end
-    command.handle('')
+    cmd.handle('')
     block
   end
 
@@ -89,12 +106,16 @@ RSpec.describe Commands::CompactCommand do
     result[:context_line]   = nil
 
     expect(run_command).not_to match(/🧠 ctx/)
+
+    result[:context_before] = '🧠 ctx ~62100/65536 (95%)'
+    result[:context_line]   = '🧠 ctx ~523/65536 (1%)'
   end
 
   it 'reports a task error as a [task error] line' do
-    allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| ['boom', nil] }
+    cmd = command
+    stub_run(cmd, error: 'boom')
 
-    command.handle('')
+    cmd.handle('')
 
     expect(io.string).to include('[task error] boom')
   end
@@ -108,12 +129,10 @@ RSpec.describe Commands::CompactCommand do
     end.new
 
     allow(Task).to receive(:current).and_return(fake_task)
-    allow(Task).to receive(:run) do |harness:, ui:, buffer:, &blk|
-      blk.call(nil)
-      [nil, nil]
-    end
+    cmd = command
+    stub_run(cmd)
 
-    command.handle('')
+    cmd.handle('')
 
     # Nothing reached the console directly: every line is an event.
     expect(io.string).to eq("")

@@ -8,9 +8,9 @@ require 'json'
 require 'commands/sessions_command'
 
 # issue #276: listing saved sessions is path + JSON reading, so it needs no
-# harness at all - CLI's --list-sessions runs this command with harness: nil,
-# before any Harness is constructed (the old path built a whole Harness,
-# minting a fresh random session id on the way to reading a few files).
+# harness at all - CLI's --list-sessions runs this command before any Harness is
+# constructed (the old path built a whole Harness, minting a fresh random session
+# id on the way to reading a few files).
 RSpec.describe Commands::SessionsCommand do
   let(:workdir) { Dir.mktmpdir('sessions-cmd-spec') }
   let(:file_list) { FileList.new([], workdir: workdir) }
@@ -30,10 +30,10 @@ RSpec.describe Commands::SessionsCommand do
     File.utime(saved_at, saved_at, path)
   end
 
-  # harness: nil is the point of this helper - the command must not need one.
+  # No Harness: the command must not need one.
   def run_command
     io      = StringIO.new
-    command = described_class.new(harness: nil, file_list: file_list,
+    command = described_class.new(file_list: file_list,
                                   ui: UI::Console.new(stdout: io))
     command.handle('')
     io.string

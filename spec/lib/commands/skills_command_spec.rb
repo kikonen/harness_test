@@ -6,6 +6,7 @@ require 'tmpdir'
 require 'fileutils'
 require 'skills'
 require 'file_list'
+require 'job_registry'
 require 'commands/skills_command'
 
 RSpec.describe Commands::SkillsCommand do
@@ -28,14 +29,16 @@ RSpec.describe Commands::SkillsCommand do
 
   def run_command(dir, args = '')
     stdout = StringIO.new
-    described_class.new(harness: Object.new, file_list: file_list_with(dir),
+    described_class.new(file_list: file_list_with(dir),
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string
   end
 
   def run_with_palette(dir, args = '', palette = 'default')
     stdout = StringIO.new
-    described_class.new(harness: harness_with_palette(dir, palette),
+    registry = JobRegistry.new
+    registry.add_job(kind: :main, harness: harness_with_palette(dir, palette))
+    described_class.new(registry:,
                         file_list: file_list_with(dir),
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string

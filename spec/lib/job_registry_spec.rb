@@ -116,10 +116,10 @@ RSpec.describe JobRegistry do
     # The drain loop is still the single writer of the job's buffer, so a run
     # through the registry lands the block's value as the awaited result.
     it 'runs a job and reads its result back' do
-      job = registry.add_job(kind: :main)
+      job = registry.add_job(kind: :main, harness: spec_harness)
       io = StringIO.new
 
-      error, _task, result = registry.run(job:, harness: spec_harness,
+      error, _task, result = registry.run(job:,
                                           ui: UI::Console.new(stdout: io, stdin: StringIO.new)) do
         :turn_value
       end

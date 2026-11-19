@@ -22,7 +22,7 @@ module Commands
       see_also: %w[tools])
 
     def handle(_args)
-      states = @harness.mcp.servers
+      states = foreground_harness.mcp.servers
       return nothing_declared if states.empty?
 
       report(states)
@@ -92,7 +92,7 @@ module Commands
     # one row per paragraph (the tool name on its first row only), because
     # kramdown-ansi cannot stack paragraphs in a single cell.
     def report_tools(state)
-      registry = @harness.tool_registry
+      registry = foreground_harness.tool_registry
       items = state.tool_names.map do |name|
         { tool: name, description: registry.get(name)&.description.to_s }
       end
@@ -107,7 +107,7 @@ module Commands
     # A collision is about a tool on BOTH sides (the built-in wins), so it belongs
     # to no single server and would otherwise only ever appear in the banner.
     def report_collisions
-      collisions = @harness.mcp.collision_notes
+      collisions = foreground_harness.mcp.collision_notes
       return if collisions.empty?
 
       items = collisions.map do |note|

@@ -21,7 +21,6 @@ require_relative "session_logger"
 
 class CLI
   attr_reader :options,
-    :harness,
     :settings,
     :registry,
     :file_list,
@@ -42,10 +41,18 @@ class CLI
     # (issue #388).
     @ui = ui || UI::Console.new(
       stdout: $stdout, stdin: $stdin,
-      palette: -> { @harness&.output_palette })
+      palette: -> { foreground_harness&.output_palette })
 
     @file_list = build_file_list
     @locator = SessionLocator.new(@options[:workdir])
+  end
+
+  # The run's Harness lives INSIDE the foreground job (#286): the CLI builds it,
+  # attaches it to the main job, and reaches it only through that job - so a
+  # background/sub-agent harness would be read the same way. nil before #setup
+  # (and for --list-sessions / --delete-session, which never build a Harness).
+  def foreground_harness
+    @registry&.foreground_job&.harness
   end
 
   # Dispatch the argument-only modes (--list-sessions / --delete-session): run
@@ -85,7 +92,7 @@ class CLI
     # CLI builds the per-session logger here and injects it (with the settings)
     # rather than letting the Harness mint its own (#286).
     logger   = SessionLogger.build(@locator.session_log_path(session_id))
-    @harness = Harness.new(
+    harness = Harness.new(
       @file_list,
       settings: @settings,
       session_id:,
@@ -102,26 +109,29 @@ class CLI
       max_saved: @settings.resume_replay_entries,
       tasks_kept: @settings.output_tasks_kept)
 
-    @registry.add_job(kind: :main)
+    # The Harness lives INSIDE the main job (#286): commands reach it through
+    # registry.foreground_job.harness rather than a CLI-held reference. After
+    # this line every read below goes through #foreground_harness, never a
+    # @harness ivar.
+    @registry.add_job(kind: :main, harness:)
 
     if resume_data
       @registry.restore_replay_tail(resume_data[:replay_tail])
       saved_fg = resume_data[:foreground_job]
       if saved_fg
         @registry.restore_foreground(saved_fg)
-        @harness.logger.info "foreground job restored: ##{@registry.foreground}"
+        foreground_harness.logger.info "foreground job restored: ##{@registry.foreground}"
       end
     end
 
     # The save side records from the registry the RUN owns (#286): SessionManager
     # is built by Harness, which holds no registry, so its owner injects it.
-    @harness.session_manager.registry = @registry
+    foreground_harness.session_manager.registry = @registry
 
     @history  = HistoryManager.new(@file_list.workdir, session_id:)
-    @harness.history = @history
+    foreground_harness.history = @history
 
     @commands = CommandHandler.new(
-      harness: @harness,
       registry: @registry,
       file_list: @file_list,
       ui: @ui,
@@ -139,7 +149,6 @@ class CLI
     return unless !!@options[:list_sessions]
 
     Commands::SessionsCommand.new(
-      harness: nil,
       file_list: @file_list,
       ui: @ui).handle("")
 
@@ -190,7 +199,7 @@ class CLI
       # ONE input path for the whole run (issue #286): the idle prompt and a
       # mid-turn note are the same read, so the edit state is a state of the
       # single poll loop. The command handler drains events through it too.
-      reader = PromptReader.new(ui: @ui, harness: -> { @harness })
+      reader = PromptReader.new(ui: @ui, harness: -> { foreground_harness })
       @commands.input_path = reader.input_path
       @commands.input_path.target = -> { @registry.foreground_job }
       @commands.input_path.registry = -> { @registry }
@@ -206,25 +215,25 @@ class CLI
           commands.handle(input)
         rescue Interrupt
           ui.puts "\n  [interrupted]"
-          @harness.logger.info "command interrupted (Ctrl+C)"
+          foreground_harness.logger.info "command interrupted (Ctrl+C)"
         # LLMError and ToolLoopError are subclasses of HarnessError, so they
         # MUST be rescued before it or the HarnessError branch swallows them
         # and their specific hint never prints.
         rescue LLMError => e
-          @harness.logger.warn "LLM error: #{e.class.name}: #{e.message}"
+          foreground_harness.logger.warn "LLM error: #{e.class.name}: #{e.message}"
           ui.puts "  [LLM error] #{e.message}"
           ui.puts "  (everything up to this point is kept in the session - type /retry"
           ui.puts "   to resume from exactly there, including tool work already done)"
         rescue ToolLoopError => e
-          @harness.logger.warn "tool loop: #{e.class.name}: #{e.message}"
+          foreground_harness.logger.warn "tool loop: #{e.class.name}: #{e.message}"
           ui.puts "  [tool loop] #{e.message}"
         rescue HarnessError => e
-          @harness.logger.warn "command error: #{e.class.name}: #{e.message}"
+          foreground_harness.logger.warn "command error: #{e.class.name}: #{e.message}"
           ui.puts "  [error] #{e.message}"
         rescue StandardError => e
           # A crash the harness did not expect: full backtrace to the log, the
           # same shape Task logs a raising thread with ("task thread raised").
-          @harness.logger.error ErrorText.detailed(e, "unexpected error")
+          foreground_harness.logger.error ErrorText.detailed(e, "unexpected error")
           ui.puts "  [unexpected error] #{ErrorText.label(e)}"
           ui.puts ErrorText.backtrace(e)
           ui.puts "  (harness continues - type /exit to quit)"
@@ -239,13 +248,13 @@ class CLI
     rescue Interrupt
       # Ctrl+C at the prompt (or anywhere in the loop is waiting): treat as
       # a normal exit so that history and the session are still saved.
-      @harness.logger.info "prompt read interrupted (Ctrl+C)"
+      foreground_harness.logger.info "prompt read interrupted (Ctrl+C)"
       ui.puts "\n  [interrupted]"
     end
 
     # issue #48: an MCP server is a subprocess this run spawned; closing them
     # here is what stops a server outliving the CLI.
-    @harness.close_mcp
+    foreground_harness.close_mcp
 
     # issue #188: a run that changed settings (e.g. /model) but sent no
     # prompt still has session-worthy state. The new history entry is the
@@ -255,7 +264,7 @@ class CLI
     id = auto_save_session(state_changed)
     ui.puts "Goodbye."
     if id
-      ui.puts "Session saved as #{id} (#{harness.session_manager.session_file_path(id)})."
+      ui.puts "Session saved as #{id} (#{foreground_harness.session_manager.session_file_path(id)})."
       ui.puts "Resume it later with: #{resume_cli_string(id)}"
     end
     0
@@ -273,28 +282,28 @@ class CLI
 
     # issue #217: show WHERE calls go (API type + endpoint path + base url),
     # not just the base url - a profile switch can change the API type.
-    ui.puts "Model: #{harness.session_manager.active_model_name} " \
-            "(#{harness.session_manager.target_display} @ #{harness.model_config.base_url})"
+    ui.puts "Model: #{foreground_harness.session_manager.active_model_name} " \
+            "(#{foreground_harness.session_manager.target_display} @ #{foreground_harness.model_config.base_url})"
     # issue #449: name the image posture, but only when the run can actually
     # receive one - MCP servers are the only source of tool-result images, so a
     # run without them has nothing to say about it. The two cases behave
     # completely differently (pixels to the model vs. a path to a file under
     # .harness/content) and nothing else at startup says which one this is.
     if Array(@options[:mcp_servers]).any?
-      ui.puts "Tool-result images: #{harness.vision? ? 'inlined to the model' : 'files only (no vision profile)'}"
+      ui.puts "Tool-result images: #{foreground_harness.vision? ? 'inlined to the model' : 'files only (no vision profile)'}"
     end
     ui.puts "Working directory: #{@file_list.workdir}"
 
     # issue #189: show the session id at startup so the user knows WHERE
     # this session's log is written (.harness/sessions/<id>/harness.log) -
     # and which id a later /save or --resume would refer to.
-    ui.puts "Session: #{harness.session.session_id} (log: #{session_log_path_display})"
+    ui.puts "Session: #{foreground_harness.session.session_id} (log: #{session_log_path_display})"
 
     # issue #341: a rules file that is not valid UTF-8 now LOADS (with the bad
     # bytes replaced) instead of crashing the run, so the repair has to be said
     # out loud: the prompt the model got is not byte-for-byte what harness.md holds.
-    if harness.rules_repair_note
-      ui.puts "  [harness.md repaired: #{harness.rules_repair_note}]"
+    if foreground_harness.rules_repair_note
+      ui.puts "  [harness.md repaired: #{foreground_harness.rules_repair_note}]"
     end
 
     # issue #276: --resume / --continue now restore the conversation during
@@ -318,22 +327,22 @@ class CLI
     # file inside the project must say so at startup, and name the opt-out -
     # a standing grant that is invisible reads as a run that protects nothing.
     ui.puts "File consent: #{file_access_display}"
-    @harness.logger.info "file consent: #{file_access_display}"
+    foreground_harness.logger.info "file consent: #{file_access_display}"
 
     # issue #303: same reasoning - which palette this run renders with is a
     # fact about the run, and /palette is the way to change it mid-session.
-    ui.puts "Output palette: #{@harness.output_palette.name} (/palette <name> switches it)"
+    ui.puts "Output palette: #{foreground_harness.output_palette.name} (/palette <name> switches it)"
 
     # issue #28: same reasoning - whether this run streams responses decides
     # what the user sees while the model is writing, and /stream switches it.
-    ui.puts "LLM responses: #{@harness.stream? ? 'streamed (/stream off buffers them)' \
+    ui.puts "LLM responses: #{foreground_harness.stream? ? 'streamed (/stream off buffers them)' \
               : 'buffered (/stream on shows each part as it arrives)'}"
     ui.puts "Tip: type a plain message (no /) to send it directly to the model."
 
     # issue #48: MCP servers the user declared. Each connected server and each
     # problem (a failed start, a name collision) is reported here, so the run
     # never silently pretends its MCP tools are available.
-    @harness.mcp_status_notes.each do |note|
+    foreground_harness.mcp_status_notes.each do |note|
       ui.puts "  [mcp] #{note}"
     end
 
@@ -401,7 +410,7 @@ class CLI
   # issue #189: the log path relative to the workdir (absolute paths would
   # duplicate the Working directory line above).
   def session_log_path_display
-    id = harness.session.session_id
+    id = foreground_harness.session.session_id
     File.join(SessionLocator::SESSIONS_DIR, id, SessionLocator::SESSION_LOG_FILE)
   end
 
@@ -410,7 +419,7 @@ class CLI
   def resume_cli_string(id)
     # -m names the active model PROFILE; the live name (not the original -m)
     # so a session switched with /model resumes on the profile it ended on.
-    parts = ["ruby harness.rb", "-m #{harness.session_manager.active_model_name}", "--resume #{id}"]
+    parts = ["ruby harness.rb", "-m #{foreground_harness.session_manager.active_model_name}", "--resume #{id}"]
     parts << "-d #{@file_list.workdir}" unless @file_list.workdir == Dir.pwd
     parts.join(" ")
   end
@@ -433,9 +442,9 @@ class CLI
     return if tail.empty?
 
     renderer = UI::Renderer.new(
-      palette: harness.output_palette,
-      markdown: harness.markdown?,
-      markdown_max_width: harness.markdown_max_width)
+      palette: foreground_harness.output_palette,
+      markdown: foreground_harness.markdown?,
+      markdown_max_width: foreground_harness.markdown_max_width)
     # The replay sits between this run's startup facts on BOTH sides, so a
     # block-width rule on each side (the same width the render loop uses for a
     # block boundary, and wider than the 40-dash prompt-loop separator) keeps
@@ -455,11 +464,11 @@ class CLI
   # posture. The /yolo command's own report is the long form; this is the
   # at-a-glance version shown in the startup banner.
   def consent_posture_display
-    label = @harness.command_mode_label
+    label = foreground_harness.command_mode_label
     return "n/a" if label.nil?
 
     base =
-      if @harness.yolo?
+      if foreground_harness.yolo?
         "YOLO - unapproved commands run without asking; disaster " \
           "commands still ask"
       elsif label == "AUTO-APPROVE"
@@ -469,7 +478,7 @@ class CLI
       end
     # issue #389: a relaxed floor is named in the banner for the same reason YOLO
     # names it - never mistake a relaxed run for a normal one.
-    return base unless @harness.denylist_safe_approve?
+    return base unless foreground_harness.denylist_safe_approve?
 
     "#{base}; denylist + \"safe:\" also runs without asking " \
       "(command_safety_auto_approve: denylist)"
@@ -494,11 +503,11 @@ class CLI
   # state_changed: the run submitted a command but built no conversation
   # (issue #188) - settings like /model then still deserve a saved session.
   def auto_save_session(state_changed = false)
-    return nil if @harness.session.empty? && !state_changed
+    return nil if foreground_harness.session.empty? && !state_changed
 
-    @harness.session_manager.save_session
+    foreground_harness.session_manager.save_session
   rescue StandardError => e
-    @harness.logger.error ErrorText.detailed(e, "auto-save failed")
+    foreground_harness.logger.error ErrorText.detailed(e, "auto-save failed")
     ui.puts "  [warning] could not auto-save session: #{e.message}"
     nil
   end

@@ -27,7 +27,7 @@ module Commands
 
     def handle(_args)
       run_on_task do |_t|
-        result = @harness.session_manager.compact_session
+        result = foreground_harness.session_manager.compact_session
         retained = result[:retained]
         emit_line "Session compacted: #{result[:before]} messages -> " \
                   "#{result[:after]} messages (#{retained} recent retained)."

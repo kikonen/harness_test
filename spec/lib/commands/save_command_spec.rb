@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'stringio'
 require 'tmpdir'
 require 'file_list'
+require 'job_registry'
 require 'commands/save_command'
 
 RSpec.describe Commands::SaveCommand do
@@ -22,7 +23,9 @@ RSpec.describe Commands::SaveCommand do
 
   def run_command(file_list, id: 'abc123', path: '.harness/sessions/%s/session.json')
     stdout = StringIO.new
-    described_class.new(harness: harness_with(id, path), file_list: file_list,
+    registry = JobRegistry.new
+    registry.add_job(kind: :main, harness: harness_with(id, path))
+    described_class.new(registry:, file_list: file_list,
                         ui: UI::Console.new(stdout: stdout)).handle('')
     stdout.string
   end
@@ -45,7 +48,9 @@ RSpec.describe Commands::SaveCommand do
   describe 'resume_cli_string' do
     it 'builds the command line with the active model and --resume <id>' do
       Dir.mktmpdir do |_dir|
-        cli = described_class.new(harness: harness_with('abc123', 'x'),
+        registry = JobRegistry.new
+        registry.add_job(kind: :main, harness: harness_with('abc123', 'x'))
+        cli = described_class.new(registry:,
                                   file_list: FileList.new([], workdir: Dir.pwd),
                                   ui: UI::Console.new(stdout: StringIO.new))
           .resume_cli_string('abc123')
@@ -61,7 +66,9 @@ RSpec.describe Commands::SaveCommand do
 
     it 'names the model the run switched to, not the original -m' do
       Dir.mktmpdir do |_dir|
-        cli = described_class.new(harness: harness_with('abc123', 'x', active_model: 'big'),
+        registry = JobRegistry.new
+        registry.add_job(kind: :main, harness: harness_with('abc123', 'x', active_model: 'big'))
+        cli = described_class.new(registry:,
                                   file_list: FileList.new([], workdir: Dir.pwd),
                                   ui: UI::Console.new(stdout: StringIO.new))
           .resume_cli_string('abc123')
@@ -72,7 +79,9 @@ RSpec.describe Commands::SaveCommand do
 
     it 'adds -d <workdir> only when the workdir differs from the current directory' do
       Dir.mktmpdir do |dir|
-        cli = described_class.new(harness: harness_with('abc123', 'x'),
+        registry = JobRegistry.new
+        registry.add_job(kind: :main, harness: harness_with('abc123', 'x'))
+        cli = described_class.new(registry:,
                                   file_list: FileList.new([], workdir: dir),
                                   ui: UI::Console.new(stdout: StringIO.new))
           .resume_cli_string('abc123')

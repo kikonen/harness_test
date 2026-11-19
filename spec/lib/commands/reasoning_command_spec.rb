@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'stringio'
+require 'job_registry'
 require 'commands/reasoning_command'
 
 # issue #98: /reasoning shows the reasoning text of the last response, which
@@ -24,7 +25,9 @@ RSpec.describe Commands::ReasoningCommand do
   # StringIO and reads it back instead of swapping $stdout.
   def run_command
     io      = StringIO.new
-    command = described_class.new(harness:, file_list: nil, ui: UI::Console.new(stdout: io))
+    registry = JobRegistry.new
+    registry.add_job(kind: :main, harness:)
+    command = described_class.new(registry:, file_list: nil, ui: UI::Console.new(stdout: io))
     command.handle('')
     io.string
   end

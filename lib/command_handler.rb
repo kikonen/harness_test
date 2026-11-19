@@ -43,8 +43,7 @@ require_relative "help_topics"
 class CommandHandler
   include TaskRunner
 
-  attr_reader :harness,
-    :file_list,
+  attr_reader :file_list,
     :ui,
     :settings
 
@@ -79,12 +78,10 @@ class CommandHandler
   }.freeze
 
   def initialize(
-    harness:,
     file_list:,
     ui:,
     settings: nil,
     registry: nil)
-    @harness   = harness
     @file_list = file_list
     # The run-wide posture/consent state (#286): posture commands read and
     # write it directly instead of routing through Harness.
@@ -95,8 +92,7 @@ class CommandHandler
     # so /help can never list a different set than /dispatch accepts.
     @help_renderer = UI::HelpRenderer.new(
       registry: COMMANDS,
-      ui:,
-      harness:)
+      ui:)
     HelpTopics.validate!(COMMANDS.keys)
     # The JobRegistry the run owns (#286), exposed through TaskRunner#registry;
     # it is passed to every command built here (build_command).
@@ -105,6 +101,12 @@ class CommandHandler
 
   def exiting?
     @exiting
+  end
+
+  # The dispatcher reaches the Harness through the foreground job the run's
+  # registry marks (its #run_direct_prompt), never a global (#286).
+  def foreground_harness
+    registry&.foreground_job&.harness
   end
 
   # Dispatch a single line of input. Slash-commands go through the registry;
@@ -174,7 +176,6 @@ class CommandHandler
   # the mid-turn dispatcher so both construct identically.
   def build_command(cmd_class)
     cmd_class.new(
-      harness:,
       file_list:,
       ui:,
       help_renderer: @help_renderer,
@@ -212,7 +213,7 @@ class CommandHandler
       @file_list,
       @settings,
       label: "shell",
-      harness: @harness, # failed commands traced in harness.log (issue #185)
+      harness: foreground_harness, # failed commands traced in harness.log (issue #185)
       title_fmt: CommandRunner::BANG_TITLE,
       ui: @ui,
       list: :shell,
@@ -245,7 +246,7 @@ class CommandHandler
     # (issue #458, #286: the run record is not the single-turn-engine's).
     registry&.record_user_prompt(text)
     run_on_task do |_t|
-      @harness.session_manager.run_prompt(text)
+      foreground_harness.session_manager.run_prompt(text)
     end
   end
 

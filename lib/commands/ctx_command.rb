@@ -18,7 +18,7 @@ module Commands
       see_also: %w[compact session conversation])
 
     def handle(_args)
-      usage = @harness.context_usage
+      usage = foreground_harness.context_usage
       return emit_role(:note, "No conversation yet - nothing to measure.") if usage.nil?
 
       emit_list(

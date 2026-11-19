@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'stringio'
 require 'command'
+require 'job_registry'
 require 'commands/ctx_command'
 require 'commands/yolo_command'
 require 'commands/stream_command'
@@ -13,7 +14,7 @@ require 'commands/exit_command'
 
 RSpec.describe Command do
   def build(klass = described_class, ui: UI::Console.new(stdout: StringIO.new), **extra)
-    klass.new(harness: nil, file_list: nil, ui: ui, **extra)
+    klass.new(file_list: nil, ui: ui, **extra)
   end
 
   describe '.help' do
@@ -73,14 +74,24 @@ RSpec.describe Command do
 
   describe '#initialize' do
     it 'exposes everything a command needs to run' do
-      harness = Object.new
       file_list = Object.new
       ui = UI::Console.new(stdout: StringIO.new)
-      cmd = build(described_class, ui: ui, harness: harness, file_list: file_list)
+      cmd = build(described_class, ui: ui, file_list: file_list)
 
-      expect(cmd.harness).to equal(harness)
       expect(cmd.file_list).to equal(file_list)
       expect(cmd.ui).to equal(ui)
+    end
+
+    # #286: a command never stores a harness - it reaches the one living on the
+    # registry's foreground job. A built-in registry exposes it; none gives nil.
+    it 'reaches the Harness through the foreground job, never a stored reference' do
+      harness = Object.new
+      registry = JobRegistry.new
+      registry.add_job(kind: :main, harness:)
+      cmd = build(described_class, registry: registry)
+
+      expect(cmd.foreground_harness).to equal(harness)
+      expect(build(described_class).foreground_harness).to be_nil
     end
 
     it 'defaults the CLI-only collaborator to nil' do

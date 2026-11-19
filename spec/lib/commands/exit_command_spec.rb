@@ -6,7 +6,7 @@ require 'commands/exit_command'
 
 RSpec.describe Commands::ExitCommand do
   def build
-    described_class.new(harness: nil, file_list: nil,
+    described_class.new(file_list: nil,
                         ui: UI::Console.new(stdout: StringIO.new))
   end
 
@@ -26,7 +26,7 @@ RSpec.describe Commands::ExitCommand do
 
   it 'prints nothing on the way out' do
     stdout = StringIO.new
-    cmd = described_class.new(harness: nil, file_list: nil,
+    cmd = described_class.new(file_list: nil,
                               ui: UI::Console.new(stdout: stdout))
     cmd.handle('')
 

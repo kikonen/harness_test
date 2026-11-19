@@ -26,7 +26,7 @@ module Commands
 
     def handle(_args)
       run_on_task do |_t|
-        @harness.session_manager.retry
+        foreground_harness.session_manager.retry
       end
     end
   end

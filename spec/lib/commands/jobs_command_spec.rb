@@ -11,7 +11,7 @@ require 'commands/jobs_command'
 RSpec.describe Commands::JobsCommand do
   def run(args, registry)
     io = StringIO.new
-    described_class.new(harness: Object.new, registry:, file_list: nil,
+    described_class.new(registry:, file_list: nil,
                         ui: UI::Console.new(stdout: io)).handle(args)
     io.string
   end
@@ -88,7 +88,7 @@ RSpec.describe Commands::JobsCommand do
 
     it 'says nothing to list when there is no registry' do
       io = StringIO.new
-      described_class.new(harness: Object.new, file_list: nil,
+      described_class.new(file_list: nil,
                           ui: UI::Console.new(stdout: io)).handle('')
 
       expect(io.string).to include('No registry')
