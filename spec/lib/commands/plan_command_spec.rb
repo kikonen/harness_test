@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'stringio'
+require 'job_registry'
 require 'commands/plan_command'
 
 # issue #359: /plan flips the planning posture. It is per-conversation Harness
@@ -28,7 +29,9 @@ RSpec.describe Commands::PlanCommand do
   let(:ui) { UI::Console.new(stdout: io) }
 
   def command(harness = build_harness)
-    described_class.new(harness: harness, file_list: nil, ui: ui)
+    registry = JobRegistry.new
+    registry.add_job(kind: :main, harness:)
+    described_class.new(registry:, file_list: nil, ui: ui)
   end
 
   describe 'the help entry (issue #323 contract)' do

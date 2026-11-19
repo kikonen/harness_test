@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'stringio'
 require 'tool_registry'
 require 'mcp/manager'
+require 'job_registry'
 require 'commands/mcp_command'
 
 RSpec.describe Commands::McpCommand do
@@ -52,7 +53,7 @@ RSpec.describe Commands::McpCommand do
     harness.define_singleton_method(:tool_registry) { registry }
     stdout = StringIO.new
     described_class.new(
-      harness: harness,
+      registry: (JobRegistry.new.tap { |r| r.add_job(kind: :main, harness:) }),
       file_list: nil,
       ui: UI::Console.new(stdout: stdout)).handle('')
     stdout.string

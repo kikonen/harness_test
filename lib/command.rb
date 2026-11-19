@@ -18,7 +18,7 @@ require_relative "ui/help_renderer"
 class Command
   include TaskRunner
 
-  attr_reader :harness, :settings, :file_list, :ui, :help_renderer
+  attr_reader :settings, :file_list, :ui, :help_renderer
 
   # Every command class declares its own HELP (a CommandHelp). /help renders it
   # from the dispatch registry, so a command that has no help entry fails loudly
@@ -42,14 +42,12 @@ class Command
   end
 
   def initialize(
-    harness: nil,
     file_list:,
     ui:,
     help_renderer: nil,
     settings: nil,
     registry: nil
   )
-    @harness    = harness
     @file_list  = file_list
     @ui         = ui
     # Only /help renders it; every other command ignores it.
@@ -61,6 +59,15 @@ class Command
     # The JobRegistry the run owns (#286): TaskRunner#run_on_task awaits its
     # job and TaskRunner records main-thread reports into it.
     self.registry = registry
+  end
+
+  # A command reaches the Harness through the FOREGROUND job it acts on (#286),
+  # never a global: a Harness lives INSIDE a Job, so this reads the one on the
+  # job the run's registry marks foreground. A command built without a registry
+  # (a unit-test double for a read-only command) gets nil. Named for the job it
+  # reads off, so a later background/sub-agent harness reads the same way.
+  def foreground_harness
+    registry&.foreground_job&.harness
   end
 
   # Print this command's usage on a bad argument (issue #471) from its own HELP

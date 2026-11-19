@@ -6,12 +6,11 @@ require 'tmpdir'
 require 'command_handler'
 require 'command_runner'
 require 'system_settings'
+require 'job_registry'
 
 RSpec.describe CommandHandler do
   def make_handler(dir, console, options: {})
-    # harness: nil is fine for the bang/prompt routing paths (not touched).
     described_class.new(
-      harness: nil,
       file_list: FileList.new([], workdir: dir),
       settings: SystemSettings.from_options(options),
       ui: console
@@ -210,9 +209,9 @@ RSpec.describe CommandHandler do
 
     def mid_handler(stdout)
       CommandHandler.new(
-        harness: ctx_harness,
         file_list: FileList.new([], workdir: Dir.pwd),
         settings: SystemSettings.from_options({}),
+        registry: (JobRegistry.new.tap { |r| r.add_job(kind: :main, harness: ctx_harness) }),
         ui: UI::Console.new(stdout: stdout, stdin: StringIO.new(''))
       )
     end

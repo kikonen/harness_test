@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'stringio'
 require 'tool_registry'
+require 'job_registry'
 require 'commands/tools_command'
 
 RSpec.describe Commands::ToolsCommand do
@@ -16,7 +17,9 @@ RSpec.describe Commands::ToolsCommand do
     harness = Object.new
     harness.define_singleton_method(:tool_registry) { registry }
     stdout = StringIO.new
-    described_class.new(harness: harness, file_list: nil,
+    job_registry = JobRegistry.new
+    job_registry.add_job(kind: :main, harness:)
+    described_class.new(registry: job_registry, file_list: nil,
                         ui: UI::Console.new(stdout: stdout)).handle('')
     stdout.string
   end

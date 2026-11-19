@@ -12,7 +12,7 @@ module Commands
       see_also: %w[help])
 
     def handle(_args)
-      registry = @harness.tool_registry
+      registry = foreground_harness.tool_registry
       emit_list(
         title: "Available tools (#{registry.tools.size}):",
         kind: :table,

@@ -16,7 +16,6 @@ RSpec.describe Commands::HelpCommand do
     console = UI::Console.new(stdout: io, stdin: StringIO.new(''))
     renderer = UI::HelpRenderer.new(registry: reg)
     described_class.new(
-      harness: nil,
       file_list: nil,
       ui: console,
       help_renderer: renderer

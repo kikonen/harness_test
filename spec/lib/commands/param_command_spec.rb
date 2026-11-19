@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'stringio'
 require 'param_overrides'
 require 'model_config'
+require 'job_registry'
 require 'commands/param_command'
 
 # issue #219: /param shows and adjusts the LLM parameters for this session.
@@ -28,7 +29,9 @@ RSpec.describe Commands::ParamCommand do
 
   def run_command(args = '')
     io = StringIO.new
-    described_class.new(harness: harness, file_list: nil,
+    registry = JobRegistry.new
+    registry.add_job(kind: :main, harness: harness)
+    described_class.new(registry:, file_list: nil,
                         ui: UI::Console.new(stdout: io)).handle(args)
     io.string
   end

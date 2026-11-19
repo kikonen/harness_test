@@ -15,7 +15,7 @@ module Commands
       see_also: %w[model param])
 
     def handle(_args)
-      reasoning = @harness.session.last_reasoning
+      reasoning = foreground_harness.session.last_reasoning
       if reasoning.nil? || reasoning.strip.empty?
         emit_role(
           :note,

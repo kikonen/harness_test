@@ -100,10 +100,10 @@ RSpec.describe CLI do
       cli  = build_cli
       cli.setup
 
-      id   = cli.harness.session.session_id
+      id   = cli.foreground_harness.session.session_id
 
       expect(session_dirs).to eq([id])
-      expect(File.file?(cli.harness.session_log_path)).to be true
+      expect(File.file?(cli.foreground_harness.session_log_path)).to be true
       expect(cli.history.history_file).to eq(
         File.join(workdir, '.harness', 'sessions', id, 'harness_history')
       )
@@ -116,13 +116,13 @@ RSpec.describe CLI do
       cli = described_class.new(options.merge(resume: saved[0, 8]), ui)
       cli.setup
 
-      id  = cli.harness.session.session_id
+      id  = cli.foreground_harness.session.session_id
 
       expect(id).to eq(saved)
       # Issue #135's symptom: a second (throwaway) directory for the fresh
       # random id the run threw away. There is no longer a fresh id to throw.
       expect(session_dirs).to eq([saved])
-      expect(File.file?(cli.harness.session_log_path)).to be true
+      expect(File.file?(cli.foreground_harness.session_log_path)).to be true
       expect(cli.history.history_file).to eq(
         File.join(workdir, '.harness', 'sessions', saved, 'harness_history')
       )
@@ -139,13 +139,13 @@ RSpec.describe CLI do
       cli = described_class.new(options.merge(continue: true), ui)
       cli.setup
 
-      expect(cli.harness.session.session_id).to eq(newer)
+      expect(cli.foreground_harness.session.session_id).to eq(newer)
       # Same single id for log, history and the session dir - and only the two
       # REAL sessions exist (no third one minted for this run).
       expect(session_dirs).to eq([older, newer])
-      expect(cli.harness.session_log_path)
+      expect(cli.foreground_harness.session_log_path)
         .to eq(File.join(workdir, '.harness', 'sessions', newer, 'harness.log'))
-      expect(File.file?(cli.harness.session_log_path)).to be true
+      expect(File.file?(cli.foreground_harness.session_log_path)).to be true
       expect(cli.history.history_file).to eq(
         File.join(workdir, '.harness', 'sessions', newer, 'harness_history')
       )
@@ -173,7 +173,7 @@ RSpec.describe CLI do
       cli = described_class.new(options.merge(list_sessions: true, model: nil), ui)
 
       expect(cli.run).to eq(0)
-      expect(cli.harness).to be_nil
+      expect(cli.foreground_harness).to be_nil
 
       expect(ui).to have_received(:puts).with(/Saved sessions \(1\)/)
       expect(ui).to have_received(:puts).with(/#{Regexp.escape(saved)}/)
@@ -199,7 +199,7 @@ RSpec.describe CLI do
         options.merge(delete_session: saved[0, 8], model: nil), ui)
 
       expect(cli.run).to eq(0)
-      expect(cli.harness).to be_nil
+      expect(cli.foreground_harness).to be_nil
 
       expect(File.directory?(dir)).to be false
       expect(session_dirs).to eq([])
@@ -237,7 +237,7 @@ RSpec.describe CLI do
       cli = build_cli
       cli.setup
 
-      id  = cli.harness.session.session_id
+      id  = cli.foreground_harness.session.session_id
 
       expect(cli.send(:session_log_path_display))
         .to eq(File.join('.harness', 'sessions', id, 'harness.log'))
@@ -258,8 +258,8 @@ RSpec.describe CLI do
       cli = described_class.new(options.merge(resume: saved), ui)
       cli.setup
 
-      expect(cli.harness.session.session_id).to eq(saved)
-      expect(cli.harness.session.messages.map { |m| m[:content] }).to include('earlier prompt')
+      expect(cli.foreground_harness.session.session_id).to eq(saved)
+      expect(cli.foreground_harness.session.messages.map { |m| m[:content] }).to include('earlier prompt')
       expect(cli.history.history_file).to eq(
         File.join(workdir, '.harness', 'sessions', saved, 'harness_history')
       )
@@ -272,9 +272,9 @@ RSpec.describe CLI do
       cli = build_cli
       cli.setup
 
-      id  = cli.harness.session.session_id
+      id  = cli.foreground_harness.session.session_id
 
-      expect(cli.harness.session.session_id).to eq(id)
+      expect(cli.foreground_harness.session.session_id).to eq(id)
       expect(session_dirs).to eq([id])
     end
   end
@@ -312,7 +312,7 @@ RSpec.describe CLI do
       tail = cli.registry.foreground_buffer.replay_tail
 
       expect(tail.map { |e| [e.type, e.origin] }).to eq([[:user, :user], [:list, :grant]])
-      expect(cli.harness.session_manager.registry).to equal(cli.registry)
+      expect(cli.foreground_harness.session_manager.registry).to equal(cli.registry)
     end
   end
 
@@ -350,7 +350,7 @@ RSpec.describe CLI do
       cli.setup
 
       stub_prompt_reader
-      cli.harness.yolo = true
+      cli.foreground_harness.yolo = true
 
       expected = 'Command consent: YOLO - unapproved commands run ' \
                  'without asking; disaster commands still ask'
@@ -583,7 +583,7 @@ RSpec.describe CLI do
       cli = build_cli
       cli.setup
 
-      id  = cli.harness.session.session_id
+      id  = cli.foreground_harness.session.session_id
       stub_prompt_reader
 
       expect(ui).to receive(:puts)
@@ -617,7 +617,7 @@ RSpec.describe CLI do
       cli = build_cli
       cli.setup
 
-      allow(cli.harness).to receive(:mcp_status_notes).and_return(
+      allow(cli.foreground_harness).to receive(:mcp_status_notes).and_return(
         ["MCP server 'fs' failed to start (RuntimeError: boom)"]
       )
       stub_prompt_reader
@@ -664,15 +664,15 @@ RSpec.describe CLI do
       cli = build_cli
       cli.setup
 
-      cli.harness.session.add_user('keep this turn')
-      allow(cli.harness.session_manager).to receive(:save_session)
+      cli.foreground_harness.session.add_user('keep this turn')
+      allow(cli.foreground_harness.session_manager).to receive(:save_session)
         .and_raise(RuntimeError, 'save exploded')
       allow(ui).to receive(:puts)
       stub_prompt_reader
 
       expect { cli.run }.not_to raise_error
 
-      log = File.read(cli.harness.session_log_path)
+      log = File.read(cli.foreground_harness.session_log_path)
       expect(log).to include('auto-save failed: RuntimeError: save exploded')
       expect(log).to include('cli_spec.rb')
     end
@@ -696,7 +696,7 @@ RSpec.describe CLI do
       stub_prompt_reader
 
       cli.run
-      id = cli.harness.session.session_id
+      id = cli.foreground_harness.session.session_id
 
       expect(File.file?(session_json(id))).to be(true)
     end
@@ -708,7 +708,7 @@ RSpec.describe CLI do
       stub_prompt_reader
 
       cli.run
-      id = cli.harness.session.session_id
+      id = cli.foreground_harness.session.session_id
 
       # The session dir exists (the run wrote its harness.log under the id),
       # but no session.json was written for a run that changed nothing.
@@ -719,13 +719,13 @@ RSpec.describe CLI do
       Reline::HISTORY.clear
       cli = build_cli
       cli.setup
-      cli.harness.session.add_user('a real prompt')
+      cli.foreground_harness.session.add_user('a real prompt')
 
       allow(ui).to receive(:puts)
       stub_prompt_reader
 
       cli.run
-      id = cli.harness.session.session_id
+      id = cli.foreground_harness.session.session_id
 
       expect(File.file?(session_json(id))).to be(true)
     end

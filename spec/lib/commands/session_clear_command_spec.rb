@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'stringio'
+require 'job_registry'
 require 'commands/session_clear_command'
 
 RSpec.describe Commands::SessionClearCommand do
@@ -12,7 +13,9 @@ RSpec.describe Commands::SessionClearCommand do
     harness = Object.new
     harness.define_singleton_method(:session) { session }
     stdout = StringIO.new
-    described_class.new(harness: harness, file_list: nil,
+    registry = JobRegistry.new
+    registry.add_job(kind: :main, harness:)
+    described_class.new(registry:, file_list: nil,
                         ui: UI::Console.new(stdout: stdout)).handle('')
     [stdout.string, cleared]
   end
@@ -38,7 +41,9 @@ RSpec.describe Commands::SessionClearCommand do
     session.define_singleton_method(:clear) { raise HarnessError, 'session locked' }
     harness = Object.new
     harness.define_singleton_method(:session) { session }
-    cmd = described_class.new(harness: harness, file_list: nil,
+    registry = JobRegistry.new
+    registry.add_job(kind: :main, harness:)
+    cmd = described_class.new(registry:, file_list: nil,
                               ui: UI::Console.new(stdout: StringIO.new))
 
     expect { cmd.handle('') }.to raise_error(HarnessError, /session locked/)

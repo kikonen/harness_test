@@ -13,7 +13,7 @@ module Commands
       see_also: %w[session compact save conversation])
 
     def handle(_args)
-      @harness.session.clear
+      foreground_harness.session.clear
       emit_role(:note, "Session cleared (conversation history reset).")
     end
   end

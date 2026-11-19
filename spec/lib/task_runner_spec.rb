@@ -17,7 +17,7 @@ RSpec.describe TaskRunner do
   let(:host) do
     Class.new do
       include TaskRunner
-      attr_accessor :harness, :ui
+      attr_accessor :foreground_harness, :ui
 
       def do_thing
         run_on_task { |_t| :work_done }
@@ -26,7 +26,7 @@ RSpec.describe TaskRunner do
   end
 
   def setup_host
-    host.harness = harness
+    host.foreground_harness = harness
     host.ui = ui
     host
   end
@@ -54,20 +54,20 @@ RSpec.describe TaskRunner do
   describe 'run_on_task awaits the registry job' do
     def registry_host
       registry = JobRegistry.new
-      host.harness = Object.new
       host.registry = registry
       host.ui = ui
-      [host, registry, registry.add_job(kind: :main)]
+      [host, registry, registry.add_job(kind: :main, harness: Object.new)]
     end
 
     it 'runs the foreground job through the registry and returns its result' do
       host, registry, job = registry_host
-      allow(registry).to receive(:run) do |job:, harness:, ui:, &blk|
+      # #286: registry.run no longer takes a harness - it reads it off the job.
+      allow(registry).to receive(:run) do |job:, ui:, &blk|
         [nil, nil, blk.call(nil)]
       end
 
       expect(host.do_thing).to eq(:work_done)
-      expect(registry).to have_received(:run).with(job:, harness: host.harness, ui:)
+      expect(registry).to have_received(:run).with(job:, ui:)
     end
 
     # The ONE input path is handed to the executor when the host owns one, so
@@ -87,7 +87,7 @@ RSpec.describe TaskRunner do
       # captures it from the block itself.
       captured = nil
       allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| [nil, captured = blk.call(nil)] }
-      host.harness = harness
+      host.foreground_harness = harness
       host.ui = ui
       host.do_thing
       expect(captured).to eq(:work_done)
@@ -226,7 +226,7 @@ RSpec.describe TaskRunner do
   describe 'emit_list (issue #474: structured command report)' do
     it 'renders the bullet list AND records the payload as structure' do
       recorded = []
-      host.harness = Object.new
+      host.foreground_harness = Object.new
       host.ui = ui
       reg = Object.new
       reg.define_singleton_method(:record_report_output) do |type:, origin:, content:|
@@ -249,7 +249,7 @@ RSpec.describe TaskRunner do
     end
 
     it 'renders without a record path when the host has no registry' do
-      host.harness = Object.new
+      host.foreground_harness = Object.new
       host.ui = ui
       allow(Task).to receive(:current).and_return(nil)
       host.emit_list(title: 'L:', items: [{ value: 'x' }], columns: [:value])
@@ -273,7 +273,7 @@ RSpec.describe TaskRunner do
 
     it 'records the stored markdown while printing the rendered line' do
       registry, recorded = recording_registry
-      host.harness = Object.new
+      host.foreground_harness = Object.new
       host.registry = registry
       host.ui = UI::Console.new(stdout: io, palette: UI::Palette.fetch('default'))
       allow(Task).to receive(:current).and_return(nil)
@@ -292,7 +292,7 @@ RSpec.describe TaskRunner do
     end
 
     it 'still prints when harness has no record path' do
-      host.harness = Object.new
+      host.foreground_harness = Object.new
       host.registry = nil
       host.ui = ui
       allow(Task).to receive(:current).and_return(nil)

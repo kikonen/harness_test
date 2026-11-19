@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'stringio'
 require 'file_list'
+require 'job_registry'
 require 'tmpdir'
 require 'commands/model_command'
 
@@ -41,7 +42,11 @@ RSpec.describe Commands::ModelCommand do
   def run_command(args = '', manager: nil, vision: false)
     manager ||= session_manager([{ name: 'qwen', model: 'qwen3:8b' }], 'qwen', vision: vision)
     stdout = StringIO.new
-    described_class.new(harness: harness(manager), file_list: nil,
+    # #286: the command reaches the Harness through the foreground job's harness,
+    # so the spec builds a registry whose main job carries the double.
+    registry = JobRegistry.new
+    registry.add_job(kind: :main, harness: harness(manager))
+    described_class.new(registry:, file_list: nil,
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string
   end

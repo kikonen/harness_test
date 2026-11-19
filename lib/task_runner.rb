@@ -13,7 +13,7 @@ require_relative "tool"
 #
 # Included by anything that drives an LLM round: CommandHandler (direct
 # prompts) and the Command subclasses that do (/retry issue #235, /compact
-# issue #253). The includer must expose #harness and #ui.
+# issue #253). The includer must expose #foreground_harness and #ui.
 module TaskRunner
   # The run's ONE input path (issue #286): the same reader the idle prompt uses,
   # so the edit state is one state of the poll loop and not two mechanisms.
@@ -31,14 +31,17 @@ module TaskRunner
     job ||= registry&.foreground_job
     error, _task, result =
       if registry
-        registry.run(job:, harness:, ui:, **input_kwargs) { |_t| yield }
+        # The Harness is the job's (#286), so the registry reads it off the job;
+        # this host no longer hands one to the executor.
+        registry.run(job:, ui:, **input_kwargs) { |_t| yield }
       else
         # No job, so no registry result: the block's own value is what the
         # caller gets back, and the drain loop needs a buffer to write its
         # single record into.
         value = nil
         buffer = OutputBuffer.new
-        error, _t = Task.run(harness:, ui:, buffer:, **input_kwargs) do |_t|
+        error, _t = Task.run(
+          harness: foreground_harness, ui:, buffer:, **input_kwargs) do |_t|
           value = yield
         end
         [error, nil, value]
@@ -130,6 +133,7 @@ module TaskRunner
     # Palette and table width now live in SystemSettings (#286); read them from
     # the settings this host carries, falling back to Harness (a host that has
     # one but no settings, e.g. CommandRunner).
+    harness = foreground_harness
     width = respond_to?(:settings) ? settings&.markdown_max_width : nil
     width ||= harness.respond_to?(:markdown_max_width) ? harness.markdown_max_width : nil
     UI::Renderer.new(

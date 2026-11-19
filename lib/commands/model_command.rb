@@ -23,14 +23,14 @@ module Commands
         # backend is visible at a glance. issue #449: image support is a
         # per-profile fact the parameter list does not cover (it is not a
         # generation parameter). The two facts are contiguous prose -> one note.
-        images = @harness.session_manager.vision? ? "inlined to the model" \
+        images = foreground_harness.session_manager.vision? ? "inlined to the model" \
                                                   : "files only (no vision declared)"
         emit_role(
           :note,
           [
-            "Current model: #{@harness.session_manager.active_model_name} " \
-              "(#{@harness.session_manager.target_display} " \
-              "@ #{@harness.model_config.base_url})",
+            "Current model: #{foreground_harness.session_manager.active_model_name} " \
+              "(#{foreground_harness.session_manager.target_display} " \
+              "@ #{foreground_harness.model_config.base_url})",
             "Tool-result images: #{images}"
           ])
         emit_params
@@ -41,14 +41,14 @@ module Commands
         return
       end
 
-      profile = @harness.session_manager.switch_model(name)
+      profile = foreground_harness.session_manager.switch_model(name)
       display = profile[:name] || profile[:model]
-      url     = profile[:url] || @harness.model_config.base_url
+      url     = profile[:url] || foreground_harness.model_config.base_url
       # issue #217: the API type can CHANGE with the profile - say it.
       emit_role(
         :note,
         "Switched to model: #{display} (#{profile[:model]} @ #{url}) " \
-        "-> #{@harness.session_manager.target_display}")
+        "-> #{foreground_harness.session_manager.target_display}")
       emit_params
     end
 
@@ -59,7 +59,7 @@ module Commands
     # listing is shared with /param (ParamOverrides#list_items) so both
     # commands render the exact same table.
     def emit_params
-      param = @harness.session_manager.param_overrides
+      param = foreground_harness.session_manager.param_overrides
       emit_list(
         title: ParamOverrides::LIST_TITLE,
         kind: :table,

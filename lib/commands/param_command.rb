@@ -77,7 +77,7 @@ module Commands
 
     # The shared override object (SessionManager owns the single instance).
     def param
-      @harness.session_manager.param_overrides
+      foreground_harness.session_manager.param_overrides
     end
   end
 end

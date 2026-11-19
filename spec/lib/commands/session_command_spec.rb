@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'stringio'
+require 'job_registry'
 require 'commands/session_command'
 
 RSpec.describe Commands::SessionCommand do
@@ -10,8 +11,11 @@ RSpec.describe Commands::SessionCommand do
     session.define_singleton_method(:summary) { summary }
     harness = Object.new
     harness.define_singleton_method(:session) { session }
+    harness.define_singleton_method(:markdown_max_width) { nil }
     stdout = StringIO.new
-    described_class.new(harness: harness, file_list: nil,
+    registry = JobRegistry.new
+    registry.add_job(kind: :main, harness:)
+    described_class.new(registry:, file_list: nil,
                         ui: UI::Console.new(stdout: stdout)).handle('')
     stdout.string
   end

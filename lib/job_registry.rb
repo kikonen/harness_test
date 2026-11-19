@@ -34,7 +34,8 @@ class JobRegistry
   def add_job(
     kind:,
     dependencies: [],
-    requested_by: nil
+    requested_by: nil,
+    harness: nil
   )
     job = Job.new(
       id: @next_id,
@@ -42,7 +43,8 @@ class JobRegistry
       registry: self,
       buffer: OutputBuffer.new(max_memory:, max_saved:),
       dependencies:,
-      requested_by:)
+      requested_by:,
+      harness:)
     @next_id += 1
     @jobs << job
     @foreground ||= job.id
@@ -75,8 +77,11 @@ class JobRegistry
 
   # The executor: the CLI asks the registry to run a job and awaits its result.
   # The drain loop stays the single main-thread writer of the job's buffer.
-  def run(job:, harness:, ui:, input_path: nil, &block)
-    error, task = Task.run(harness:, ui:, registry: self, job:, input_path:, &block)
+  def run(job:, ui:, input_path: nil, &block)
+    # The Harness is the job's (#286): a Harness lives INSIDE the job it drives,
+    # so the executor reads it off the job rather than taking it from the caller.
+    error, task = Task.run(
+      harness: job.harness, ui:, registry: self, job:, input_path:, &block)
     [error, task, job.result]
   end
 
