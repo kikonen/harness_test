@@ -33,7 +33,16 @@ class CLI
   # into SystemSettings here - the CLI's ONLY run-config holder - so the workdir
   # is available for the file list and the locator built below.
   def initialize(options = nil, ui = nil)
-    @settings = SystemSettings.from_options(options || CLIOptions.parse)
+    options ||= CLIOptions.parse
+    @settings = SystemSettings.from_options(options)
+    # Argument modes / run-selection are the CLI's own state, NOT run config
+    # shared with the Harness (#286): which session this run resumes, and the
+    # list/delete actions that run without ever building a Harness. They stay
+    # here in the CLI, never promoted to SystemSettings accessors.
+    @resume         = options[:resume]
+    @continue       = options[:continue]
+    @list_sessions  = options[:list_sessions]
+    @delete_session = options[:delete_session]
 
     # This console is the single sink every dialog and status line reaches (a
     # Task's drain loop renders to it, and the Poller serves a dialog
@@ -77,8 +86,8 @@ class CLI
     @setup_done = true
 
     @session_id ||= @locator.resolve_id(
-      resume: @settings.resume,
-      newest: !!@settings.continue)
+      resume: @resume,
+      newest: !!@continue)
     resume_data = resumed_run? ? @locator.read_session(session_id) : nil
 
     # SystemSettings was resolved in #initialize (the CLI's single run-config
@@ -145,7 +154,7 @@ class CLI
   # constructed a whole Harness (client, logger, tool registry) just to read a
   # few JSON files, minting a fresh random id on the way.
   def list_sessions
-    return unless @settings.list_sessions
+    return unless @list_sessions
 
     Commands::SessionsCommand.new(
       file_list: @file_list,
@@ -162,7 +171,7 @@ class CLI
   # entry point, which prints "Error: ..." and exits 1); find_session_file
   # already raises on an ambiguous prefix and returns nil when nothing matches.
   def delete_session
-    id = @settings.delete_session.to_s.strip
+    id = @delete_session.to_s.strip
     return if id.empty?
 
     path = @locator.find_session_file(id)
@@ -420,7 +429,7 @@ class CLI
   # issue #276): the conversation was restored during construction, so the
   # banner has to say so (there is no separate resume call left to report it).
   def resumed_run?
-    !!@settings.continue || !@settings.resume.to_s.strip.empty?
+    !!@continue || !@resume.to_s.strip.empty?
   end
 
   # issue #458: redraw the saved OutputBuffer tail of the previous run. The
