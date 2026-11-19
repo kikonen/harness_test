@@ -28,10 +28,10 @@ require_relative "../command_runner"
 module Tools
 
   class RunCommandTool < Tool
-    def initialize(file_list, options, harness: nil)
+    def initialize(file_list, settings, harness: nil)
       # harness: gives the runner access to the session logger so FAILED
       # commands are traced in harness.log (issue #185).
-      @runner = CommandRunner.new(file_list, options, harness:)
+      @runner = CommandRunner.new(file_list, settings, harness:)
       super(
         name: "run.command",
         description: "Executes a shell command in the harness working directory. " \

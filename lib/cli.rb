@@ -42,7 +42,7 @@ class CLI
     # (issue #388).
     @ui = ui || UI::Console.new(
       stdout: $stdout, stdin: $stdin,
-      palette: -> { foreground_harness&.output_palette })
+      palette: -> { @settings.output_palette })
 
     @file_list = build_file_list
     @locator = SessionLocator.new(@settings.workdir)
@@ -198,7 +198,7 @@ class CLI
       # ONE input path for the whole run (issue #286): the idle prompt and a
       # mid-turn note are the same read, so the edit state is a state of the
       # single poll loop. The command handler drains events through it too.
-      reader = PromptReader.new(ui: @ui, harness: -> { foreground_harness })
+      reader = PromptReader.new(ui: @ui, registry: @registry)
       @commands.input_path = reader.input_path
       @commands.input_path.target = -> { @registry.foreground_job }
       @commands.input_path.registry = -> { @registry }
@@ -330,7 +330,7 @@ class CLI
 
     # issue #303: same reasoning - which palette this run renders with is a
     # fact about the run, and /palette is the way to change it mid-session.
-    ui.puts "Output palette: #{foreground_harness.output_palette.name} (/palette <name> switches it)"
+    ui.puts "Output palette: #{@settings.output_palette.name} (/palette <name> switches it)"
 
     # issue #28: same reasoning - whether this run streams responses decides
     # what the user sees while the model is writing, and /stream switches it.

@@ -26,13 +26,15 @@ module UI
       registry:,
       topics: HelpTopics::TOPICS,
       ui: nil,
-      harness: nil,
+      settings: nil,
       width: nil
     )
       @registry = registry
       @topics   = topics
       @ui       = ui
-      @harness  = harness
+      # The palette this page paints with comes from the run's settings, never
+      # from a Harness (the per-LLM object has no business painting main-thread help).
+      @settings = settings
       @width    = width
     end
 
@@ -171,7 +173,7 @@ module UI
 
     def renderer
       @renderer ||= UI::Renderer.new(
-        palette: UI::Renderer.palette_for(ui: @ui, harness: @harness),
+        palette: UI::Renderer.palette_for(ui: @ui, settings: @settings),
         ui: @ui,
         markdown_max_width: @width)
     end

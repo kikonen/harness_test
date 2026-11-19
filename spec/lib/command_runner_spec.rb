@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'stringio'
 require 'tmpdir'
+require 'system_settings'
 require 'command_runner'
 
 RSpec.describe CommandRunner do
@@ -40,16 +41,18 @@ RSpec.describe CommandRunner do
     stdin  = StringIO.new(dialog_lines.join("\n"))
     stdout = StringIO.new
     file_list = FileList.new([], workdir: dir)
-    runner = described_class.new(file_list, {},
+    runner = described_class.new(file_list, SystemSettings.from_options({}),
                                  label: 'shell',
                                  ui: UI::Console.new(stdout: stdout,
-                                                     stdin: stdin),
+                                                     stdin: stdin,
+                                                     palette: UI::Palette.fetch('none')),
                                  list: :shell, **kwargs)
     [runner, stdout]
   end
 
   def make_tool_runner(dir, options = {}, harness: nil)
-    described_class.new(FileList.new([], workdir: dir), options, harness: harness)
+    described_class.new(FileList.new([], workdir: dir),
+                        SystemSettings.from_options(options), harness: harness)
   end
 
   # -- CommandRunner ---------------------------------------------------------
@@ -169,7 +172,7 @@ RSpec.describe CommandRunner do
       expect(File.file?(tool_yml)).to be false
 
       # A fresh shell runner auto-approves from the saved grant.
-      expect(described_class.new(FileList.new([], workdir: dir), {},
+      expect(described_class.new(FileList.new([], workdir: dir), SystemSettings.from_options({}),
                                  label: 'shell', list: :shell).run('echo x'))
         .to start_with('exit code: 0')
     end
@@ -319,7 +322,7 @@ RSpec.describe CommandRunner do
       Dir.mktmpdir do |dir|
         seed_allowlist(dir, 'false')
         _, logger = fake_logger
-        runner = described_class.new(FileList.new([], workdir: dir), {},
+        runner = described_class.new(FileList.new([], workdir: dir), SystemSettings.from_options({}),
                                      harness: harness_with(logger))
 
         out = runner.run('false')
@@ -333,7 +336,7 @@ RSpec.describe CommandRunner do
       Dir.mktmpdir do |dir|
         seed_allowlist(dir, 'false')
         messages, logger = fake_logger
-        runner = described_class.new(FileList.new([], workdir: dir), {},
+        runner = described_class.new(FileList.new([], workdir: dir), SystemSettings.from_options({}),
                                      harness: harness_with(logger))
 
         runner.run('false')
@@ -349,7 +352,7 @@ RSpec.describe CommandRunner do
       Dir.mktmpdir do |dir|
         seed_allowlist(dir, 'sleep 120')
         messages, logger = fake_logger
-        runner = described_class.new(FileList.new([], workdir: dir), {},
+        runner = described_class.new(FileList.new([], workdir: dir), SystemSettings.from_options({}),
                                      harness: harness_with(logger))
         allow_any_instance_of(described_class).to receive(:run_in_shell)
                   .and_return(['', :timeout])
@@ -365,7 +368,7 @@ RSpec.describe CommandRunner do
       Dir.mktmpdir do |dir|
         seed_allowlist(dir, 'echo')
         messages, logger = fake_logger
-        runner = described_class.new(FileList.new([], workdir: dir), {},
+        runner = described_class.new(FileList.new([], workdir: dir), SystemSettings.from_options({}),
                                      harness: harness_with(logger))
 
         runner.run('echo hi')
@@ -914,20 +917,23 @@ RSpec.describe CommandRunner do
       end
     end
 
-    it 'reads the harness palette per line, so a mid-session switch is honored' do
+    it 'reads the settings palette per line, so a mid-session switch is honored' do
       Dir.mktmpdir do |dir|
-        runner, out = make_main_runner(dir, auto_approve_all: true,
-                                       harness: double('harness',
-                                                      output_palette: UI::Palette.fetch('none'),
-                                                      logger: nil))
+        stdin  = StringIO.new
+        stdout = StringIO.new
+        runner = described_class.new(
+          FileList.new([], workdir: dir),
+          SystemSettings.from_options({ output_palette: 'none' }),
+          label: 'shell', list: :shell, auto_approve_all: true,
+          ui: UI::Console.new(stdout: stdout, stdin: stdin))
         runner.run('echo one')
         # StringIO#string is the LIVE buffer: copy it before the next run.
-        plain = out.string.dup
-        runner.instance_variable_set(:@harness,
-                                     double('harness', output_palette: UI::Palette.fetch('default'),
-                                            logger: nil))
+        plain = stdout.string.dup
+        # A mid-session /palette switch lands on the settings the runner reads.
+        runner.instance_variable_set(:@settings,
+                                     SystemSettings.from_options({ output_palette: 'default' }))
         runner.run('echo two')
-        colored = out.string[plain.length..]
+        colored = stdout.string[plain.length..]
 
         expect(plain).not_to include("\e[")
         expect(colored).to include("\e[32m ✓ echo two")
@@ -938,21 +944,20 @@ RSpec.describe CommandRunner do
     # written to carries a palette, it wins over the harness's - a browser /
     # non-terminal sink (no palette) then renders plain instead of being handed
     # terminal SGR it cannot interpret. Here the console is colored but the
-    # harness palette is 'none', so a colored line proves the sink won.
+    # settings palette is 'none', so a colored line proves the sink won.
     it 'paints with the console (sink) palette when the sink carries one' do
       Dir.mktmpdir do |dir|
         stdin  = StringIO.new
         stdout = StringIO.new
         console = UI::Console.new(stdout: stdout, stdin: stdin,
                                   palette: UI::Palette.fetch('default'))
-        runner = described_class.new(FileList.new([], workdir: dir), {},
-                                     label: 'shell', list: :shell,
-                                     auto_approve_all: true, ui: console,
-                                     harness: double('harness',
-                                                    output_palette: UI::Palette.fetch('none'),
-                                                    logger: nil))
+        runner = described_class.new(
+          FileList.new([], workdir: dir),
+          SystemSettings.from_options({ output_palette: 'none' }),
+          label: 'shell', list: :shell,
+          auto_approve_all: true, ui: console)
         runner.run('echo sink')
-        # The sink's default palette colored it even though the harness said 'none'.
+        # The sink's default palette colored it even though the settings said 'none'.
         expect(stdout.string).to include("\e[32m ✓ echo sink")
       end
     end
@@ -1222,7 +1227,7 @@ RSpec.describe CommandRunner do
         stdin  = StringIO.new('2')
         stdout = StringIO.new
         runner = described_class.new(FileList.new([], workdir: dir),
-                                     override_options('safe: fine'),
+                                     SystemSettings.from_options(override_options('safe: fine')),
                                      label: 'shell',
                                      list: :shell,
                                      ui: UI::Console.new(stdout: stdout, stdin: stdin))

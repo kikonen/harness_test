@@ -6,7 +6,7 @@ require 'tmpdir'
 require 'fileutils'
 require 'skills'
 require 'file_list'
-require 'job_registry'
+require 'system_settings'
 require 'commands/skills_command'
 
 RSpec.describe Commands::SkillsCommand do
@@ -17,14 +17,12 @@ RSpec.describe Commands::SkillsCommand do
     FileList.new([], workdir: dir)
   end
 
-  # A harness that answers a palette is the real-run shape (Harness#output_palette
-  # is ALWAYS a palette there), and it is what lets the renderer render the body as
-  # markdown (#474): the emitter states the RAW stored text, the markers are consumed
-  # by the render.
-  def harness_with_palette(_dir, name = 'default')
-    h = Object.new
-    h.define_singleton_method(:output_palette) { UI::Palette.new(name) }
-    h
+  # The run's settings carry the palette (issue #286): the main-thread renderer
+  # paints with SystemSettings#output_palette, never with a Harness. A palette
+  # renders the body as markdown (#474): the emitter states the RAW stored text,
+  # the markers are consumed by the render.
+  def settings_with_palette(name = 'default')
+    SystemSettings.from_options({ output_palette: name })
   end
 
   def run_command(dir, args = '')
@@ -36,9 +34,7 @@ RSpec.describe Commands::SkillsCommand do
 
   def run_with_palette(dir, args = '', palette = 'default')
     stdout = StringIO.new
-    registry = JobRegistry.new
-    registry.add_job(kind: :main, harness: harness_with_palette(dir, palette))
-    described_class.new(registry:,
+    described_class.new(settings: settings_with_palette(palette),
                         file_list: file_list_with(dir),
                         ui: UI::Console.new(stdout: stdout)).handle(args)
     stdout.string

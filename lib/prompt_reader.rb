@@ -10,8 +10,9 @@ require_relative "ui"
 # tags + context indicator), read one multiline buffer through the ONE input
 # path, and re-prompt until the user submits a command (returned) or hits
 # Ctrl-D on an empty buffer (nil => quit). The draft persists for the reader's
-# life so an Esc'd or edited buffer is prefilled at the next prompt. The harness
-# is a live reader (a callable) so the modeline always reads the current Harness.
+# life so an Esc'd or edited buffer is prefilled at the next prompt. The reader
+# holds the run's JobRegistry and reads the modeline off the FOREGROUND job's
+# Harness (#286) - the same path every command uses - not a stored Harness.
 # Key model and rationale: doc/reline_cursor_and_enter_handling.md.
 class PromptReader
   # The prompt the idle read uses (the input path's own default is the note
@@ -20,9 +21,9 @@ class PromptReader
 
   attr_reader :input_path
 
-  def initialize(ui:, harness:, input_path: nil)
+  def initialize(ui:, registry:, input_path: nil)
     @ui = ui
-    @harness = harness # a live reader: the modeline reads the current Harness
+    @registry = registry
     @draft = nil
     @input_path = input_path || InputPath.new(ui:, prompt: PROMPT)
   end
@@ -32,7 +33,7 @@ class PromptReader
   # so the run loop only ever sees a submitted command or nil.
   def read
     loop do
-      harness = @harness.call
+      harness = @registry.foreground_job.harness
       render_modeline(harness)
 
       result = input_path.read(prefill: @draft)

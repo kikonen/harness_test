@@ -145,17 +145,16 @@ module UI
     # palette would bake SGR it has no terminal to interpret, so the escape
     # bytes show up as literal "[38;5;240m" text in the browser. A palette-AWARE
     # sink (a UI::Console) keeps the run's colors: its own palette wins (the CLI
-    # wires the live harness palette into it, cli.rb), and when it answers nil
-    # the harness palette applies - that is how a terminal built before a
-    # Harness exists still honors a mid-session /palette switch. Terminal output
-    # stays byte-identical (the CLI console's palette IS the harness palette)
-    # and "paint nothing" is the automatic behavior of a non-paintable sink.
-    def self.palette_for(ui:, harness: nil, settings: nil)
+    # wires the live SystemSettings palette into it, cli.rb), and when it answers
+    # nil the settings palette applies - that is how a terminal built before the
+    # Harness exists still honors a mid-session /palette switch (the palette lives
+    # in SystemSettings, not in the per-LLM Harness). Terminal output stays
+    # byte-identical (the CLI console's palette IS the settings palette) and
+    # "paint nothing" is the automatic behavior of a non-paintable sink.
+    def self.palette_for(ui:, settings: nil)
       return nil unless ui.respond_to?(:palette)
 
-      ui.palette ||
-        (settings.respond_to?(:output_palette) ? settings.output_palette : nil) ||
-        (harness.respond_to?(:output_palette) ? harness.output_palette : nil)
+      ui.palette || settings&.output_palette
     end
 
     attr_reader :palette

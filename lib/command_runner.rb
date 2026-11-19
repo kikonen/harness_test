@@ -108,7 +108,7 @@ class CommandRunner
   # list:      :tool (default) or :shell - selects the allowlist file
   # force_confirm: true keeps the consent dialog even for a command whose
   #   prefix is already allowlisted. Used by the `!` bang path while bang
-  #   confirmation is ON (options[:bang_requires_confirmation], the default
+  #   confirmation is ON (settings.bang_requires_confirmation, the default
   #   - issue #221). Setting that config key to false passes force_confirm:
   #   false here, so a command the USER typed runs without a dialog (the
   #   disaster denylist still applies: a user-typed rm -rf / is asked for).
@@ -121,10 +121,10 @@ class CommandRunner
   # harness:   optional Harness (any object with a lazy #logger accessor):
   #            when given, FAILED commands are logged to the session's
   #            harness.log so they leave a trace (issue #185). nil in specs.
-  def initialize(file_list, options, label: "run.command", title_fmt: TOOL_TITLE,
+  def initialize(file_list, settings, label: "run.command", title_fmt: TOOL_TITLE,
                  ui: nil, list: :tool, harness: nil, auto_approve_all: false)
     @file_list = file_list
-    @options   = options
+    @settings  = settings
     @label     = label
     @title_fmt = title_fmt
     @ui        = ui
@@ -344,7 +344,7 @@ class CommandRunner
   # re-read per line and a /palette switch shows up in the next bang command.
   def renderer
     # The SINK decides color (#466): the shared rule lives in UI::Renderer.
-    palette = UI::Renderer.palette_for(ui: @ui, harness: @harness)
+    palette = UI::Renderer.palette_for(ui: @ui, settings: @settings)
     UI::Renderer.new(palette:)
   end
 
@@ -382,16 +382,16 @@ class CommandRunner
   end
 
   # issue #224: the verdict for THIS command. Priority: a batch pre-check
-  # verdict cached on options by the harness (Harness#precheck_batch_safety
+  # verdict cached on settings by the harness (Harness#precheck_batch_safety
   # removes it after first use), else a single-command check right here
   # (a lone run.command in its batch has no pre-check). Returns nil when
   # the check is disabled or produced nothing.
   def safety_verdict_for(command)
-    return nil unless @options[:command_safety_check] == true
+    return nil unless @settings[:command_safety_check] == true
 
-    cached = @options[:safety_verdicts]
+    cached = @settings[:safety_verdicts]
     if cached.is_a?(Hash)
-      @options[:safety_verdicts] = cached.reject { |k, _v| k == command }
+      @settings[:safety_verdicts] = cached.reject { |k, _v| k == command }
       return cached[command]
     end
 
@@ -413,7 +413,7 @@ class CommandRunner
 
   # Issue #221: does THIS caller run without a consent dialog?
   #   * the `!` bang path with bang confirmation disabled (@auto_approve_all,
-  #     passed by CommandHandler from options[:bang_requires_confirmation]);
+  #     passed by CommandHandler from settings.bang_requires_confirmation);
   #   * the run.command tool path while the harness YOLO posture is on.
   # The YOLO flag is re-read on EVERY command (not cached at construction)
   # so a /yolo typed at the idle prompt, or flipped by a mid-turn steering
@@ -450,7 +450,7 @@ class CommandRunner
   # relaxed floor cannot appear or disappear inside one tool loop. Rationale:
   # doc/denylist_safe_approve_design.md.
   def denylist_safe_override?
-    @options[:command_safety_denylist_safe_approve] == true
+    @settings[:command_safety_denylist_safe_approve] == true
   end
 
   # An override approval is the most auditable event the runner can produce: a
