@@ -15,6 +15,7 @@ RSpec.describe SessionLocator do
   let(:locator) { described_class.new(workdir) }
   let(:sid_a) { 'aaaaaaaa-bbbb-cccc-dddd-111111111111' }
   let(:sid_b) { 'ffffffff-0000-1111-2222-333333333333' }
+  let(:sid_c) { 'cccccccc-0000-1111-2222-333333333333' }
 
   after { FileUtils.remove_entry(workdir) if File.directory?(workdir) }
 
@@ -32,6 +33,25 @@ RSpec.describe SessionLocator do
     File.write(path, JSON.generate(data))
     File.utime(saved_at, saved_at, path)
     path
+  end
+
+  # Seed a layered run directory (issue #548, layout A):
+  # <sessions>/<id>/run.json plus <sessions>/<id>/jobs/<job>/session.json.
+  def seed_run(id, jobs: [0, 1])
+    dir = File.join(workdir, '.harness', 'sessions', id)
+    FileUtils.mkdir_p(dir)
+    run_data = { session_id: id, workdir:, next_id: jobs.max + 1,
+                 jobs: jobs.map { |j| { id: j, dir: "jobs/#{j}" } } }
+    run_path = File.join(dir, 'run.json')
+    File.write(run_path, JSON.generate(run_data))
+    jobs.each do |j|
+      jdir = File.join(dir, 'jobs', j.to_s)
+      FileUtils.mkdir_p(jdir)
+      File.write(File.join(jdir, 'session.json'),
+                 JSON.generate({ messages: [{ role: 'user', content: "job#{j}" }],
+                                 active_model: 'm', param_overrides: {} }))
+    end
+    run_path
   end
 
   describe '#sessions_dir / #session_file_path' do
@@ -246,6 +266,65 @@ RSpec.describe SessionLocator do
       File.write(path, '{ not json')
 
       expect(locator.search('m0').map { |m| m[:id] }).to eq([sid_a])
+    end
+  end
+
+  # issue #548: the layered dir-per-job layout. These are the read-side path and
+  # read primitives a writer/resolver build on. They are ADDITIVE - they do not
+  # yet change the #207 #session_files glob, #list, or resume (that switch is the
+  # same increment as the writer), so a #207 session and a layered run coexist.
+  describe '#548 layered layout primitives' do
+    it 'derives run.json, a job dir, and a job session path from the workdir' do
+      expect(locator.run_file_path(sid_a))
+        .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'run.json'))
+      expect(locator.job_dir_path(sid_a, 0))
+        .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'jobs', '0'))
+      expect(locator.job_session_file_path(sid_a, 3))
+        .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'jobs', '3', 'session.json'))
+    end
+
+    it 'reports a layered run dir as a run, and a #207 dir as not' do
+      seed_run(sid_a)
+      seed_session(sid_b)
+
+      expect(locator.run_dir?(sid_a)).to be true
+      expect(locator.run_dir?(sid_b)).to be false
+      expect(locator.run_dir?(sid_c)).to be false # no such dir at all
+    end
+
+    it 'reads run.json symbolized for a layered session' do
+      seed_run(sid_a, jobs: [0, 1, 2])
+
+      run = locator.read_run(sid_a)
+
+      expect(run[:session_id]).to eq(sid_a)
+      expect(run[:next_id]).to eq(3)
+      expect(run[:jobs].map { |j| j[:id] }).to eq([0, 1, 2])
+    end
+
+    it 'reads a job session.json symbolized, carrying no session_id' do
+      seed_run(sid_a, jobs: [0])
+
+      job = locator.read_job_session(sid_a, 0)
+
+      expect(job[:messages].first[:content]).to eq('job0')
+      expect(job).not_to have_key(:session_id)
+    end
+
+    it 'raises reading a run record that is not there (a #207 session has none)' do
+      seed_session(sid_b)
+
+      expect { locator.read_run(sid_b) }
+        .to raise_error(HarnessError, /no run record for session/)
+      expect { locator.read_run(sid_c) }
+        .to raise_error(HarnessError, /no run record for session/)
+    end
+
+    it 'raises reading a job session that is not there' do
+      seed_run(sid_a, jobs: [0])
+
+      expect { locator.read_job_session(sid_a, 5) }
+        .to raise_error(HarnessError, /no session for job 5 of session/)
     end
   end
 end
