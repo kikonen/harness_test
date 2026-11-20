@@ -11,11 +11,14 @@ require 'harness_config'
 RSpec.describe JobRegistry do
   let(:registry) { JobRegistry.new }
 
-  # The minimum harness Task.run reads (the palette is optional, so a plain
-  # object answers only what the drain loop asks).
+  # The minimum harness Task.run reads: a non-nil harness answers the whole
+  # interface it reads off one (#286: full-or-nil), so plain defaults apply.
   def spec_harness
     h = Object.new
     h.define_singleton_method(:output_log) { OutputBuffer.new }
+    h.define_singleton_method(:output_palette) { nil }
+    h.define_singleton_method(:markdown?) { false }
+    h.define_singleton_method(:markdown_max_width) { nil }
     h
   end
 
