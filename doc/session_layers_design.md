@@ -348,9 +348,14 @@ breaks no reader.
 - **Stamp channel mechanism**: a thread-local set explicitly at every `Thread.new` with a
   main-thread fallback to the foreground job, versus `Logger#progname` per call. Thread ids
   are rejected.
-- **Is the run id the foreground agent's id, or a separate id?** The layout keeps the
-  session directory named by the run id; whether job 0's `session.json` reuses it or gets
-  its own id is unresolved.
+- **Run id vs job id (DECIDED):** the run/system UUID lives only in the **directory name**
+  and **`run.json`** - never in a job's `session.json` / `job.json`. A job is identified by
+  its directory (`jobs/<id>/`) plus the `id` in `job.json`; it does not need the run UUID,
+  and a job file that also stores a `session_id` is a second source of one identity - which
+  is what invites drift bugs. Today's `Harness#initialize` already polices that copy (it
+  raises when `resume_data[:session_id]` disagrees with the directory id); dropping the field
+  removes that bug class rather than guarding it. The directory name IS the run id - there is
+  no separate run-UUID to invent.
 - **Whether a sub-agent's harness session is auto-saved at all**, or only saved when a
   dependency needs it back (a read-only `agent.explore` may not need its transcript
   persisted; a write-capable sub-agent will).
