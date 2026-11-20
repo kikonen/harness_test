@@ -207,7 +207,7 @@ class Task
   # (single-thread I/O rule) and the outbox carries ONE line, so without this
   # the trace dies with the thread.
   def record_task_error(error)
-    logger = @harness.respond_to?(:logger) ? @harness.logger : nil
+    logger = @harness&.logger
     return unless logger
 
     logger.error ErrorText.detailed(error, "task thread raised")

@@ -27,6 +27,7 @@ RSpec.describe Task do
       attr_reader :output_log
 
       # #286: a non-nil harness answers the whole interface Task.run reads off
+      def logger = nil
       # it (the palette and the two markdown knobs), so the plain defaults apply.
       def output_palette = nil
       def markdown? = false
