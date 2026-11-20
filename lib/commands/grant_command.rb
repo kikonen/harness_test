@@ -39,7 +39,7 @@ module Commands
       # touch, and a posture that auto-approves silently must never be invisible.
       # It is not part of the access lists above because a session saves and
       # restores those - a posture must never persist into a resumed grant.
-      if @file_list.respond_to?(:posture_active?) && @file_list.posture_active?
+      if @file_list.posture_active?
         scope = @file_list.posture_scope
         # Name the dirs the posture actually leaves asking (issue #385), not a
         # hardcoded local/ - the list is configurable.
