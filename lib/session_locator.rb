@@ -27,6 +27,9 @@ class SessionLocator
   # issue #207: the session JSON lives INSIDE its own directory
   # (.harness/sessions/<id>/session.json), alongside its log and history.
   SESSION_FILE = "session.json"
+  # issue #548 (dir per job): a saved run directory holds run.json + jobs/<id>/...
+  RUN_FILE = "run.json"
+  JOBS_DIR = "jobs"
   # issue #113: each session logs to its own file inside its session dir, so
   # concurrent sessions in one workdir do not interleave in a shared log.
   SESSION_LOG_FILE = "harness.log"
@@ -47,6 +50,33 @@ class SessionLocator
 
   def session_file_path(id)
     File.join(sessions_dir, id, SESSION_FILE)
+  end
+
+  # -- Layered (dir-per-job) layout (issue #548) ----------------------------
+  # A saved RUN is a session directory holding run.json plus a jobs/<id>/ tree.
+  # These are the path primitives a writer/resolver build on. They do NOT yet
+  # replace the #207 #session_file_path / #session_files glob: the listing glob
+  # is rewritten in the same step that switches the writer, so old and new
+  # layouts stay listable at once (see doc/session_layers_design.md).
+  def run_file_path(id)
+    File.join(sessions_dir, id, RUN_FILE)
+  end
+
+  def job_dir_path(id, job_id)
+    File.join(sessions_dir, id, JOBS_DIR, job_id.to_s)
+  end
+
+  # A job's conversation file. It carries NO session_id (a job is named by this
+  # path, doc/session_layers_design.md); the run UUID lives in the dir name and
+  # run.json only.
+  def job_session_file_path(id, job_id)
+    File.join(job_dir_path(id, job_id), SESSION_FILE)
+  end
+
+  # True when the directory is a layered RUN (it has run.json). A #207 layout
+  # dir (top-level session.json, no run.json) is not.
+  def run_dir?(id)
+    File.file?(run_file_path(id))
   end
 
   # The session's own log file (issue #113). It is part of WHERE a session
@@ -126,6 +156,29 @@ class SessionLocator
   def read_session(id)
     path = find_session_file(id)
     raise HarnessError, "no saved session matching '#{id}' (see /sessions)" unless path
+
+    JSON.parse(File.read(path), symbolize_names: true)
+  end
+
+  # The layered run record (issue #548): run.json of a session directory, parsed
+  # symbolized. Raises when the id has no run record (a #207 session has none).
+  def read_run(id)
+    path = run_file_path(id)
+    unless File.file?(path)
+      raise HarnessError, "no run record for session '#{id}' (see /sessions)"
+    end
+
+    JSON.parse(File.read(path), symbolize_names: true)
+  end
+
+  # A job's conversation file (jobs/<id>/session.json), parsed symbolized. Raises
+  # when that job has no conversation file (its dir was dropped, or it is the
+  # degenerate layout with no per-job tree).
+  def read_job_session(id, job_id)
+    path = job_session_file_path(id, job_id)
+    unless File.file?(path)
+      raise HarnessError, "no session for job #{job_id} of session '#{id}'"
+    end
 
     JSON.parse(File.read(path), symbolize_names: true)
   end
