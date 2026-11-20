@@ -1,23 +1,23 @@
 # frozen_string_literal: true
 
 # Issue #548 (session layers) / #286 (job model): measurements behind the
-# single-harness.log decision. Runs from a fresh clone; writes only into its own
-# directory. Verified on Ruby 4.0.7 / logger.rb v1.7.0, x64-mingw-ucrt.
+# single-harness.log decision. Runs from a fresh clone; writes only into a
+# temporary directory removed on exit. Verified on Ruby 4.0.7 / logger.rb
+# v1.7.0, x64-mingw-ucrt.
 
 require "logger"
 require "fileutils"
+require "tmpdir"
 
-OUT  = __dir__
-N    = 200
-BIG  = "X" * 200
-PAD  = "!E!job-0!INFO #{BIG}\n".bytesize
-LOGS = %w[one_logger two_loggers thread_name progname delimiter multiline]
+# The generated logs are transient byproducts of the measurements; the guard in
+# spec/lib/sensitive_files_spec.rb lists EVERY untracked file under analysis/
+# (gitignored ones too), so a run must leave nothing there.
+OUT = Dir.mktmpdir("548-log-format")
+at_exit { FileUtils.remove_entry(OUT) }
 
-# Logger.new appends to an existing path, so each run must start from a clean
-# directory or the counts double.
-LOGS.each do |name|
-  FileUtils.rm_f(File.join(OUT, "#{name}.log"))
-end
+N   = 200
+BIG = "X" * 200
+PAD = "!E!job-0!INFO #{BIG}\n".bytesize
 
 def header(text)
   puts "\n== #{text} =="
