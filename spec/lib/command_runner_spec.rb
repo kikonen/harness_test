@@ -56,6 +56,22 @@ RSpec.describe CommandRunner do
                         SystemSettings.from_options(options), harness: harness)
   end
 
+  # A harness double answers the WHOLE interface the runner reads off a harness
+  # (#286: full-or-nil), so the runner reads each posture straight through and
+  # never asks "do you respond_to? this". A site overrides only the key it
+  # tests; every other posture stays at its off/nil default.
+  def harness_double(**overrides)
+    double('harness', **{
+      yolo?: false,
+      command_safety_auto_approve_effective?: false,
+      tools_payload: nil,
+      tool_wait_suffix: nil,
+      logger: nil,
+      session: nil,
+      client: nil
+    }.merge(overrides))
+  end
+
   # -- CommandRunner ---------------------------------------------------------
 
   it 'returns an error for an empty command' do
@@ -316,7 +332,7 @@ RSpec.describe CommandRunner do
     end
 
     def harness_with(logger)
-      double('harness', logger: logger)
+      harness_double(logger: logger)
     end
 
     it 'names the failure when a command exits non-zero without output' do
@@ -392,7 +408,7 @@ RSpec.describe CommandRunner do
   end
 
   def harness_with(client, chain)
-    double('harness', client: client, logger: nil,
+    harness_double(client: client, logger: nil,
            session: double('session', messages: chain),
            tools_payload: [{ type: 'function', function: { name: 'test.echo' } }])
   end
@@ -466,7 +482,7 @@ RSpec.describe CommandRunner do
     it 'sends no tools and still verdicts when the harness reports none' do
       Dir.mktmpdir do |dir|
         client = fake_client('safe: harmless read')
-        h = double('harness', client: client, logger: nil,
+        h = harness_double(client: client, logger: nil,
                    session: double('session', messages: chain_mid_tool_loop))
         runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
         out = drive_dialog(['1'])
@@ -606,13 +622,13 @@ RSpec.describe CommandRunner do
   # "dangerous:" verdicts and missing verdicts still ask.
   context 'auto-approve mode (issue #224 follow-up)' do
     def auto_approve_harness(client, chain)
-      double('harness', client: client, logger: nil,
+      harness_double(client: client, logger: nil,
              session: double('session', messages: chain),
              command_safety_auto_approve_effective?: true)
     end
 
     def manual_harness(client, chain)
-      double('harness', client: client, logger: nil,
+      harness_double(client: client, logger: nil,
              session: double('session', messages: chain),
              command_safety_auto_approve_effective?: false)
     end
@@ -686,7 +702,7 @@ RSpec.describe CommandRunner do
         allow(logger).to receive(:info) { |m| logged << m }
         allow(logger).to receive(:warn) { |m| logged << m }
         client = fake_client('Here are my verdicts:', 'safe: harmless read')
-        h = double('harness', client: client, logger: logger,
+        h = harness_double(client: client, logger: logger,
                    session: double('session', messages: chain_mid_tool_loop),
                    command_safety_auto_approve_effective?: true)
         runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
@@ -979,7 +995,7 @@ RSpec.describe CommandRunner do
       allow(logger).to receive(:info) { |m| messages << m }
       allow(logger).to receive(:warn) { |m| messages << m }
       allow(logger).to receive(:debug) { |m| messages << m }
-      h = double('harness', yolo?: true, logger: logger)
+      h = harness_double(yolo?: true, logger: logger)
       [messages, h]
     end
 
@@ -1011,7 +1027,7 @@ RSpec.describe CommandRunner do
     it 'skips the model safety check entirely (issue #238: no extra LLM round trip)' do
       Dir.mktmpdir do |dir|
         client = fake_client('safe: should never be asked')
-        h = double('harness', yolo?: true, logger: nil, client: client,
+        h = harness_double(yolo?: true, logger: nil, client: client,
                    session: double('session', messages: []))
         runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
         drive_dialog([])
@@ -1027,7 +1043,7 @@ RSpec.describe CommandRunner do
     it 'runs the model check for a denylisted command, on its dialog' do
       Dir.mktmpdir do |dir|
         client = fake_client('1: dangerous: recursive force delete')
-        h = double('harness', yolo?: true, logger: nil, client: client,
+        h = harness_double(yolo?: true, logger: nil, client: client,
                    session: double('session', messages: chain_mid_tool_loop))
         runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
         out = drive_dialog(['2']) # Allow(1), Cancel(2): no grants offered
@@ -1084,7 +1100,7 @@ RSpec.describe CommandRunner do
     it 'the disaster denylist overrides the AUTO-APPROVE model verdict' do
       Dir.mktmpdir do |dir|
         client = fake_client('safe: definitely fine')
-        h = double('harness', yolo?: false, logger: nil, client: client,
+        h = harness_double(yolo?: false, logger: nil, client: client,
                    session: double('session', messages: chain_mid_tool_loop),
                    command_safety_auto_approve_effective?: true)
         runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
@@ -1100,7 +1116,7 @@ RSpec.describe CommandRunner do
     it 'shows the AUTO-APPROVE verdict on the denylist dialog it cannot clear' do
       Dir.mktmpdir do |dir|
         client = fake_client('1: dangerous: escalates privileges')
-        h = double('harness', yolo?: false, logger: nil, client: client,
+        h = harness_double(yolo?: false, logger: nil, client: client,
                    session: double('session', messages: chain_mid_tool_loop),
                    command_safety_auto_approve_effective?: true)
         runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
@@ -1156,7 +1172,7 @@ RSpec.describe CommandRunner do
       logger = double('logger')
       allow(logger).to receive(:info) { |m| logged << m }
       allow(logger).to receive(:warn) { |m| logged << m }
-      [logged, double('harness', yolo?: false, logger: logger)]
+      [logged, harness_double(yolo?: false, logger: logger)]
     end
 
     # The verdict is INJECTED as a batch pre-check result (options[:safety_verdicts])
@@ -1321,7 +1337,7 @@ RSpec.describe CommandRunner do
     end
 
     def suffix_harness
-      double('harness', logger: nil, tool_wait_suffix: -> { 'ctx 12%' })
+      harness_double(logger: nil, tool_wait_suffix: -> { 'ctx 12%' })
     end
 
     it 'names the run on the spinner while it waits' do

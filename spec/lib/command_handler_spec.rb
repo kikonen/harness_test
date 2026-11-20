@@ -13,8 +13,23 @@ RSpec.describe CommandHandler do
   # asks the harness for its logger to trace failed commands). #286: the run
   # always owns a registry with a main job, so the host must too - a command
   # handler with no registry is not a state the app can reach.
+  # The double answers the WHOLE interface the bang CommandRunner reads off a
+  # harness (logger, auto-approve posture, tool payload, spinner suffix, chain,
+  # client), so the runner reads each straight through instead of asking
+  # respond_to?.
+  def bang_harness
+    Class.new do
+      def logger = nil
+      def command_safety_auto_approve_effective? = false
+      def tools_payload = nil
+      def tool_wait_suffix = nil
+      def session = nil
+      def client = nil
+    end.new
+  end
+
   def bang_registry
-    JobRegistry.new.tap { |r| r.add_job(kind: :main, harness: (Class.new { def logger = nil; }.new)) }
+    JobRegistry.new.tap { |r| r.add_job(kind: :main, harness: bang_harness) }
   end
 
   def make_handler(dir, console, options: {})

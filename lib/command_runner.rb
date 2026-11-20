@@ -407,8 +407,7 @@ class CommandRunner
   # that build the runner standalone) means the mode is off, so consent
   # always proceeds via the dialog.
   def auto_approve_mode?
-    @harness.respond_to?(:command_safety_auto_approve_effective?) &&
-      @harness.command_safety_auto_approve_effective?
+    !!@harness&.command_safety_auto_approve_effective?
   end
 
   # Issue #221: does THIS caller run without a consent dialog?
@@ -430,8 +429,7 @@ class CommandRunner
   # typed the command - its consent is controlled by the separate
   # 'bang_requires_confirmation' config key instead.
   def yolo_active?
-    @list == :tool &&
-      @harness.respond_to?(:yolo?) && @harness.yolo?
+    @list == :tool && @harness&.yolo? == true
   end
 
   # Issue #221: an auto-approved-without-dialog run MUST leave a trace.
@@ -508,7 +506,7 @@ class CommandRunner
   # harness has no tool definitions to mirror, and a missing payload is a
   # cache miss, never a wrong verdict.
   def harness_tools
-    @harness.respond_to?(:tools_payload) ? @harness.tools_payload : nil
+    @harness&.tools_payload
   end
 
   # The live conversation chain to fork from (issue #208: the session IS
@@ -589,7 +587,7 @@ class CommandRunner
     return nil unless task
 
     handle = command_handle(command).sub(/ \.\.\.\z/, "")
-    suffix = @harness.respond_to?(:tool_wait_suffix) ? @harness.tool_wait_suffix : nil
+    suffix = @harness&.tool_wait_suffix
     task.push_event(type: :spinner_detail, origin: @label,
                     content: { message: "#{@label}: #{handle}", suffix: })
   end
