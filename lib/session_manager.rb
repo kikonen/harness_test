@@ -721,23 +721,23 @@ class SessionManager
     # a floor under the posture, not part of it.) Kept here rather than in
     # Session#to_h because it is harness consent state, not conversation
     # state - the same treatment as active_model / param_overrides.
-    data[:yolo] = @harness.yolo? == true
+    data[:yolo] = @harness.settings.yolo? == true
 
     # issue #28: the streaming posture travels with the session too. It is a
     # harness posture, not conversation state (the same treatment as yolo),
     # and a resumed session must not quietly drop back to buffered.
-    data[:stream] = @harness.stream? == true
+    data[:stream] = @harness.settings.stream? == true
 
     # issue #106: the markdown rendering posture travels with the session too
     # (a harness posture, not conversation state). A session the user set to
     # markdown-rendered must not drop back to raw markdown on resume.
-    data[:markdown] = @harness.markdown? == true
+    data[:markdown] = @harness.settings.markdown? == true
 
     # issue #303: the rendered-output palette travels with the session too.
     # A display preference the user chose for THIS session; resuming it must
     # not drop back to the startup default. Stored as the palette NAME so the
     # resume side can validate it against the palettes this build has.
-    data[:output_palette] = @harness.output_palette.name
+    data[:output_palette] = @harness.settings.output_palette.name
 
     # issue #286: which job was foreground is harness state, not conversation
     # state (the same treatment as the postures), so it travels as an id and

@@ -16,9 +16,11 @@ RSpec.describe JobRegistry do
   def spec_harness
     h = Object.new
     h.define_singleton_method(:output_log) { OutputBuffer.new }
-    h.define_singleton_method(:output_palette) { nil }
-    h.define_singleton_method(:markdown?) { false }
-    h.define_singleton_method(:markdown_max_width) { nil }
+    h.define_singleton_method(:settings) do
+      SystemSettings.from_options({ output_palette: 'none' })
+    end
+    h.define_singleton_method(:logger) { nil }
+    h.define_singleton_method(:plan_mode_label) { nil }
     h
   end
 

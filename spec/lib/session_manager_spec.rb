@@ -41,18 +41,15 @@ RSpec.describe SessionManager do
     Class.new do
       attr_accessor :session, :client, :history
 
-      # issue #221: save/resume persists the YOLO consent posture, so the
-      # stub mirrors Harness#yolo? / yolo=.
-      attr_writer :yolo
-      def yolo?; @yolo == true; end
-      # issue #28: save/resume persists the streaming posture too.
-      attr_writer :stream
-      def stream?; @stream == true; end
-      # issue #303: stub mirrors Harness#output_palette (save_session).
-      def output_palette = UI::Palette.fetch(nil)
-      # issue #106: save/resume persists the markdown rendering posture too.
-      attr_writer :markdown
-      def markdown?; @markdown == true; end
+      # #286: the postures SessionManager#save_session reads live on the
+      # harness' SystemSettings, so this stub's accessors forward to @settings
+      # (a test writes harness.yolo = and the save sees it on the settings).
+      def yolo=(val); settings.yolo = val; end
+      def yolo? = settings.yolo?
+      def stream=(val); settings.stream = val; end
+      def stream? = settings.stream?
+      def markdown=(val); settings.markdown = val; end
+      def markdown? = settings.markdown?
       # issue #405: save_session records what MCP servers connected, so the
       # stub mirrors Harness#mcp_connected_summary (settable so a spec can put a
       # connected summary in place of the empty default).

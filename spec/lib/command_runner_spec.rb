@@ -7,6 +7,9 @@ require 'system_settings'
 require 'command_runner'
 require 'job_registry'
 
+# The YOLO posture carried in a runner's SystemSettings options.
+YOLO_OPTIONS = { yolo: true }.freeze
+
 RSpec.describe CommandRunner do
   # Pin the dialog wrap width so note phrases asserted contiguously do not split
   # on a terminal of another width (issue #476: the dialog now wraps to a
@@ -15,7 +18,6 @@ RSpec.describe CommandRunner do
   before { allow(Tins::Terminal).to receive(:columns).and_return(100) }
 
   # -- helpers ---------------------------------------------------------------
-
   def seed_allowlist(dir, *prefixes)
     FileUtils.mkdir_p(File.join(dir, '.harness'))
     File.write(File.join(dir, '.harness', 'allowed_commands.yml'),
@@ -38,11 +40,13 @@ RSpec.describe CommandRunner do
 
   # Main-thread mode (ui:): no interception needed - the runner serves
   # perform_direct directly on the provided console. Returns [runner, out].
-  def make_main_runner(dir, *dialog_lines, **kwargs)
+  # options: the consent-posture config the runner reads off its settings
+  # (the runner reads yolo / auto-approve from SystemSettings, not Harness).
+  def make_main_runner(dir, *dialog_lines, options: {}, **kwargs)
     stdin  = StringIO.new(dialog_lines.join("\n"))
     stdout = StringIO.new
     file_list = FileList.new([], workdir: dir)
-    runner = described_class.new(file_list, SystemSettings.from_options({}),
+    runner = described_class.new(file_list, SystemSettings.from_options(options),
                                  label: 'shell',
                                  ui: UI::Console.new(stdout: stdout,
                                                      stdin: stdin,
@@ -56,14 +60,12 @@ RSpec.describe CommandRunner do
                         SystemSettings.from_options(options), harness: harness)
   end
 
-  # A harness double answers the WHOLE interface the runner reads off a harness
-  # (#286: full-or-nil), so the runner reads each posture straight through and
-  # never asks "do you respond_to? this". A site overrides only the key it
-  # tests; every other posture stays at its off/nil default.
+  # A harness double answers the interface the runner still reads off a harness:
+  # the logger, client, tool payload, spinner suffix and conversation chain. The
+  # consent postures (yolo, auto-approve) are NOT here - the runner reads them
+  # from its SystemSettings (the options), so a test sets them in options.
   def harness_double(**overrides)
     double('harness', **{
-      yolo?: false,
-      command_safety_auto_approve_effective?: false,
       tools_payload: nil,
       tool_wait_suffix: nil,
       logger: nil,
@@ -621,22 +623,19 @@ RSpec.describe CommandRunner do
   # the posture effective, a verdict of "safe:" skips the consent dialog;
   # "dangerous:" verdicts and missing verdicts still ask.
   context 'auto-approve mode (issue #224 follow-up)' do
+    # The AUTO-APPROVE posture is now a settings fact (command_safety_check +
+    # command_safety_auto_approve), so each test carries it in options; the
+    # harness only supplies the client and the chain the fork reads.
     def auto_approve_harness(client, chain)
       harness_double(client: client, logger: nil,
-             session: double('session', messages: chain),
-             command_safety_auto_approve_effective?: true)
-    end
-
-    def manual_harness(client, chain)
-      harness_double(client: client, logger: nil,
-             session: double('session', messages: chain),
-             command_safety_auto_approve_effective?: false)
+                     session: double('session', messages: chain))
     end
 
     it 'skips the dialog for a "safe:" verdict (no user input consumed)' do
       Dir.mktmpdir do |dir|
         client = fake_client('safe: harmless read')
-        runner = make_tool_runner(dir, { command_safety_check: true },
+        runner = make_tool_runner(dir, { command_safety_check: true,
+                                         command_safety_auto_approve: true },
                                   harness: auto_approve_harness(client, chain_mid_tool_loop))
         out = drive_dialog([]) # nothing typed - the dialog must not open
         result = runner.run('echo hi')
@@ -648,7 +647,8 @@ RSpec.describe CommandRunner do
     it 'still opens the dialog for a "dangerous:" verdict' do
       Dir.mktmpdir do |dir|
         client = fake_client('dangerous: deletes the repo')
-        runner = make_tool_runner(dir, { command_safety_check: true },
+        runner = make_tool_runner(dir, { command_safety_check: true,
+                                         command_safety_auto_approve: true },
                                   harness: auto_approve_harness(client, chain_mid_tool_loop))
         out = drive_dialog(['4']) # Allow(1), Cancel(2) -> deny
         result = runner.run('rm -rf .')
@@ -664,7 +664,8 @@ RSpec.describe CommandRunner do
     it 'does NOT auto-approve (or even show) an answer that is not a verdict shape' do
       Dir.mktmpdir do |dir|
         client = fake_client('not really safe, just checking')
-        runner = make_tool_runner(dir, { command_safety_check: true },
+        runner = make_tool_runner(dir, { command_safety_check: true,
+                                         command_safety_auto_approve: true },
                                   harness: auto_approve_harness(client, chain_mid_tool_loop))
         out = drive_dialog(['4'])
         expect(runner.run('echo hi')).to start_with('error: user denied')
@@ -682,7 +683,8 @@ RSpec.describe CommandRunner do
     it 'does NOT auto-approve when the model answer cannot be placed (issue #344)' do
       Dir.mktmpdir do |dir|
         client = fake_client('Here are my verdicts:', 'safe: harmless read')
-        runner = make_tool_runner(dir, { command_safety_check: true },
+        runner = make_tool_runner(dir, { command_safety_check: true,
+                                         command_safety_auto_approve: true },
                                   harness: auto_approve_harness(client, chain_mid_tool_loop))
         out = drive_dialog(['4']) # Allow(1), two grants, Cancel(4): the dialog
                                   # MUST open despite the posture and the safe: line
@@ -703,9 +705,9 @@ RSpec.describe CommandRunner do
         allow(logger).to receive(:warn) { |m| logged << m }
         client = fake_client('Here are my verdicts:', 'safe: harmless read')
         h = harness_double(client: client, logger: logger,
-                   session: double('session', messages: chain_mid_tool_loop),
-                   command_safety_auto_approve_effective?: true)
-        runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
+                   session: double('session', messages: chain_mid_tool_loop))
+        runner = make_tool_runner(dir, { command_safety_check: true,
+                                         command_safety_auto_approve: true }, harness: h)
         drive_dialog(['2'])
         runner.run('echo hi')
 
@@ -718,7 +720,7 @@ RSpec.describe CommandRunner do
       Dir.mktmpdir do |dir|
         client = fake_client('safe: harmless read')
         runner = make_tool_runner(dir, { command_safety_check: true },
-                                  harness: manual_harness(client, chain_mid_tool_loop))
+                                  harness: auto_approve_harness(client, chain_mid_tool_loop))
         out = drive_dialog(['1'])
         result = runner.run('echo hi')
         expect(result).to start_with('exit code: 0')
@@ -729,7 +731,7 @@ RSpec.describe CommandRunner do
     it 'ignores the posture when the safety check is disabled (no verdict)' do
       Dir.mktmpdir do |dir|
         client = fake_client('safe: should never be asked')
-        runner = make_tool_runner(dir, {},
+        runner = make_tool_runner(dir, { command_safety_auto_approve: true },
                                   harness: auto_approve_harness(client, chain_mid_tool_loop))
         out = drive_dialog(['1'])
         result = runner.run('echo hi')
@@ -987,22 +989,20 @@ RSpec.describe CommandRunner do
   # with a stored grant AND YOLO on, and that dialog is the one YOLO case where the
   # check does run and the verdict is shown (issue #382).
   context 'YOLO posture (issue #221)' do
-    # A harness stand-in with the YOLO posture ON and a recording logger
-    # (the audit trail: every auto-approved run must be logged).
     def yolo_harness
       messages = []
       logger = double('logger')
       allow(logger).to receive(:info) { |m| messages << m }
       allow(logger).to receive(:warn) { |m| messages << m }
       allow(logger).to receive(:debug) { |m| messages << m }
-      h = harness_double(yolo?: true, logger: logger)
+      h = harness_double(logger: logger)
       [messages, h]
     end
 
     it 'runs an unapproved command with no dialog (nothing typed)' do
       Dir.mktmpdir do |dir|
         _, h = yolo_harness
-        runner = make_tool_runner(dir, {}, harness: h)
+        runner = make_tool_runner(dir, YOLO_OPTIONS, harness: h)
         out = drive_dialog([]) # the dialog must NEVER open
         result = runner.run('echo yolo')
         expect(result).to start_with('exit code: 0')
@@ -1015,7 +1015,7 @@ RSpec.describe CommandRunner do
     it 'auto-approves a command with UNSAFE constructs' do
       Dir.mktmpdir do |dir|
         _, h = yolo_harness
-        runner = make_tool_runner(dir, {}, harness: h)
+        runner = make_tool_runner(dir, YOLO_OPTIONS, harness: h)
         drive_dialog([])
         # A redirect: extract_prefix_options returns [] and the allowlist
         # path refuses it - under YOLO it simply runs.
@@ -1027,9 +1027,9 @@ RSpec.describe CommandRunner do
     it 'skips the model safety check entirely (issue #238: no extra LLM round trip)' do
       Dir.mktmpdir do |dir|
         client = fake_client('safe: should never be asked')
-        h = harness_double(yolo?: true, logger: nil, client: client,
+        h = harness_double(logger: nil, client: client,
                    session: double('session', messages: []))
-        runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
+        runner = make_tool_runner(dir, { command_safety_check: true }.merge(YOLO_OPTIONS), harness: h)
         drive_dialog([])
         expect(runner.run('echo hi')).to start_with('exit code: 0')
         expect(client.instance_variable_get(:@calls)).to be_empty
@@ -1043,9 +1043,9 @@ RSpec.describe CommandRunner do
     it 'runs the model check for a denylisted command, on its dialog' do
       Dir.mktmpdir do |dir|
         client = fake_client('1: dangerous: recursive force delete')
-        h = harness_double(yolo?: true, logger: nil, client: client,
+        h = harness_double(logger: nil, client: client,
                    session: double('session', messages: chain_mid_tool_loop))
-        runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
+        runner = make_tool_runner(dir, { command_safety_check: true }.merge(YOLO_OPTIONS), harness: h)
         out = drive_dialog(['2']) # Allow(1), Cancel(2): no grants offered
         result = runner.run('rm -rf /somewhere')
         expect(result).to start_with('error: user denied')
@@ -1059,7 +1059,7 @@ RSpec.describe CommandRunner do
     it 'logs every YOLO auto-approval to harness.log (the audit trail)' do
       Dir.mktmpdir do |dir|
         messages, h = yolo_harness
-        runner = make_tool_runner(dir, {}, harness: h)
+        runner = make_tool_runner(dir, YOLO_OPTIONS, harness: h)
         drive_dialog([])
         runner.run('echo yolo')
         expect(messages.any? { |m| m.include?('auto-approved (YOLO): echo yolo') })
@@ -1071,10 +1071,9 @@ RSpec.describe CommandRunner do
       Dir.mktmpdir do |dir|
         _, h = yolo_harness
         # The bang runner keeps asking even while YOLO is on - its consent
-        # is controlled by the separate bang_requires_confirmation key.
-        # BANG_TITLE + list: :shell - a real bang-path runner, just with
-        # the YOLO harness attached (which it must ignore).
-        runner, out = make_main_runner(dir, '2', harness: h,
+        # is controlled by the separate bang_requires_confirmation key, and the
+        # posture itself is read from settings (list :shell ignores it).
+        runner, out = make_main_runner(dir, '2', options: YOLO_OPTIONS, harness: h,
                                        title_fmt: described_class::BANG_TITLE)
         result = runner.run('echo bang')
         expect(out.string).to include('Run shell command:')
@@ -1086,7 +1085,7 @@ RSpec.describe CommandRunner do
       Dir.mktmpdir do |dir|
         seed_allowlist(dir, 'rm -rf')
         _, h = yolo_harness
-        runner = make_tool_runner(dir, {}, harness: h)
+        runner = make_tool_runner(dir, YOLO_OPTIONS, harness: h)
         # Denylist wins: the dialog DOES open (Cancel = option 2 - a
         # denylisted command gets no "Always allow" options).
         out = drive_dialog(['2'])
@@ -1100,10 +1099,10 @@ RSpec.describe CommandRunner do
     it 'the disaster denylist overrides the AUTO-APPROVE model verdict' do
       Dir.mktmpdir do |dir|
         client = fake_client('safe: definitely fine')
-        h = harness_double(yolo?: false, logger: nil, client: client,
-                   session: double('session', messages: chain_mid_tool_loop),
-                   command_safety_auto_approve_effective?: true)
-        runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
+        h = harness_double(logger: nil, client: client,
+                   session: double('session', messages: chain_mid_tool_loop))
+        runner = make_tool_runner(dir, { command_safety_check: true,
+                                         command_safety_auto_approve: true }, harness: h)
         out = drive_dialog(['2']) # Cancel (Allow=1, Cancel=2: no grants offered)
         result = runner.run('sudo rm something')
         expect(result).to start_with('error: user denied')
@@ -1116,10 +1115,10 @@ RSpec.describe CommandRunner do
     it 'shows the AUTO-APPROVE verdict on the denylist dialog it cannot clear' do
       Dir.mktmpdir do |dir|
         client = fake_client('1: dangerous: escalates privileges')
-        h = harness_double(yolo?: false, logger: nil, client: client,
-                   session: double('session', messages: chain_mid_tool_loop),
-                   command_safety_auto_approve_effective?: true)
-        runner = make_tool_runner(dir, { command_safety_check: true }, harness: h)
+        h = harness_double(logger: nil, client: client,
+                   session: double('session', messages: chain_mid_tool_loop))
+        runner = make_tool_runner(dir, { command_safety_check: true,
+                                         command_safety_auto_approve: true }, harness: h)
         out = drive_dialog(['2']) # Cancel (Allow=1, Cancel=2: no grants offered)
         result = runner.run('sudo rm something')
         expect(result).to start_with('error: user denied')
@@ -1172,7 +1171,7 @@ RSpec.describe CommandRunner do
       logger = double('logger')
       allow(logger).to receive(:info) { |m| logged << m }
       allow(logger).to receive(:warn) { |m| logged << m }
-      [logged, harness_double(yolo?: false, logger: logger)]
+      [logged, harness_double(logger: logger)]
     end
 
     # The verdict is INJECTED as a batch pre-check result (options[:safety_verdicts])

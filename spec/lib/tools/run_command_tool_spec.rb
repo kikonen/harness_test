@@ -3,9 +3,14 @@
 require 'spec_helper'
 require 'stringio'
 require 'tmpdir'
+require 'system_settings'
 require 'tools/run_command_tool'
 
 RSpec.describe Tools::RunCommandTool do
+  # Production hands the tool a SystemSettings (the run-wide resolved config);
+  # a fresh empty one is the stand-in for "every posture off".
+  def settings = SystemSettings.from_options({})
+
   # Drive the confirmation dialog without any real I/O: intercept
   # Dialog#show (the tool calls it with ui: nil because
   # tools run on the Task thread) and perform the interaction directly on a
@@ -22,7 +27,7 @@ RSpec.describe Tools::RunCommandTool do
   it 'forwards the user\'s denial note to the model' do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
-      tool = described_class.new(list, {})
+      tool = described_class.new(list, settings)
       # "bundle exec rake test" offers its prefix candidates, so:
       # Allow(1), 'bundle'(2), 'bundle exec'(3), 'bundle exec rake'(4),
       # 'bundle exec rake test'(5), Cancel(6).
@@ -37,7 +42,7 @@ RSpec.describe Tools::RunCommandTool do
   it 'returns a plain denial when the user cancels without a note' do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
-      tool = described_class.new(list, {})
+      tool = described_class.new(list, settings)
       # Allow(1), 'bundle'(2), 'bundle exec'(3), 'bundle exec rake'(4),
       # 'bundle exec rake test'(5), Cancel(6).
       drive_dialog("6\n")
@@ -50,7 +55,7 @@ RSpec.describe Tools::RunCommandTool do
   it 'runs the command when the user allows it once' do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
-      tool = described_class.new(list, {})
+      tool = described_class.new(list, settings)
       drive_dialog("1\n")
 
       out = tool.execute('command' => 'pwd')
@@ -62,7 +67,7 @@ RSpec.describe Tools::RunCommandTool do
     it 'saves the prefix and auto-approves future matching commands' do
       Dir.mktmpdir do |dir|
         list = FileList.new(workdir: dir)
-        tool = described_class.new(list, {})
+        tool = described_class.new(list, settings)
 
         # First time: options are Allow(1), 'bundle'(2), 'bundle exec'(3),
         # 'bundle exec rspec'(4), Cancel(5). User picks the longest
@@ -85,7 +90,7 @@ RSpec.describe Tools::RunCommandTool do
     it 'still asks for commands with a different prefix' do
       Dir.mktmpdir do |dir|
         list = FileList.new(workdir: dir)
-        tool = described_class.new(list, {})
+        tool = described_class.new(list, settings)
 
         # Options for "bundle exec rspec spec/": Allow(1), 'bundle'(2),
         # 'bundle exec'(3), 'bundle exec rspec'(4), Cancel(5). Save only
@@ -113,7 +118,7 @@ RSpec.describe Tools::RunCommandTool do
                    YAML.dump(['git status']))
 
         list = FileList.new(workdir: dir)
-        tool = described_class.new(list, {})
+        tool = described_class.new(list, settings)
         # No dialog stub: the command is auto-approved, so no dialog shows.
         out = tool.execute('command' => 'git status')
         expect(out).to start_with('exit code:')
@@ -128,7 +133,7 @@ RSpec.describe Tools::RunCommandTool do
                    YAML.dump(['gh issue view']))
 
         list = FileList.new(workdir: dir)
-        tool = described_class.new(list, {})
+        tool = described_class.new(list, settings)
 
         # Option 2 = Cancel (Allow=1, Cancel=2); deny, only the rendered
         # dialog is under test.
@@ -154,7 +159,7 @@ RSpec.describe Tools::RunCommandTool do
                    YAML.dump(['gh issue view']))
 
         list = FileList.new(workdir: dir)
-        tool = described_class.new(list, {})
+        tool = described_class.new(list, settings)
 
         # Option 2 = Cancel; deny - only the rendered dialog is under test.
         out = drive_dialog("2\n")
@@ -177,7 +182,7 @@ RSpec.describe Tools::RunCommandTool do
                    YAML.dump(['git log']))
 
         list = FileList.new(workdir: dir)
-        tool = described_class.new(list, {})
+        tool = described_class.new(list, settings)
 
         # Option 2 = "Always allow 'tail'" - saves it; either way only the
         # rendered dialog is under test.
@@ -199,7 +204,7 @@ RSpec.describe Tools::RunCommandTool do
       it 'offers one option per candidate prefix length' do
         Dir.mktmpdir do |dir|
           list = FileList.new(workdir: dir)
-          tool = described_class.new(list, {})
+          tool = described_class.new(list, settings)
           # Allow(1); deny - only the rendered dialog is under test.
           out = drive_dialog("1\n")
           tool.execute('command' => 'cd C:/work/x && ruby -c lib/cli.rb')
@@ -216,7 +221,7 @@ RSpec.describe Tools::RunCommandTool do
       it 'saves only the selected prefixes when several are picked at once' do
         Dir.mktmpdir do |dir|
           list = FileList.new(workdir: dir)
-          tool = described_class.new(list, {})
+          tool = described_class.new(list, settings)
           # Options: 1 Allow, 2 'cd', 3 'cd C:/work/x', 4 'ruby', 5 'ruby -c'
           # (issue #249 offers the short prefix too).
           drive_dialog("4 5\n")
@@ -236,7 +241,7 @@ RSpec.describe Tools::RunCommandTool do
       it 'saves a single picked prefix (bare value, not an array)' do
         Dir.mktmpdir do |dir|
           list = FileList.new(workdir: dir)
-          tool = described_class.new(list, {})
+          tool = described_class.new(list, settings)
           # Options: 1 Allow, 2 'cd', 3 'cd C:/work/x' (issue #249 - the
           # short prefix comes first), 4 'ruby', 5 'ruby -c', 6 Cancel.
           # Pick the full invocation (option 3).
@@ -254,7 +259,7 @@ RSpec.describe Tools::RunCommandTool do
       it 'runs the command without saving when only "Allow" is picked' do
         Dir.mktmpdir do |dir|
           list = FileList.new(workdir: dir)
-          tool = described_class.new(list, {})
+          tool = described_class.new(list, settings)
           drive_dialog("1\n")
 
           out = tool.execute('command' => 'bundle exec rspec spec/')
@@ -266,7 +271,7 @@ RSpec.describe Tools::RunCommandTool do
       it 'runs the command without saving when Allow is mixed into a multi-select' do
         Dir.mktmpdir do |dir|
           list = FileList.new(workdir: dir)
-          tool = described_class.new(list, {})
+          tool = described_class.new(list, settings)
           # Options: Allow(1), 'bundle'(2), 'bundle exec'(3),
           # 'bundle exec rspec'(4), Cancel(5). "1 2" = Allow + save 'bundle'
           # - ambiguous (user wants to run now); the command runs and
@@ -285,7 +290,7 @@ RSpec.describe Tools::RunCommandTool do
     it 'hides "Always allow" and explains why in a dialog note' do
       Dir.mktmpdir do |dir|
         list = FileList.new(workdir: dir)
-        tool = described_class.new(list, {})
+        tool = described_class.new(list, settings)
         # "rm -rf /" is simple (gets an option); "echo hi > f" is not.
         out = drive_dialog("2\n")
         tool.execute('command' => 'echo hi > tmpfile')
@@ -307,7 +312,7 @@ RSpec.describe Tools::RunCommandTool do
     it 'names a combined &> redirect in the note (issue #102)' do
       Dir.mktmpdir do |dir|
         list = FileList.new(workdir: dir)
-        tool = described_class.new(list, {})
+        tool = described_class.new(list, settings)
         # Cancel is option 2 (Allow=1, Cancel=2).
         out = drive_dialog("2\n")
         tool.execute('command' => 'run test &> build.log')

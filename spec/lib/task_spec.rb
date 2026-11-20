@@ -22,16 +22,15 @@ RSpec.describe Task do
     Class.new do
       def initialize
         @output_log = OutputBuffer.new
+        @settings   = SystemSettings.from_options({ output_palette: 'none' })
       end
 
       attr_reader :output_log
+      attr_reader :settings
 
       # #286: a non-nil harness answers the whole interface Task.run reads off
+      # it; the palette and markdown knobs now live under #settings (none = plain).
       def logger = nil
-      # it (the palette and the two markdown knobs), so the plain defaults apply.
-      def output_palette = nil
-      def markdown? = false
-      def markdown_max_width = nil
     end.new
   end
 
@@ -438,12 +437,11 @@ RSpec.describe Task do
     it 'colors the console line but stores plain role content in the buffer' do
       io_out = StringIO.new
       io_in  = StringIO.new
-      palette = UI::Palette.fetch('default')
       harness = Class.new do
-        define_method(:output_palette) { palette }
+        define_method(:settings) { SystemSettings.from_options({ output_palette: 'default' }) }
         define_method(:output_log) { OutputBuffer.new }
-        define_method(:markdown?) { false }
-        define_method(:markdown_max_width) { nil }
+        define_method(:logger) { nil }
+        define_method(:plan_mode_label) { nil }
       end.new
 
       _err, task = run_task(harness: harness,
@@ -524,9 +522,8 @@ RSpec.describe Task do
       harness = Class.new do
         define_method(:logger) { Logger.new(log) }
         define_method(:output_log) { OutputBuffer.new }
-        define_method(:output_palette) { nil }
-        define_method(:markdown?) { false }
-        define_method(:markdown_max_width) { nil }
+        define_method(:settings) { SystemSettings.from_options({ output_palette: 'none' }) }
+        define_method(:plan_mode_label) { nil }
       end.new
 
       error, = run_task(harness:,
@@ -726,10 +723,9 @@ RSpec.describe Task do
         end
 
         def output_log = OutputBuffer.new
-
-        def output_palette = nil
-        def markdown? = false
-        def markdown_max_width = nil
+        def settings = SystemSettings.from_options({ output_palette: 'none' })
+        def logger = nil
+        def plan_mode_label = nil
       end.new
     end
 
@@ -949,9 +945,11 @@ RSpec.describe Task do
       io = StringIO.new
       harness = Object.new
       harness.define_singleton_method(:output_log) { OutputBuffer.new }
-      harness.define_singleton_method(:output_palette) { nil }
-      harness.define_singleton_method(:markdown?) { false }
-      harness.define_singleton_method(:markdown_max_width) { nil }
+      harness.define_singleton_method(:settings) do
+        SystemSettings.from_options({ output_palette: 'none' })
+      end
+      harness.define_singleton_method(:logger) { nil }
+      harness.define_singleton_method(:plan_mode_label) { nil }
       described_class.run(harness:, ui: UI::Console.new(stdout: io, stdin: StringIO.new),
                           registry:, job:) { :turn_value }
 
