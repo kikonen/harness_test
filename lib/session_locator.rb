@@ -30,6 +30,9 @@ class SessionLocator
   # issue #548 (dir per job): a saved run directory holds run.json + jobs/<id>/...
   RUN_FILE = "run.json"
   JOBS_DIR = "jobs"
+  # A job's replay tail (issue #548): the foreground buffer's saved entries,
+  # moved into the job dir on ownership grounds (JobRegistry owns it, not Session).
+  REPLAY_FILE = "replay.json"
   # issue #113: each session logs to its own file inside its session dir, so
   # concurrent sessions in one workdir do not interleave in a shared log.
   SESSION_LOG_FILE = "harness.log"
@@ -71,6 +74,10 @@ class SessionLocator
   # run.json only.
   def job_session_file_path(id, job_id)
     File.join(job_dir_path(id, job_id), SESSION_FILE)
+  end
+
+  def job_replay_file_path(id, job_id)
+    File.join(job_dir_path(id, job_id), REPLAY_FILE)
   end
 
   # True when the directory is a layered RUN (it has run.json). A #207 layout
@@ -173,11 +180,21 @@ class SessionLocator
   # The saved conversation data of a session id (used to fill a session whose
   # id is ALREADY settled - which is why this returns data instead of doing
   # the restore itself).
+  #
+  # A layered RUN (issue #548) stores its data split across run.json and the
+  # foreground job's files; a #207 session stores one flat session.json. Both
+  # are reassembled into the SAME flat hash so the resume consumers (Harness#
+  # restore, apply_resume_state, CLI#setup) read one shape regardless of layout
+  # - the layout stays the locator's knowledge, not the caller's. A #207 session
+  # is read as the degenerate one-job case: its flat file already IS that hash.
   def read_session(id)
     path = find_session_file(id)
     raise HarnessError, "no saved session matching '#{id}' (see /sessions)" unless path
 
-    JSON.parse(File.read(path), symbolize_names: true)
+    session_id = File.basename(File.dirname(path))
+    return JSON.parse(File.read(path), symbolize_names: true) unless run_dir?(session_id)
+
+    assemble_run(session_id)
   end
 
   # The layered run record (issue #548): run.json of a session directory, parsed
@@ -259,6 +276,34 @@ class SessionLocator
   end
 
   private
+
+  # Re-join a layered run into the flat resume_data hash: run.json supplies the
+  # run/world keys (identity, postures, access, file_cache, foreground, jobs),
+  # the foreground job's session.json supplies its conversation and per-agent
+  # model state, replay.json supplies the saved tail. Disjoint by construction,
+  # so a plain merge is the whole assembly. A foreground job whose dir was
+  # dropped contributes nothing (an empty conversation) - the run-level state
+  # still restores.
+  def assemble_run(session_id)
+    run    = read_run(session_id)
+    fg     = run[:foreground_job]
+    merged = run.dup
+    if fg && File.file?(job_session_file_path(session_id, fg))
+      merged.merge!(read_job_session(session_id, fg))
+    end
+    replay_path = job_replay_file_path(session_id, fg) if fg
+    merged[:replay_tail] = parse_json(replay_path) || []
+    merged
+  end
+
+  # Parse a JSON file symbolized, or nil when it does not exist. Used for the
+  # job's replay.json so the assembled replay_tail is symbol-keyed like every
+  # other resume_data value (the resume side re-symbols entry type/origin).
+  def parse_json(path)
+    return nil unless path && File.file?(path)
+
+    JSON.parse(File.read(path), symbolize_names: true)
+  end
 
   def valid_id?(id)
     !id.to_s.strip.empty? && id.to_s.match?(/\A[0-9a-fA-F-]+\Z/)
