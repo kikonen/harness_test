@@ -312,7 +312,8 @@ RSpec.describe CLI do
       tail = cli.registry.foreground_buffer.replay_tail
 
       expect(tail.map { |e| [e.type, e.origin] }).to eq([[:user, :user], [:list, :grant]])
-      expect(cli.foreground_harness.session_manager.registry).to equal(cli.registry)
+      expect(cli.foreground_harness.session_manager.run_record.foreground_job)
+        .to eq(cli.registry.foreground)
     end
   end
 
