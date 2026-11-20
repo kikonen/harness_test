@@ -41,6 +41,7 @@ RSpec.describe SessionLocator do
     dir = File.join(workdir, '.harness', 'sessions', id)
     FileUtils.mkdir_p(dir)
     run_data = { session_id: id, workdir:, next_id: jobs.max + 1,
+                 foreground_job: jobs.min,
                  jobs: jobs.map { |j| { id: j, dir: "jobs/#{j}" } } }
     run_path = File.join(dir, 'run.json')
     File.write(run_path, JSON.generate(run_data))
@@ -196,6 +197,33 @@ RSpec.describe SessionLocator do
     it 'raises for an unknown id' do
       expect { locator.read_session('deadbeef') }
         .to raise_error(HarnessError, /no saved session matching/)
+    end
+  end
+
+  # issue #548: a layered run is re-joined into the SAME flat resume_data hash
+  # a #207 session provides, so the resume consumers read one shape. The run
+  # keys come from run.json, the foreground conversation from its job dir, and
+  # the replay tail from that job's replay.json.
+  describe '#read_session re-joins a layered run (issue #548)' do
+    it 'merges run.json + the foreground job session.json + replay.json' do
+      seed_run(sid_c, jobs: [0])
+      File.write(locator.job_replay_file_path(sid_c, 0),
+                 JSON.generate([{ type: 'user', origin: 'user', content: 'do the thing' }]))
+
+      data = locator.read_session(sid_c)
+
+      expect(data[:session_id]).to eq(sid_c)
+      expect(data[:next_id]).to eq(1)
+      expect(data[:foreground_job]).to eq(0)
+      expect(data[:messages].first[:content]).to eq('job0')
+      expect(data[:active_model]).to eq('m')
+      expect(data[:replay_tail].first[:content]).to eq('do the thing')
+    end
+
+    it 'defaults replay_tail to [] when the job has no replay.json' do
+      seed_run(sid_c, jobs: [0])
+
+      expect(locator.read_session(sid_c)[:replay_tail]).to eq([])
     end
   end
 
