@@ -50,24 +50,21 @@ class Task
 
   # A task built for a job reads the registry's ONE queue instead of its own
   # outbox, and its inbox IS the job's inbox (the registry routes answers to it).
-  def initialize(buffer:, registry: nil, job: nil, input_path: nil, &block)
+  def initialize(registry:, job:, input_path: nil, &block)
     @block   = block
-    # main -> task (the job's inbox). For a job this IS the job's inbox, where
-    # the registry routes steering notes (and STOP for a task servicing no live
-    # request). #request answers come back on the SEPARATE @pending_reply, so a
-    # note can never be mistaken for a dialog answer (issue #424).
-    @inbox         = job ? job.inbox : Thread::Queue.new
+    # main -> task (the job's inbox), where the registry routes steering notes
+    # (and STOP for a task servicing no live request). #request answers come back
+    # on the SEPARATE @pending_reply, so a note can never be mistaken for a
+    # dialog answer (issue #424).
+    @inbox         = job.inbox
     @pending_reply = nil            # live request's reply channel (one at a time)
-    # task -> main (SINGLE event queue). Under the registry (issue #286) this is
-    # the registry's ONE fan-in queue: events carry the job id, so ordering holds.
-    @outbox  = Thread::Queue.new
     @registry = registry
     @job      = job
-    # The task USES the buffer it is given (issue #286): the registry's job
-    # supplies its own buffer, otherwise the caller hands the run buffer. The
-    # task never builds one - the buffer's own limits belong to the buffer. The
-    # drain loop is the single writer; the task thread never touches it.
-    @buffer       = job ? job.buffer : buffer
+    # The task uses the job's buffer (issue #286): the run record belongs to the
+    # job's registry. The task never builds one - the buffer's limits belong to
+    # the buffer. The drain loop is the single writer; the task thread never
+    # touches it.
+    @buffer       = job.buffer
     # Patterns and colors are the renderer's decision, so the drain loop asks
     # it instead of printing content as the emitter wrote it. #run replaces it
     # with the harness's configured palette; this one colors nothing.
@@ -143,8 +140,6 @@ class Task
   # ANOTHER job is recorded into that job's own buffer and skipped - the
   # foreground task never renders another job's lines.
   def poll(timeout = DEFAULT_POLL_TIMEOUT)
-    return @outbox.pop(false, timeout:) unless @registry && @job
-
     event = @registry.poll(timeout)
     return nil if event.nil?
     return event if event[:job] == @job.id
@@ -158,15 +153,13 @@ class Task
   # True when no events are waiting (used by the drain loop to decide whether
   # to show the spinner).
   def outbox_empty?
-    return @registry.queue_empty? if @registry && @job
-
-    @outbox.empty?
+    @registry.queue_empty?
   end
 
   # Reply to a pending request (called from the main thread). Unblocks the
   # task thread's #request call with the given value.
   def respond(value)
-    @job&.mark_awaiting(false)
+    @job.mark_awaiting(false)
     if @pending_reply
       @pending_reply << value
     else
@@ -185,7 +178,7 @@ class Task
     # An interrupted turn answers every request it still owes (STOP is not an
     # answer, so a blocked requester would raise on it). STOP then only breaks
     # this thread's own pending pop when no answer already hit that inbox.
-    owed = (@registry&.jobs || []).select(&:awaiting?)
+    owed = @registry.jobs.select(&:awaiting?)
     had_live = !@pending_reply.nil?
     if had_live
       # A live request on THIS task blocks on the reply channel, not the inbox.
@@ -194,7 +187,7 @@ class Task
       # so it is not ALSO answered into its inbox.
       @pending_reply << Job::INTERRUPTED_ANSWER
       @pending_reply = nil
-      @job&.mark_awaiting(false)
+      @job.mark_awaiting(false)
       owed = owed.reject { |job| job.equal?(@job) }
     end
     owed.each { |job| job.respond(Job::INTERRUPTED_ANSWER) }
@@ -225,8 +218,8 @@ class Task
   def push_event(type:, origin: nil, content: nil, **extra)
     event = { type: type.to_sym, origin:, content: }
     event.merge!(extra) unless extra.empty?
-    event[:job] = @job.id if @job
-    (@registry || @outbox) << event
+    event[:job] = @job.id
+    @registry << event
     event
   end
 
@@ -237,7 +230,7 @@ class Task
     # comes back on a channel SEPARATE from @inbox (issue #424): a steering note
     # already resident in the job inbox can no longer be mistaken for the answer.
     @pending_reply = Thread::Queue.new
-    @job&.mark_awaiting(true)
+    @job.mark_awaiting(true)
     push_event(type: :__request__, kind: type, **payload)
     reply = @pending_reply.pop
     @pending_reply = nil
@@ -314,18 +307,15 @@ class Task
   def self.run(
     harness:,
     ui:,
-    registry: nil,
-    job: nil,
+    registry:,
+    job:,
     input_path: nil,
-    buffer: nil,
     &block
   )
-    # A task built for a job uses that job's buffer and inbox through the
-    # registry; otherwise the caller hands the buffer the record lives in
-    # (#286: the run record is the registry's, not the harness'). The drain
-    # loop is the single main-thread writer, so every put lands in the same
-    # record a save reads.
-    task = Task.new(buffer:, registry:, job:, input_path:, &block)
+    # The task runs on its job's registry, buffer and inbox (#286: the run
+    # record is the registry's, not the harness'). The drain loop is the single
+    # main-thread writer, so every put lands in the same record a save reads.
+    task = Task.new(registry:, job:, input_path:, &block)
     task.ui = ui
     # The input path is the ONE reader the main thread's poll loop shares with
     # the idle prompt. It only PEEKS stdin until typing starts, so nothing races

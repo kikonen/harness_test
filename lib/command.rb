@@ -67,7 +67,7 @@ class Command
   # (a unit-test double for a read-only command) gets nil. Named for the job it
   # reads off, so a later background/sub-agent harness reads the same way.
   def foreground_harness
-    registry&.foreground_job&.harness
+    registry.foreground_job&.harness
   end
 
   # Print this command's usage on a bad argument (issue #471) from its own HELP

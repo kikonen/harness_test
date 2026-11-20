@@ -14,10 +14,16 @@ RSpec.describe TaskRunner do
   let(:ui) { UI::Console.new(stdout: io) }
   let(:harness) { double('harness') }
 
+  # #286: every TaskRunner host is built by the run with its registry, and
+  # #run_on_task AWAITs a job there (the harness reaches the Task via the job).
+  # The smallest real one (a single main job) stands in for the run's registry.
+  let(:registry) { JobRegistry.new }
+  let(:main_job) { registry.add_job(kind: :main, harness: harness) }
+
   let(:host) do
     Class.new do
       include TaskRunner
-      attr_accessor :foreground_harness, :ui, :settings
+      attr_accessor :foreground_harness, :ui, :settings, :registry
 
       def do_thing
         run_on_task { |_t| :work_done }
@@ -28,24 +34,26 @@ RSpec.describe TaskRunner do
   def setup_host
     host.foreground_harness = harness
     host.ui = ui
+    host.registry = registry
+    main_job # force the foreground job into the registry
     host
   end
 
-  it 'runs the block inside Task.run with the host harness and ui' do
+  it 'runs the block on the host registry job, the harness off the job' do
     setup_host
     captured = {}
-    allow(Task).to receive(:run) do |harness:, ui:, buffer:, &blk|
-      captured[:harness] = harness
+    # #286: registry.run reads the Harness off the job, not from this host.
+    allow(registry).to receive(:run) do |job:, ui:, &blk|
+      captured[:harness] = job.harness
       captured[:ui]      = ui
-      captured[:result]  = blk.call(nil)
-      [nil, nil]
+      [nil, nil, blk.call(nil)]
     end
 
     host.do_thing
 
     expect(captured[:harness]).to equal(harness)
     expect(captured[:ui]).to equal(ui)
-    expect(captured[:result]).to eq(:work_done)
+    expect(registry).to have_received(:run).with(job: main_job, ui: ui)
   end
 
   # issue #286 increment 2: the registry is the executor, so a host whose harness
@@ -80,18 +88,6 @@ RSpec.describe TaskRunner do
 
       expect(registry).to have_received(:run).with(include(input_path: host.input_path))
     end
-
-    # A host with no registry (a spec harness double) keeps the plain drain loop.
-    it 'falls back to Task.run when the host has no registry' do
-      # The block's value is what the no-registry path returns, so the pin
-      # captures it from the block itself.
-      captured = nil
-      allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| [nil, captured = blk.call(nil)] }
-      host.foreground_harness = harness
-      host.ui = ui
-      host.do_thing
-      expect(captured).to eq(:work_done)
-    end
   end
 
   # issue #474 increment 22: the bracket shape belongs to UI::Renderer, so the
@@ -101,7 +97,7 @@ RSpec.describe TaskRunner do
   it 'states the task error as the :kind role, the bracket being the renderer shape' do
     setup_host
     allow(Task).to receive(:current).and_return(nil)
-    allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| ['boom', nil] }
+    allow(registry).to receive(:run) { [ 'boom', nil, nil ] }
 
     host.do_thing
 
@@ -122,7 +118,7 @@ RSpec.describe TaskRunner do
       end
     end.new
     allow(Task).to receive(:current).and_return(fake_task)
-    allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| ['boom', nil] }
+    allow(registry).to receive(:run) { ['boom', nil, nil] }
 
     host.do_thing
 
@@ -137,7 +133,7 @@ RSpec.describe TaskRunner do
 
   it 'prints blank lines before and after the task output' do
     setup_host
-    allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| [nil, nil] }
+    allow(registry).to receive(:run) { [nil, nil, nil] }
 
     host.do_thing
 
@@ -149,7 +145,7 @@ RSpec.describe TaskRunner do
   # event queue, never straight to a stream (single-thread I/O rule, #40).
   it 'writes emit_line to the console when no task is active' do
     setup_host
-    allow(Task).to receive(:run) { |harness:, ui:, buffer:, &blk| blk.call(nil); [nil, nil] }
+    allow(registry).to receive(:run) { |job:, ui:, &blk| blk.call(nil); [nil, nil, nil] }
     allow(Task).to receive(:current).and_return(nil)
     host.instance_eval { run_on_task { emit_line 'hello' } }
 
@@ -166,9 +162,9 @@ RSpec.describe TaskRunner do
     end.new
 
     allow(Task).to receive(:current).and_return(fake_task)
-    allow(Task).to receive(:run) do |harness:, ui:, buffer:, &blk|
+    allow(registry).to receive(:run) do |job:, ui:, &blk|
       blk.call(nil)
-      [nil, nil]
+      [nil, nil, nil]
     end
     host.instance_eval { run_on_task { emit_line 'hello' } }
 

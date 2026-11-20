@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'task'
+require 'job_registry'
 require 'ui/console'
 require 'stringio'
 
@@ -15,6 +16,13 @@ require 'stringio'
 # block (blank line finishes, Ctrl-D cancels), riding along as
 # [FREE_TEXT, text]; out-of-range numbers re-prompt (issue #73).
 RSpec.describe UI::Dialog do
+  # An un-started Task captures a task-thread request (#286: a Task always
+  # runs on a registry + job). Build the smallest real registry.
+  def emit_task
+    registry = JobRegistry.new
+    Task.new(registry:, job: registry.add_job(kind: :main))
+  end
+
   let(:options) do
     [
       described_class::Option.new(title: 'Allow', value: :allow),
@@ -59,7 +67,7 @@ RSpec.describe UI::Dialog do
     context 'on a task thread (Thread.current[:harness_task] set)' do
       around do |example|
         old = Thread.current[:harness_task]
-        Thread.current[:harness_task] = Task.new(buffer: OutputBuffer.new) { }
+        Thread.current[:harness_task] = emit_task
         example.run
       ensure
         Thread.current[:harness_task] = old

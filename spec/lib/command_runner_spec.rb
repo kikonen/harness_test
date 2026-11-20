@@ -5,6 +5,7 @@ require 'stringio'
 require 'tmpdir'
 require 'system_settings'
 require 'command_runner'
+require 'job_registry'
 
 RSpec.describe CommandRunner do
   # Pin the dialog wrap width so note phrases asserted contiguously do not split
@@ -1298,7 +1299,10 @@ RSpec.describe CommandRunner do
   # line that already finished, so a long run reads as if the model were still
   # generating. The runner re-points it for the run itself.
   describe 'spinner re-point while a command runs (issue #362)' do
-    let(:task) { Task.new(buffer: OutputBuffer.new) }
+    let(:task) do
+      registry = JobRegistry.new
+      Task.new(registry:, job: registry.add_job(kind: :main))
+    end
     around do |example|
       @old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task

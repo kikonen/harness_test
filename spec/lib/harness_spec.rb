@@ -4,6 +4,7 @@ require 'tmpdir'
 require 'fileutils'
 require 'spec_helper'
 require 'harness'
+require 'job_registry'
 
 # Display-layer coverage for issue #63: the context indicator (shown above
 # the prompt and in the per-response stats) and the /ctx report. Both are
@@ -11,6 +12,15 @@ require 'harness'
 RSpec.describe Harness do
   # Use a temp workdir so building the Harness (which creates .harness/)
   # does not pollute the project root.
+  # An un-started Task is enough to capture Task.emit events: a Task now always
+  # runs on a registry + job (#286), so build the smallest real one (one main job)
+  # and drain its queue like the real drain loop does.
+  def emit_task
+    registry = JobRegistry.new
+    job = registry.add_job(kind: :main)
+    Task.new(registry:, job:)
+  end
+
   let(:workdir) { Dir.mktmpdir('harness-spec') }
   after { FileUtils.remove_entry(workdir) if File.directory?(workdir) }
 
@@ -621,7 +631,7 @@ RSpec.describe Harness do
     # Task's outbox (single event queue) via Task.emit. Set the thread-local
     # task so Task.emit finds it, then drain the outbox to assert on the
     # lines - exactly what the real drain loop does.
-    let(:task) { Task.new(buffer: OutputBuffer.new) { } }
+    let(:task) { emit_task }
     around do |example|
       @old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
@@ -713,7 +723,7 @@ RSpec.describe Harness do
 
   describe '#execute_tool_call spinner_detail (issue #40)' do
     let(:harness) { build_harness }
-    let(:task) { Task.new(buffer: OutputBuffer.new) { } }
+    let(:task) { emit_task }
     def drain_outbox(t)
       ms = []
       loop do
@@ -1022,7 +1032,7 @@ RSpec.describe Harness do
 
     it 'says on the console that the late note was NOT applied (issue #430)' do
       harness, = late_note_harness
-      task = Task.new(buffer: OutputBuffer.new) { }
+      task = emit_task
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1047,7 +1057,7 @@ RSpec.describe Harness do
     end
 
     it 'leaves the "sent to model" ack when the note WAS injected' do
-      task = Task.new(buffer: OutputBuffer.new) { }
+      task = emit_task
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1063,7 +1073,7 @@ RSpec.describe Harness do
     end
 
     it 'says nothing when no note is pending at the final answer' do
-      task = Task.new(buffer: OutputBuffer.new) { }
+      task = emit_task
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1078,7 +1088,7 @@ RSpec.describe Harness do
 
     describe '#discard_pending_user_note (issue #430)' do
       it 'returns nil and emits nothing when nothing is pending' do
-        task = Task.new(buffer: OutputBuffer.new) { }
+        task = emit_task
         old_current = Thread.current[:harness_task]
         Thread.current[:harness_task] = task
         begin
@@ -1102,7 +1112,7 @@ RSpec.describe Harness do
       end
 
       it 'names the leftover case differently from the late one' do
-        task = Task.new(buffer: OutputBuffer.new) { }
+        task = emit_task
         old_current = Thread.current[:harness_task]
         Thread.current[:harness_task] = task
         begin
@@ -1122,7 +1132,7 @@ RSpec.describe Harness do
     end
 
     it 'shows a console ack that the note was sent to the model (issue #198)' do
-      task = Task.new(buffer: OutputBuffer.new) { }
+      task = emit_task
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1139,7 +1149,7 @@ RSpec.describe Harness do
     end
 
     it 'shows no "sent to model" ack when there is no note' do
-      task = Task.new(buffer: OutputBuffer.new) { }
+      task = emit_task
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1573,7 +1583,7 @@ RSpec.describe Harness do
       client = scripted(h, [echo.call('c1'), echo.call('c2'), pwned, { content: 'final' }])
       h.session.add_user('do the thing')
 
-      task = Task.new(buffer: OutputBuffer.new) { }
+      task = emit_task
       old = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       events = []
@@ -1598,7 +1608,7 @@ RSpec.describe Harness do
   # re-point made by an earlier wait (an in-loop compaction) cannot stick for
   # the rest of the turn.
   describe '#call_llm spinner announcements (issue #283)' do
-    let(:task) { Task.new(buffer: OutputBuffer.new) { } }
+    let(:task) { emit_task }
     around do |example|
       @old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
@@ -1732,7 +1742,7 @@ RSpec.describe Harness do
     it 'shows the performance on the stats line' do
       stats = harness_with({ prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050,
                              cached_tokens: 768, prompt_eval_ms: 1160.0, eval_ms: 1310.2 })
-      task = Task.new(buffer: OutputBuffer.new) { }
+      task = emit_task
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -1752,7 +1762,7 @@ RSpec.describe Harness do
   # answer. The plumbing (finish_reason in the normalized shape) belongs to the
   # spec/lib/llm/ specs; this is what Harness#call_llm does with it.
   describe '#call_llm finish_reason (issue #345)' do
-    let(:task) { Task.new(buffer: OutputBuffer.new) { } }
+    let(:task) { emit_task }
     around do |example|
       @old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
@@ -1894,7 +1904,7 @@ RSpec.describe Harness do
     end
 
     def with_task
-      task = Task.new(buffer: OutputBuffer.new) { }
+      task = emit_task
       old = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
