@@ -343,7 +343,7 @@ class CLI
 
     # issue #28: same reasoning - whether this run streams responses decides
     # what the user sees while the model is writing, and /stream switches it.
-    ui.puts "LLM responses: #{foreground_harness.stream? ? 'streamed (/stream off buffers them)' \
+    ui.puts "LLM responses: #{@settings.stream? ? 'streamed (/stream off buffers them)' \
               : 'buffered (/stream on shows each part as it arrives)'}"
     ui.puts "Tip: type a plain message (no /) to send it directly to the model."
 
@@ -443,9 +443,9 @@ class CLI
     return if tail.empty?
 
     renderer = UI::Renderer.new(
-      palette: foreground_harness.output_palette,
-      markdown: foreground_harness.markdown?,
-      markdown_max_width: foreground_harness.markdown_max_width)
+      palette: @settings.output_palette,
+      markdown: @settings.markdown?,
+      markdown_max_width: @settings.markdown_max_width)
     # The replay sits between this run's startup facts on BOTH sides, so a
     # block-width rule on each side (the same width the render loop uses for a
     # block boundary, and wider than the 40-dash prompt-loop separator) keeps
@@ -465,11 +465,11 @@ class CLI
   # posture. The /yolo command's own report is the long form; this is the
   # at-a-glance version shown in the startup banner.
   def consent_posture_display
-    label = foreground_harness.command_mode_label
+    label = @settings.command_mode_label
     return "n/a" if label.nil?
 
     base =
-      if foreground_harness.yolo?
+      if @settings.yolo?
         "YOLO - unapproved commands run without asking; disaster " \
           "commands still ask"
       elsif label == "AUTO-APPROVE"
@@ -479,7 +479,7 @@ class CLI
       end
     # issue #389: a relaxed floor is named in the banner for the same reason YOLO
     # names it - never mistake a relaxed run for a normal one.
-    return base unless foreground_harness.denylist_safe_approve?
+    return base unless @settings.denylist_safe_approve?
 
     "#{base}; denylist + \"safe:\" also runs without asking " \
       "(command_safety_auto_approve: denylist)"

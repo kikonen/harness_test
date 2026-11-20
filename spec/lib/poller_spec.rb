@@ -49,11 +49,14 @@ RSpec.describe Poller do
   # consent mode (live, re-read every frame) when the harness exposes it.
   describe 'Poller#ensure_spinner_running mode badge (issue #224 follow-up)' do
     def mode_harness(label)
-      h = Class.new do
-        define_method(:command_mode_label) { label }
-        define_method(:stream_mode_label) { nil }
-        define_method(:plan_mode_label) { nil }
-      end.new
+      # #286: the consent/stream labels live under harness#settings; the plan
+      # label is Harness-owned. A stand-in settings answers the posture labels.
+      settings = Object.new
+      settings.define_singleton_method(:command_mode_label) { label }
+      settings.define_singleton_method(:stream_mode_label) { nil }
+      h = Object.new
+      h.define_singleton_method(:settings) { settings }
+      h.define_singleton_method(:plan_mode_label) { nil }
       h
     end
 
@@ -96,11 +99,13 @@ RSpec.describe Poller do
     # issue #28: the streaming posture is a second tag on the SAME badge, so
     # a mid-turn /stream toggle is visible while the answer is arriving.
     def posture_harness(command_label, stream_label, plan_label = nil)
-      Class.new do
-        define_method(:command_mode_label) { command_label }
-        define_method(:stream_mode_label) { stream_label }
-        define_method(:plan_mode_label) { plan_label }
-      end.new
+      settings = Object.new
+      settings.define_singleton_method(:command_mode_label) { command_label }
+      settings.define_singleton_method(:stream_mode_label) { stream_label }
+      Object.new.tap do |h|
+        h.define_singleton_method(:settings) { settings }
+        h.define_singleton_method(:plan_mode_label) { plan_label }
+      end
     end
 
     it 'mode_badge adds the stream tag alongside the consent tag' do
@@ -137,10 +142,12 @@ RSpec.describe Poller do
     it 'installs a badge when the harness only exposes the plan label' do
       task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
+      settings = Object.new
+      settings.define_singleton_method(:command_mode_label) { nil }
+      settings.define_singleton_method(:stream_mode_label) { nil }
       task.harness = Class.new do
+        define_method(:settings) { settings }
         def plan_mode_label = 'PLAN'
-        def command_mode_label = nil
-        def stream_mode_label = nil
       end.new
 
       described_class.new(task).ensure_spinner_running
@@ -151,9 +158,11 @@ RSpec.describe Poller do
     it 'installs a badge when the harness only exposes the stream label' do
       task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
+      settings = Object.new
+      settings.define_singleton_method(:command_mode_label) { nil }
+      settings.define_singleton_method(:stream_mode_label) { 'STREAM' }
       task.harness = Class.new do
-        def stream_mode_label = 'STREAM'
-        def command_mode_label = nil
+        define_method(:settings) { settings }
         def plan_mode_label = nil
       end.new
 
@@ -165,10 +174,12 @@ RSpec.describe Poller do
     # A live callable: a /stream toggle mid-turn shows on the very next frame.
     it 're-reads both tags on every frame (a mid-turn toggle shows at once)' do
       stream = false
+      settings = Object.new
+      settings.define_singleton_method(:command_mode_label) { 'MANUAL' }
+      settings.define_singleton_method(:stream_mode_label) { stream ? 'STREAM' : nil }
       harness = Class.new do
-        define_method(:command_mode_label) { 'MANUAL' }
-        define_method(:stream_mode_label) { stream ? 'STREAM' : nil }
-        define_method(:plan_mode_label) { nil }
+        define_method(:settings) { settings }
+        def plan_mode_label = nil
       end.new
       task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)

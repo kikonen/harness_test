@@ -321,16 +321,16 @@ class Task
     # the idle prompt. It only PEEKS stdin until typing starts, so nothing races
     # for the keyboard. Input needs a harness to land on (nil = unit test).
     task.harness = harness
-    # The palette is the harness's (issue #303): a nil harness (a unit-test run
-    # with no harness) colors nothing, so the plain renderer stays.
-    palette = harness&.output_palette
+    # The palette is the run's settings (issue #303, #286): a nil harness (a
+    # unit-test run with no harness) colors nothing, so the plain renderer stays.
+    palette = harness&.settings&.output_palette
     # Markdown rendering of the assistant answer is opt-in (issue #106): the
     # posture is read here (a Task builds its renderer once per turn), so a
     # mid-run /markdown toggle lands on the next turn (the same as /palette).
-    markdown = harness&.markdown?
+    markdown = harness&.settings&.markdown?
     # The table-width basis (issue #106): config-derived, read once per turn
     # like the palette. nil = the renderer's default (80% of the terminal).
-    max_width = harness&.markdown_max_width
+    max_width = harness&.settings&.markdown_max_width
     task.renderer = UI::Renderer.new(palette:, markdown:, markdown_max_width: max_width)
     task.note_editor = UI::Editor.new(ui.stdin) if ui.stdin && harness
     # The Poller owns the main-thread loop, the spinner, stdin and dialog

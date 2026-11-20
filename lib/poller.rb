@@ -167,8 +167,8 @@ class Poller
   # prompt line (PromptReader) so a posture cannot read differently in the two.
   def self.mode_badge(harness)
     tags = []
-    tags << "[#{harness&.command_mode_label}]" if harness&.command_mode_label
-    tags << "[#{harness&.stream_mode_label}]" if harness&.stream_mode_label
+    tags << "[#{harness&.settings&.command_mode_label}]" if harness&.settings&.command_mode_label
+    tags << "[#{harness&.settings&.stream_mode_label}]" if harness&.settings&.stream_mode_label
     tags << "[#{harness&.plan_mode_label}]" if harness&.plan_mode_label
     tags.empty? ? nil : tags.join(" ")
   end

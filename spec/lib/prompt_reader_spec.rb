@@ -25,8 +25,12 @@ RSpec.describe PromptReader do
     sm.define_singleton_method(:param_overrides) { po }
     h = Object.new
     h.define_singleton_method(:session_manager) { sm }
-    h.define_singleton_method(:command_mode_label) { command_label }
-    h.define_singleton_method(:stream_mode_label) { stream_label }
+    # #286: the posture tags Poller.mode_badge reads come from harness#settings;
+    # the plan tag is Harness-owned.
+    settings = Object.new
+    settings.define_singleton_method(:command_mode_label) { command_label }
+    settings.define_singleton_method(:stream_mode_label) { stream_label }
+    h.define_singleton_method(:settings) { settings }
     h.define_singleton_method(:plan_mode_label) { plan_label }
     h.define_singleton_method(:context_indicator) { ctx }
     h

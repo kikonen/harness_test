@@ -403,11 +403,11 @@ class CommandRunner
   # issue #224 follow-up: AUTO-APPROVE MODE (config-derived, no live toggle).
   # ON only when the harness has BOTH the safety check enabled and the
   # session's consent posture set to auto-approve (see
-  # Harness#command_safety_auto_approve_effective?). No harness (specs
-  # that build the runner standalone) means the mode is off, so consent
-  # always proceeds via the dialog.
+  # SystemSettings#command_safety_auto_approve_effective?). The mode is read off
+  # the run-wide settings the runner already holds, not through a Harness
+  # delegator.
   def auto_approve_mode?
-    !!@harness&.command_safety_auto_approve_effective?
+    !!@settings.command_safety_auto_approve_effective?
   end
 
   # Issue #221: does THIS caller run without a consent dialog?
@@ -421,15 +421,13 @@ class CommandRunner
     @auto_approve_all || yolo_active?
   end
 
-  # The harness-side YOLO posture (Harness#yolo?), read live. A runner
-  # built without a harness (unit specs) has no posture to consult, so only
-  # the explicit @auto_approve_all argument can enable it there.
-  # YOLO covers ONLY the model-driven tool path (user decision for issue
-  # #221): the bang list is untouched by it, because there the human already
-  # typed the command - its consent is controlled by the separate
-  # 'bang_requires_confirmation' config key instead.
+  # The run-wide YOLO posture (SystemSettings#yolo?), read live off the settings
+  # the runner holds so a mid-run /yolo applies to the next command. YOLO covers
+  # ONLY the model-driven tool path (user decision for issue #221): the bang list
+  # is untouched by it, because there the human already typed the command - its
+  # consent is controlled by the separate 'bang_requires_confirmation' key.
   def yolo_active?
-    @list == :tool && @harness&.yolo? == true
+    @list == :tool && @settings.yolo? == true
   end
 
   # Issue #221: an auto-approved-without-dialog run MUST leave a trace.
