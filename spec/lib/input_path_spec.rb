@@ -108,11 +108,5 @@ RSpec.describe InputPath do
       expect(main.poll(0)).to eq({ type: :note, content: 'to job 0' })
       expect(other.poll(0)).to eq({ type: :note, content: 'to job 1' })
     end
-
-    # Without a registry there is no inbox to write - the FIFO rule lives in the
-    # registry, so a bare path only names the event.
-    it 'still names the event without a registry (unit-test path)' do
-      expect(build.route('a note')).to eq({ type: :note, content: 'a note' })
-    end
   end
 end

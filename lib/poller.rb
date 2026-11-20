@@ -62,8 +62,9 @@ class Poller
           when :done
             finished = true
             # The registry is the only writer of the record, so the finish (and
-            # the result the caller awaits) lands there, not here.
-            task.registry&.record(msg)
+            # the result the caller awaits) lands there, not here. A drain-loop
+            # task is always built by the registry, so its registry is never nil.
+            task.registry.record(msg)
             break
           when :error_ctrl
             error_msg = msg[:content]
@@ -226,8 +227,7 @@ class Poller
         handler.run_mid_turn(text)
         return
       end
-      commit_input(task.registry&.note_event(result.text) ||
-                             { type: :note, content: result.text })
+      commit_input(task.registry.note_event(result.text))
     when *InputPath::ROUND_TRIP
       # An editor round-trip is NOT an input commit - closing an editor is not
       # a submission, and a note that reached the model just because an editor
@@ -243,7 +243,7 @@ class Poller
   # then ack and record it. Main thread only (single-thread I/O rule).
   def commit_input(event)
     task = @task
-    task.registry&.route_input(task.job&.id, event)
+    task.registry.route_input(task.job.id, event)
 
     commit_note(event[:content])
   end
@@ -275,8 +275,8 @@ class Poller
     # A job outside the foreground cannot be shown a dialog, so it gets an
     # answer VALUE the tool can return to the model. Grant dialogs are excepted:
     # denying one would stop the job from working at all.
-    target = task.registry&.job(msg[:job])
-    if task.registry&.denied?(target, dialog)
+    target = task.registry.job(msg[:job])
+    if task.registry.denied?(target, dialog)
       task.respond(Job::DENIED_ANSWER)
       return
     end

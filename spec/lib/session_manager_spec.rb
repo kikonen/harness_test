@@ -22,6 +22,14 @@ RSpec.describe SessionManager do
   let(:file_list) { FileList.new([], workdir: Dir.pwd) }
   let(:logger) { Logger.new(File::NULL) }
 
+  # A Task always runs on a registry + job (#286); an un-started one is
+  # enough to capture Task.emit events. Build the smallest real registry.
+  def emit_task
+    registry = JobRegistry.new
+    job = registry.add_job(kind: :main)
+    Task.new(registry:, job:)
+  end
+
   # A minimal stand-in for Harness providing only what SessionManager uses.
   # NOTE: in the post-refactor design the harness no longer owns a spinner
   # or an output buffer - both are owned by the running Task (see
@@ -175,7 +183,7 @@ RSpec.describe SessionManager do
   # it, so nothing can hold a stale message for the rest of a turn.
   describe '#request_spinner_detail (issue #283)' do
     def emitted_details
-      task = Task.new(buffer: OutputBuffer.new) { }
+      task = emit_task
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin
@@ -818,6 +826,13 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
   let(:file_list) { FileList.new([], workdir: Dir.pwd) }
   let(:backend) { double('backend', api_type: :openai, endpoint_path: '/chat/completions') }
   let(:client) { double('client', chat: nil, backend: backend) }
+
+  def emit_task
+    registry = JobRegistry.new
+    job = registry.add_job(kind: :main)
+    Task.new(registry:, job:)
+  end
+
   let(:harness) do
     Class.new do
       attr_accessor :session, :client
@@ -1024,7 +1039,7 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
       messages = inloop_messages
 
       # A Task instance (not started) provides the outbox for event capture.
-      task = Task.new(buffer: OutputBuffer.new) { }
+      task = emit_task
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
 
@@ -1046,7 +1061,7 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
       allow_summary_response
       messages = inloop_messages
 
-      task = Task.new(buffer: OutputBuffer.new) { }
+      task = emit_task
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       begin

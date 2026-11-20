@@ -3,6 +3,7 @@
 require 'logger'
 require 'task'
 require 'harness'
+require 'job_registry'
 require 'ui/spinner'
 require 'stringio'
 
@@ -17,13 +18,6 @@ RSpec.describe Task do
     events
   end
 
-  # Issue #286: a Task is GIVEN a buffer and never builds one, so every stand-in
-  # Task here is handed one; Task.run reads the buffer off the harness, so its
-  # doubles answer output_log.
-  def spec_buffer
-    OutputBuffer.new
-  end
-
   def spec_harness
     Class.new do
       def initialize
@@ -34,9 +28,24 @@ RSpec.describe Task do
     end.new
   end
 
+  # A Task always runs on a registry + job (#286): the run's registry is its
+  # executor and the home of the run record. These stand-ins build the smallest
+  # real one (a single main job) so every Task here is a genuine registry task.
+  def new_task(input_path: nil, &block)
+    registry = JobRegistry.new
+    job = registry.add_job(kind: :main)
+    described_class.new(registry:, job:, input_path:, &block)
+  end
+
+  def run_task(harness:, ui:, input_path: nil, &block)
+    registry = JobRegistry.new
+    job = registry.add_job(kind: :main)
+    described_class.run(harness:, ui:, registry:, job:, input_path:, &block)
+  end
+
   describe 'push_event (single event queue)' do
     it 'delivers messages to the outbox in order' do
-      task = described_class.new(buffer: spec_buffer) do |t|
+      task = new_task do |t|
         t.push_event(type: :output, origin: :harness, content: 'hello')
         t.push_event(type: :stats, origin: :harness, content: '3 iterations')
       end
@@ -51,7 +60,7 @@ RSpec.describe Task do
     end
 
     it 'delivers a :done message when the block completes' do
-      task = described_class.new(buffer: spec_buffer) { |_t| }
+      task = new_task { |_t| }
       task.start
 
       msg = nil
@@ -65,7 +74,7 @@ RSpec.describe Task do
 
   describe 'request / respond' do
     it 'blocks the task thread until the main thread responds' do
-      task = described_class.new(buffer: spec_buffer) do |t|
+      task = new_task do |t|
         reply = t.request(:test_request, key: 'value')
         # After unblock, push the received value for verification
         t.push_event(type: :result, origin: :task, content: reply)
@@ -101,7 +110,7 @@ RSpec.describe Task do
     end
 
     it 'captures the error when task is stopped while waiting' do
-      task = described_class.new(buffer: spec_buffer) do |t|
+      task = new_task do |t|
         t.request(:forever) # will never be responded to
       end
       task.start
@@ -141,7 +150,7 @@ RSpec.describe Task do
       # The note lands in the inbox BEFORE the request is posted.
       main.deliver(note)
 
-      task = described_class.new(buffer: nil, registry:, job: main) do |t|
+      task = described_class.new(registry:, job: main) do |t|
         t.push_event(type: :result, origin: :task, content: t.request(:dialog))
       end
       task.start
@@ -168,7 +177,7 @@ RSpec.describe Task do
 
   describe 'stop' do
     it 'joins the thread and sets @thread to nil' do
-      task = described_class.new(buffer: spec_buffer) do |t|
+      task = new_task do |t|
         t.request(:forever) # blocks forever
       end
       task.start
@@ -193,7 +202,7 @@ RSpec.describe Task do
       registry = JobRegistry.new
       main = registry.add_job(kind: :main)
       background = registry.add_job(kind: :command, requested_by: main)
-      task = described_class.new(buffer: nil, registry:, job: main) { }
+      task = described_class.new(registry:, job: main) { }
       background.mark_awaiting
 
       task.stop(0.1)
@@ -207,7 +216,7 @@ RSpec.describe Task do
     it 'does not push STOP over the answer it just delivered to its own inbox' do
       registry = JobRegistry.new
       main = registry.add_job(kind: :main)
-      task = described_class.new(buffer: nil, registry:, job: main) { }
+      task = described_class.new(registry:, job: main) { }
       main.mark_awaiting
 
       task.stop(0.1)
@@ -222,7 +231,7 @@ RSpec.describe Task do
 
   describe 'Task.puts (single event queue)' do
     it 'pushes :text events onto the active task outbox' do
-      task = described_class.new(buffer: spec_buffer) { }
+      task = new_task { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
 
@@ -248,7 +257,7 @@ RSpec.describe Task do
   # bracket label, and UI::Renderer builds the line from them.
   describe 'Tool#status (tools push a verdict event onto the active task outbox)' do
     it 'pushes the verdict type with the tool name as origin' do
-      task = described_class.new(buffer: spec_buffer) { }
+      task = new_task { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
       tool = Class.new(Tool) do
@@ -279,7 +288,7 @@ RSpec.describe Task do
 
   describe 'Task.emit (structured events on the outbox)' do
     it 'pushes a typed event onto the active task outbox' do
-      task = described_class.new(buffer: spec_buffer) { }
+      task = new_task { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
 
@@ -300,7 +309,7 @@ RSpec.describe Task do
     end
 
     it 'stores non-string payloads (e.g. spinner_detail Hashes) intact' do
-      task = described_class.new(buffer: spec_buffer) { }
+      task = new_task { }
       old_current = Thread.current[:harness_task]
       Thread.current[:harness_task] = task
 
@@ -319,7 +328,7 @@ RSpec.describe Task do
   end
 
   describe 'the ONE spinner (owned by the drain loop)' do
-    let(:task) { described_class.new(buffer: spec_buffer) { |_t| } }
+    let(:task) { new_task { |_t| } }
 
     def make_spinner(running: true)
       sp = UI::Spinner.new('Working', ui: UI::Console.new(stdout: StringIO.new))
@@ -370,7 +379,7 @@ RSpec.describe Task do
   # head (never the tail), and the rebuild reads the most recently updated
   # spinner head cell - so the live state and the replay are the same object.
   describe 'spinner head memory (issue #286)' do
-    let(:task) { described_class.new(buffer: spec_buffer) { |_t| } }
+    let(:task) { new_task { |_t| } }
 
     it 'the spinner head cell is nil until a re-point lands in the head' do
       expect(task.buffer.latest_head(:spinner_detail)).to be_nil
@@ -399,28 +408,16 @@ RSpec.describe Task do
 
   end
 
-  # issue #286: ONE buffer per run. The task uses the buffer its owner hands it
-  # rather than building its own, so the drain loop's writes and the record a
-  # save reads are the same object. The buffer's limits belong to the buffer.
-  describe 'the buffer the caller hands the task (issue #286)' do
-    it 'the task uses the buffer it is given' do
-      buffer = OutputBuffer.new
-      _err, task = described_class.run(buffer:, harness: spec_harness,
-        ui: UI::Console.new(stdout: StringIO.new, stdin: StringIO.new(''))) { |_t| }
-      expect(task.buffer).to equal(buffer)
-    end
-  end
-
   describe 'Task#elapsed_label (issue #277)' do
     it 'counts whole seconds below a minute' do
-      task = described_class.new(buffer: spec_buffer) { |_t| }
+      task = new_task { |_t| }
       task.instance_variable_set(:@started_at, Time.now - 12.7)
 
       expect(task.elapsed_label).to eq('12s')
     end
 
     it 'switches to minutes past a minute, zero-padded seconds' do
-      task = described_class.new(buffer: spec_buffer) { |_t| }
+      task = new_task { |_t| }
       task.instance_variable_set(:@started_at, Time.now - 123)
 
       expect(task.elapsed_label).to eq('2m 03s')
@@ -440,7 +437,7 @@ RSpec.describe Task do
         define_method(:output_log) { OutputBuffer.new }
       end.new
 
-      _err, task = described_class.run(buffer: spec_buffer, harness: harness,
+      _err, task = run_task(harness: harness,
                                        ui: UI::Console.new(stdout: io_out, stdin: io_in)) do
         Task.emit(:plan, origin: :harness, content: 'read the tool first')
         Task.emit(:error, origin: :session_manager, content: 'hunk did not apply')
@@ -461,7 +458,7 @@ RSpec.describe Task do
       io_in  = StringIO.new
       message = "ruby -e '\nputs 1\nputs 2\n'"
 
-      _err, task = described_class.run(buffer: spec_buffer, harness: spec_harness,
+      _err, task = run_task(harness: spec_harness,
                                        ui: UI::Console.new(stdout: io_out, stdin: io_in)) do
         Tool.push_status(label: 'run.command', verdict: :ok, message:)
       end
@@ -487,7 +484,7 @@ RSpec.describe Task do
       io_out = StringIO.new
       io_in = StringIO.new
 
-      error, task = described_class.run(buffer: spec_buffer, harness: spec_harness,
+      error, task = run_task(harness: spec_harness,
                                        ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
         Task.puts 'greeting'
       end
@@ -500,7 +497,7 @@ RSpec.describe Task do
       io_out = StringIO.new
       io_in = StringIO.new
 
-      error, _task = described_class.run(buffer: spec_buffer, harness: spec_harness,
+      error, _task = run_task(harness: spec_harness,
                                          ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
         raise 'boom'
       end
@@ -520,7 +517,7 @@ RSpec.describe Task do
         define_method(:output_log) { OutputBuffer.new }
       end.new
 
-      error, = described_class.run(buffer: spec_buffer, harness:,
+      error, = run_task(harness:,
                                    ui: UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)) do
         nil.record
       end
@@ -537,7 +534,7 @@ RSpec.describe Task do
     # A harness double with no logger must not turn a task error into a second
     # error on the error path.
     it 'still returns the one-line error when the harness answers no logger' do
-      error, = described_class.run(buffer: spec_buffer, harness: spec_harness,
+      error, = run_task(harness: spec_harness,
                                    ui: UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)) do
         raise 'boom'
       end
@@ -549,7 +546,7 @@ RSpec.describe Task do
       io_out = StringIO.new
       io_in = StringIO.new
 
-      described_class.run(buffer: spec_buffer, harness: spec_harness,
+      run_task(harness: spec_harness,
                           ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
         sleep 0.3 # let the drain loop render a few default frames
       end
@@ -562,7 +559,7 @@ RSpec.describe Task do
       io_out = StringIO.new
       io_in  = StringIO.new
 
-      described_class.run(buffer: spec_buffer, harness: spec_harness,
+      run_task(harness: spec_harness,
                           ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
         sleep 0.35
       end
@@ -575,7 +572,7 @@ RSpec.describe Task do
       io_out = StringIO.new
       io_in = StringIO.new
 
-      described_class.run(buffer: spec_buffer, harness: spec_harness,
+      run_task(harness: spec_harness,
                           ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
         Task.emit(:spinner_detail, origin: :session_manager,
                   content: { message: 'Sending', suffix: 'ctx 12%' })
@@ -594,7 +591,7 @@ RSpec.describe Task do
       io_out = StringIO.new
       io_in  = StringIO.new
 
-      described_class.run(buffer: spec_buffer, harness: spec_harness,
+      run_task(harness: spec_harness,
                           ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
         Task.emit(:spinner_detail, origin: :session_manager,
                   content: { message: 'Sending to model' })
@@ -617,7 +614,7 @@ RSpec.describe Task do
       io_out = StringIO.new
       io_in  = StringIO.new
 
-      described_class.run(buffer: spec_buffer, harness: spec_harness,
+      run_task(harness: spec_harness,
                           ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
         Task.emit(:spinner_detail, origin: :session_manager,
                   content: { message: 'Compacting session mid-task' })
@@ -640,7 +637,7 @@ RSpec.describe Task do
       io_out = StringIO.new
       io_in = StringIO.new
 
-      described_class.run(buffer: spec_buffer, harness: spec_harness,
+      run_task(harness: spec_harness,
                           ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |_t|
         Task.puts '[step 1] first'
         sleep 0.1 # let the text line render and the spinner re-appear
@@ -662,7 +659,7 @@ RSpec.describe Task do
       io_in = StringIO.new("1\n") # "1" selects the first option
 
       choice = nil
-      described_class.run(buffer: spec_buffer, harness: spec_harness,
+      run_task(harness: spec_harness,
                           ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |t|
         dialog = UI::Dialog.new(
           title: 'Test dialog',
@@ -740,7 +737,7 @@ RSpec.describe Task do
         stdin = FakePendingStdin.new(io_in)
         writer.puts 'steer left' # typed before the turn even starts
         stdin.pending = true
-        described_class.run(buffer: spec_buffer, harness: harness,
+        run_task(harness: harness,
                             ui: UI::Console.new(stdout: io_out, stdin: stdin)) do |_t|
           Task.puts 'working'
           sleep 0.3
@@ -764,7 +761,7 @@ RSpec.describe Task do
         stdin = FakePendingStdin.new(io_in)
         writer.puts '' # bare Enter: nothing typed, no note (T3 design)
         stdin.pending = true
-        described_class.run(buffer: spec_buffer, harness: harness,
+        run_task(harness: harness,
                             ui: UI::Console.new(stdout: io_out, stdin: stdin)) do |_t|
           sleep 0.2
         end
@@ -784,7 +781,7 @@ RSpec.describe Task do
       stdin.pending = true
       begin
         writer.close # immediate EOF: the editor read returns :eof
-        described_class.run(buffer: spec_buffer, harness: harness,
+        run_task(harness: harness,
                             ui: UI::Console.new(stdout: io_out, stdin: stdin)) do |t|
           task = t # captured so we can assert the thread was stopped
           sleep 5 # would hang forever if the EOF did not abort the turn
@@ -812,7 +809,7 @@ RSpec.describe Task do
         stdin = FakePendingStdin.new(io_in)
         writer.puts 'steer left on multiline'
         stdin.pending = true
-        described_class.run(buffer: spec_buffer, harness: harness,
+        run_task(harness: harness,
                             ui: UI::Console.new(stdout: io_out, stdin: stdin)) do |_t|
           Task.puts 'working'
           sleep 0.3
@@ -837,7 +834,7 @@ RSpec.describe Task do
           sleep 0.5
           writer.puts '1' # the real dialog answer (Allow), typed while open
         end
-        described_class.run(buffer: spec_buffer, harness: harness,
+        run_task(harness: harness,
                             ui: UI::Console.new(stdout: io_out, stdin: stdin)) do |t|
           dialog = UI::Dialog.new(
             title: 'Grant test',
@@ -860,7 +857,7 @@ RSpec.describe Task do
       choice  = nil
 
       with_stdin_pipe do |io_in, writer|
-        described_class.run(buffer: spec_buffer, harness: harness,
+        run_task(harness: harness,
                             ui: UI::Console.new(stdout: io_out, stdin: io_in)) do |t|
           dialog = UI::Dialog.new(
             title: 'Grant test',
@@ -881,7 +878,7 @@ RSpec.describe Task do
   # block's value becomes the result the caller awaits on :done.
   describe 'a task built for a job (the registry is the executor)' do
     def registry_task(registry, job, &)
-      task = described_class.new(buffer: nil, registry:, job:, &)
+      task = described_class.new(registry:, job:, &)
       task.ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
       task
     end
@@ -936,7 +933,7 @@ RSpec.describe Task do
       io = StringIO.new
       harness = Object.new
       harness.define_singleton_method(:output_log) { OutputBuffer.new }
-      described_class.run(buffer: spec_buffer, harness:, ui: UI::Console.new(stdout: io, stdin: StringIO.new),
+      described_class.run(harness:, ui: UI::Console.new(stdout: io, stdin: StringIO.new),
                           registry:, job:) { :turn_value }
 
       expect(job.result).to eq(:turn_value)

@@ -91,7 +91,12 @@ RSpec.describe Command do
       cmd = build(described_class, registry: registry)
 
       expect(cmd.foreground_harness).to equal(harness)
-      expect(build(described_class).foreground_harness).to be_nil
+    end
+
+    # The registry is always present (the dispatcher built it), but a fresh one
+    # has NO foreground job yet - that is the only legitimate nil this reaches.
+    it 'is nil for a registry with no foreground job yet' do
+      expect(build(described_class, registry: JobRegistry.new).foreground_harness).to be_nil
     end
 
     it 'defaults the CLI-only collaborator to nil' do

@@ -135,8 +135,9 @@ code. All three are settled; the wiring is what remains.
   first job added is #0, and its buffer is just job #0's buffer.
 - `TaskRunner#run_on_task` stops RUNNING a turn and AWAITS one: the registry is the
   executor, so the CLI asks it to run a job and awaits the result. Decision resolved;
-  `lib/task_runner.rb` awaits the foreground job on the registry, falling back to the
-  plain drain loop when the host has no registry (the single-thread I/O rule).
+  `lib/task_runner.rb` awaits the foreground job on the registry. The host's registry
+  is never nil: every TaskRunner host (Command, CommandHandler) is built by the run
+  with its registry, so the plain no-registry drain loop affordance was removed.
 - **A denied background dialog returns a real answer value** (resolved).
   `DialogTool#execute` blocks on `task.request(:dialog, ...)`, so the denial must come
   back as a value the tool can return to the model - a bare refusal is not an answer it

@@ -13,8 +13,12 @@ require 'stringio'
 # those methods the way the loop calls them: the instance methods through a
 # Poller built around a task, the posture-badge helper as a class method.
 RSpec.describe Poller do
-  def spec_buffer
-    OutputBuffer.new
+  # A Task always runs on a registry + job (#286): these specs build the
+  # smallest real one (a single main job) so every Task is a genuine registry task.
+  def spec_task(input_path: nil, &block)
+    registry = JobRegistry.new
+    job = registry.add_job(kind: :main)
+    Task.new(registry:, job:, input_path:, &block)
   end
 
   describe 'spinner head memory (issue #286)' do
@@ -23,7 +27,7 @@ RSpec.describe Poller do
     # event. A recording stand-in spinner proves the value it receives is the
     # head cell's content, so the head is the single source of live state.
     it 'store_and_render puts the head first, then builds the spinner from the head' do
-      task = Task.new(buffer: spec_buffer)
+      task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
       seen = []
       recorder = Class.new do
@@ -52,7 +56,7 @@ RSpec.describe Poller do
     end
 
     it 'installs a live badge callable when the harness has a mode label' do
-      task = Task.new(buffer: spec_buffer)
+      task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
       task.harness = mode_harness('AUTO-APPROVE')
 
@@ -63,7 +67,7 @@ RSpec.describe Poller do
     end
 
     it 'installs no badge for a harness without a mode (unit-test harness)' do
-      task = Task.new(buffer: spec_buffer)
+      task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
       task.harness = Object.new # no command_mode_label
 
@@ -129,7 +133,7 @@ RSpec.describe Poller do
     end
 
     it 'installs a badge when the harness only exposes the plan label' do
-      task = Task.new(buffer: spec_buffer)
+      task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
       task.harness = Class.new { def plan_mode_label = 'PLAN'; }.new
 
@@ -139,7 +143,7 @@ RSpec.describe Poller do
     end
 
     it 'installs a badge when the harness only exposes the stream label' do
-      task = Task.new(buffer: spec_buffer)
+      task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
       task.harness = Class.new { def stream_mode_label = 'STREAM'; }.new
 
@@ -155,7 +159,7 @@ RSpec.describe Poller do
         define_method(:command_mode_label) { 'MANUAL' }
         define_method(:stream_mode_label) { stream ? 'STREAM' : nil }
       end.new
-      task = Task.new(buffer: spec_buffer)
+      task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
       task.harness = harness
 
@@ -169,7 +173,7 @@ RSpec.describe Poller do
     end
 
     it 'does not replace an already running spinner' do
-      task = Task.new(buffer: spec_buffer)
+      task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
       task.harness = mode_harness('MANUAL')
 
@@ -183,7 +187,7 @@ RSpec.describe Poller do
     # outbox empties again after an output batch cleared it - the new
     # spinner must show the message the task asked for, not 'Working'.
     it 'a rebuilt spinner re-plays the recorded spinner detail' do
-      task = Task.new(buffer: spec_buffer)
+      task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
       task.harness = mode_harness('MANUAL')
       # The head cell is the memory the rebuild reads (issue #286): the
@@ -204,7 +208,7 @@ RSpec.describe Poller do
     # spinner gets it as a callable so a rebuilt spinner keeps counting from
     # the turn's start instead of from its own construction.
     it 'installs a live elapsed clock on the spinner' do
-      task = Task.new(buffer: spec_buffer) { nil }
+      task = spec_task { nil }
       task.ui = UI::Console.new(stdout: StringIO.new)
       task.harness = mode_harness('MANUAL')
       task.start
@@ -215,7 +219,7 @@ RSpec.describe Poller do
     end
 
     it 'elapsed_label is nil before the task is started (no turn to measure)' do
-      task = Task.new(buffer: spec_buffer)
+      task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
 
       expect(task.elapsed_label).to be_nil
@@ -239,7 +243,7 @@ RSpec.describe Poller do
         raise 'stdin must not be read without a harness'
       end
 
-      task = Task.new(buffer: spec_buffer)
+      task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new, stdin: fake_in)
       task.note_editor = instance_double(UI::Editor)
 
@@ -295,7 +299,7 @@ RSpec.describe Poller do
       end
       ui   = UI::Console.new(stdout: StringIO.new, stdin: stdin)
       path = InputPath.new(ui: ui, editor: editor)
-      task = Task.new(buffer: spec_buffer, input_path: path)
+      task = spec_task(input_path: path)
       task.ui          = ui
       task.note_editor = editor
       task.harness     = note_harness
@@ -374,7 +378,7 @@ RSpec.describe Poller do
       allow(editor).to receive(:read_multiline)
         .and_return(UI::Editor::EDITOR_RESULT.new(result[:text], result[:status],
                                                   result[:note]))
-      task = Task.new(buffer: spec_buffer)
+      task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new, stdin: stubbed_pending_stdin)
       task.harness = note_harness
       task.note_editor = editor
@@ -426,7 +430,7 @@ RSpec.describe Poller do
   # otherwise the whole note suite above would call raw! on a pipe.
   describe 'Poller#hold_raw_stdin (issue #473 raw-mode guard)' do
     def task_with_stdin(stdin)
-      t = Task.new(buffer: spec_buffer)
+      t = spec_task
       t.ui = UI::Console.new(stdout: StringIO.new, stdin: stdin)
       t
     end
@@ -522,7 +526,7 @@ RSpec.describe Poller do
       registry, _main, background = denied_registry
       # The request arrives on the background job's own task, so the denial
       # answer lands on ITS inbox - which is the task's inbox.
-      task = Task.new(buffer: nil, registry:, job: background)
+      task = Task.new(registry:, job: background)
       task.ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
       dialog = UI::Dialog.new(title: 'pick',
                               options: [UI::Dialog::Option.new(title: 'Yes', value: :yes)])

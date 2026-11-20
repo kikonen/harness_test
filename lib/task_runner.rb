@@ -20,32 +20,18 @@ module TaskRunner
   attr_accessor :input_path
 
   # Issue #286: the JobRegistry the RUN owns is the executor and the home of the
-  # run record, so this AWAITs a job there rather than running a turn itself.
-  # A host with no registry (a spec host, a library caller) still goes through
-  # the drain loop with its own buffer, so the single-thread I/O rule and the
-  # drain-loop pins are unchanged.
+  # run record, so this AWAITs a job there rather than running a turn itself. The
+  # host's registry is never nil: every TaskRunner host (Command, CommandHandler)
+  # is built by the run with its registry.
   attr_accessor :registry
 
   def run_on_task(job: nil)
     emit_role(:gap, "")
-    job ||= registry&.foreground_job
-    error, _task, result =
-      if registry
-        # The Harness is the job's (#286), so the registry reads it off the job;
-        # this host no longer hands one to the executor.
-        registry.run(job:, ui:, **input_kwargs) { |_t| yield }
-      else
-        # No job, so no registry result: the block's own value is what the
-        # caller gets back, and the drain loop needs a buffer to write its
-        # single record into.
-        value = nil
-        buffer = OutputBuffer.new
-        error, _t = Task.run(
-          harness: foreground_harness, ui:, buffer:, **input_kwargs) do |_t|
-          value = yield
-        end
-        [error, nil, value]
-      end
+    # The host's registry is never nil (#286): it is the executor and the home
+    # of the run record. The Harness is the job's, so the registry reads it off
+    # the job rather than this host handing one to the executor.
+    job ||= registry.foreground_job
+    error, _task, result = registry.run(job:, ui:, **input_kwargs) { |_t| yield }
     emit_role(:kind, error, origin: "task error") if error
     emit_role(:gap, "")
     result

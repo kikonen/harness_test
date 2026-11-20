@@ -66,9 +66,8 @@ class InputPath
   # to write, which is what keeps the FIFO rule: a note must never steal the
   # answer a pending dialog request is waiting for.
   def route(text)
-    event = resolved_registry ? resolved_registry.note_event(text) :
-      { type: :note, content: text }
-    resolved_registry&.route_input(job_id, event)
+    event = resolved_registry.note_event(text)
+    resolved_registry.route_input(job_id, event)
     event
   end
 
