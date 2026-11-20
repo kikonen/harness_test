@@ -28,11 +28,18 @@ The three targets:
   holder is `@settings` - it holds no raw `@options` hash and exposes no `options`
   reader; every startup fact (workdir, resume/continue, the dispatch modes, the
   resolved editor and submit key) is read through a settings accessor, so the CLI
-  carries the resolved config, never the bag it was resolved from. Harness keeps
-  thin delegators so existing consumers keep one read surface. Static config
-  (`markdown_max_width`, the three output-buffer limits) is read once there too.
-  A resumed run applies its saved postures over the settings via
-  `SystemSettings#restore_persisted`.
+  carries the resolved config, never the bag it was resolved from. Harness holds
+  NO posture/consent delegators - every consumer reads the posture off the
+  settings it already has (a consumer holding settings reads `settings.X`; one
+  holding only a Harness reads `harness.settings.X`, via its `attr_reader
+  :settings`). Static config (`markdown_max_width`, the three output-buffer
+  limits) is read through the settings too. A resumed run applies its saved
+  postures over the settings via `SystemSettings#restore_persisted`.
+
+  The planning posture is the exception that stays Harness-owned (`@plan` ivar,
+  `plan?`/`plan=`/`toggle_plan`/`plan_mode_label`): it is per-conversation state
+  seeded from the config only, so a #286 sub-agent sharing the settings object
+  is NOT forced into planning mode by a `[PLAN]` toggle on the foreground.
 
 - **The run record -> JobRegistry.** The run's OutputBuffer is the FOREGROUND
   job's buffer; the `JobRegistry` owns it, not Harness. The CLI builds the
