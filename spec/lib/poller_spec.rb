@@ -51,6 +51,8 @@ RSpec.describe Poller do
     def mode_harness(label)
       h = Class.new do
         define_method(:command_mode_label) { label }
+        define_method(:stream_mode_label) { nil }
+        define_method(:plan_mode_label) { nil }
       end.new
       h
     end
@@ -66,10 +68,10 @@ RSpec.describe Poller do
       expect(task.visible_spinner.badge.call).to eq('[AUTO-APPROVE]')
     end
 
-    it 'installs no badge for a harness without a mode (unit-test harness)' do
+    it 'installs no badge when there is no harness at all (unit-test harness)' do
       task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
-      task.harness = Object.new # no command_mode_label
+      task.harness = nil # #286: a badge is built from a harness or not at all
 
       described_class.new(task).ensure_spinner_running
 
@@ -135,7 +137,11 @@ RSpec.describe Poller do
     it 'installs a badge when the harness only exposes the plan label' do
       task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
-      task.harness = Class.new { def plan_mode_label = 'PLAN'; }.new
+      task.harness = Class.new do
+        def plan_mode_label = 'PLAN'
+        def command_mode_label = nil
+        def stream_mode_label = nil
+      end.new
 
       described_class.new(task).ensure_spinner_running
 
@@ -145,7 +151,11 @@ RSpec.describe Poller do
     it 'installs a badge when the harness only exposes the stream label' do
       task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
-      task.harness = Class.new { def stream_mode_label = 'STREAM'; }.new
+      task.harness = Class.new do
+        def stream_mode_label = 'STREAM'
+        def command_mode_label = nil
+        def plan_mode_label = nil
+      end.new
 
       described_class.new(task).ensure_spinner_running
 
@@ -158,6 +168,7 @@ RSpec.describe Poller do
       harness = Class.new do
         define_method(:command_mode_label) { 'MANUAL' }
         define_method(:stream_mode_label) { stream ? 'STREAM' : nil }
+        define_method(:plan_mode_label) { nil }
       end.new
       task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)

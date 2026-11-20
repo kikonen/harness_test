@@ -151,8 +151,7 @@ class Poller
                               detail[:suffix], ui: task.ui)
     # A live badge so a mid-turn /yolo toggle is visible at once.
     harness = task.harness
-    if harness.respond_to?(:command_mode_label) || harness.respond_to?(:stream_mode_label) ||
-        harness.respond_to?(:plan_mode_label)
+    if harness
       spinner.badge = -> { self.class.mode_badge(harness) }
     end
     # The turn clock (issue #277): a live callable, so every rebuilt spinner
@@ -168,12 +167,9 @@ class Poller
   # prompt line (PromptReader) so a posture cannot read differently in the two.
   def self.mode_badge(harness)
     tags = []
-    label = harness.command_mode_label if harness.respond_to?(:command_mode_label)
-    tags << "[#{label}]" if label
-    stream = harness.stream_mode_label if harness.respond_to?(:stream_mode_label)
-    tags << "[#{stream}]" if stream
-    plan = harness.plan_mode_label if harness.respond_to?(:plan_mode_label)
-    tags << "[#{plan}]" if plan
+    tags << "[#{harness&.command_mode_label}]" if harness&.command_mode_label
+    tags << "[#{harness&.stream_mode_label}]" if harness&.stream_mode_label
+    tags << "[#{harness&.plan_mode_label}]" if harness&.plan_mode_label
     tags.empty? ? nil : tags.join(" ")
   end
 
