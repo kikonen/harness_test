@@ -95,6 +95,32 @@ RSpec.describe SessionLocator do
     end
   end
 
+  # issue #548: a layered run nests its session.json under jobs/<id>/, so the
+  # old one-level glob would skip it. The directory-based reader lists a layered
+  # run AND a #207 session together, each by the JSON that names its directory.
+  describe '#session_dirs / layered + #207 listing (issue #548)' do
+    it 'lists a layered run by its run.json, not its nested job session.json' do
+      seed_run(sid_c)
+
+      expect(locator.session_dirs).to eq([File.join(workdir, '.harness', 'sessions', sid_c)])
+      expect(locator.session_files).to eq([File.join(workdir, '.harness', 'sessions', sid_c, 'run.json')])
+    end
+
+    it 'lists a layered run and a #207 session side by side' do
+      seed_run(sid_c)
+      seed_session(sid_a)
+
+      dirs = locator.session_dirs.map { |d| File.basename(d) }.sort
+      expect(dirs).to eq([sid_a, sid_c])
+    end
+
+    it 'finds a layered run dir by abbreviated id (resume/delete address it)' do
+      seed_run(sid_c)
+
+      expect(File.basename(File.dirname(locator.find_session_file(sid_c[0, 8])))).to eq(sid_c)
+    end
+  end
+
   describe '#find_session_file' do
     it 'matches an abbreviated id by directory-name prefix' do
       path = seed_session(sid_a)
