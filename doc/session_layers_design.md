@@ -3,8 +3,9 @@
 Design notes for splitting session persistence along the ownership seam #286 has
 already established. This is a DESIGN document only; no code is written for #548
 yet. It states the conflation, the evidence in today's code, the proposed two-layer
-shape, the file-layout options with their costs, the increments, and the decisions
-still open. Issue #548 stays OPEN until the owner picks the layout.
+shape, the file layout the owner has chosen (dir per job), the log decision that
+layout forces, the increments, and the decisions still open. Issue #548 stays OPEN
+until the layout is implemented.
 
 Cross-refs: #548 (this), #286 (agent tasks / the Job model), #458 (the run record),
 #207 (session dir layout), #276 (identity resolution), #188 (the `state_changed`
@@ -127,31 +128,33 @@ agent's message chain. They belong to the run session. The `registry` injection 
 only because a per-Harness object was asked to reach the run record; moving the record
 to its owner deletes the injection.
 
-## File-layout options (the open fork)
+## File-layout options (fork resolved: A, as dir per job)
 
-Two shapes, both workable; the choice is the owner's and changes the increments.
+Two shapes were on the table; the owner picked **A**, sharpened into **one directory per
+job** (see "The layout decision" below). Recording both because the cost difference is
+what the increments are ordered around.
 
-**A. Two files per run.** `.harness/sessions/<run-id>/run.json` plus per-agent
-`<agent-id>/session.json` (each agent dir already keyed by its own id, as logs and
-history are). `run.json` carries the run record and the `agents:` id list.
+**A. Separate run file plus per-agent files.** `.harness/sessions/<run-id>/run.json`
+plus an agent session per job. `run.json` carries the run record and the id list.
 - Pros: each layer is a standalone file the locator can read without decoding the
-  other; a sub-agent's session already looks like the existing per-session dir; the
-  run id and the foreground agent id stop being the same number.
+  other; a sub-agent's session becomes a real saved object; the run id and the
+  foreground agent id stop being the same number; and a job can own FILES, not just
+  keys in a JSON blob - which is what per-job artifacts and per-job cleanup need.
 - Cons: identity resolution must now resolve a *run* id and then follow it to agent
   ids; `/sessions` and `--resume` change what they list and what they read.
 
-**B. One file with two blocks.** a single `session.json` that holds a `run:` block and
-an `agents:` block (the foreground agent's chain living where `messages` is today).
+**B. One file with two blocks.** a single `session.json` holding a `run:` block and an
+`agents:` block (the foreground agent's chain living where `messages` is today).
 - Pros: keeps today's one-file-per-session directory and the `#207`/`#276` identity
   machinery almost unchanged; resume reads one file.
-- Cons: the run record and the conversation still share a file and (if the foreground
-  agent's chain stays under `messages`) the run id and the foreground id stay coupled;
-  a sub-agent's chain must go in a nested `agents:` section rather than its own dir.
+- Cons: the run record and the conversation still share a file and the run id stays
+  coupled to the foreground id; a sub-agent's chain must go in a nested `agents:`
+  section rather than its own dir. **Disqualified by dir-per-job**: a single file cannot
+  hold "and other files per case", so B cannot express per-job retention at all.
 
-The design leans toward **A** because it is what makes a sub-agent's session a real
-saved object and is what the ownership split actually implies - but it is the costlier
-migration, and **B** may be the right first increment if the owner wants the seam
-without re-doing identity resolution yet. This is the central open decision.
+Increment 1 below still writes both halves into the current one file while the seam is
+proven, but that is a transitional step with no `agents:` block and no nested keys - not
+option B as a destination.
 
 ## Increments (a suggested sequence)
 
@@ -159,9 +162,9 @@ without re-doing identity resolution yet. This is the central open decision.
    `Session#to_h` keys + `active_model` + `param_overrides`) and a run-record writer
    owned by CLI/`JobRegistry` (jobs/foreground/replay_tail/postures/mcp_connected).
    Delete `SessionManager#registry` and its injection. No layout change yet - the two
-   writers can still emit into one file (option B) while the seam is proven.
-2. **Choose and apply the layout** (option A or B). This is where the run -> agent-id
-   map first appears.
+   writers can still emit into the existing file while the seam is proven.
+2. **Apply the chosen layout** (run.json + `jobs/<id>/`). This is where the run -> agent
+   map first appears and where `@next_id` becomes persisted.
 3. **`SessionLocator` learns the run record.** It becomes the reader of the run file and
    the resolver that follows a run id to the agent ids it names, so list/resume/delete
    understand both layers.
@@ -188,21 +191,170 @@ persistence/profile catalogue)" to a later increment; #548 is that deferral sche
   before anything is built from it; #548 extends "identity" to include the run-vs-agent
   distinction rather than collapsing it into one id.
 
+## The layout decision: one run file, one directory per job
+
+`run.json` for system state plus a directory holding everything one job owns. The
+per-job part is what makes retention work: a job's artifacts are FILES under its own
+directory (a sub-agent transcript, a dump, a scratch note), which is exactly what a
+single `session.json` cannot express.
+
+```
+.harness/
+  harness_history              # legacy read-only fallback
+  memories/ plans/ skills/     # run-wide ON PURPOSE - never touched by job GC
+  sessions/<session-id>/       # SecureRandom.uuid == the run/system id (#276)
+    run.json                   # version, session_id, created_at, workdir, postures,
+                               # mcp_connected, access + file_cache (run-wide TODAY),
+                               # next_id, foreground_job,
+                               # jobs: [{id, kind, status, requested_by,
+                               #         dependencies, dir}]
+    harness.log                # ONE Logger object for the run; delimiter format;
+                               # every event stamped with the JOB id, not the thread id
+    harness_history            # Reline input only (#119), escaped one-per-line
+    jobs/<id>/                 # job.json   (kind, status, result, edges AS IDS)
+                               # session.json (that agent's chain; message 0 implicit
+                               #              exactly as Session#to_h does today)
+                               # replay.json
+                               # + any future per-job artifact
+```
+
+`memories/`, `plans/` and `skills/` stay outside the session id **on purpose**
+(`doc/memory_design.md`: "Not session state"; the owner's note that plans are not bound
+to a session). Only the *active-plan pointer* is session state. Per-job GC must never
+reach those directories.
+
+### Why a directory, not a set of flat per-job files
+
+Cleanup stays O(1) in the **number of file types** rather than O(job x file kind):
+dropping a job is one recursive delete. Retention never needs an inventory of what that
+job owned, and adding a new per-job artifact needs **no retention change at all**. Flat
+per-job files turn `tasks_kept` into a growing list of "which files belong to job 3".
+Precedent for the directory as the cleanup unit: `doc/sensitive_paths_design.md`
+scratch/keep zone.
+
+### The drop rule
+
+`Job#finish` hands the job to the registry's retention decision. `retain` plus
+`tasks_kept` drop **finished** jobs only - never a running job, never the foreground
+job - and a drop is two actions in one step:
+
+1. remove the job's entry from `run.json`'s `jobs:` list,
+2. `FileUtils.rm_rf` the job's directory.
+
+Unlink **before** deleting, so a crash between the two leaves an orphan directory
+(recoverable by a startup sweep that deletes any `jobs/<id>/` with no `run.json` entry)
+rather than a dangling id (unrecoverable, because code dereferences an id whose directory is
+gone). `@next_id` is persisted in `run.json` and, for legacy files without it, falls back
+to `max(existing job id)`; both, so an id is never reused. Job ids do not need to be
+globally unique because containment namespaces them: "job 3" always means
+`<session-id>/job-3`.
+
+## The log decision the layout forces: one run-wide `harness.log`
+
+Dir-per-job does **not** imply one log per job. The registry has one queue, which gives a
+**total order across jobs**; splitting the log discards that order, which is the thing a
+troubleshooting reader needs. The log is for finding the right line, and tolerating a
+large log is a requirement - it is read per line, never parsed as a whole file (the 8.5 MB
+sample is not even valid UTF-8). So: **one file for the run, one `Logger` object, every
+event stamped with its job's id.** Format and size are separate problems; delimiters make
+the log *attributable*, not small.
+
+Measured on this box (ruby 4.0.7 x64-mingw-ucrt, `logger.rb` v1.7.0) by
+`analysis/548/log_format_measure.rb`, which runs from a fresh clone and writes only into
+its own directory. Four results constrain the implementation:
+
+- **One `Logger` object per session is a hard requirement, and today's code can mint a
+  second one.** Two `Logger` objects opened on the same path share `Logger`'s
+  class-level `@log_mutex` (so lines never interleave) yet **lose writes**: 400 concurrent
+  writes leave 365-391 lines across eight runs (~10% gone), because each object keeps its
+  own file position. One object hammered from two threads leaves 400 lines in every run.
+  `Harness#initialize` currently does `@logger = logger || SessionLogger.build(...)`
+  (`lib/harness.rb:143`), so a Harness built with an injected session id and no injected
+  logger opens its own writer on the same path - which is exactly what a per-job
+  sub-agent Harness will do. Enforce one writer per session in the same increment that
+  gives sub-agents persistence.
+- **Stamp the job id, not the thread id.** One job is serviced by its task thread, by the
+  Poller on the main thread, and by nested threads; a thread-id stamp splits a single
+  job's output across stamps and defeats "show me job 3's lines". The main thread stamps
+  the foreground job (id 0).
+- **Whatever channel carries the stamp must be propagated explicitly at every
+  `Thread.new`.** `Logger#formatter` runs on the calling thread, so it *can* read
+  thread-local state, but `Thread.current.name` is `nil` inside a nested thread - as is
+  the channel the tree already uses (`Task` publishes `Thread.current[:harness_task]`,
+  `lib/task.rb:107`; `Task.emit` reads it at `:252`). `Logger#progname` does reach the
+  formatter as its third argument, and so does the block form `logger.info("tag") { ... }`;
+  both are viable per-call carriers.
+- **A payload containing a line-start delimiter is parsed as a new event** (tested with a
+  `web.fetch`-shaped body). "Unlikely to appear in practice" is not sufficient: escaping
+  or a length prefix is required.
+
+The naive delimiter `!E!<job>!<time>!<severity> <body>` with the body running to the next
+delimiter is the shape; unreconstructibility is the open part (see below). Today's format
+already fails on multi-line messages: of 95,177 lines in the sample only 10,183 carry a
+header, so ~89% are continuation lines with no job attribution. Nothing in `lib/` *reads*
+`harness.log` - only the path is constructed - so it is write-only and reformatting it
+breaks no reader.
+
+## Code constraints the layout imposes
+
+- Job ids are per-run: `@next_id` starts at 0 and increments by 1 (`lib/job_registry.rb`),
+  and job 0 exists in every session as the main turn.
+- Jobs are not persisted today at all: `foreground_job` (a single int) is the only job
+  fact `save_session` writes, and resume's `restore_foreground` early-returns when
+  `job(id)` is `nil`.
+- **Edges are live object references, not ids.** `Job#ready?` calls `dep.finished?` /
+  `dep.call`, and `finish` does `requested_by&.deliver(result)`; nothing serializes them.
+  Per-job storage forces edges into ids that resume must re-resolve, and a dropped job's
+  id can dangle in another job's `dependencies`. That re-resolution is the real work of
+  this change, not the file split.
+- Access grants are **run-wide today** (`doc/harness_job_design.md`: `Session#restore_access_grants`
+  still reaches the run-wide `FileList`), so `access` and `file_cache` stay in `run.json`
+  until `FileList` itself becomes per-job. That is a code dependency, not a design choice.
+- `replay_tail` moves to the job directory on **ownership** grounds, not size:
+  `JobRegistry#replay_tail_for_save` returns the foreground buffer's replay tail, i.e. a
+  run record currently stored in the job's conversation file.
+- `SessionLocator#session_files` globs `sessions/*/"session.json"` - exactly one level
+  deep - and `list`, `search`, `find_session_file` and `newest_session_path` all derive
+  from it. Nesting job directories under the run makes that glob return `[]`, breaking
+  `/sessions`, `--resume`, `--continue` and `--delete-session` unless the locator is
+  rewritten **in the same increment**. `valid_id?` accepts UUIDs only, and directory names
+  are matched by prefix.
+- `Session#to_h` persists `@messages[1..]` - message 0 is implicit and rebuilt from the
+  current `build_system_prompt`. A per-job chain inherits that convention.
+- Existing bug, fix while touching the locator: `SessionLocator#list` reads `data[:files]`
+  and nothing ever writes a `:files` key, so `/sessions` always reports `files: 0`.
+
+## Corrections to earlier reasoning (recorded so they are not re-litigated)
+
+- "One file for system state is already true" is **wrong**: that claim read the filename
+  instead of the writers. `session.json` mixes run state and foreground-job state, and the
+  writers are per-Harness.
+- The 370 MB `harness.log` (`stat` size 0, 377,984 blocks allocated) is a **Windows**
+  artifact: a file held open by the live `SessionLogger` cannot be truncated, so blocks
+  stay allocated after the size is zeroed. Judge log growth by `du`/block count rather
+  than size, and check for open handles before trusting a truncated sample.
+- The bulk of session volume is the conversation: in a measured 231,914 B `session.json`,
+  `messages` is 190,214 B (82%) and `replay_tail` 39,492 B (17%, 30 entries); every other
+  key is under 1.2 KB. Per-job storage relocates the bulk rather than shrinking it.
+  Log *size* is a separate, larger problem: ~400 MB of growth comes from unbounded raw
+  dumps (command output, fetched bodies).
+
 ## Open decisions / deferred
 
-- **Layout A vs B** (the central fork above): separate run file, or one file with a
-  `run:` + `agents:` block.
-- **Is the run id the foreground agent's id, or a separate id?** Option B keeps them
-  the same (cheaper); option A separates them (what the split implies).
-- **Where the run -> agent map is stored and how it survives Job retention**
-  (`tasks_kept`): a dropped job cannot be answered or read, so its session must not be
-  orphaned by the map - decide whether a dropped job's session is deleted or retained.
+- **Unreconstructible delimiters**: escape, length-prefix, or a per-file marker. The
+  requirement is measured; the mechanism is not chosen.
+- **Log size control**: cap raw dumps, move dumps into `jobs/<id>/`, or rotate. Delimiters
+  do not address this.
+- **Stamp channel mechanism**: a thread-local set explicitly at every `Thread.new` with a
+  main-thread fallback to the foreground job, versus `Logger#progname` per call. Thread ids
+  are rejected.
+- **Is the run id the foreground agent's id, or a separate id?** The layout keeps the
+  session directory named by the run id; whether job 0's `session.json` reuses it or gets
+  its own id is unresolved.
 - **Whether a sub-agent's harness session is auto-saved at all**, or only saved when a
   dependency needs it back (a read-only `agent.explore` may not need its transcript
   persisted; a write-capable sub-agent will).
 - **How `/sessions`, `--resume`, `--continue`, and `--delete-session` read a layered
-  store** - do they list runs, list agent sessions, or both; which one `--resume` targets.
-- **Whether the run record and the agent sessions share a directory** (one
-  `<run-id>/` dir holding `run.json` + nested agent dirs) or separate top-level dirs.
-- **Backward compatibility**: existing one-file sessions from older builds - migrate them
-  into the layered shape (`StateMigrator`), or read them as the degenerate one-agent case.
+  store** - list runs, list agent sessions, or both; which one `--resume` targets.
+- **Backward compatibility**: migrate existing one-file sessions into the layered shape
+  (`StateMigrator`), or read them as the degenerate one-job case.
