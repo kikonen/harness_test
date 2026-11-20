@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'logger'
 require 'stringio'
 require 'tmpdir'
+require 'system_settings'
 require 'tools/web_fetch_tool'
 
 # A stand-in for the fetcher: the transport rules (and their real sockets) are
@@ -51,7 +52,8 @@ RSpec.describe Tools::WebFetchTool do
   end
 
   def tool_in(dir, options = {})
-    described_class.new(FileList.new(workdir: dir), options,
+    described_class.new(FileList.new(workdir: dir),
+                        SystemSettings.from_options(options),
                         logger: Logger.new(File::NULL))
   end
 
@@ -184,7 +186,7 @@ RSpec.describe Tools::WebFetchTool do
         with_fetcher(tool, result)
         # The shell postures are a decision about shell commands (issue #221), so
         # even with yolo on, a new host must still reach the dialog.
-        tool.instance_variable_set(:@options, { yolo: true })
+        tool.instance_variable_set(:@settings, SystemSettings.from_options({ yolo: true }))
         stdout = drive_dialog("1\n")
 
         tool.execute('url' => 'https://example.com/')

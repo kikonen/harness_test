@@ -136,8 +136,8 @@ RSpec.describe Harness do
   # A harness whose client plays a scripted response sequence (see
   # FakeScriptedClient) - the call_llm specs below use it to drive multi-
   # round tool loops and mid-loop failures.
-  def build_harness_with_responses(responses = [{ content: 'done', reasoning: nil }])
-    h = build_harness
+  def build_harness_with_responses(responses = [{ content: 'done', reasoning: nil }], options = {})
+    h = build_harness(options)
     h.instance_variable_set(:@client, FakeScriptedClient.new(responses))
     h
   end
@@ -1303,8 +1303,7 @@ RSpec.describe Harness do
         { content: nil, tool_calls: [{ id: 'c2', function: { name: 'test.echo', arguments: '{"text":"b"}' } }] },
         { content: nil, tool_calls: [{ id: 'c3', function: { name: 'test.echo', arguments: '{"text":"c"}' } }] }
       ]
-      harness = build_harness_with_responses(rounds)
-      harness.settings[:max_tool_iterations] = 2
+      harness = build_harness_with_responses(rounds, max_tool_iterations: 2)
 
       expect { harness.call_llm }.to raise_error(ToolLoopError, /exceeded max tool iterations \(2\)/)
     end
@@ -2886,7 +2885,7 @@ RSpec.describe Harness do
       h = build_harness
       tool = h.tool_registry.get('web.fetch')
 
-      expect(tool.instance_variable_get(:@options)).to equal(h.settings)
+      expect(tool.instance_variable_get(:@settings)).to equal(h.settings)
       expect(tool.instance_variable_get(:@workdir)).to eq(workdir)
       expect(tool.instance_variable_get(:@logger)).to equal(h.logger)
     end
@@ -3072,12 +3071,13 @@ RSpec.describe Harness, 'tool-result images (issue #449)' do
   end
 
   def build_harness_vision(options = {})
-    h = build(options)
     # A profile that declares vision (SessionManager#vision? reads the active one).
     # model_profiles is run-wide config (settings); active_model is live per-
-    # connection state (#286), so it lands on the Harness' ModelConfig.
-    h.settings[:model_profiles] = [{ name: 'v', model: 'vis', vision: true }]
-    h.model_config.active_model  = 'v'
+    # connection state (#286), so a #286 settings carries only the catalogue and
+    # the Harness seeds its ModelConfig from it at build time.
+    opts = { model_profiles: [{ name: 'v', model: 'vis', vision: true }],
+             active_model: 'v' }.merge(options)
+    h = build(opts)
     h
   end
 

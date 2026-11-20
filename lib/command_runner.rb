@@ -387,11 +387,11 @@ class CommandRunner
   # (a lone run.command in its batch has no pre-check). Returns nil when
   # the check is disabled or produced nothing.
   def safety_verdict_for(command)
-    return nil unless @settings[:command_safety_check] == true
+    return nil unless @settings.command_safety_check == true
 
-    cached = @settings[:safety_verdicts]
+    cached = @settings.safety_verdicts
     if cached.is_a?(Hash)
-      @settings[:safety_verdicts] = cached.reject { |k, _v| k == command }
+      @settings.safety_verdicts = cached.reject { |k, _v| k == command }
       return cached[command]
     end
 
@@ -446,7 +446,7 @@ class CommandRunner
   # relaxed floor cannot appear or disappear inside one tool loop. Rationale:
   # doc/denylist_safe_approve_design.md.
   def denylist_safe_override?
-    @settings[:command_safety_denylist_safe_approve] == true
+    @settings.denylist_safe_approve?
   end
 
   # An override approval is the most auditable event the runner can produce: a
