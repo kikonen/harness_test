@@ -75,5 +75,8 @@ The three targets:
 
 The SessionManager split (per-LLM loop vs persistence/profile catalogue) and
 collapsing the LLM loop into a dedicated turn engine are later increments. The
-one known leak: `Session#restore_access_grants` still reaches the run-wide
-`FileList` from conversation restore.
+persistence half of that split - moving the run-level keys (`yolo`/`stream`/
+`markdown`/palette, the run record, `mcp_connected`) out of the per-Harness
+`save_session` into a run-owned writer - is issue #548, designed in
+`doc/session_layers_design.md`. The one known leak: `Session#restore_access_grants`
+still reaches the run-wide `FileList` from conversation restore.
