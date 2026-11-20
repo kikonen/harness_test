@@ -85,11 +85,31 @@ class SessionLocator
     File.join(sessions_dir, id, SESSION_LOG_FILE)
   end
 
-  # All saved session files (issue #207 layout: <sessions>/<id>/session.json).
-  def session_files
+  # Session DIRECTORY names (issue #548). The unit of a saved session is its
+  # directory, which is either the #207 layout (a top-level session.json) or a
+  # layered RUN (a run.json + jobs/<id>/). Enumerating directories - not a
+  # one-level session.json glob - is what lets both layouts coexist: the old
+  # glob returned [] for a layered run (its session.json is nested under jobs/),
+  # which would break /sessions, --resume, --continue and --delete-session the
+  # moment the writer switched layouts. A stray loose file is not a directory.
+  def session_dirs
     return [] unless File.directory?(sessions_dir)
 
-    Dir.glob(File.join(sessions_dir, "*", SESSION_FILE)).select { |p| File.file?(p) }
+    Dir.glob(File.join(sessions_dir, "*")).select do |dir|
+      File.directory?(dir) && (File.file?(File.join(dir, RUN_FILE)) ||
+                               File.file?(File.join(dir, SESSION_FILE)))
+    end
+  end
+
+  # The saved JSON that names each session directory: run.json for a layered run,
+  # session.json for a #207 session. Callers that need the directory take
+  # File.dirname of the path. #find_session_file / #list / #search / #newest_*
+  # all derive from this so both layouts are addressed the same way.
+  def session_files
+    session_dirs.map do |dir|
+      run = File.join(dir, RUN_FILE)
+      File.file?(run) ? run : File.join(dir, SESSION_FILE)
+    end
   end
 
   def newest_session_path
