@@ -10,6 +10,7 @@ require 'output_buffer'
 require 'session_manager'
 require 'system_settings'
 require 'job_registry'
+require 'run_record'
 require 'fileutils'
 require 'tmpdir'
 
@@ -607,7 +608,7 @@ RSpec.describe SessionManager do
       registry = JobRegistry.new
       registry.add_job(kind: :main)
       registry.foreground_buffer.restore(tail)
-      manager.registry = registry
+      manager.run_record = RunRecord.new(registry)
       session.add_user('hello')
       manager.save_session
       JSON.parse(File.read(manager.session_file_path(session.session_id)), symbolize_names: true)
@@ -649,7 +650,7 @@ RSpec.describe SessionManager do
       double.define_singleton_method(:markdown?) { false }
 
       manager = described_class.new(double, FileList.new([], workdir: dir))
-      manager.registry = registry
+      manager.run_record = RunRecord.new(registry)
       manager.save_session
       JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
                                      'session.json')), symbolize_names: true)
