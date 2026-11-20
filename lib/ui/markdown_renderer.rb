@@ -126,7 +126,7 @@ module UI
     # The 'none' palette has no colors at all: emit no ANSI (the gem would still
     # apply its own defaults, so the escape codes are stripped after parsing).
     def strip?
-      @palette.respond_to?(:name) && @palette.name == Palette::NONE_NAME
+      @palette.name == Palette::NONE_NAME
     end
 
     # kramdown-ansi sizes tables and wraps paragraphs from Tins::Terminal.columns
