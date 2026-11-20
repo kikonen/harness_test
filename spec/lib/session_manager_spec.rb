@@ -70,7 +70,7 @@ RSpec.describe SessionManager do
         @model_config = ModelConfig.new({ num_ctx: 65_536, auto_save: false })
       end
 
-      attr_reader :settings, :model_config, :logger
+      attr_accessor :settings, :model_config, :logger
 
       def compact_recent_messages
         Session::COMPACT_RECENT_MESSAGES
@@ -414,7 +414,7 @@ RSpec.describe SessionManager do
       Dir.mktmpdir do |dir|
         file_list = FileList.new([], workdir: dir)
         manager   = described_class.new(harness, file_list)
-        harness.settings[:auto_save] = auto_save
+        harness.settings = SystemSettings.from_options({ num_ctx: 65_536, auto_save: auto_save })
         yield manager, file_list, dir
       end
     end

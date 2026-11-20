@@ -16,13 +16,11 @@ require_relative "ui/palette"
 # one settings object, so putting a per-connection field here would couple every
 # agent to it.
 #
-# Two access routes, deliberately distinct (#286):
-#   * Harness and its collaborators read NAMED accessors - compact_*, retry_*,
-#     yolo?, and the model catalogue/selection. These are read-only here.
-#   * "Others" (the tools, CommandRunner) read a single key through the
-#     designated [] reader. [] is the single-key reader/writer; there is no
-#     full options accessor, because re-exposing the whole mutable hash is what
-#     smuggling the bag back under a new name would be.
+# One access route: NAMED accessors only. Harness, its collaborators, the tools
+# and CommandRunner all read config by name (compact_*, retry_*, yolo?, the model
+# catalogue/selection, the consent postures). The raw options hash is never
+# re-exposed - there is no single-key [] reader/writer, because handing a key
+# back through the raw hash is how the whole mutable bag would slip back in.
 class SystemSettings
   # How many entries of the run record a session saves and a resumed run
   # redraws (issue #458). 0 disables the run record entirely.
@@ -85,16 +83,6 @@ class SystemSettings
     # The palette is the one value resolved (not just passed through): it is
     # validated here so every route (CLI, /palette, resume) shares the name check.
     @output_palette = UI::Palette.fetch(options[:output_palette])
-  end
-
-  # Designated single-key reader/writer for consumers that are not Harness or its
-  # collaborators (the tools, CommandRunner). Hands back one key, not the hash.
-  def [](key)
-    @options[key]
-  end
-
-  def []=(key, value)
-    @options[key] = value
   end
 
   # -- Static config with a resolved default -------------------------------
@@ -238,6 +226,14 @@ class SystemSettings
   # per-conversation Harness state - settings is run-wide and shared with every
   # agent, so a mutable [PLAN] toggle here would force every sub-agent into
   # planning mode at once. Harness owns it, seeded from the config value.
+
+  # The config seed for Harness' per-conversation planning posture: read once
+  # when the Harness is built (Harness#initialize), never mutated here. It is
+  # the one run-wide key Harness reads to SEED its own live #plan toggle -
+  # settings carries no mutable plan state (the NOTE above).
+  def plan_seed?
+    @options[:plan] == true
+  end
 
   # -- Output palette (issue #303) -----------------------------------------
 

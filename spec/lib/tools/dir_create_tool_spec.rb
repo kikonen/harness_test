@@ -22,7 +22,7 @@ RSpec.describe Tools::DirCreateTool do
   it 'forwards the user\'s denial note for the new-dir grant' do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
-      tool = described_class.new(list, {})
+      tool = described_class.new(list)
       # target-first prompt (issue #54): 1=target, 2=parent flat,
       # 3=parent recursive, 4=cancel
       drive_dialog("4 nope, use a different layout\n")
@@ -36,7 +36,7 @@ RSpec.describe Tools::DirCreateTool do
   it 'offers the new directory itself first in the grant prompt (issue #54)' do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
-      tool = described_class.new(list, {})
+      tool = described_class.new(list)
       drive_dialog("1\n")
 
       out = tool.execute('path' => 'newdir')
@@ -52,7 +52,7 @@ RSpec.describe Tools::DirCreateTool do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
       list.add_file('newdir', :w) # grant on the target itself
-      tool = described_class.new(list, {})
+      tool = described_class.new(list)
 
       out = tool.execute('path' => 'newdir')
       expect(out).to eq("ok: created directory 'newdir'")
@@ -64,7 +64,7 @@ RSpec.describe Tools::DirCreateTool do
     Dir.mktmpdir do |dir|
       list = FileList.new(workdir: dir)
       list.add_flat_dir('.', :w)
-      tool = described_class.new(list, {})
+      tool = described_class.new(list)
 
       out = tool.execute('path' => 'newdir')
       expect(out).to eq("ok: created directory 'newdir'")

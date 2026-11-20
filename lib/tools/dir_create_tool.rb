@@ -11,9 +11,8 @@ require "fileutils"
 module Tools
 
   class DirCreateTool < Tool
-    def initialize(file_list, options = {})
+    def initialize(file_list)
       @file_list = file_list
-      @options   = options
       super(
         name: "dir.create",
         description: "Creates a directory (mkdir -p semantics: parent directories are created as needed). " \

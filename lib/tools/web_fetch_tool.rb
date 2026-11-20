@@ -48,9 +48,9 @@ module Tools
       "Output is truncated to a line limit: it enters the context window."
     ].join(" ")
 
-    def initialize(file_list, options, logger:)
+    def initialize(file_list, settings, logger:)
       @workdir   = file_list.workdir
-      @options   = options
+      @settings  = settings
       @logger    = logger
       @fetcher   = WebFetcher.new(guard: build_guard)
       @allowlist = WebHostAllowlist.new(@workdir)
@@ -112,7 +112,7 @@ module Tools
     # it exists for a local or internal endpoint (a localhost dev server, an
     # intranet wiki), and it lifts the PRIVATE tier only (AddressGuard).
     def build_guard
-      AddressGuard.new(allow_private: @options[:web_fetch_allow_private] == true)
+      AddressGuard.new(allow_private: @settings.web_fetch_allow_private == true)
     end
 
     def limit_for(raw)

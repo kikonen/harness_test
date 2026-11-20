@@ -203,7 +203,7 @@ class Harness
     # Harness state, seeded from the config only - so a #286 sub-agent is NOT
     # forced into planning mode by a [PLAN] toggle on the foreground
     # (doc/planning_mode_design.md).
-    @plan = settings[:plan] == true
+    @plan = settings.plan_seed?
     @stream_preview  = nil
 
     # The same posture the shell consent reads live (issue #274): a lambda, so a
