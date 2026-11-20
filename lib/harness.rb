@@ -198,11 +198,11 @@ class Harness
     @session_manager = SessionManager.new(self, file_list)
 
     # Consent + display postures (yolo/stream/markdown/palette, the two
-    # command-safety flags) are run-wide SystemSettings state; the Harness
-    # methods below are thin delegators to @settings. The planning posture is
-    # the exception - per-conversation Harness state, seeded from the config
-    # only - so a #286 sub-agent is NOT forced into planning mode by a
-    # [PLAN] toggle on the foreground (doc/planning_mode_design.md).
+    # command-safety flags) are run-wide SystemSettings state read through
+    # @settings (#286). The planning posture is the exception - per-conversation
+    # Harness state, seeded from the config only - so a #286 sub-agent is NOT
+    # forced into planning mode by a [PLAN] toggle on the foreground
+    # (doc/planning_mode_design.md).
     @plan = settings[:plan] == true
     @stream_preview  = nil
 
@@ -210,7 +210,7 @@ class Harness
     # /yolo at the idle prompt or a mid-turn flip applies to the very next tool
     # call and switching it off removes the coverage at once. FileList never
     # stores a grant from it, so a resume cannot turn it into a standing grant.
-    @file_list.posture      = -> { yolo? }
+    @file_list.posture      = -> { @settings.yolo? }
     @file_list.audit_logger = @logger
 
     # The blob store for tool-result images (issue #449): the harness' own
@@ -279,98 +279,6 @@ class Harness
 
   def max_tool_iterations
     settings.max_tool_iterations || MAX_TOOL_ITERATIONS
-  end
-
-  # The posture/consent state lives in SystemSettings (@settings, #286); these
-  # are thin delegators so the existing consumers - the commands, Poller, Task,
-  # SessionManager and the CLI banner - keep one read surface on the Harness.
-  # The toggle methods return the new mode label (the badge shape). Ownership
-  # and the static-vs-runtime split: doc/harness_job_design.md.
-  def output_palette
-    @settings.output_palette
-  end
-
-  def output_palette=(name)
-    @settings.output_palette = name
-  end
-
-  def command_safety_check
-    @settings.command_safety_check
-  end
-
-  def command_safety_auto_approve
-    @settings.command_safety_auto_approve
-  end
-
-  def command_safety_auto_approve=(val)
-    @settings.command_safety_auto_approve = val
-  end
-
-  def command_safety_auto_approve_effective?
-    @settings.command_safety_auto_approve_effective?
-  end
-
-  def yolo?
-    @settings.yolo?
-  end
-
-  def yolo=(val)
-    @settings.yolo = val
-  end
-
-  def toggle_yolo
-    @settings.toggle_yolo
-  end
-
-  def command_mode_label
-    @settings.command_mode_label
-  end
-
-  def yolo_mode_label
-    @settings.yolo_mode_label
-  end
-
-  def denylist_safe_approve?
-    @settings.denylist_safe_approve?
-  end
-
-  def denylist_safe_approve=(val)
-    @settings.denylist_safe_approve = val
-  end
-
-  def stream?
-    @settings.stream?
-  end
-
-  def stream=(val)
-    @settings.stream = val
-  end
-
-  def toggle_stream
-    @settings.toggle_stream
-  end
-
-  def stream_mode_label
-    @settings.stream_mode_label
-  end
-
-  def markdown?
-    @settings.markdown?
-  end
-
-  def markdown=(val)
-    @settings.markdown = val
-  end
-
-  def toggle_markdown
-    @settings.toggle_markdown
-  end
-
-  # Static config (slice B: not a live posture): read once, applied when a Task
-  # builds its renderer, so a --markdown-width change needs a restart. Read
-  # through @settings (SystemSettings owns it).
-  def markdown_max_width
-    @settings.markdown_max_width
   end
 
   def plan?
@@ -488,12 +396,12 @@ class Harness
   # ONE check call per tool batch (never one per command). SafetyCheck
   # never touches Session, so it cannot trigger in-loop compaction.
   def precheck_batch_safety(message_calls)
-    return nil unless command_safety_check
+    return nil unless @settings.command_safety_check
 
     # YOLO's auto-approval branch in CommandRunner#run returns before
     # safety_verdict_for is reached, so a batch check here would pay for a
     # forked round trip whose verdicts can only be thrown away (#238's cost).
-    if yolo?
+    if @settings.yolo?
       logger.info "safety pre-check skipped (YOLO consumes no verdicts)"
       return nil
     end
@@ -1041,7 +949,7 @@ class Harness
   # must not leave its partial tail for the NEXT request to show. Posture
   # ownership and the retry boundary: doc/streaming_design.md.
   def request_chain(messages, tools)
-    streaming = stream?
+    streaming = @settings.stream?
     # The estimate ratio is injected, not fixed here: the token estimate the
     # spinner's rate and the context indicator both need belongs to Session.
     preview = streaming ? LLM::StreamPreview.new(
@@ -1228,9 +1136,9 @@ class Harness
     # a key the session does not carry keeps its config value (a session saved
     # before the posture existed falls back to the default, #28/#106/#303).
     @settings.restore_persisted(data)
-    logger.info "yolo posture restored: #{yolo? ? 'ON' : 'OFF'}"
-    logger.info "streaming posture restored: #{stream? ? 'ON' : 'OFF'}"
-    logger.info "markdown posture restored: #{markdown? ? 'ON' : 'OFF'}"
+    logger.info "yolo posture restored: #{@settings.yolo? ? 'ON' : 'OFF'}"
+    logger.info "streaming posture restored: #{@settings.stream? ? 'ON' : 'OFF'}"
+    logger.info "markdown posture restored: #{@settings.markdown? ? 'ON' : 'OFF'}"
 
     # #285: the saved per-request performance (#251) is a server measurement, so
     # a resumed session can show a recent rate immediately - a client-timed one
@@ -1239,7 +1147,7 @@ class Harness
     @last_rate = saved_rate if saved_rate
     logger.info "recent generation rate restored: #{last_rate_segment}" if saved_rate
 
-    logger.info "output palette restored: #{output_palette.name}"
+    logger.info "output palette restored: #{@settings.output_palette.name}"
 
     # issue #405: the saved session names the MCP tools its conversation had.
     # THIS run already connected what its own config declared (the tool-registry

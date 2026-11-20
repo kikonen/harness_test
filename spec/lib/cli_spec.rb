@@ -350,7 +350,7 @@ RSpec.describe CLI do
       cli.setup
 
       stub_prompt_reader
-      cli.foreground_harness.yolo = true
+      cli.foreground_harness.settings.yolo = true
 
       expected = 'Command consent: YOLO - unapproved commands run ' \
                  'without asking; disaster commands still ask'

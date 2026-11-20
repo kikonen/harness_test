@@ -409,7 +409,7 @@ RSpec.describe Harness do
       # The posture the session was saved with wins over the config initial
       # posture (#221 rule), and it is applied DURING construction - not by a
       # later resume call that would then need a logger rebind.
-      expect(harness.yolo?).to be(true)
+      expect(harness.settings.yolo?).to be(true)
       expect(harness.logger).to be_a(Logger)
       expect(harness.session_log_path).to include(id)
       # Only the resumed session's directory exists (issues #123 / #135).
@@ -425,8 +425,8 @@ RSpec.describe Harness do
 
       harness = build_harness(session_id: id, resume_data: saved_data(id))
 
-      expect(harness.stream?).to be(true)
-      expect(harness.stream_mode_label).to eq('STREAM')
+      expect(harness.settings.stream?).to be(true)
+      expect(harness.settings.stream_mode_label).to eq('STREAM')
     end
 
     # THE regression (#464): a resumed run must follow the CURRENT rules, not the
@@ -453,7 +453,7 @@ RSpec.describe Harness do
 
       harness = build_harness(session_id: id, resume_data: data)
 
-      expect(harness.stream?).to be(false)
+      expect(harness.settings.stream?).to be(false)
     end
 
     # issue #106: the markdown rendering posture travels with the session too
@@ -465,7 +465,7 @@ RSpec.describe Harness do
 
       harness = build_harness(session_id: id, resume_data: saved_data(id))
 
-      expect(harness.markdown?).to be(true)
+      expect(harness.settings.markdown?).to be(true)
     end
 
     # A session saved BEFORE markdown rendering existed has no key at all: that
@@ -478,7 +478,7 @@ RSpec.describe Harness do
 
       harness = build_harness(session_id: id, resume_data: data)
 
-      expect(harness.markdown?).to be(false)
+      expect(harness.settings.markdown?).to be(false)
     end
 
     # issue #303: the palette the session was saved with is restored during
@@ -491,7 +491,7 @@ RSpec.describe Harness do
       harness = build_harness(session_id: id, resume_data: saved_data(id),
                               output_palette: 'default')
 
-      expect(harness.output_palette.name).to eq('none')
+      expect(harness.settings.output_palette.name).to eq('none')
     end
 
     it 'falls back to the default palette when the stored name no longer exists' do
@@ -500,7 +500,7 @@ RSpec.describe Harness do
 
       harness = build_harness(session_id: id, resume_data: saved_data(id))
 
-      expect(harness.output_palette.name).to eq('default')
+      expect(harness.settings.output_palette.name).to eq('default')
     end
 
     # issue #188: a run that changed postures but sent no prompt now saves a
@@ -519,10 +519,10 @@ RSpec.describe Harness do
 
       harness = build_harness(session_id: id, resume_data: saved_data(id))
 
-      expect(harness.yolo?).to be(true)
-      expect(harness.stream?).to be(true)
-      expect(harness.markdown?).to be(true)
-      expect(harness.output_palette.name).to eq('basic16')
+      expect(harness.settings.yolo?).to be(true)
+      expect(harness.settings.stream?).to be(true)
+      expect(harness.settings.markdown?).to be(true)
+      expect(harness.settings.output_palette.name).to eq('basic16')
       expect(harness.session.messages.map { |m| m[:role] }).to eq(['system'])
     end
 
@@ -1314,12 +1314,12 @@ RSpec.describe Harness do
   # so the drain loop never re-resolves a name per line.
   describe '#output_palette (issue #303)' do
     it 'resolves to the default palette when the option is absent' do
-      expect(build_harness.output_palette.name).to eq('default')
+      expect(build_harness.settings.output_palette.name).to eq('default')
     end
 
     it 'resolves a configured name to that palette' do
-      expect(build_harness(output_palette: 'basic16').output_palette.name).to eq('basic16')
-      expect(build_harness(output_palette: 'none').output_palette.name).to eq('none')
+      expect(build_harness(output_palette: 'basic16').settings.output_palette.name).to eq('basic16')
+      expect(build_harness(output_palette: 'none').settings.output_palette.name).to eq('none')
     end
 
     it 'rejects an unknown name when the creator applies it, before any LLM call' do
@@ -1335,17 +1335,17 @@ RSpec.describe Harness do
     it 'defaults to MANUAL when the option is absent' do
       harness = build_harness(command_safety_check: true)
 
-      expect(harness.command_safety_auto_approve).to be(false)
-      expect(harness.command_mode_label).to eq('MANUAL')
-      expect(harness.command_safety_auto_approve_effective?).to be(false)
+      expect(harness.settings.command_safety_auto_approve).to be(false)
+      expect(harness.settings.command_mode_label).to eq('MANUAL')
+      expect(harness.settings.command_safety_auto_approve_effective?).to be(false)
     end
 
     it 'starts in AUTO-APPROVE when the option is set (config default)' do
       harness = build_harness(command_safety_check: true,
                               command_safety_auto_approve: true)
 
-      expect(harness.command_mode_label).to eq('AUTO-APPROVE')
-      expect(harness.command_safety_auto_approve_effective?).to be(true)
+      expect(harness.settings.command_mode_label).to eq('AUTO-APPROVE')
+      expect(harness.settings.command_safety_auto_approve_effective?).to be(true)
     end
 
     it 'labels the posture MANUAL with the check off (issue #221 review)' do
@@ -1355,8 +1355,8 @@ RSpec.describe Harness do
       harness = build_harness(command_safety_check: false,
                               command_safety_auto_approve: true)
 
-      expect(harness.command_mode_label).to eq('MANUAL')
-      expect(harness.command_safety_auto_approve_effective?).to be(false)
+      expect(harness.settings.command_mode_label).to eq('MANUAL')
+      expect(harness.settings.command_safety_auto_approve_effective?).to be(false)
     end
 
     it 'AUTO-APPROVE is only labeled when the check is on' do
@@ -1365,15 +1365,15 @@ RSpec.describe Harness do
       harness = build_harness(command_safety_check: false,
                               command_safety_auto_approve: true)
 
-      expect(harness.command_mode_label).to eq('MANUAL')
+      expect(harness.settings.command_mode_label).to eq('MANUAL')
     end
 
     it 'coerces the setter to a boolean' do
       harness = build_harness(command_safety_check: true)
-      harness.command_safety_auto_approve = 'yes'
-      expect(harness.command_safety_auto_approve).to be(false)
-      harness.command_safety_auto_approve = true
-      expect(harness.command_safety_auto_approve).to be(true)
+      harness.settings.command_safety_auto_approve = 'yes'
+      expect(harness.settings.command_safety_auto_approve).to be(false)
+      harness.settings.command_safety_auto_approve = true
+      expect(harness.settings.command_safety_auto_approve).to be(true)
     end
   end
 
@@ -1386,45 +1386,45 @@ RSpec.describe Harness do
     it 'defaults to off' do
       harness = build_harness
 
-      expect(harness.yolo?).to be(false)
+      expect(harness.settings.yolo?).to be(false)
     end
 
     it 'starts ON when the yolo option is set (config initial posture)' do
       harness = build_harness(yolo: true)
 
-      expect(harness.yolo?).to be(true)
-      expect(harness.command_mode_label).to eq('YOLO')
+      expect(harness.settings.yolo?).to be(true)
+      expect(harness.settings.command_mode_label).to eq('YOLO')
     end
 
     it 'YOLO wins over AUTO-APPROVE / MANUAL in the mode label' do
       harness = build_harness(command_safety_check: true,
                               command_safety_auto_approve: true, yolo: true)
 
-      expect(harness.command_mode_label).to eq('YOLO')
+      expect(harness.settings.command_mode_label).to eq('YOLO')
     end
 
     it 'YOLO keeps its label even with the safety check off' do
       harness = build_harness(command_safety_check: false, yolo: true)
 
-      expect(harness.command_mode_label).to eq('YOLO')
+      expect(harness.settings.command_mode_label).to eq('YOLO')
     end
 
     it 'toggle_yolo flips the posture and returns the new label' do
       harness = build_harness
 
-      expect(harness.toggle_yolo).to eq('YOLO ON')
-      expect(harness.yolo?).to be(true)
-      expect(harness.toggle_yolo).to eq('YOLO OFF')
-      expect(harness.yolo?).to be(false)
+      expect(harness.settings.toggle_yolo).to eq('YOLO ON')
+      expect(harness.settings.yolo?).to be(true)
+      expect(harness.settings.toggle_yolo).to eq('YOLO OFF')
+      expect(harness.settings.yolo?).to be(false)
     end
 
     it 'coerces the setter to a boolean (truthy junk stays OFF)' do
       harness = build_harness
 
-      harness.yolo = 'yes'
-      expect(harness.yolo?).to be(false)
-      harness.yolo = true
-      expect(harness.yolo?).to be(true)
+      harness.settings.yolo = 'yes'
+      expect(harness.settings.yolo?).to be(false)
+      harness.settings.yolo = true
+      expect(harness.settings.yolo?).to be(true)
     end
 
     # issue #274: the same posture gates FILE access, so Harness wires its
@@ -1435,12 +1435,12 @@ RSpec.describe Harness do
       expect(harness.file_list.posture).to be_a Proc
       expect(harness.file_list.readable?('lib/a.rb')).to be(false)
 
-      harness.toggle_yolo
+      harness.settings.toggle_yolo
       expect(harness.file_list.readable?('lib/a.rb')).to be(true)
       expect(harness.file_list.writable?('lib/a.rb')).to be(true)
       expect(harness.file_list.deletable?('lib/a.rb')).to be(true)
 
-      harness.toggle_yolo
+      harness.settings.toggle_yolo
       expect(harness.file_list.readable?('lib/a.rb')).to be(false)
     end
 
@@ -2219,40 +2219,40 @@ RSpec.describe Harness do
     it 'defaults to buffered when the option is absent' do
       harness = build_harness
 
-      expect(harness.stream?).to be(false)
-      expect(harness.stream_mode_label).to be_nil
+      expect(harness.settings.stream?).to be(false)
+      expect(harness.settings.stream_mode_label).to be_nil
     end
 
     it 'starts streaming when the option is set (config key)' do
       harness = build_harness(stream: true)
 
-      expect(harness.stream?).to be(true)
-      expect(harness.stream_mode_label).to eq('STREAM')
+      expect(harness.settings.stream?).to be(true)
+      expect(harness.settings.stream_mode_label).to eq('STREAM')
     end
 
     it 'labels only the non-default posture (buffered gets no spinner tag)' do
       harness = build_harness
-      harness.stream = true
-      expect(harness.stream_mode_label).to eq('STREAM')
+      harness.settings.stream = true
+      expect(harness.settings.stream_mode_label).to eq('STREAM')
 
-      harness.stream = false
-      expect(harness.stream_mode_label).to be_nil
+      harness.settings.stream = false
+      expect(harness.settings.stream_mode_label).to be_nil
     end
 
     it 'toggle_stream flips the posture and returns the new label' do
       harness = build_harness
 
-      expect(harness.toggle_stream).to eq('STREAM')
-      expect(harness.stream?).to be(true)
-      expect(harness.toggle_stream).to be_nil
-      expect(harness.stream?).to be(false)
+      expect(harness.settings.toggle_stream).to eq('STREAM')
+      expect(harness.settings.stream?).to be(true)
+      expect(harness.settings.toggle_stream).to be_nil
+      expect(harness.settings.stream?).to be(false)
     end
 
     it 'coerces the setter to a boolean' do
       harness = build_harness
-      harness.stream = 'yes'
+      harness.settings.stream = 'yes'
 
-      expect(harness.stream?).to be(false)
+      expect(harness.settings.stream?).to be(false)
     end
   end
 
@@ -2307,32 +2307,32 @@ RSpec.describe Harness do
     it 'defaults to markdown off when the option is absent' do
       harness = build_harness
 
-      expect(harness.markdown?).to be(false)
+      expect(harness.settings.markdown?).to be(false)
     end
 
     it 'starts markdown on when the option is set (config key)' do
       harness = build_harness(markdown: true)
 
-      expect(harness.markdown?).to be(true)
+      expect(harness.settings.markdown?).to be(true)
     end
 
     it 'toggle_markdown flips the posture and returns the new state' do
       harness = build_harness
 
-      expect(harness.toggle_markdown).to eq('MARKDOWN ON')
-      expect(harness.markdown?).to be(true)
-      expect(harness.toggle_markdown).to eq('MARKDOWN OFF')
-      expect(harness.markdown?).to be(false)
+      expect(harness.settings.toggle_markdown).to eq('MARKDOWN ON')
+      expect(harness.settings.markdown?).to be(true)
+      expect(harness.settings.toggle_markdown).to eq('MARKDOWN OFF')
+      expect(harness.settings.markdown?).to be(false)
     end
 
     it 'coerces the markdown setter to a boolean' do
       harness = build_harness
-      harness.markdown = 'yes'
+      harness.settings.markdown = 'yes'
 
-      expect(harness.markdown?).to be(false)
+      expect(harness.settings.markdown?).to be(false)
 
-      harness.markdown = true
-      expect(harness.markdown?).to be(true)
+      harness.settings.markdown = true
+      expect(harness.settings.markdown?).to be(true)
     end
   end
 
@@ -2341,11 +2341,11 @@ RSpec.describe Harness do
   # the markdown on/off posture. nil = the renderer's default (80% of terminal).
   describe '#markdown_max_width (issue #106)' do
     it 'is nil when the option is absent (the renderer picks 80% of the terminal)' do
-      expect(build_harness.markdown_max_width).to be_nil
+      expect(build_harness.settings.markdown_max_width).to be_nil
     end
 
     it 'reads an explicit column count from options' do
-      expect(build_harness(markdown_max_width: 120).markdown_max_width).to eq(120)
+      expect(build_harness(markdown_max_width: 120).settings.markdown_max_width).to eq(120)
     end
   end
 
@@ -2389,7 +2389,7 @@ RSpec.describe Harness do
     it 'reads the posture per request, so a toggle applies to the next one' do
       client = FakeScriptedClient.new([tool_round('c1'), { content: 'final' }])
       h = scripted(build_harness, client)
-      client.after_call = -> { h.toggle_stream }
+      client.after_call = -> { h.settings.toggle_stream }
 
       h.call_llm
 
