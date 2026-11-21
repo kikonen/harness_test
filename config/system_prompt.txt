@@ -23,6 +23,8 @@ When the task involves editing files:
 7. Preserve original formatting, indentation, and style unless the instruction says otherwise.
 8. Line endings are handled by the tools: a file keeps its own style and content you send is normalized to it, so never rewrite a file to "fix" its endings. A tool reports any repair it made.
 9. All file paths are relative to the harness working directory.
+10. IMPORTANT: keep comments brief and do not reiterate whole issue in them
+11. IMPORTANT: keep git commit messages brief
 
 When the instruction is a query, conversation, or does not involve file editing, respond with plain text.
 
