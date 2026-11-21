@@ -24,6 +24,34 @@ RSpec.describe SessionLogger do
     end
   end
 
+  # issue #548: every line is stamped with the thread's name, which each thread
+  # sets to the job it services. An unnamed thread leaves no stamp.
+  it 'stamps a line with the thread name (the job label the thread set)' do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'harness.log')
+      logger = described_class.build(path)
+
+      t = Thread.new { logger.info('job work') }
+      t.name = "7"
+      t.join
+
+      line = File.read(path).lines.last
+      expect(line).to include('[7]')
+      expect(line).to include('[INFO] job work')
+    end
+  end
+
+  it 'writes no stamp when the thread set no name' do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'harness.log')
+      # Main thread of a spec run has Thread.current.name == nil.
+      described_class.build(path).info('unattributed')
+
+      line = File.read(path).lines.last
+      expect(line).to match(/\[INFO\] unattributed\s*$/)
+    end
+  end
+
   it 'writes through the fixed line format under the per-session path' do
     Dir.mktmpdir do |dir|
       path = File.join(dir, 'harness.log')
