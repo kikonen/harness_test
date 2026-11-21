@@ -16,6 +16,7 @@ require_relative "session_locator"
 require_relative "command_handler"
 require_relative "prompt_reader"
 require_relative "ui"
+require_relative "harness_factory"
 require_relative "session_logger"
 
 # -- CLI ------------------------------------------------------------------
@@ -27,6 +28,7 @@ class CLI
     :session_id,
     :commands,
     :system_saver,
+    :harness_factory,
     :history,
     :ui,
     :saved_jobs
@@ -98,18 +100,6 @@ class CLI
     # session-persisted postures are applied over it by the Harness for a
     # resumed run (#221: the saved choice wins over the config). Ownership:
     # doc/harness_job_design.md.
-
-    # The log path is keyed by the session id the CLI resolved above, so the
-    # CLI builds the per-session logger here and injects it (with the settings)
-    # rather than letting the Harness mint its own (#286).
-    logger   = SessionLogger.build(@locator.session_log_path(session_id))
-    harness = Harness.new(
-      @file_list,
-      settings: @settings,
-      session_id:,
-      resume_data:,
-      logger:)
-
     # The run record and its job list belong to the RUN, not to the single-LLM
     # turn engine (#286): the CLI owns the registry, builds it from the
     # resolved buffer limits, and registers the main turn first (job #0).
@@ -135,10 +125,23 @@ class CLI
     # registry.foreground_job.harness rather than a CLI-held reference. After
     # this line every read below goes through #foreground_harness, never a
     # @harness ivar.
-    main_job = @registry.add_job(kind: :main, harness:)
-    # Each Harness saves its OWN job dir (issue #548 increment 4b): the id is
-    # wired when a harness is attached to a job. The main turn is this job.
-    harness.session_manager.job_id = main_job.id
+    # The main turn is built the SAME way a second agent will be: the factory
+    # adds the job and gives it its own Harness in one step (#548), wiring the
+    # job id onto its save. A run starts with no jobs, so the main add takes
+    # id 0. The CLI injects the session logger (keyed by the resolved id) so
+    # every job's harness shares one log (#286).
+    @harness_factory = HarnessFactory.new(
+      registry: @registry,
+      locator: @locator,
+      settings: @settings,
+      file_list: @file_list,
+      system_saver: @system_saver,
+      logger: SessionLogger.build(@locator.session_log_path(session_id)))
+    @harness_factory.add_harness_job(
+      kind: :main,
+      session_id:,
+      resume_data:,
+      base_file_list: @file_list)
     @saved_jobs = resume_data ? Array(resume_data[:jobs]) : []
 
     if resume_data

@@ -49,22 +49,23 @@ class HarnessFactory
     session_id:,
     dependencies: [],
     requested_by: nil,
-    resume_data: nil
+    resume_data: nil,
+    base_file_list: nil
   )
     job = @registry.add_job(kind:, dependencies:, requested_by:)
-    build_for(job, session_id:, resume_data:) && job
+    build_for(job, session_id:, resume_data:, base_file_list:) && job
   end
 
   # Build this job's own Harness and attach it. `resume_data` is this job's OWN
   # saved half (its chain, active model, param overrides), never the system
   # record - a system record fed to a job Harness would restore one agent's
   # conversation into every job.
-  def build_for(job, session_id:, resume_data: nil)
+  def build_for(job, session_id:, resume_data: nil, base_file_list: nil)
     raise HarnessError, "no job to attach a harness to" if job.nil?
     raise HarnessError, "job #{job.id} already has a harness" if job.harness
 
     harness = Harness.new(
-      job_file_list,
+      job_file_list(base_file_list),
       settings: @settings,
       session_id:,
       resume_data:,
@@ -80,7 +81,14 @@ class HarnessFactory
   # workdir, and a run has ONE log for every job (one Logger object per path is
   # a measured requirement, doc/session_layers_design.md) - a deeper root would
   # fork that file per job.
-  def job_file_list
+  # The initial (main) job reuses the run's OWN FileList: its access grants and
+  # digest cache are system-wide state the CLI (and the commands) already hold on
+  # that object, so the main turn must keep it. A SECOND agent gets a fresh list
+  # rooted at the same run workdir (per-job isolation). Passing base_file_list:
+  # to build_for marks a job as that initial one.
+  def job_file_list(base_file_list = nil)
+    return base_file_list if base_file_list
+
     FileList.new(
       [],
       workdir: @locator.workdir,

@@ -95,6 +95,27 @@ RSpec.describe CLI do
   # issue #276: identity is resolved before anything derived from it is
   # constructed, so on EVERY startup path the log file, the history file and
   # the session directory all sit under the same single id.
+# #548: the main turn is built the SAME way a second agent will be - through
+# HarnessFactory (the factory's first production caller). The main job takes
+# id 0 and keeps the run's OWN FileList (its grants/digests are system-wide),
+# while a later agent would get a fresh per-job list.
+describe 'the main harness is built via HarnessFactory (issue #548)' do
+  it 'wires the factory-built main job with id 0 over the run FileList' do
+    cli = build_cli
+    cli.setup
+
+    main = cli.registry.foreground_job
+    expect(main.kind).to eq(:main)
+    expect(main.id).to eq(0)
+    expect(main.harness).to be(cli.foreground_harness)
+    # The factory wired the job id onto the save.
+    expect(cli.foreground_harness.session_manager.job_id).to eq(0)
+    # The main turn keeps the run's FileList (its access grants live there),
+    # not a fresh per-job list.
+    expect(cli.foreground_harness.file_list).to be(cli.file_list)
+  end
+end
+
   describe 'identity-first bootstrap (issue #276)' do
     it 'a fresh run puts log, history and session dir under its own id' do
       cli  = build_cli
