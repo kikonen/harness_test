@@ -43,12 +43,12 @@ class SessionManager
     @last_autosave = 0
   end
 
-  # The run/world persistence record the run's owner injects (#286 / #548): the
-  # foreground job id and the foreground replay tail, read through RunRecord so
+  # The system/world persistence record the system's owner injects (#286 / #548): the
+  # foreground job id and the foreground replay tail, read through SystemRecord so
   # a per-Harness SessionManager never reaches a scheduling registry it does not
   # own. nil for a Harness built without an owner that injects one - a save then
-  # writes neither run-record key.
-  attr_accessor :run_record
+  # writes neither system-record key.
+  attr_accessor :system_record
 
   # -- Prompt flow ---------------------------------------------------------
 
@@ -612,7 +612,7 @@ class SessionManager
 
   # Find a configured profile by its name or raw model id (nil when absent).
   def find_profile(name)
-    # The catalogue is run-wide static config (#286); the active-model name
+    # The catalogue is system-wide static config (#286); the active-model name
     # that feeds it is runtime state owned here.
     @harness.settings.find_profile(name)
   end
@@ -620,7 +620,7 @@ class SessionManager
   # Apply a model profile to this Harness' ModelConfig in place.
   def apply_profile(profile)
     # The live per-connection values land in THIS Harness' ModelConfig, never
-    # in the run-wide settings a #286 sub-agent also shares. A profile with no
+    # in the system-wide settings a #286 sub-agent also shares. A profile with no
     # 'mcp_images:' block says nothing, so ModelConfig#apply_profile leaves the
     # seeded budget intact.
     @harness.model_config.apply_profile(profile)
@@ -695,32 +695,32 @@ class SessionManager
 
   # -- Persistence ---------------------------------------------------------
 
-  # issue #548: a saved RUN is a directory holding run.json (the run/world half)
+  # issue #548: a saved RUN is a directory holding system.json (the system/world half)
   # and jobs/<id>/ (each job's own files). The file a save writes - what the save
-  # log line and the UI report - is run.json, the run's entry point.
+  # log line and the UI report - is system.json, the system's entry point.
   # issue #276: WHERE a session lives is SessionLocator's knowledge.
-  def session_file_path(id) = @locator.run_file_path(id)
+  def session_file_path(id) = @locator.system_file_path(id)
 
-  # Save the foreground agent's conversation and the run record to disk, split
-  # along the ownership seam (issue #548): run.json carries the run/world state,
+  # Save the foreground agent's conversation and the system record to disk, split
+  # along the ownership seam (issue #548): system.json carries the system/world state,
   # the foreground job's session.json its conversation and model state, and its
   # replay.json the foreground buffer's saved tail. SessionLocator#read_session
   # re-joins them into one resume_data hash, so Harness#restore,
   # apply_resume_state and CLI#setup read one shape regardless of layout. A save
-  # built without an injected run record is the degenerate one-job run whose only
+  # built without an injected system record is the degenerate one-job run whose only
   # job is 0 (the main turn), so a standalone SessionManager still produces a
   # valid layered record.
   def save_session
     id = @harness.session.session_id
     session_h = @harness.session.to_h(@file_list)
-    fg = run_record&.foreground_job || 0
+    fg = system_record&.foreground_job || 0
 
     FileUtils.mkdir_p(@locator.job_dir_path(id, fg))
-    File.write(@locator.run_file_path(id), JSON.generate(run_json(id, session_h)))
+    File.write(@locator.system_file_path(id), JSON.generate(system_json(id, session_h)))
     write_json(@locator.job_session_file_path(id, fg), job_session_json(session_h))
-    write_json(@locator.job_replay_file_path(id, fg), run_record&.replay_tail || [])
+    write_json(@locator.job_replay_file_path(id, fg), system_record&.replay_tail || [])
 
-    @harness.logger.info "session saved: #{id} (#{@locator.run_file_path(id)})"
+    @harness.logger.info "session saved: #{id} (#{@locator.system_file_path(id)})"
     id
   end
 
@@ -750,16 +750,16 @@ class SessionManager
     File.write(path, JSON.generate(data))
   end
 
-  # The run/world half the run's owner (CLI/JobRegistry) holds (#286). access and
-  # the digest cache stay here because they are run-wide TODAY (Session#
-  # restore_access_grants reaches the run-wide FileList), not per-job. The four
+  # The system/world half the system's owner (CLI/JobRegistry) holds (#286). access and
+  # the digest cache stay here because they are system-wide TODAY (Session#
+  # restore_access_grants reaches the system-wide FileList), not per-job. The four
   # postures and mcp_connected are harness/run state, not conversation state, so
   # each is written so a resumed run keeps the choice made for THIS session, and a
   # session saved before a key existed simply has none (#221/#28/#106/#303/#405).
-  # foreground_job/next_id/jobs are the run -> agent map: which job was foreground,
+  # foreground_job/next_id/jobs are the system -> agent map: which job was foreground,
   # the next id (so a resumed run never reuses one) and one entry per retained job
-  # with its edges as IDS (RunRecord#jobs_for_save). No run record -> job-0 record.
-  def run_json(id, session_h)
+  # with its edges as IDS (SystemRecord#jobs_for_save). No system record -> job-0 record.
+  def system_json(id, session_h)
     {
       version: session_h[:version],
       session_id: id,
@@ -772,9 +772,9 @@ class SessionManager
       markdown: @harness.settings.markdown? == true,
       output_palette: @harness.settings.output_palette.name,
       mcp_connected: @harness.mcp_connected_summary,
-      foreground_job: run_record&.foreground_job || 0,
-      next_id: run_record&.next_id || 1,
-      jobs: run_record&.jobs_for_save ||
+      foreground_job: system_record&.foreground_job || 0,
+      next_id: system_record&.next_id || 1,
+      jobs: system_record&.jobs_for_save ||
         [{ id: 0, kind: :main, status: :pending, requested_by: nil, dependencies: [], dir: "jobs/0" }]
     }
   end
@@ -782,7 +782,7 @@ class SessionManager
   # The foreground agent's own conversation half: its message chain (message 0
   # implicit, exactly as Session#to_h stores @messages[1..]), its per-agent model
   # state, and its parameter overrides (#219). It carries NO session_id - a job is
-  # named by its directory plus the id run.json records (DECIDED,
+  # named by its directory plus the id system.json records (DECIDED,
   # doc/session_layers_design.md), so the run UUID is never duplicated in a job
   # file: that is the drift bug Harness#initialize otherwise has to guard.
   def job_session_json(session_h)

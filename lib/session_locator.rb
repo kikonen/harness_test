@@ -27,8 +27,8 @@ class SessionLocator
   # issue #207: the session JSON lives INSIDE its own directory
   # (.harness/sessions/<id>/session.json), alongside its log and history.
   SESSION_FILE = "session.json"
-  # issue #548 (dir per job): a saved run directory holds run.json + jobs/<id>/...
-  RUN_FILE = "run.json"
+  # issue #548 (dir per job): a saved run directory holds system.json + jobs/<id>/...
+  SYSTEM_FILE = "system.json"
   JOBS_DIR = "jobs"
   # A job's replay tail (issue #548): the foreground buffer's saved entries,
   # moved into the job dir on ownership grounds (JobRegistry owns it, not Session).
@@ -56,12 +56,12 @@ class SessionLocator
   end
 
   # -- Layered (dir-per-job) layout (issue #548) ----------------------------
-  # A saved RUN is a session directory holding run.json plus a jobs/<id>/ tree.
+  # A saved SYSTEM is a session directory holding system.json plus a jobs/<id>/ tree.
   # These are the path primitives the layered writer (#save_session) and the
   # reader (#read_session / #list / #search) build on. session_dirs /
-  # session_files below address BOTH a layered run and a #207 dir.
-  def run_file_path(id)
-    File.join(sessions_dir, id, RUN_FILE)
+  # session_files below address BOTH a layered system and a #207 dir.
+  def system_file_path(id)
+    File.join(sessions_dir, id, SYSTEM_FILE)
   end
 
   def job_dir_path(id, job_id)
@@ -70,7 +70,7 @@ class SessionLocator
 
   # A job's conversation file. It carries NO session_id (a job is named by this
   # path, doc/session_layers_design.md); the run UUID lives in the dir name and
-  # run.json only.
+  # system.json only.
   def job_session_file_path(id, job_id)
     File.join(job_dir_path(id, job_id), SESSION_FILE)
   end
@@ -79,10 +79,10 @@ class SessionLocator
     File.join(job_dir_path(id, job_id), REPLAY_FILE)
   end
 
-  # True when the directory is a layered RUN (it has run.json). A #207 layout
-  # dir (top-level session.json, no run.json) is not.
-  def run_dir?(id)
-    File.file?(run_file_path(id))
+  # True when the directory is a layered SYSTEM (it has system.json). A #207 layout
+  # dir (top-level session.json, no system.json) is not.
+  def system_dir?(id)
+    File.file?(system_file_path(id))
   end
 
   # The session's own log file (issue #113). It is part of WHERE a session
@@ -93,28 +93,28 @@ class SessionLocator
 
   # Session DIRECTORY names (issue #548). The unit of a saved session is its
   # directory, which is either the #207 layout (a top-level session.json) or a
-  # layered RUN (a run.json + jobs/<id>/). Enumerating directories - not a
+  # layered RUN (a system.json + jobs/<id>/). Enumerating directories - not a
   # one-level session.json glob - is what lets both layouts coexist: the old
-  # glob returned [] for a layered run (its session.json is nested under jobs/),
+  # glob returned [] for a layered system (its session.json is nested under jobs/),
   # which would break /sessions, --resume, --continue and --delete-session the
   # moment the writer switched layouts. A stray loose file is not a directory.
   def session_dirs
     return [] unless File.directory?(sessions_dir)
 
     Dir.glob(File.join(sessions_dir, "*")).select do |dir|
-      File.directory?(dir) && (File.file?(File.join(dir, RUN_FILE)) ||
+      File.directory?(dir) && (File.file?(File.join(dir, SYSTEM_FILE)) ||
                                File.file?(File.join(dir, SESSION_FILE)))
     end
   end
 
-  # The saved JSON that names each session directory: run.json for a layered run,
+  # The saved JSON that names each session directory: system.json for a layered system,
   # session.json for a #207 session. Callers that need the directory take
   # File.dirname of the path. #find_session_file / #list / #search / #newest_*
   # all derive from this so both layouts are addressed the same way.
   def session_files
     session_dirs.map do |dir|
-      run = File.join(dir, RUN_FILE)
-      File.file?(run) ? run : File.join(dir, SESSION_FILE)
+      sys_path = File.join(dir, SYSTEM_FILE)
+      File.file?(sys_path) ? sys_path : File.join(dir, SESSION_FILE)
     end
   end
 
@@ -180,7 +180,7 @@ class SessionLocator
   # id is ALREADY settled - which is why this returns data instead of doing
   # the restore itself).
   #
-  # A layered RUN (issue #548) stores its data split across run.json and the
+  # A layered SYSTEM (issue #548) stores its data split across system.json and the
   # foreground job's files; a #207 session stores one flat session.json. Both
   # are reassembled into the SAME flat hash so the resume consumers (Harness#
   # restore, apply_resume_state, CLI#setup) read one shape regardless of layout
@@ -191,17 +191,19 @@ class SessionLocator
     raise HarnessError, "no saved session matching '#{id}' (see /sessions)" unless path
 
     session_id = File.basename(File.dirname(path))
-    return JSON.parse(File.read(path), symbolize_names: true) unless run_dir?(session_id)
+    unless system_dir?(session_id)
+      return JSON.parse(File.read(path), symbolize_names: true)
+    end
 
-    assemble_run(session_id)
+    assemble_system(session_id)
   end
 
-  # The layered run record (issue #548): run.json of a session directory, parsed
-  # symbolized. Raises when the id has no run record (a #207 session has none).
-  def read_run(id)
-    path = run_file_path(id)
+  # The layered system record (issue #548): system.json of a session directory, parsed
+  # symbolized. Raises when the id has no system record (a #207 session has none).
+  def read_system(id)
+    path = system_file_path(id)
     unless File.file?(path)
-      raise HarnessError, "no run record for session '#{id}' (see /sessions)"
+      raise HarnessError, "no system record for session '#{id}' (see /sessions)"
     end
 
     JSON.parse(File.read(path), symbolize_names: true)
@@ -276,29 +278,29 @@ class SessionLocator
 
   private
 
-  # The flat data hash of one session ENTRY file: run.json for a layered run (the
+  # The flat data hash of one session ENTRY file: system.json for a layered system (the
   # foreground job's conversation is folded in so a /sessions message count and a
-  # search hit describe the run's real conversation, not an empty run.json), or
-  # the #207 flat session.json as-is. A layered run with no readable foreground
-  # job still lists (its run-level keys remain); only its message count is 0.
+  # search hit describe the system's real conversation, not an empty system.json), or
+  # the #207 flat session.json as-is. A layered system with no readable foreground
+  # job still lists (its system-level keys remain); only its message count is 0.
   def entry_data(path)
     id = File.basename(File.dirname(path))
-    return assemble_run(id) if File.basename(path) == RUN_FILE
+    return assemble_system(id) if File.basename(path) == SYSTEM_FILE
 
     JSON.parse(File.read(path), symbolize_names: true)
   end
 
-  # Re-join a layered run into the flat resume_data hash: run.json supplies the
-  # run/world keys (identity, postures, access, file_cache, foreground, jobs),
+  # Re-join a layered system into the flat resume_data hash: system.json supplies the
+  # system/world keys (identity, postures, access, file_cache, foreground, jobs),
   # the foreground job's session.json supplies its conversation and per-agent
   # model state, replay.json supplies the saved tail. Disjoint by construction,
   # so a plain merge is the whole assembly. A foreground job whose dir was
-  # dropped contributes nothing (an empty conversation) - the run-level state
+  # dropped contributes nothing (an empty conversation) - the system-level state
   # still restores.
-  def assemble_run(session_id)
-    run    = read_run(session_id)
-    fg     = run[:foreground_job]
-    merged = run.dup
+  def assemble_system(session_id)
+    record = read_system(session_id)
+    fg     = record[:foreground_job]
+    merged = record.dup
     if fg && File.file?(job_session_file_path(session_id, fg))
       merged.merge!(read_job_session(session_id, fg))
     end

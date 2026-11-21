@@ -1,16 +1,16 @@
 # frozen_string_literal: true
 
-# The run's own persistence record - the run/world half of what save_session
-# writes (issue #548 increment 1). Built by the run's owner (the CLI, from the
+# The system's own persistence record - the system/world half of what save_session
+# writes (issue #548 increment 1). Built by the system's owner (the CLI, from the
 # JobRegistry it owns) and injected into SessionManager in place of the raw
 # registry, so a per-Harness SessionManager no longer reaches a scheduling
 # registry it does not own (doc/harness_job_design.md: "its owner injects it").
 #
-# Increment 1 keeps the single-file layout: RunRecord only supplies the keys the
+# Increment 1 keeps the single-file layout: SystemRecord only supplies the keys the
 # registry owns - the foreground job id and the foreground buffer's replay tail -
 # read live so a save records the registry as it is at save time, not a snapshot
 # taken at CLI#setup (jobs are added and the foreground switches during a run).
-class RunRecord
+class SystemRecord
   def initialize(registry)
     @registry = registry
   end
@@ -34,7 +34,7 @@ class RunRecord
     @registry.next_id
   end
 
-  # One run.json entry per retained job (issue #548). The run -> agent map and
+  # One system.json entry per retained job (issue #548). The system -> agent map and
   # the job list the reader needs to know which job dirs a run owns. EDGES ARE
   # SERIALIZED AS IDS here (a Job reference is not JSON): requested_by and
   # dependencies become int ids. Re-resolving those ids back to live Jobs on
