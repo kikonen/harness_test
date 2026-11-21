@@ -227,13 +227,17 @@ class SessionLocator
   # than failing the whole listing.
   def list
     session_files.sort_by { |p| File.mtime(p) }.reverse.map do |path|
+      id   = File.basename(File.dirname(path))
       data = entry_data(path)
+      jobs = job_breakdown(data)
       {
-        id:       File.basename(File.dirname(path)),
+        id:,
         path:,
         saved_at: File.mtime(path),
-        messages: (data[:messages] || []).size,
-        files:    (data[:files] || []).size,
+        messages: jobs.sum { |j| j[:messages] },
+        job_breakdown: jobs,
+        files:    grant_count(data),
+        jobs:     jobs.size,
         workdir:  data[:workdir]
       }
     rescue StandardError
@@ -253,6 +257,7 @@ class SessionLocator
     return [] if q.empty?
 
     session_files.sort_by { |p| File.mtime(p) }.reverse.filter_map do |path|
+      id   = File.basename(File.dirname(path))
       data = begin
         entry_data(path)
       rescue StandardError
@@ -260,15 +265,14 @@ class SessionLocator
       end
       next if data.nil?
 
-      id      = File.basename(File.dirname(path))
-      matches = match_locations(data, id, query: q)
+      matches = match_all(id, data, q)
       next if matches.empty?
 
       {
         id:,
         path:,
         saved_at:   File.mtime(path),
-        messages:   (data[:messages] || []).size,
+        messages:   job_breakdown(data).sum { |j| j[:messages] },
         workdir:    data[:workdir],
         hits:       matches.size,
         snippet:    matches.first
@@ -278,14 +282,13 @@ class SessionLocator
 
   private
 
-  # The flat data hash of one session ENTRY file: system.json for a layered system (the
-  # foreground job's conversation is folded in so a /sessions message count and a
-  # search hit describe the system's real conversation, not an empty system.json), or
-  # the #207 flat session.json as-is. A layered system with no readable foreground
-  # job still lists (its system-level keys remain); only its message count is 0.
+  # The data hash of one session ENTRY file for the list/search side: system.json
+  # for a layered system (its recorded jobs carry each job's conversation size), or
+  # the #207 flat session.json as-is. Resume keeps its own assemble_system - a
+  # listing never needs the conversation folded back in.
   def entry_data(path)
     id = File.basename(File.dirname(path))
-    return assemble_system(id) if File.basename(path) == SYSTEM_FILE
+    return read_system(id) if File.basename(path) == SYSTEM_FILE
 
     JSON.parse(File.read(path), symbolize_names: true)
   end
@@ -318,22 +321,64 @@ class SessionLocator
     JSON.parse(File.read(path), symbolize_names: true)
   end
 
+  # [{id:, messages:}] for one session: the per-job conversation sizes a save
+  # records in system.json's job entries (no job-file reads). A #207 flat
+  # session is the degenerate one-job case, read from its own messages.
+  def job_breakdown(data)
+    return Array(data[:jobs]).map do |job|
+      { id: job[:id], messages: job[:messages].to_i }
+    end if data.key?(:jobs)
+
+    [{ id: 0, messages: (data[:messages] || []).size }]
+  end
+
+  # A modern save keeps grants under the per-mode access hash; a pre-#92 file
+  # used the flat files/dirs/trees lists. Count the union of distinct paths.
+  def grant_count(data)
+    access = data[:access] || data["access"]
+    return legacy_grant_count(data) unless access.is_a?(Hash)
+
+    paths = []
+    %w[both read write delete].each do |section_key|
+      section = access[section_key.to_sym] || access[section_key] || {}
+      %w[files dirs flat_dirs].each do |tier|
+        paths.concat(Array(section[tier.to_sym] || section[tier]))
+      end
+    end
+    paths.uniq.size
+  end
+
+  def legacy_grant_count(data)
+    (Array(data[:files]) + Array(data[:dirs]) + Array(data[:trees])).uniq.size
+  end
+
   def valid_id?(id)
     !id.to_s.strip.empty? && id.to_s.match?(/\A[0-9a-fA-F-]+\Z/)
   end
 
-  # Where a query appears in one session: the id, then each message content.
-  # Returns one snippet per location that matches, so a session that mentions
-  # the query several times reports its hit count but the model still only
-  # sees compact windows, not the whole conversation.
-  def match_locations(data, id, query:)
+  # Where a query appears in one session: the id, then every job's message text.
+  # A layered system stores each conversation in its own jobs/<id>/session.json,
+  # so a search reads them all (a sub-agent transcript must be findable, not just
+  # the foreground's). Returns one snippet per matching location.
+  def match_all(id, data, query)
     found = []
     found << snippet(id.to_s, query) if id.to_s.downcase.include?(query)
-    (data[:messages] || []).each do |msg|
-      text = msg[:content].to_s
+    job_texts(id, data).each do |content|
+      text = content.to_s
       found << snippet(text, query) if text.downcase.include?(query)
     end
     found
+  end
+
+  # The message contents of every conversation a session owns: the flat file for
+  # a #207 session, every retained job's session.json for a layered system.
+  def job_texts(id, data)
+    return Array(data[:messages]).map { |m| m[:content] } unless system_dir?(id)
+
+    Array(read_system(id)[:jobs]).flat_map do |job|
+      path = job_session_file_path(id, job[:id])
+      File.file?(path) ? Array(parse_json(path)[:messages]).map { |m| m[:content] } : []
+    end
   end
 
   # A compact window of text centred on the first case-insensitive occurrence

@@ -42,7 +42,7 @@ RSpec.describe SessionLocator do
     FileUtils.mkdir_p(dir)
     run_data = { session_id: id, workdir:, next_id: jobs.max + 1,
                  foreground_job: jobs.min,
-                 jobs: jobs.map { |j| { id: j, dir: "jobs/#{j}" } } }
+                 jobs: jobs.map { |j| { id: j, dir: "jobs/#{j}", messages: 1 } } }
     run_path = File.join(dir, 'system.json')
     File.write(run_path, JSON.generate(run_data))
     jobs.each do |j|
@@ -246,6 +246,34 @@ RSpec.describe SessionLocator do
       expect(entry[:saved_at]).to be_a(Time)
     end
 
+    # The /sessions "files" column is a GRANT count (SessionsCommand HELP), but a
+    # modern save stores grants under the per-mode "access" hash and never writes
+    # a literal "files" key, so a naive data[:files].size always read 0.
+    it 'counts grants from the modern per-mode access hash' do
+      dir  = File.join(workdir, '.harness', 'sessions', sid_a)
+      path = File.join(dir, 'session.json')
+      FileUtils.mkdir_p(dir)
+      File.write(path, JSON.generate({
+                                      session_id: sid_a, workdir:,
+                                      messages: [{ role: 'user', content: 'm0' }],
+                                      access: {
+                                        both:  { files: ['lib/a.rb'], dirs: [], flat_dirs: [] },
+                                        read:  { files: [], dirs: ['spec/lib'], flat_dirs: [] },
+                                        write: { files: [], dirs: [], flat_dirs: [] },
+                                        delete: { files: [], dirs: [], flat_dirs: [] }
+                                      }
+                                    }))
+
+      expect(locator.list.find { |s| s[:id] == sid_a }[:files]).to eq(2)
+    end
+
+    it 'counts a grant that spans sections only once' do
+      seed_session(sid_a)
+      # seed_session writes files: ['lib/a.rb'] (legacy shape); a duplicate
+      # across sections must not inflate the union.
+      expect(locator.list.find { |s| s[:id] == sid_a }[:files]).to eq(1)
+    end
+
     it 'skips an unreadable session file instead of failing the listing' do
       seed_session(sid_a)
       path = seed_session(sid_b)
@@ -255,21 +283,22 @@ RSpec.describe SessionLocator do
     end
   end
 
-  # issue #548: a layered system lists/searches by the foreground job's conversation
-  # (system.json itself has no messages key), so /sessions counts and #search hits
-  # describe the real conversation rather than an empty system record.
+  # issue #548: messages are PER JOB - a layered system has no single "session
+  # messages" number. /sessions reports the sum of the recorded per-job counts in
+  # system.json, and #search reads every job's conversation, not just the foreground.
   describe '#list / #search of a layered system (issue #548)' do
-    it 'counts the foreground job messages, not an empty system.json' do
-      seed_system(sid_c, jobs: [0])
+    it 'sums the recorded per-job message counts, not an empty system.json' do
+      seed_system(sid_c, jobs: [0, 1]) # seed records messages: 1 per job
 
       entry = locator.list.find { |s| s[:id] == sid_c }
-      expect(entry[:messages]).to eq(1) # seed_system writes one message per job
+      expect(entry[:messages]).to eq(2)
+      expect(entry[:jobs]).to eq(2)
     end
 
-    it 'searches a layered system by its job conversation text' do
-      seed_system(sid_c, jobs: [0]) # message content is "job0"
+    it 'searches a layered system across every job, not just the foreground' do
+      seed_system(sid_c, jobs: [0, 1]) # job 1's content is "job1"
 
-      expect(locator.search('job0').map { |m| m[:id] }).to eq([sid_c])
+      expect(locator.search('job1').map { |m| m[:id] }).to eq([sid_c])
     end
   end
 
