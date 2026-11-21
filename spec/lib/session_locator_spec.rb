@@ -382,6 +382,36 @@ RSpec.describe SessionLocator do
         .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'jobs', '0'))
       expect(locator.job_session_file_path(sid_a, 3))
         .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'jobs', '3', 'session.json'))
+      expect(locator.job_file_path(sid_a, 3))
+        .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'jobs', '3', 'job.json'))
+      expect(locator.job_replay_file_path(sid_a, 3))
+        .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'jobs', '3', 'replay.json'))
+    end
+
+    # issue #548 increment 1: a job's OWN record is a sibling of its session.json
+    # and replay.json inside the job dir - the job's facts, not its conversation
+    # and not its shown output.
+    it 'reads a job.json symbolized beside the job session.json' do
+      seed_system(sid_a, jobs: [0])
+      File.write(locator.job_file_path(sid_a, 0),
+                 JSON.generate({ id: 0, kind: 'sub_agent', status: 'finished',
+                                 result: 'answer', requested_by: 1, dependencies: [2] }))
+
+      record = locator.read_job_record(sid_a, 0)
+
+      expect(record[:kind]).to eq('sub_agent')
+      expect(record[:status]).to eq('finished')
+      expect(record[:result]).to eq('answer')
+      expect(record[:requested_by]).to eq(1)
+      expect(record[:dependencies]).to eq([2])
+      expect(record).not_to have_key(:session_id)
+    end
+
+    it 'raises reading a job record that is not there' do
+      seed_system(sid_a, jobs: [0])
+
+      expect { locator.read_job_record(sid_a, 5) }
+        .to raise_error(HarnessError, /no job record for job 5 of session/)
     end
 
     it 'reports a layered system dir as a run, and a #207 dir as not' do

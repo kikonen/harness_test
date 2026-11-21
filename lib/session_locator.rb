@@ -33,6 +33,9 @@ class SessionLocator
   # A job's replay tail (issue #548): the foreground buffer's saved entries,
   # moved into the job dir on ownership grounds (JobRegistry owns it, not Session).
   REPLAY_FILE = "replay.json"
+  # A job's own record (issue #548 increment 1): kind, status, result and edges
+  # AS IDS - the per-job detail the system.json jobs[] index points at.
+  JOB_FILE = "job.json"
   # issue #113: each session logs to its own file inside its session dir, so
   # concurrent sessions in one workdir do not interleave in a shared log.
   SESSION_LOG_FILE = "harness.log"
@@ -73,6 +76,12 @@ class SessionLocator
   # system.json only.
   def job_session_file_path(id, job_id)
     File.join(job_dir_path(id, job_id), SESSION_FILE)
+  end
+
+  # A job's own record file (kind/status/result/edges), the per-job detail the
+  # system.json jobs[] index points at (issue #548 increment 1).
+  def job_file_path(id, job_id)
+    File.join(job_dir_path(id, job_id), JOB_FILE)
   end
 
   def job_replay_file_path(id, job_id)
@@ -216,6 +225,18 @@ class SessionLocator
     path = job_session_file_path(id, job_id)
     unless File.file?(path)
       raise HarnessError, "no session for job #{job_id} of session '#{id}'"
+    end
+
+    JSON.parse(File.read(path), symbolize_names: true)
+  end
+
+  # A job's own record (jobs/<id>/job.json): kind, status, result and edges as
+  # ids. Read by the per-job resume path (issue #548 increment 1 write side; the
+  # id -> live Job re-resolution is increment 2). Raises when the job has no record.
+  def read_job_record(id, job_id)
+    path = job_file_path(id, job_id)
+    unless File.file?(path)
+      raise HarnessError, "no job record for job #{job_id} of session '#{id}'"
     end
 
     JSON.parse(File.read(path), symbolize_names: true)

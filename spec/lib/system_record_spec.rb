@@ -194,4 +194,66 @@ RSpec.describe SystemRecord do
       expect(replay.first[:content]).to eq('shown')
     end
   end
+
+  # issue #548 increment 1 (per-job record): every retained job gets its own
+  # jobs/<id>/job.json - the detail system.json's jobs[] index points at.
+  it 'writes a job.json for every retained job (the per-job record)' do
+    Dir.mktmpdir do |dir|
+      id      = 'eeeeeeee-0000-0000-0000-000000000000'
+      locator = SessionLocator.new(dir)
+      registry = JobRegistry.new
+      main  = registry.add_job(kind: :main)
+      child = registry.add_job(kind: :sub_agent, requested_by: main, dependencies: [main])
+      child.finish('child answer')
+
+      described_class.new(registry).write_system_files(
+        locator, id, session_h(id, dir), harness_double(SystemSettings.from_options({}))
+      )
+
+      job0 = locator.read_job_record(id, 0)
+      job1 = locator.read_job_record(id, 1)
+      # The round trip is JSON: a Symbol value reads back as a String.
+      expect(job0).to eq(id: 0, kind: 'main', status: 'pending', result: nil,
+                         requested_by: nil, dependencies: [])
+      expect(job1[:kind]).to eq('sub_agent')
+      expect(job1[:status]).to eq('finished')
+      expect(job1[:result]).to eq('child answer')
+      expect(job1[:requested_by]).to eq(main.id)
+      expect(job1[:dependencies]).to eq([main.id])
+      # A job record carries no run UUID: the directory name and system.json own it.
+      expect(job1).not_to have_key(:session_id)
+    end
+  end
+
+  it 'records a job result that is not JSON-representable as a labelled placeholder' do
+    Dir.mktmpdir do |dir|
+      id      = 'ffffffff-0000-0000-0000-000000000000'
+      locator = SessionLocator.new(dir)
+      registry = JobRegistry.new
+      registry.add_job(kind: :main).finish(->(x) { x })
+
+      described_class.new(registry).write_system_files(
+        locator, id, session_h(id, dir), harness_double(SystemSettings.from_options({}))
+      )
+
+      expect(locator.read_job_record(id, 0)[:result]).to eq('(unserializable Proc)')
+    end
+  end
+
+  it 'writes the degenerate job.json when the record has no registry' do
+    Dir.mktmpdir do |dir|
+      id      = 'abababab-0000-0000-0000-000000000000'
+      locator = SessionLocator.new(dir)
+
+      described_class.new(nil).write_system_files(
+        locator, id, session_h(id, dir), harness_double(SystemSettings.from_options({}))
+      )
+
+      # A nil-registry save has no Job to take a result from, so it records an
+      # unfinished job with the fields a live Job would supply.
+      expect(locator.read_job_record(id, 0)).to eq(
+        id: 0, kind: 'main', status: 'pending', result: nil, requested_by: nil, dependencies: []
+      )
+    end
+  end
 end
