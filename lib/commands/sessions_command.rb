@@ -14,7 +14,7 @@ module Commands
     HELP = CommandHelp.new(
       usage: "sessions",
       summary: "List saved sessions in this working directory (id, saved-at, " \
-               "message and grant counts)",
+               "message, grant and job counts)",
       group: :session,
       see_also: %w[save saving])
 
@@ -30,7 +30,7 @@ module Commands
       emit_list(
         title: "Saved sessions (#{sessions.size}):",
         kind: :table,
-        columns: %i[id saved messages files workdir],
+        columns: %i[id saved messages files jobs workdir],
         items: sessions.map { |session| session_item(session) },
         footer: [footer_text],
         origin: "sessions")
@@ -42,8 +42,16 @@ module Commands
         saved: session[:saved_at].strftime("%Y-%m-%d %H:%M:%S"),
         messages: session[:messages],
         files: session[:files],
+        jobs: jobs_cell(session[:job_breakdown]),
         workdir: session[:workdir]
       }
+    end
+
+    # The jobs column is a per-job breakdown, not a count: messages only ever
+    # belong to a job, so a bare number would ask "messages of what?". One row
+    # per job (the renderer stacks a multi-line cell into table rows).
+    def jobs_cell(breakdown)
+      Array(breakdown).map { |j| "job #{j[:id]}: #{j[:messages]}" }.join("\n\n")
     end
   end
 end

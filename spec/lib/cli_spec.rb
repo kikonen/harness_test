@@ -351,6 +351,9 @@ RSpec.describe CLI do
       system_data = JSON.parse(File.read(locator.system_file_path(id)))
       expect(system_data).not_to have_key('messages')
       expect(system_data['jobs'].map { |j| j['id'] }).to eq([0])
+      # The system records each job's conversation size so /sessions can report a
+      # per-job breakdown from metadata alone (SystemRecord#jobs_for_save).
+      expect(system_data['jobs'].map { |j| j['messages'] }).to eq([2])
       job_data = JSON.parse(File.read(locator.job_session_file_path(id, 0)))
       expect(job_data['messages'].map { |m| m['content'] }).to include('earlier prompt')
 
