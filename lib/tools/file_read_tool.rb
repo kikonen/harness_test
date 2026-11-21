@@ -4,6 +4,7 @@ require_relative "../tool"
 require_relative "../file_list"
 require_relative "../text_normalizer"
 require_relative "../output_budget"
+require_relative "../result_spill"
 
 module Tools
 
@@ -47,7 +48,8 @@ module Tools
       # A spilled tool result lives in the session dir, which FileList blocks as
       # harness state - no grant can make it readable through the normal route,
       # so the owner is asked BEFORE the grant dialog (issue #551).
-      if @spill_reader && File.file?(path) && (spilled = @spill_reader.read_spilled_result(path))
+      spilled = @spill_reader&.read_spilled_result(path) if File.file?(path)
+      if spilled&.start_with?(ResultSpill::ALREADY_CAPPED_MARK)
         status(:ok, "#{shown} (spilled tool output)")
         return clean_text(spilled)
       end

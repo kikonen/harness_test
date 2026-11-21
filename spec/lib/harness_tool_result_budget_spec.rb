@@ -32,6 +32,10 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
     ".harness/sessions/#{session}/jobs/0/results/#{tool}-#{seq}.txt"
   end
 
+  def log_of(session)
+    File.read(File.join(workdir, '.harness', 'sessions', session, 'harness.log'))
+  end
+
   it 'leaves an ordinary result untouched' do
     h = build
 
@@ -136,6 +140,35 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
 
       expect(h.read_spilled_result(File.join(workdir, spill_path('sess-7'))))
         .to include('omitted')
+    end
+    # A spill file is slightly BIGGER than the byte budget (the notice is added
+    # on the way out), so a spill read that came back over the limit was fitted
+    # again: the read spilled the spill and harness.log reported a cap the model
+    # never received.
+    it 'does not re-spill a spill read that is already capped' do
+      h = build(output_result_bytes: 10_000, session_id: 'sess-9')
+      h.budget_tool_result('run.command', huge(bytes: 10_060))
+
+      out = h.budget_tool_result('file.read',
+                                 h.read_spilled_result(spill_path('sess-9')))
+
+      expect(Dir.glob(File.join(workdir, '.harness', 'sessions', 'sess-9',
+                                'jobs', '0', 'results', '*'))
+             .map { |f| File.basename(f) }).to eq(['run.command-1.txt'])
+      expect(log_of('sess-9')).not_to include('tool file.read result')
+      expect(out).not_to include('spilled tool output')
+    end
+
+    it 'still caps a spill read of its own oversized spill file' do
+      h = build(output_result_bytes: 10_000, session_id: 'sess-10')
+      FileUtils.mkdir_p(File.dirname(File.join(workdir, spill_path('sess-10'))))
+      File.write(File.join(workdir, spill_path('sess-10')), huge(bytes: 500_000))
+
+      out = h.budget_tool_result('file.read',
+                                 h.read_spilled_result(spill_path('sess-10')))
+
+      expect(out.bytesize).to be < 20_000
+      expect(out).to include('bytes omitted from the middle of 500000')
     end
   end
 

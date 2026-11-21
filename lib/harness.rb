@@ -966,6 +966,12 @@ class Harness
   def budget_tool_result(name, result)
     return result if result.is_a?(ToolResult)
 
+    # A spill read came back already capped and is exempt: re-fitting it would
+    # spill the spill and log a cap the model never received.
+    if (capped = spill_read_result?(name, result))
+      return capped
+    end
+
     text  = result.to_s
     fit   = OutputBudget.fit(text, limit: output_result_bytes)
     return text unless fit.truncated?
@@ -985,10 +991,21 @@ class Harness
     rel = @file_list.relative_path(@file_list.resolve(path))
     return nil unless rel && result_spill.covers?(rel)
 
-    OutputBudget.read_capped(@file_list.resolve(path),
-                             limit: output_result_bytes)[0]
+    # read_capped so an oversized spill is never loaded whole; the mark tells
+    # budget_tool_result this text is already inside the byte budget.
+    ResultSpill::ALREADY_CAPPED_MARK +
+      OutputBudget.read_capped(@file_list.resolve(path), limit: output_result_bytes)[0]
   rescue SystemCallError => e
     "error: cannot read #{path} (#{e.message})"
+  end
+
+  # The mark a spill read carries (FileReadTool#read_spilled sets it): the text
+  # with the mark stripped, or nil when this result is not one.
+  def spill_read_result?(name, result)
+    return nil unless name == "file.read" && result.is_a?(String)
+    return nil unless result.start_with?(ResultSpill::ALREADY_CAPPED_MARK)
+
+    result[ResultSpill::ALREADY_CAPPED_MARK.length..]
   end
 
   def output_result_bytes
