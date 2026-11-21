@@ -254,6 +254,33 @@ agent gets a fresh per-job `FileList` rooted at the run workdir (the isolation t
 factory exists for). Making the main turn itself per-job is deferred with Blocker A
 (job->id) and the grant-prompt routing it would need.
 
+### How a resumed run restores jobs: the system owner's steps, no foreground fold
+
+Resume is the **system's** work, done in the owner's order - not one flat hash with
+a foreground special case merged into it. `SessionLocator#assemble_system` returns
+the **system half only** (`system.json` as-is: identity, postures, access,
+`file_cache`, `next_id`, the job index) and deliberately carries **no** job
+conversation. Then:
+
+1. **Continue numbering.** The registry is seeded `JobRegistry.new(next_id: <saved
+   next_id>)`, and `add_job(id:)` accepts an explicit id so a saved job is rebuilt
+   at its **saved** id (its live id matches the `jobs/<id>/` dir its files live
+   under). next_id stays past every id in use, so a new job never reuses one on
+   disk (#548 A).
+2. **Rebuild the foreground at its saved id.** The CLI reads the foreground job's
+   own `session.json` (`SystemSaver#resume_main` composes the system half + the
+   job's conversation half) and builds it as an agent via the factory with that
+   `id:`, so a resumed run whose saved foreground was job 2 drives job 2 - not a
+   re-numbered job 0.
+3. **Then set the foreground.** `@registry.foreground = <saved fg>` (a plain
+   assignment; the old `restore_foreground` special case is gone) and the foreground
+   job's own `replay.json` redraws the shown tail.
+
+A non-foreground job that still has a saved dir has no agent to rebuild a
+conversation into (lib builds only one agent per run today), so it stays a
+**dropped** job - stated, not silently rebuilt empty. `job_restores` no longer
+excludes the foreground job: on restore no job is foreground yet.
+
 ### Why a directory, not a set of flat per-job files
 
 Cleanup stays O(1) in the **number of file types** rather than O(job x file kind):
