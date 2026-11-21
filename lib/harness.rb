@@ -25,6 +25,8 @@ require_relative "sandbox_gemfile"
 require_relative "tool_result"
 require_relative "image_store"
 require_relative "image_delivery"
+require_relative "output_budget"
+require_relative "result_spill"
 require_relative "system_settings"
 require_relative "model_config"
 require_relative "tool_registry_builder"
@@ -954,6 +956,54 @@ class Harness
     @mcp.connected_summary
   end
 
+  # The conversation's size gate (issue #551): a tool result that would make the
+  # NEXT request exceed the backend's context window is refused by that backend
+  # outright ("requests are never truncated"), and the auto-compact retry then
+  # fails on the same oversized chain. So the cap is applied HERE, before the
+  # result becomes a message; the full text goes to the session's own dir so
+  # nothing is invented about what the command printed. A ToolResult is left to
+  # ImageDelivery (its bytes are images, not text). doc/tool_output_budget_design.md.
+  def budget_tool_result(name, result)
+    return result if result.is_a?(ToolResult)
+
+    text  = result.to_s
+    fit   = OutputBudget.fit(text, limit: output_result_bytes)
+    return text unless fit.truncated?
+
+    @result_seq = (@result_seq || 0) + 1
+    spill       = result_spill.write(name, @result_seq, text)
+    @logger.warn "tool #{name} result #{text.bytesize} B capped to " \
+                 "#{fit.text.bytesize} B (#{spill || 'not spilled'})"
+    fit.text + OutputBudget.notice(fit.bytes_dropped, spill:)
+  end
+
+  # A spilled result is harness state the file tools cannot open (a session dir is
+  # blocked for every component), so the tool that spilled answers a read of its
+  # own spill file - capped, so reading the overflow back cannot overflow again.
+  # nil when the path names no spill of this job.
+  def read_spilled_result(path)
+    rel = @file_list.relative_path(@file_list.resolve(path))
+    return nil unless rel && result_spill.covers?(rel)
+
+    OutputBudget.read_capped(@file_list.resolve(path),
+                             limit: output_result_bytes)[0]
+  rescue SystemCallError => e
+    "error: cannot read #{path} (#{e.message})"
+  end
+
+  def output_result_bytes
+    settings.output_result_bytes || OutputBudget::DEFAULT_RESULT_BYTES
+  end
+
+  # The session dir is harness state, so the spill path is named as such: the
+  # model tells the USER where the full output is instead of trying to read it.
+  def result_spill
+    return @result_spill if defined?(@result_spill)
+
+    @result_spill = ResultSpill.new(@locator, @session.session_id,
+                                    job_id: @session_manager.job_id)
+  end
+
   private
 
   # One LLM request. The streaming posture applies to THIS request only, so a
@@ -1125,13 +1175,14 @@ class Harness
 
     begin
       result = tool.execute(args)
-      logger.info "tool #{func_name} → #{result}"
+      logger.info "tool #{func_name} → #{OutputBudget.log_excerpt(result)}"
       # A byte invalid in UTF-8 would make the NEXT JSON.generate raise -
       # including the save that should record the failure.
       # A ToolResult is normalized where its text is built (ToolResult#new) and
       # carries raw image bytes beside it - normalizing the OBJECT would flatten
       # it to its #to_s and lose the images (issue #449).
-      result.is_a?(ToolResult) ? result : TextNormalizer.normalize(result)
+      text = result.is_a?(ToolResult) ? result : TextNormalizer.normalize(result)
+      budget_tool_result(func_name, text)
     rescue => e
       logger.error ErrorText.detailed(e, "tool #{func_name} failed")
       "error: #{ErrorText.label(e)}"

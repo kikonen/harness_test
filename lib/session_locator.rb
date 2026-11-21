@@ -54,6 +54,13 @@ class SessionLocator
     File.join(@workdir, SESSIONS_DIR)
   end
 
+  # A path in the working directory as the model sees it (relative), so a spill
+  # the model is told about is a path the USER can open.
+  def relative_path(path)
+    prefix = "#{@workdir}/"
+    path.start_with?(prefix) ? path[prefix.length..] : path
+  end
+
   def session_file_path(id)
     File.join(sessions_dir, id, SESSION_FILE)
   end

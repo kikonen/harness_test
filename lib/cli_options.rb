@@ -285,6 +285,11 @@ class CLIOptions
     opts[:output_tail_memory] = config.output_tail_memory
     opts[:output_tasks_kept] = config.output_tasks_kept
 
+    # issue #551: the byte budget one tool result may occupy in the conversation.
+    # Config-only (no CLI flag): the overflow it prevents cannot be repaired from
+    # inside the run that caused it.
+    opts[:output_result_bytes] = config.output_result_bytes
+
     # issue #303: rendered-output palette. CLI flag > config > default palette.
     # Validated HERE rather than when the Harness builds the palette, so a typo
     # is reported before the model is contacted (and --list-sessions, which

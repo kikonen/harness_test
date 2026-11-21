@@ -819,6 +819,23 @@ RSpec.describe CommandRunner do
     end
   end
 
+  # Issue #551: the line gate alone is blind to output with few newlines and
+  # huge lines, and such a result overflowed the context window.
+  it 'bounds output in bytes when the line count is within the limit' do
+    Dir.mktmpdir do |dir|
+      seed_allowlist(dir, 'seq 3')
+      runner = make_tool_runner(dir)
+      allow_any_instance_of(described_class).to receive(:run_in_shell) do
+        stdout = (1..3).map { |_i| 'x' * 100_000 }.join("\n") + "\n"
+        [stdout, Struct.new(:exitstatus).new(0)]
+      end
+
+      out = runner.run('seq 3', limit: 500)
+      expect(out.bytesize).to be < 60_000
+      expect(out).to include('output too large')
+    end
+  end
+
   it 'uses the dialog title from its configuration' do
     Dir.mktmpdir do |dir|
       runner, out = make_main_runner(dir, '4', # Allow(1), grants(2,3), Cancel(4)
