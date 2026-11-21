@@ -317,6 +317,57 @@ RSpec.describe CLI do
     end
   end
 
+  # issue #548 merge gate: a REAL layered save (system.json + jobs/<id>/) must
+  # round-trip back through --resume. Every other resume spec here seeds a
+  # hand-built flat #207 session.json; this one writes the layered layout with
+  # the real save_session and resumes it, proving SessionLocator#assemble_system
+  # folds the job's session.json + replay.json back into one resume_data hash.
+  # system.json carries NO messages key - the conversation lives only in
+  # jobs/0/session.json - so a non-empty resumed conversation is the proof the
+  # assembly read the job file. A model PROFILE is configured so the active
+  # model resolves on BOTH runs (a bare -m id with no profile raises on resume's
+  # restore_session_model, unrelated to this round-trip).
+  describe 'layered save/resume round-trip (issue #548)' do
+    let(:layered_options) do
+      options.merge(model_profiles: [{ name: 'test-model', model: 'test-model' }])
+    end
+
+    it 'resumes the conversation and replay tail a layered save wrote' do
+      saver = described_class.new(layered_options, ui)
+      saver.setup
+      id = saver.session_id
+
+      saver.foreground_harness.session.add_user('earlier prompt')
+      saver.foreground_harness.session.add_assistant('earlier reply')
+      saver.registry.record_user_prompt('fix the parser')
+      saver.foreground_harness.session_manager.save_session
+
+      locator = SessionLocator.new(workdir)
+      expect(File.file?(locator.system_file_path(id))).to be true
+      expect(File.file?(locator.job_session_file_path(id, 0))).to be true
+      expect(File.file?(locator.job_replay_file_path(id, 0))).to be true
+
+      # The conversation is NOT in system.json - it moved to the job's own file.
+      system_data = JSON.parse(File.read(locator.system_file_path(id)))
+      expect(system_data).not_to have_key('messages')
+      expect(system_data['jobs'].map { |j| j['id'] }).to eq([0])
+      job_data = JSON.parse(File.read(locator.job_session_file_path(id, 0)))
+      expect(job_data['messages'].map { |m| m['content'] }).to include('earlier prompt')
+
+      resumed = described_class.new(layered_options.merge(resume: id), ui)
+      resumed.setup
+
+      expect(resumed.session_id).to eq(id)
+      contents = resumed.foreground_harness.session.messages.map { |m| m[:content] }
+      expect(contents).to include('earlier prompt')
+      expect(contents).to include('earlier reply')
+
+      tail = resumed.registry.foreground_buffer.replay_tail
+      expect(tail.map { |e| [e.type, e.origin, e.content] })
+        .to include([:user, :user, 'fix the parser'])
+    end
+  end
+
   # issue #221 review (bug 2): the shell consent posture is stated in the startup
   # banner so the system's approval behavior is visible from the first line.
   describe 'startup banner - command consent posture' do
