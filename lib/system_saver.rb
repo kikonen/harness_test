@@ -16,12 +16,24 @@ class SystemSaver
 
   attr_reader :registry
 
+  # A standalone (single-job) save: assemble the one-job run this save IS and
+  # write it in the same two steps save_run uses, so every save - interactive
+  # or standalone - produces the same complete layered record. It mutates no
+  # registry: a SessionManager built for a harness on its own has no run.
+  def save_standalone(run_id, harness)
+    session_h = harness.session.to_h(harness.file_list)
+    harness.session_manager.job_id = 0
+    harness.session_manager.save_job_session(run_id)
+    SystemRecord.new(nil).write_system_files(@locator, run_id, session_h)
+    run_id
+  end
+
   def foreground_job
     @record.foreground_job
   end
 
-  def write_system_files(id, session_h, harness)
-    @record.write_system_files(@locator, id, session_h, harness)
+  def write_system_files(id, session_h)
+    @record.write_system_files(@locator, id, session_h)
   end
 
   # The saved conversations of the jobs the system's own resume_data does not
@@ -57,6 +69,10 @@ class SystemSaver
   # non-empty: the caller has already decided the run is worth saving (a
   # settings-only change has an empty chain but must still persist).
   def save_run(run_id)
+    # A save is the SYSTEM's write: system.json plus every retained job's own
+    # files, in ONE call by the run's owner. A SessionManager never assembles
+    # this - system.json carries the SYSTEM's access list and digest cache, and
+    # each job Harness has its own SessionFileCache.
     fg = @registry.foreground_job
     @registry.jobs.each do |job|
       harness = job.harness
@@ -71,7 +87,7 @@ class SystemSaver
     return run_id if harness.nil?
 
     session_h = harness.session.to_h(harness.file_list)
-    write_system_files(run_id, session_h, harness)
+    write_system_files(run_id, session_h)
     run_id
   end
 end

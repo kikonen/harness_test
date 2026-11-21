@@ -88,20 +88,11 @@ class HarnessFactory
   end
 
   # The wiring one job's agent cannot invent for itself: which job dir its save
-  # writes under, and the system's own writer it delegates the system half to.
-  # Both land here so a second harness job is wired exactly like the main turn is.
+  # writes under. The system half is written once by the run owner over this
+  # factory's @system_saver, so a job manager never holds a saver of its own.
   def attach(harness, job)
     manager             = harness.session_manager
     manager.job_id      = job.id
-    manager.system_saver = run_system_saver
     job.attach_harness(harness)
-  end
-
-  # ONE writer for the whole run: the caller's if it passed one, else a single
-  # saver built over the run's registry (memoized - a saver per job would be a
-  # second source of the system half, and SessionManager's own default has no
-  # registry at all).
-  def run_system_saver
-    @run_system_saver ||= @system_saver || SystemSaver.new(@locator, @registry)
   end
 end

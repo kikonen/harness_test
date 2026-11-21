@@ -7,9 +7,9 @@ require_relative "session"
 
 # The system's own persistence record - the system/world half of what a save
 # writes (issue #548). Built by the system's owner (the CLI, from the JobRegistry
-# it owns) and injected into SessionManager in place of the raw registry, so a
-# per-Harness SessionManager no longer reaches a scheduling registry it does not
-# own (doc/harness_job_design.md: "its owner injects it").
+# it owns) and the system settings it owns, so a per-Harness SessionManager never
+# reaches a scheduling registry or the system's config it does not own
+# (doc/harness_job_design.md: "its owner injects it").
 #
 # Increment 4a hands SystemRecord the system HALF of the write: it assembles and
 # writes system.json (identity, postures, access, the system -> job map) and the
@@ -82,12 +82,12 @@ class SystemRecord
   # conversation itself is NOT here - that is the job's SessionManager's to write
   # on its own thread. This is the record half the registry owns, so it is safe
   # for the system's owner to write.
-  # `harness` supplies the system-wide postures and the MCP summary live;
-  # session_h carries identity/access that Session#to_h produced.
-  def write_system_files(locator, id, session_h, harness)
+  # session_h carries identity/access that Session#to_h produced; the postures
+  # and MCP summary come from what this record was built with.
+  def write_system_files(locator, id, session_h)
     system_path = locator.system_file_path(id)
     FileUtils.mkdir_p(File.dirname(system_path))
-    File.write(system_path, JSON.generate(system_json(id, session_h, harness)))
+    File.write(system_path, JSON.generate(system_json(id, session_h)))
 
     # Every retained job gets its own job.json (what it was, how it ended, its
     # edges as ids) and its own replay.json (its own main-owned buffer), so a
@@ -113,7 +113,7 @@ class SystemRecord
   # a resumed system keeps the choice made for THIS session, and a session saved
   # before a key existed simply has none (#221/#28/#106/#303/#405).
   # foreground_job/next_id/jobs are the system -> job map read live from the registry.
-  def system_json(id, session_h, harness)
+  def system_json(id, session_h)
     {
       version: session_h[:version],
       session_id: id,
@@ -121,15 +121,33 @@ class SystemRecord
       workdir: session_h[:workdir],
       Session::FILE_CACHE_KEY => session_h[Session::FILE_CACHE_KEY],
       access: session_h[:access],
-      yolo: harness.settings.yolo? == true,
-      stream: harness.settings.stream? == true,
-      markdown: harness.settings.markdown? == true,
-      output_palette: harness.settings.output_palette.name,
-      mcp_connected: harness.mcp_connected_summary,
+      yolo: posture?(:yolo?),
+      stream: posture?(:stream?),
+      markdown: posture?(:markdown?),
+      output_palette: palette_name,
+      mcp_connected: mcp_connected_summary,
       foreground_job:,
       next_id:,
       jobs: jobs_for_save
     }
+  end
+
+  # issue #405: what the run's foreground agent connected. Read off the job the
+  # system record is about to describe, the same way conversation_size reads a
+  # job's own harness - never off a harness handed to the writer.
+  def mcp_connected_summary
+    Array(@registry&.foreground_job&.harness&.mcp_connected_summary)
+  end
+
+  # A record with no registry (or none carrying settings) records the default
+  # posture, exactly as a session saved before the key existed records nothing.
+  def posture?(key)
+    @registry&.settings&.public_send(key) == true
+  end
+
+  def palette_name
+    settings = @registry&.settings
+    settings ? settings.output_palette.name : UI::Palette.fetch(nil).name
   end
 
   # The job's OWN record (jobs/<id>/job.json): what the job was, how it ended,

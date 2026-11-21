@@ -8,7 +8,6 @@ require_relative "session_locator"
 require_relative "param_overrides"
 require_relative "error_text"
 require_relative "harness_config"
-require_relative "system_saver"
 
 # Manages all session-related logic: prompt flow, compaction, rules file,
 # model switching, and persistence (save/resume/list).
@@ -42,13 +41,8 @@ class SessionManager
     @locator     = SessionLocator.new(file_list.workdir)
     @rules_mtime = current_rules_mtime
     @last_autosave = 0
-    @system_saver = SystemSaver.new(@locator, nil)
     @job_id = 0
   end
-
-  # Writes the system half (system.json + per-job replay.json). A per-job
-  # SessionManager never assembles that file itself - it delegates here.
-  attr_accessor :system_saver
 
   # The id of the job this Harness lives in (issue #548 increment 4b): a save
   # writes this job's OWN jobs/<id>/session.json, so a background/sub-agent
@@ -61,6 +55,7 @@ class SessionManager
   # Appends a new user prompt to the session and sends the chain to the LLM.
   # If the request fails, the prompt stays in the session (pending) so it can
   # be re-sent with #retry.
+  # The saver is the run owner's, passed down for every save this turn does.
   def run_prompt(instruction)
     # A new prompt is a new turn: a note left pending by a turn that ended
     # abnormally must not ride along as a phantom mid-turn note (issue #430).
@@ -152,6 +147,9 @@ class SessionManager
   # a save failure never breaks the prompt flow (it only warns). Silent on
   # success - these saves are routine bookkeeping, not a user action.
   # De-duplicated within a fast round trip via AUTOSAVE_MIN_INTERVAL.
+  # A save with no saver saves NOTHING: writing a system half is the run owner's
+  # job, and a saver-less write would replace a real multi-job system.json with
+  # a degenerate one-job record.
   def maybe_auto_save(tag)
     return unless @harness.settings.auto_save
     return if @harness.session.empty?
@@ -707,28 +705,12 @@ class SessionManager
   # issue #276: WHERE a session lives is SessionLocator's knowledge.
   def session_file_path(id) = @locator.system_file_path(id)
 
-  # Save this job's conversation and the system record (issue #548 increment 4a).
-  # The ownership seam: this Harness' SessionManager writes ONLY its own job's
-  # session.json - the conversation this single LLM loop owns, safe to read on
-  # this thread. The system half (system.json + the foreground replay.json) is
-  # the SystemSaver's to assemble, so this object never assembles the system
-  # file itself - it delegates. A save with no injected saver writes a
-  # degenerate one-job system (job 0 = the main turn), a standalone save.
-  def save_session
-    id        = @harness.session.session_id
-    session_h = @harness.session.to_h(@file_list)
-
-    write_own_job_session(id, session_h)
-    system_saver.write_system_files(id, session_h, @harness)
-
-    @harness.logger.info "session saved: #{id} (#{@locator.system_file_path(id)})"
-    id
-  end
-
   # Save ONLY this job's own conversation file (issue #548 increment 4b), no
-  # system half. At exit the run's owner (CLI) calls it on each finished job
-  # whose threads are quiescent, so every job's chain lands in its own dir; the
-  # system.json + per-job replay.json are written once by the foreground save.
+  # system half. The system.json + per-job job.json/replay.json are written
+  # ONCE by the run owner (SystemSaver#save_run): system.json carries the
+  # SYSTEM's access list and digest cache, and every job Harness has its own
+  # SessionFileCache, so a per-job writer would replace the foreground's
+  # grants and digests with its own.
   # run_id is the SESSION DIRECTORY key (the run's id), not this harness' own
   # session id: a #286 sub-agent harness may mint its own uuid, and its chain
   # must land under this run's jobs/<id>/, not a stray top-level session dir.
@@ -739,6 +721,8 @@ class SessionManager
     write_own_job_session(id, session_h)
     id
   end
+
+  alias_method :save_session, :save_job_session
 
   # Restore the model a session was saved with. Harness#apply_resume_state
   # calls it while building a resumed run (issue #276), so it cannot stay

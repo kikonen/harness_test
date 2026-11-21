@@ -46,7 +46,8 @@ class Command
     ui:,
     help_renderer: nil,
     settings: nil,
-    registry: nil
+    registry: nil,
+    system_saver: nil
   )
     @file_list  = file_list
     @ui         = ui
@@ -59,6 +60,7 @@ class Command
     # The JobRegistry the run owns (#286): TaskRunner#run_on_task awaits its
     # job and TaskRunner records main-thread reports into it.
     self.registry = registry
+    self.system_saver = system_saver
   end
 
   # A command reaches the Harness through the FOREGROUND job it acts on (#286),

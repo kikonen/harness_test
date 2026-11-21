@@ -25,6 +25,10 @@ module TaskRunner
   # is built by the run with its registry.
   attr_accessor :registry
 
+  # The run's single SystemSaver (issue #548): the /save command's writer of the
+  # whole layered system, passed down from the run owner like the registry.
+  attr_accessor :system_saver
+
   def run_on_task(job: nil)
     emit_role(:gap, "")
     # The host's registry is never nil (#286): it is the executor and the home

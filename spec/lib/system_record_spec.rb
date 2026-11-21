@@ -92,16 +92,6 @@ RSpec.describe SystemRecord do
     expect(described_class.new(registry).jobs_for_save.first[:dependencies]).to eq([])
   end
 
-  # issue #548 increment 4a: SystemRecord WRITES the system half (system.json +
-  # the foreground job's replay.json). The conversation is NOT here - it belongs
-  # to the job's own SessionManager, so the system file carries no messages key.
-  def harness_double(settings)
-    Object.new.tap do |h|
-      h.define_singleton_method(:settings) { settings }
-      h.define_singleton_method(:mcp_connected_summary) { [] }
-    end
-  end
-
   def session_h(id, workdir)
     {
       version: 1,
@@ -119,8 +109,7 @@ RSpec.describe SystemRecord do
       locator = SessionLocator.new(dir)
 
       described_class.new(nil).write_system_files(
-        locator, id, session_h(id, dir), harness_double(SystemSettings.from_options({}))
-      )
+        locator, id, session_h(id, dir))
 
       run = JSON.parse(File.read(locator.system_file_path(id)), symbolize_names: true)
       expect(run[:foreground_job]).to eq(0)
@@ -139,8 +128,7 @@ RSpec.describe SystemRecord do
       sh[:messages] = [{ role: 'user', content: 'secret chain' }]
 
       described_class.new(nil).write_system_files(
-        locator, id, sh, harness_double(SystemSettings.from_options({}))
-      )
+        locator, id, sh)
 
       run = JSON.parse(File.read(locator.system_file_path(id)), symbolize_names: true)
       expect(run).not_to have_key(:messages)
@@ -161,8 +149,7 @@ RSpec.describe SystemRecord do
       registry.foreground = main.id
 
       described_class.new(registry).write_system_files(
-        locator, id, session_h(id, dir), harness_double(SystemSettings.from_options({}))
-      )
+        locator, id, session_h(id, dir))
 
       fg = JSON.parse(File.read(locator.job_replay_file_path(id, 0)), symbolize_names: true)
       job1 = JSON.parse(File.read(locator.job_replay_file_path(id, 1)), symbolize_names: true)
@@ -171,19 +158,18 @@ RSpec.describe SystemRecord do
     end
   end
 
-  it 'writes the system -> job map from a real registry, postures read live off the harness' do
+  it 'writes the system -> job map from a real registry, postures read off the registry settings' do
     Dir.mktmpdir do |dir|
       id       = 'cccccccc-0000-0000-0000-000000000000'
       locator  = SessionLocator.new(dir)
-      registry = JobRegistry.new
+      settings = SystemSettings.from_options({ yolo: true })
+      registry = JobRegistry.new(settings: settings)
       main = registry.add_job(kind: :main)
       registry.add_job(kind: :command, requested_by: main, dependencies: [main])
       registry.foreground_buffer.restore([{ type: 'user', origin: 'user', content: 'shown' }])
 
-      settings = SystemSettings.from_options({ yolo: true })
       described_class.new(registry).write_system_files(
-        locator, id, session_h(id, dir), harness_double(settings)
-      )
+        locator, id, session_h(id, dir))
 
       run = JSON.parse(File.read(locator.system_file_path(id)), symbolize_names: true)
       expect(run[:next_id]).to eq(2)
@@ -207,8 +193,7 @@ RSpec.describe SystemRecord do
       child.finish('child answer')
 
       described_class.new(registry).write_system_files(
-        locator, id, session_h(id, dir), harness_double(SystemSettings.from_options({}))
-      )
+        locator, id, session_h(id, dir))
 
       job0 = locator.read_job_record(id, 0)
       job1 = locator.read_job_record(id, 1)
@@ -233,8 +218,7 @@ RSpec.describe SystemRecord do
       registry.add_job(kind: :main).finish(->(x) { x })
 
       described_class.new(registry).write_system_files(
-        locator, id, session_h(id, dir), harness_double(SystemSettings.from_options({}))
-      )
+        locator, id, session_h(id, dir))
 
       expect(locator.read_job_record(id, 0)[:result]).to eq('(unserializable Proc)')
     end
@@ -246,8 +230,7 @@ RSpec.describe SystemRecord do
       locator = SessionLocator.new(dir)
 
       described_class.new(nil).write_system_files(
-        locator, id, session_h(id, dir), harness_double(SystemSettings.from_options({}))
-      )
+        locator, id, session_h(id, dir))
 
       # A nil-registry save has no Job to take a result from, so it records an
       # unfinished job with the fields a live Job would supply.

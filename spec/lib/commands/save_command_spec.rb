@@ -18,6 +18,9 @@ RSpec.describe Commands::SaveCommand do
     sm.define_singleton_method(:active_model_name) { active_model }
     h = Object.new
     h.define_singleton_method(:session_manager) { sm }
+    sess = Object.new
+    sess.define_singleton_method(:session_id) { id }
+    h.define_singleton_method(:session) { sess }
     h
   end
 
@@ -25,8 +28,11 @@ RSpec.describe Commands::SaveCommand do
     stdout = StringIO.new
     registry = JobRegistry.new
     registry.add_job(kind: :main, harness: harness_with(id, path))
+    saver = Object.new
+    saver.define_singleton_method(:save_run) { |run_id| run_id }
     described_class.new(registry:, file_list: file_list,
-                        ui: UI::Console.new(stdout: stdout)).handle('')
+                        ui: UI::Console.new(stdout: stdout),
+                        system_saver: saver).handle('')
     stdout.string
   end
 

@@ -81,7 +81,8 @@ class CommandHandler
     file_list:,
     ui:,
     settings: nil,
-    registry: nil)
+    registry: nil,
+    system_saver: nil)
     @file_list = file_list
     # The run-wide posture/consent state (#286): posture commands read and
     # write it directly instead of routing through Harness.
@@ -98,6 +99,8 @@ class CommandHandler
     # The JobRegistry the run owns (#286), exposed through TaskRunner#registry;
     # it is passed to every command built here (build_command).
     self.registry = registry
+    # The run's single SystemSaver (#548), passed to every command built here.
+    self.system_saver = system_saver
   end
 
   def exiting?
@@ -181,7 +184,8 @@ class CommandHandler
       ui:,
       help_renderer: @help_renderer,
       settings: @settings,
-      registry:)
+      registry:,
+      system_saver:)
   end
 
   # issue #129: `! cmd` runs a shell command locally, bypassing the model.
