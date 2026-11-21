@@ -50,9 +50,10 @@ class HarnessFactory
     dependencies: [],
     requested_by: nil,
     resume_data: nil,
-    base_file_list: nil
+    base_file_list: nil,
+    id: nil
   )
-    job = @registry.add_job(kind:, dependencies:, requested_by:)
+    job = @registry.add_job(kind:, dependencies:, requested_by:, id:)
     build_for(job, session_id:, resume_data:, base_file_list:) && job
   end
 

@@ -44,17 +44,27 @@ class SystemSaver
     @locator.job_restores(saved_system_id)
   end
 
-  # Re-attach each saved job's own status and shown tail to the job this run has
-  # under that id. A saved id with no live Job (a job the drop rule removed, or
-  # one nothing rebuilt) restores nothing and reports nil. Restoring a job to
-  # :finished makes it a retention candidate again, as it was in the saved run.
-  def restore_job_states(saved_system_id)
-    job_restores(saved_system_id).filter_map do |restore|
-      @registry&.restore_job(
-        restore[:id],
-        status: restore[:status],
-        replay_tail: restore[:replay_tail])
-    end
+  # The FOREGROUND job's own saved conversation half (its chain + per-agent
+  # model/param state), read straight from jobs/<id>/session.json. resume_data
+  # no longer folds it in (#548); the system owner reads it here to rebuild the
+  # foreground job as its own agent. {} when the job has no saved conversation
+  # (its dir was dropped) so the caller falls back to a fresh main turn.
+  # resume_data carries the SYSTEM half; the job file carries the CONVERSATION
+  # half - disjoint keys composed here, not a locator-side foreground fold.
+  def resume_main(saved_system_id, job_id, system_record)
+    job_path = @locator.job_session_file_path(saved_system_id, job_id)
+    return system_record unless File.file?(job_path)
+
+    system_record.merge(@locator.read_job_session(saved_system_id, job_id))
+  end
+
+  # The saved shown tail of a job (its own replay.json), for the foreground
+  # buffer a resumed run redraws. [] when the job has no replay.json.
+  def replay_tail_of(saved_system_id, job_id)
+    tail_path = @locator.job_replay_file_path(saved_system_id, job_id)
+    return [] unless File.file?(tail_path)
+
+    JSON.parse(File.read(tail_path), symbolize_names: true)
   end
 
   # Saved job ids with no live Job under them: dropped by the retention rule, or

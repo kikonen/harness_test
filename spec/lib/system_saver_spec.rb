@@ -66,38 +66,31 @@ RSpec.describe SystemSaver do
         id, session_h(id, dir))
     end
 
-    it 'restores a saved job status and replay tail onto the job this run has' do
+    it 'composes the system half with the foreground job chain (resume_main)' do
       Dir.mktmpdir do |dir|
         id = 'c0c0c0c0-0000-0000-0000-000000000000'
         locator = SessionLocator.new(dir)
         saved_registry = JobRegistry.new
         main = saved_registry.add_job(kind: :main)
-        child = saved_registry.add_job(kind: :sub_agent, requested_by: main)
-        child.buffer.put(type: :response, origin: :session_manager, content: 'child shown')
-        child.buffer.keep_window
-        child.finish('child answer')
+        main.buffer.put(type: :response, origin: 'session_manager', content: 'main shown')
         saved_registry.foreground = main.id
         saved_system(dir, id, saved_registry)
-        # The job's own conversation file (that job's SessionManager writes it).
-        File.write(locator.job_session_file_path(id, 1),
-                   JSON.generate({ messages: [{ role: 'assistant', content: 'child work' }] }))
+        File.write(locator.job_session_file_path(id, 0),
+                   JSON.generate({ messages: [{ role: 'user', content: 'main chain' }],
+                                   active_model: 'x' }))
 
-        resumed = JobRegistry.new
-        resumed.add_job(kind: :main)
-        resumed.add_job(kind: :command)
-        saver = described_class.new(locator, resumed)
+        saver = described_class.new(locator, JobRegistry.new)
+        system_record = locator.read_session(id)
+        merged = saver.resume_main(id, 0, system_record)
 
-        expect(saver.job_restores(id).map { |r| r[:id] }).to eq([1])
-        expect(saver.job_restores(id).first[:messages].first[:content]).to eq('child work')
-
-        restored = saver.restore_job_states(id)
-        expect(restored.map(&:id)).to eq([1])
-        # The status the save recorded was the Symbol :finished; the JSON round
-        # trip gives the String "finished", and Job#restore_status maps it back.
-        expect(resumed.job(1).status).to eq(:finished)
-        expect(resumed.job(1).buffer.tail.map(&:content)).to eq(['child shown'])
-        # A restored :finished job is a retention candidate again, as in the saved run.
-        expect(resumed.job(1).finished?).to be true
+        # System half keys survive AND the job's conversation + model land.
+        expect(merged[:session_id]).to eq(id)
+        expect(merged[:messages].first[:content]).to eq('main chain')
+        expect(merged[:active_model]).to eq('x')
+        # The saved shown tail is read straight from the job's replay file.
+        File.write(locator.job_replay_file_path(id, 0),
+                   JSON.generate([{ type: 'response', origin: 'session_manager', content: 'main shown' }]))
+        expect(saver.replay_tail_of(id, 0).first[:content]).to eq('main shown')
       end
     end
 
@@ -117,7 +110,6 @@ RSpec.describe SystemSaver do
         resumed.add_job(kind: :main)
         saver = described_class.new(locator, resumed)
 
-        expect(saver.restore_job_states(id)).to eq([])
         expect(saver.dropped_job_ids(id)).to eq([1])
       end
     end
