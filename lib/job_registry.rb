@@ -173,6 +173,17 @@ class JobRegistry
     foreground_job&.buffer
   end
 
+  # -- Session-worthy (issue #548 increment 5) ------------------------------
+
+  # Does ANY retained job own session state worth saving? This is the honest
+  # cross-job question #548 wants in place of #188's foreground-emptiness test:
+  # a background/sub-agent job that did real work must count even when the
+  # foreground chain is empty. A job the run never drove (harness nil, OPEN
+  # QUESTION 5) owns no conversation, so it is not counted.
+  def any_job_has_session_state?
+    @jobs.any? { |job| job.harness && !job.harness.session.empty? }
+  end
+
   # -- Run record (issue #458 / #286) ---------------------------------------
   #
   # The run record is the FOREGROUND job's buffer, and the registry - not the
