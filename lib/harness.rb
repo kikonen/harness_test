@@ -38,9 +38,9 @@ class Harness
 
   MAX_TOOL_ITERATIONS = 200
   # Consecutive-call thresholds: warn (inject a stop message), then break.
-  TOOL_LOOP_WARN_THRESHOLD = 10
+  TOOL_LOOP_WARN_THRESHOLD = 30
   # After this many consecutive tool-call iterations, force-break and return whatever we have
-  TOOL_LOOP_HARD_LIMIT = 20
+  TOOL_LOOP_HARD_LIMIT = 50
 
   # The two NORMAL ends of an answer; every other value a server reports
   # ('length', 'content_filter', one this harness has never seen) gets a line.
