@@ -31,10 +31,10 @@ require_relative "lib/cli"
 
 # -- Entry point ----------------------------------------------------------
 
-# issue #548: the main thread services the main job (job 0) - known at startup,
-# because main is main. Name it here so every main-thread log line is stamped
-# with its job id (the SessionLogger formatter reads Thread.current.name).
-Thread.current.name = "0"
+# issue #548: name the main thread "main" at startup (main is main), so every
+# main-thread log line is stamped [main] (the SessionLogger formatter reads
+# Thread.current.name). Task threads name themselves "job-N" (see Task#start).
+Thread.current.name = "main"
 
 begin
   exit CLI.new.run

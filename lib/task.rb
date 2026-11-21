@@ -106,9 +106,9 @@ class Task
     @thread = Thread.new do
       Thread.current[:harness_task] = self
       # issue #548: the log stamp is the thread's name. The task thread names
-      # itself after the job it services, so every line it logs is attributed
-      # to that job (the SessionLogger formatter reads Thread.current.name).
-      Thread.current.name = @job.id.to_s
+      # itself "job-<id>" after the job it services, so every line it logs is
+      # attributed to that job (the SessionLogger formatter reads Thread.current.name).
+      Thread.current.name = "job-#{@job.id}"
 
       begin
         value = @block.call(self)
