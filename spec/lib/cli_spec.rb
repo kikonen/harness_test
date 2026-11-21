@@ -685,8 +685,9 @@ RSpec.describe CLI do
   # orphaned under a throwaway id. The exit-save now also fires when the run
   # changed state (a new history entry is the evidence).
   describe 'exit-save on a state change with no conversation (issue #188)' do
-    def session_json(id)
-      File.join(workdir, '.harness', 'sessions', id, 'session.json')
+    def saved_run_entry(id)
+      # issue #548: a save now writes run.json as the run's entry point.
+      File.join(workdir, '.harness', 'sessions', id, 'run.json')
     end
 
     it 'saves the session when a command was typed but no prompt was sent' do
@@ -699,7 +700,7 @@ RSpec.describe CLI do
       cli.run
       id = cli.foreground_harness.session.session_id
 
-      expect(File.file?(session_json(id))).to be(true)
+      expect(File.file?(saved_run_entry(id))).to be(true)
     end
 
     it 'saves nothing when the session is empty and no command was typed' do
@@ -712,8 +713,8 @@ RSpec.describe CLI do
       id = cli.foreground_harness.session.session_id
 
       # The session dir exists (the run wrote its harness.log under the id),
-      # but no session.json was written for a run that changed nothing.
-      expect(File.exist?(session_json(id))).to be(false)
+      # but no run.json was written for a run that changed nothing.
+      expect(File.exist?(saved_run_entry(id))).to be(false)
     end
 
     it 'still saves a normal conversation (the empty? path is unchanged)' do
@@ -728,7 +729,7 @@ RSpec.describe CLI do
       cli.run
       id = cli.foreground_harness.session.session_id
 
-      expect(File.file?(session_json(id))).to be(true)
+      expect(File.file?(saved_run_entry(id))).to be(true)
     end
   end
 end

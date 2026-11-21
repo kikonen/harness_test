@@ -486,7 +486,7 @@ RSpec.describe SessionManager do
         manager   = described_class.new(harness, file_list)
 
         expect(manager.session_file_path(sid))
-          .to eq(File.join(dir, '.harness/sessions', sid, 'session.json'))
+          .to eq(File.join(dir, '.harness/sessions', sid, 'run.json'))
       end
     end
 
@@ -611,7 +611,8 @@ RSpec.describe SessionManager do
       manager.run_record = RunRecord.new(registry)
       session.add_user('hello')
       manager.save_session
-      JSON.parse(File.read(manager.session_file_path(session.session_id)), symbolize_names: true)
+      JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
+                                     'jobs', '0', 'replay.json')), symbolize_names: true)
     end
 
     it 'writes the saved tail as a replay_tail array' do
@@ -622,7 +623,7 @@ RSpec.describe SessionManager do
         # JSON round trip keeps the keys symbol (symbolize_names) but the
         # type/origin values come back as strings; the registry re-symbols them
         # on a resumed run.
-        expect(data[:replay_tail]).to eq(
+        expect(data).to eq(
           tail.map { |e| e.merge(type: e[:type].to_s, origin: e[:origin].to_s) }
         )
       end
@@ -653,7 +654,7 @@ RSpec.describe SessionManager do
       manager.run_record = RunRecord.new(registry)
       manager.save_session
       JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
-                                     'session.json')), symbolize_names: true)
+                                     'run.json')), symbolize_names: true)
     end
 
     it 'writes the foreground as the retained job id' do
@@ -813,8 +814,10 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       session.add_user('hello')
       mgr.save_session
 
-      path = mgr.session_file_path(session.session_id)
-      data = JSON.parse(File.read(path))
+      # param_overrides is the foreground agent's per-agent state, so it lives in
+      # that agent's own job session.json (issue #548), not in run.json.
+      job_session = SessionLocator.new(dir).job_session_file_path(session.session_id, 0)
+      data = JSON.parse(File.read(job_session))
       expect(data['param_overrides']).to include('reasoning_effort')
     end
   end
