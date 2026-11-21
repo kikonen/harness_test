@@ -8,6 +8,7 @@ require_relative "session_locator"
 require_relative "param_overrides"
 require_relative "error_text"
 require_relative "harness_config"
+require_relative "system_record"
 
 # Manages all session-related logic: prompt flow, compaction, rules file,
 # model switching, and persistence (save/resume/list).
@@ -695,30 +696,28 @@ class SessionManager
 
   # -- Persistence ---------------------------------------------------------
 
-  # issue #548: a saved RUN is a directory holding system.json (the system/world half)
+  # issue #548: a saved SYSTEM is a directory holding system.json (the system/world half)
   # and jobs/<id>/ (each job's own files). The file a save writes - what the save
   # log line and the UI report - is system.json, the system's entry point.
   # issue #276: WHERE a session lives is SessionLocator's knowledge.
   def session_file_path(id) = @locator.system_file_path(id)
 
-  # Save the foreground agent's conversation and the system record to disk, split
-  # along the ownership seam (issue #548): system.json carries the system/world state,
-  # the foreground job's session.json its conversation and model state, and its
-  # replay.json the foreground buffer's saved tail. SessionLocator#read_session
-  # re-joins them into one resume_data hash, so Harness#restore,
-  # apply_resume_state and CLI#setup read one shape regardless of layout. A save
-  # built without an injected system record is the degenerate one-job run whose only
-  # job is 0 (the main turn), so a standalone SessionManager still produces a
-  # valid layered record.
+  # Save this job's conversation and the system record (issue #548 increment 4a).
+  # The ownership seam: this Harness' SessionManager writes ONLY its own job's
+  # session.json - the conversation this single LLM loop owns, safe to read on
+  # this thread. The system half (system.json + the foreground replay.json) is the
+  # SystemRecord's to write, so this object never assembles the system file. A
+  # save with no injected record writes a degenerate one-job system (job 0 = the
+  # main turn), which is what a standalone SessionManager produces today.
   def save_session
-    id = @harness.session.session_id
+    id        = @harness.session.session_id
     session_h = @harness.session.to_h(@file_list)
-    fg = system_record&.foreground_job || 0
+    record    = system_record || SystemRecord.new(nil)
+    fg        = record.foreground_job
 
     FileUtils.mkdir_p(@locator.job_dir_path(id, fg))
-    File.write(@locator.system_file_path(id), JSON.generate(system_json(id, session_h)))
     write_json(@locator.job_session_file_path(id, fg), job_session_json(session_h))
-    write_json(@locator.job_replay_file_path(id, fg), system_record&.replay_tail || [])
+    record.write_system_files(@locator, id, session_h, @harness)
 
     @harness.logger.info "session saved: #{id} (#{@locator.system_file_path(id)})"
     id
@@ -748,35 +747,6 @@ class SessionManager
   # Write a hash as JSON to a path (the two per-job files share this).
   def write_json(path, data)
     File.write(path, JSON.generate(data))
-  end
-
-  # The system/world half the system's owner (CLI/JobRegistry) holds (#286). access and
-  # the digest cache stay here because they are system-wide TODAY (Session#
-  # restore_access_grants reaches the system-wide FileList), not per-job. The four
-  # postures and mcp_connected are harness/run state, not conversation state, so
-  # each is written so a resumed run keeps the choice made for THIS session, and a
-  # session saved before a key existed simply has none (#221/#28/#106/#303/#405).
-  # foreground_job/next_id/jobs are the system -> agent map: which job was foreground,
-  # the next id (so a resumed run never reuses one) and one entry per retained job
-  # with its edges as IDS (SystemRecord#jobs_for_save). No system record -> job-0 record.
-  def system_json(id, session_h)
-    {
-      version: session_h[:version],
-      session_id: id,
-      created_at: session_h[:created_at],
-      workdir: session_h[:workdir],
-      Session::FILE_CACHE_KEY => session_h[Session::FILE_CACHE_KEY],
-      access: session_h[:access],
-      yolo: @harness.settings.yolo? == true,
-      stream: @harness.settings.stream? == true,
-      markdown: @harness.settings.markdown? == true,
-      output_palette: @harness.settings.output_palette.name,
-      mcp_connected: @harness.mcp_connected_summary,
-      foreground_job: system_record&.foreground_job || 0,
-      next_id: system_record&.next_id || 1,
-      jobs: system_record&.jobs_for_save ||
-        [{ id: 0, kind: :main, status: :pending, requested_by: nil, dependencies: [], dir: "jobs/0" }]
-    }
   end
 
   # The foreground agent's own conversation half: its message chain (message 0
