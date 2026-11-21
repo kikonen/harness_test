@@ -341,8 +341,9 @@ breaks no reader.
 
 ## Open decisions / deferred
 
-- **Unreconstructible delimiters**: escape, length-prefix, or a per-file marker. The
-  requirement is measured; the mechanism is not chosen.
+- **Unreconstructible delimiters (DECIDED: no change)**: the per-thread stamp shipped; the
+  owner declined any escape/length-prefix scheme for multi-line dumps ("logger works fine
+  like that"). `harness.log` is write-only, so the ~89% unattributed figure is accepted.
 - **Log size control**: cap raw dumps, move dumps into `jobs/<id>/`, or rotate. Delimiters
   do not address this.
 - **Stamp channel mechanism**: a thread-local set explicitly at every `Thread.new` with a
