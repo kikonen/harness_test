@@ -31,6 +31,11 @@ require_relative "lib/cli"
 
 # -- Entry point ----------------------------------------------------------
 
+# issue #548: the main thread services the main job (job 0) - known at startup,
+# because main is main. Name it here so every main-thread log line is stamped
+# with its job id (the SessionLogger formatter reads Thread.current.name).
+Thread.current.name = "0"
+
 begin
   exit CLI.new.run
 rescue HarnessError => e
