@@ -56,4 +56,36 @@ RSpec.describe RunRecord do
 
     expect(described_class.new(registry).replay_tail).to eq([])
   end
+  # issue #548 increment 2: the writer persists the run -> job map and the next
+  # job id. next_id is read live so a resumed run continues numbering.
+  it 'reports next_id so a resumed run never reuses a job id' do
+    registry = JobRegistry.new
+    registry.add_job(kind: :main)
+    registry.add_job(kind: :command)
+
+    expect(described_class.new(registry).next_id).to eq(2)
+  end
+
+  it 'serializes each retained job with edges as IDS, not live Job refs' do
+    registry = JobRegistry.new
+    main = registry.add_job(kind: :main)
+    registry.add_job(kind: :command, requested_by: main, dependencies: [main])
+
+    jobs = described_class.new(registry).jobs_for_save
+
+    expect(jobs.map { |j| j[:id] }).to eq([0, 1])
+    expect(jobs[0][:kind]).to eq(:main)
+    expect(jobs[1][:requested_by]).to eq(main.id)        # id, not a Job object
+    expect(jobs[1][:dependencies]).to eq([main.id])      # ids, not Job objects
+    expect(jobs[1][:dir]).to eq('jobs/1')
+  end
+
+  # A dependency that is a callable predicate (not a Job) has no id to record;
+  # it is omitted (its re-resolution belongs to increment 4).
+  it 'omits a non-Job dependency that has no id' do
+    registry = JobRegistry.new
+    registry.add_job(kind: :timed, dependencies: [-> { true }])
+
+    expect(described_class.new(registry).jobs_for_save.first[:dependencies]).to eq([])
+  end
 end

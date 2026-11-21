@@ -11,7 +11,7 @@ class JobRegistry
   # Same timeout as the drain loop, so a poll costs the same everywhere.
   DEFAULT_POLL_TIMEOUT = 0.1
 
-  attr_reader :max_memory, :max_saved, :tasks_kept, :jobs
+  attr_reader :max_memory, :max_saved, :tasks_kept, :jobs, :next_id
 
   # A nil limit means the caller resolved the config value already, so the
   # buffer's built-in default has to be passed in here.
