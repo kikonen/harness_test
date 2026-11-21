@@ -695,79 +695,32 @@ class SessionManager
 
   # -- Persistence ---------------------------------------------------------
 
-  # issue #207: the saved JSON of a session lives INSIDE its own directory
-  # (next to the log and history), not alongside the per-session dirs.
-  # issue #276: WHERE a session lives is SessionLocator's knowledge - this is
-  # a pointer to it, kept because the save path and the UI both report the
-  # file a session was written to. Listing and newest-session lookup go to the
-  # locator directly (see Commands::SessionsCommand).
-  def session_file_path(id) = @locator.session_file_path(id)
+  # issue #548: a saved RUN is a directory holding run.json (the run/world half)
+  # and jobs/<id>/ (each job's own files). The file a save writes - what the save
+  # log line and the UI report - is run.json, the run's entry point.
+  # issue #276: WHERE a session lives is SessionLocator's knowledge.
+  def session_file_path(id) = @locator.run_file_path(id)
 
-  # Save the current session (conversation + file list) to disk.
+  # Save the foreground agent's conversation and the run record to disk, split
+  # along the ownership seam (issue #548): run.json carries the run/world state,
+  # the foreground job's session.json its conversation and model state, and its
+  # replay.json the foreground buffer's saved tail. SessionLocator#read_session
+  # re-joins them into one resume_data hash, so Harness#restore,
+  # apply_resume_state and CLI#setup read one shape regardless of layout. A save
+  # built without an injected run record is the degenerate one-job run whose only
+  # job is 0 (the main turn), so a standalone SessionManager still produces a
+  # valid layered record.
   def save_session
     id = @harness.session.session_id
-    path = session_file_path(id)
-    FileUtils.mkdir_p(File.dirname(path))
+    session_h = @harness.session.to_h(@file_list)
+    fg = run_record&.foreground_job || 0
 
-    data = @harness.session.to_h(@file_list)
-    data[:active_model] = @harness.model_config.active_model
+    FileUtils.mkdir_p(@locator.job_dir_path(id, fg))
+    File.write(@locator.run_file_path(id), JSON.generate(run_json(id, session_h)))
+    write_json(@locator.job_session_file_path(id, fg), job_session_json(session_h))
+    write_json(@locator.job_replay_file_path(id, fg), run_record&.replay_tail || [])
 
-    # issue #219: session-level parameter overrides survive a save/resume
-    # round trip, like the active model.
-    data[:param_overrides] = param_overrides.to_h
-
-    # issue #221: the YOLO shell posture survives a save/resume round trip
-    # too. The user switched it on deliberately for THIS session; resuming
-    # it must not quietly restore the consent prompts they opted out of.
-    # (The disaster denylist still applies in a resumed YOLO session - it is
-    # a floor under the posture, not part of it.) Kept here rather than in
-    # Session#to_h because it is harness consent state, not conversation
-    # state - the same treatment as active_model / param_overrides.
-    data[:yolo] = @harness.settings.yolo? == true
-
-    # issue #28: the streaming posture travels with the session too. It is a
-    # harness posture, not conversation state (the same treatment as yolo),
-    # and a resumed session must not quietly drop back to buffered.
-    data[:stream] = @harness.settings.stream? == true
-
-    # issue #106: the markdown rendering posture travels with the session too
-    # (a harness posture, not conversation state). A session the user set to
-    # markdown-rendered must not drop back to raw markdown on resume.
-    data[:markdown] = @harness.settings.markdown? == true
-
-    # issue #303: the rendered-output palette travels with the session too.
-    # A display preference the user chose for THIS session; resuming it must
-    # not drop back to the startup default. Stored as the palette NAME so the
-    # resume side can validate it against the palettes this build has.
-    data[:output_palette] = @harness.settings.output_palette.name
-
-    # issue #286: which job was foreground is harness state, not conversation
-    # state (the same treatment as the postures), so it travels as an id and
-    # CLI#setup restores it on the registry that run owns. Guarded so a
-    # SessionManager built without an injected run record still saves.
-    if run_record
-      data[:foreground_job] = run_record.foreground_job
-    end
-
-    # issue #405: what a session's conversation actually had tools from. The
-    # servers themselves come from the config (they are not a session posture),
-    # but the TOOLS the conversation used are a property of the session: a
-    # resumed run whose config no longer reaches one of those servers must say so
-    # instead of quietly sending a smaller tools payload. Named mcp_connected,
-    # not mcp_servers: the config DECLARES servers, this records what THIS run
-    # reached, and a session file must not read like a config override.
-    data[:mcp_connected] = @harness.mcp_connected_summary
-
-    # issue #458: the tail of the run's OutputBuffer (the both-sides record of
-    # what the user saw - their prompts as :user entries plus the model/tool
-    # side). A resumed run redraws it at startup so the last topic is visible.
-    # A run-record key (like mcp_connected), not conversation state.
-    data[:replay_tail] = run_record.replay_tail if run_record
-
-    json = JSON.generate(data)
-
-    File.write(path, json)
-    @harness.logger.info "session saved: #{id} (#{path})"
+    @harness.logger.info "session saved: #{id} (#{@locator.run_file_path(id)})"
     id
   end
 
@@ -791,6 +744,56 @@ class SessionManager
   end
 
   private
+
+  # Write a hash as JSON to a path (the two per-job files share this).
+  def write_json(path, data)
+    File.write(path, JSON.generate(data))
+  end
+
+  # The run/world half the run's owner (CLI/JobRegistry) holds (#286). access and
+  # the digest cache stay here because they are run-wide TODAY (Session#
+  # restore_access_grants reaches the run-wide FileList), not per-job. The four
+  # postures and mcp_connected are harness/run state, not conversation state, so
+  # each is written so a resumed run keeps the choice made for THIS session, and a
+  # session saved before a key existed simply has none (#221/#28/#106/#303/#405).
+  # foreground_job/next_id/jobs are the run -> agent map: which job was foreground,
+  # the next id (so a resumed run never reuses one) and one entry per retained job
+  # with its edges as IDS (RunRecord#jobs_for_save). No run record -> job-0 record.
+  def run_json(id, session_h)
+    {
+      version: session_h[:version],
+      session_id: id,
+      created_at: session_h[:created_at],
+      workdir: session_h[:workdir],
+      Session::FILE_CACHE_KEY => session_h[Session::FILE_CACHE_KEY],
+      access: session_h[:access],
+      yolo: @harness.settings.yolo? == true,
+      stream: @harness.settings.stream? == true,
+      markdown: @harness.settings.markdown? == true,
+      output_palette: @harness.settings.output_palette.name,
+      mcp_connected: @harness.mcp_connected_summary,
+      foreground_job: run_record&.foreground_job || 0,
+      next_id: run_record&.next_id || 1,
+      jobs: run_record&.jobs_for_save ||
+        [{ id: 0, kind: :main, status: :pending, requested_by: nil, dependencies: [], dir: "jobs/0" }]
+    }
+  end
+
+  # The foreground agent's own conversation half: its message chain (message 0
+  # implicit, exactly as Session#to_h stores @messages[1..]), its per-agent model
+  # state, and its parameter overrides (#219). It carries NO session_id - a job is
+  # named by its directory plus the id run.json records (DECIDED,
+  # doc/session_layers_design.md), so the run UUID is never duplicated in a job
+  # file: that is the drift bug Harness#initialize otherwise has to guard.
+  def job_session_json(session_h)
+    {
+      messages: session_h[:messages],
+      user_prompts: session_h[:user_prompts],
+      last_stats: session_h[:last_stats],
+      active_model: @harness.model_config.active_model,
+      param_overrides: param_overrides.to_h
+    }
+  end
 
   # The API type of the active backend ('openai' / 'ollama'); '' when the
   # client has no backend (a stub).
