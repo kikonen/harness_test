@@ -31,9 +31,6 @@ require_relative "lib/cli"
 
 # -- Entry point ----------------------------------------------------------
 
-# issue #548: name the main thread "main" at startup (main is main), so every
-# main-thread log line is stamped [main] (the SessionLogger formatter reads
-# Thread.current.name). Task threads name themselves "job-N" (see Task#start).
 Thread.current.name = "main"
 
 begin
