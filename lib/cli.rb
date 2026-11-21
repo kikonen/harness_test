@@ -135,6 +135,9 @@ class CLI
         @registry.restore_foreground(saved_fg)
         foreground_harness.logger.info "foreground job restored: ##{@registry.foreground}"
       end
+      # The saved job list is carried for the resume increment that will rebuild
+      # jobs from it (issue #548); today only the foreground id is restorable.
+      @saved_jobs = Array(resume_data[:jobs])
     end
 
     # The save side (system.json + per-job replay.json) belongs to the SYSTEM,

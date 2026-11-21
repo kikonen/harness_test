@@ -165,6 +165,16 @@ class JobRegistry
     @foreground = id
   end
 
+  # issue #548: which saved job ids this registry can rebuild a live Job from -
+  # the ones it already has. A saved id naming nothing is a dropped job, and an
+  # edge naming it stays dangling. Main-safe: reads only, writes nothing.
+  def resumable_job_ids(saved_entries)
+    Array(saved_entries).filter_map do |entry|
+      id = entry.is_a?(Hash) ? (entry[:id] || entry["id"]) : entry
+      id if job(id)
+    end
+  end
+
   def foreground_job
     job(@foreground)
   end

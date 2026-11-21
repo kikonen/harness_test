@@ -209,6 +209,35 @@ RSpec.describe JobRegistry do
     end
   end
 
+  # issue #548: a saved system.json names the ids the system had; a resumed
+  # registry has only the ids it added itself. Re-resolution reports which saved
+  # ids name a live Job - the rest are dropped jobs whose edges stay dangling.
+  describe '#resumable_job_ids (issue #548 edge re-resolution)' do
+    let(:resumed) { JobRegistry.new.tap { |r| r.add_job(kind: :main) } }
+
+    it 'keeps a saved id this registry has and drops one it has not' do
+      resumed.add_job(kind: :command)
+
+      saved = [{ id: 0, kind: 'main' }, { id: 1, kind: 'sub_agent' }, { id: 2, kind: 'timed' }]
+
+      expect(resumed.resumable_job_ids(saved)).to eq([0, 1])
+    end
+
+    it 'accepts the raw string ids JSON reads back, and bare ids' do
+      expect(resumed.resumable_job_ids([{ 'id' => 0 }, { 'id' => 4 }])).to eq([0])
+      expect(resumed.resumable_job_ids([0, 4])).to eq([0])
+    end
+
+    it 'is empty for a nil or empty saved list' do
+      expect(resumed.resumable_job_ids(nil)).to eq([])
+      expect(resumed.resumable_job_ids([])).to eq([])
+    end
+
+    it 'reports an id a resumed registry lost to retention as not resumable' do
+      expect(resumed.resumable_job_ids([{ id: 0 }, { id: 1 }])).to eq([0])
+    end
+  end
+
   describe 'main-thread output goes to the FOREGROUND buffer' do
     # The single-writer rule from increment 6, now reading the foreground buffer
     # rather than a run-level one.

@@ -23,6 +23,15 @@ class SystemSaver
     @record.write_system_files(@locator, id, session_h, harness)
   end
 
+  # Which saved job ids the registry this saver was built from can rebuild.
+  # A saved system.json reads kind/status back from JSON as Strings; the registry
+  # needs only the ids, so they are pulled out here rather than re-symbolizing
+  # the whole entry (a resumed Job is built with the real Job::KINDS symbol).
+  def resumable_job_ids(system_jobs)
+    ids = Array(system_jobs).map { |entry| entry[:id] || entry["id"] }
+    @registry&.resumable_job_ids(ids) || []
+  end
+
   # The system half is written on every call, even when no job chain is
   # non-empty: the caller has already decided the run is worth saving (a
   # settings-only change has an empty chain but must still persist).
