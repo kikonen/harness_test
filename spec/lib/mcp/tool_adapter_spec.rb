@@ -4,10 +4,12 @@ require 'spec_helper'
 require 'mcp/tool_adapter'
 
 RSpec.describe Mcp::ToolAdapter do
-  def fake_connection
-    conn = instance_double('Mcp::ServerConnection')
-    allow(conn).to receive(:call_tool)
-    conn
+  # The adapter borrows a connection from a per-server pool (issue #548), so the
+  # double is a pool that hands out a connection double.
+  def fake_pool(conn = fake_connection)
+    pool = instance_double('Mcp::ConnectionPool')
+    allow(pool).to receive(:checkout) { |&blk| blk.call(conn) }
+    pool
   end
 
   # The three fields the adapter reads off the gem's tool object.
@@ -15,8 +17,14 @@ RSpec.describe Mcp::ToolAdapter do
     Struct.new(:name, :description, :input_schema).new(name, description, schema)
   end
 
-  def adapter(tool = fake_tool, conn = fake_connection)
-    described_class.new(server_name: 'fs', mcp_tool: tool, connection: conn)
+  def fake_connection
+    conn = instance_double('Mcp::ServerConnection')
+    allow(conn).to receive(:call_tool)
+    conn
+  end
+
+  def adapter(tool = fake_tool, pool = fake_pool)
+    described_class.new(server_name: 'fs', mcp_tool: tool, pool: pool)
   end
 
   describe '#initialize / namespacing' do
@@ -99,7 +107,7 @@ RSpec.describe Mcp::ToolAdapter do
     it 'forwards to the connection with the MCP tool\'s own name (not the namespaced one)' do
       conn = fake_connection
       allow(conn).to receive(:call_tool).with('read_file', { 'path' => 'a.rb' }).and_return('contents')
-      a = adapter(fake_tool('read_file', 'd', {}), conn)
+      a = adapter(fake_tool('read_file', 'd', {}), fake_pool(conn))
 
       expect(a.execute('path' => 'a.rb')).to eq('contents')
     end
@@ -107,9 +115,20 @@ RSpec.describe Mcp::ToolAdapter do
     it 'passes nil arguments through as an empty call (the connection normalizes them)' do
       conn = fake_connection
       allow(conn).to receive(:call_tool).with('noop', nil).and_return('ok')
-      a = adapter(fake_tool('noop', 'd', {}), conn)
+      a = adapter(fake_tool('noop', 'd', {}), fake_pool(conn))
 
       expect(a.execute(nil)).to eq('ok')
+    end
+
+    it 'borrows the connection from the pool for the duration of the call' do
+      conn = fake_connection
+      allow(conn).to receive(:call_tool).and_return('ok')
+      pool = fake_pool(conn)
+      a = adapter(fake_tool('t', 'd', {}), pool)
+
+      a.execute('a' => 1)
+
+      expect(pool).to have_received(:checkout)
     end
   end
 end

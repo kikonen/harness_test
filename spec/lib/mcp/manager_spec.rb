@@ -59,6 +59,20 @@ RSpec.describe Mcp::Manager do
       expect(manager.status_notes).to include("MCP server 'fs' connected: 1 tool(s)")
     end
 
+    it 'gives a connected server a per-server pool its tools borrow from (issue #548)' do
+      tools = [fake_tool('read_file')]
+      conn  = fake_connection(tools)
+      allow(Mcp::ServerConnection).to receive(:new).and_return(conn)
+      manager = build_manager
+      manager.load(ToolRegistry.new, [server_entry])
+
+      pool = manager.pool('fs')
+      expect(pool).to be_a(Mcp::ConnectionPool)
+      expect(pool.size).to eq(1)
+      # The pool owns the live connection the server opened.
+      expect(pool.connections).to eq([conn])
+    end
+
     it 'passes a url entry through to the connection (issue #402)' do
       tools = [fake_tool('ping')]
       allow(Mcp::ServerConnection).to receive(:new).and_return(fake_connection(tools))
@@ -103,6 +117,17 @@ RSpec.describe Mcp::Manager do
       expect(manager.status_notes.first).to include("MCP server 'down' failed to start")
       expect(manager.status_notes.first).to include('Errno::ENOENT')
       expect(registry.names).not_to include(a_string_matching(/^down\./))
+    end
+
+    it 'does not build a pool for a server that failed to connect' do
+      conn = instance_double('Mcp::ServerConnection')
+      allow(conn).to receive(:connect).and_raise(Errno::ENOENT)
+      allow(conn).to receive(:close)
+      allow(Mcp::ServerConnection).to receive(:new).and_return(conn)
+      manager = build_manager
+      manager.load(ToolRegistry.new, [server_entry(name: 'down')])
+
+      expect(manager.pool('down')).to be_nil
     end
 
     it 'logs each note it records (a failed load leaves a trace)' do
@@ -256,6 +281,26 @@ RSpec.describe Mcp::Manager do
       manager.close
 
       expect(conn).to have_received(:close)
+    end
+
+    it 'closes each server pool\'s connections (issue #548)' do
+      conn  = fake_connection([fake_tool('ping')])
+      allow(Mcp::ServerConnection).to receive(:new).and_return(conn)
+      manager = build_manager
+      manager.load(ToolRegistry.new, [server_entry])
+
+      manager.close
+
+      expect(conn).to have_received(:close)
+      expect(manager.pool('fs')).to be_nil
+    end
+
+    it 'gives each server its own pool so a different server is never blocked (issue #548)' do
+      allow(Mcp::ServerConnection).to receive(:new) { fake_connection([fake_tool('ping')]) }
+      manager = build_manager
+      manager.load(ToolRegistry.new, [server_entry(name: 'a'), http_server_entry(name: 'b')])
+
+      expect(manager.pool('a')).not_to be(manager.pool('b'))
     end
 
     it 'is a no-op when nothing was loaded' do
