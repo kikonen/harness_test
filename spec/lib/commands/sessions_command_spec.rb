@@ -58,10 +58,12 @@ RSpec.describe Commands::SessionsCommand do
 
     expect(lines).to include('Saved sessions (1):')
     header = lines.find { |l| l.start_with?('|') && l.include?('workdir') }
-    expect(split_table_row(header)).to eq(%w[id saved messages files workdir])
+    expect(split_table_row(header)).to eq(%w[id saved messages files jobs workdir])
     expect(lines).to include(a_string_matching(/\A\| [-| ]+\|\z/)) # the markdown rule row
     row = lines.find { |l| l.include?(sid) }
-    expect(split_table_row(row)).to eq([sid, '2026-01-01 10:00:00', '1', '1', workdir])
+    # The jobs column is a per-job breakdown; a #207 flat session is the
+    # degenerate one-job case (job 0), rendered as its own row.
+    expect(split_table_row(row)).to eq([sid, '2026-01-01 10:00:00', '1', '1', 'job 0: 1', workdir])
     expect(lines.last).to include('--resume <id>')
   end
 
@@ -80,5 +82,30 @@ RSpec.describe Commands::SessionsCommand do
     run_command
 
     expect(Dir.children(File.join(workdir, '.harness', 'sessions'))).to eq([sid])
+  end
+
+  # issue #548: a layered system's conversations are per-job, so the jobs column
+  # is one row per job (the renderer stacks a multi-line cell), each with its own
+  # recorded message count. A single fused "messages" number would be meaningless.
+  def seed_layered_system(id, jobs: [0, 1])
+    dir = File.join(workdir, '.harness', 'sessions', id)
+    FileUtils.mkdir_p(dir)
+    run_data = {
+      session_id: id, workdir:, foreground_job: 0, next_id: jobs.max + 1,
+      jobs: jobs.each_with_index.map do |j, i|
+        { id: j, dir: "jobs/#{j}", messages: i + 1 }
+      end
+    }
+    File.write(File.join(dir, 'system.json'), JSON.generate(run_data))
+  end
+
+  it 'renders one jobs-row per job for a layered system' do
+    seed_layered_system(sid)
+
+    rows = run_command.lines.map(&:chomp).select { |l| l.include?('job ') }
+    expect(rows.map { |l| split_table_row(l)[4] }).to eq(['job 0: 1', 'job 1: 2'])
+    # The session id and workdir appear only on the first stacked row.
+    first = rows.first
+    expect(split_table_row(first)[0]).to eq(sid)
   end
 end

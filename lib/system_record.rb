@@ -68,7 +68,8 @@ class SystemRecord
         status: job.status,
         requested_by: job.requested_by&.id,
         dependencies: dependency_ids(job),
-        dir: "jobs/#{job.id}"
+        dir: "jobs/#{job.id}",
+        messages: conversation_size(job)
       }
     end
   end
@@ -131,7 +132,8 @@ class SystemRecord
         status: :pending,
         requested_by: nil,
         dependencies: [],
-        dir: "jobs/0"
+        dir: "jobs/0",
+        messages: 0
       }
     ]
   end
@@ -140,5 +142,11 @@ class SystemRecord
   # former has an id to serialize; a predicate is omitted until increment 4.
   def dependency_ids(job)
     job.dependencies.filter_map { |dep| dep.id if dep.respond_to?(:id) }
+  end
+
+  # Per-job conversation size, recorded at save so /sessions and sessions.search
+  # report the breakdown from metadata instead of reading every job file.
+  def conversation_size(job)
+    job.harness&.session&.conversation_size || 0
   end
 end
