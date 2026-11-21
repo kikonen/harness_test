@@ -11,7 +11,7 @@ class JobRegistry
   # Same timeout as the drain loop, so a poll costs the same everywhere.
   DEFAULT_POLL_TIMEOUT = 0.1
 
-  attr_reader :max_memory, :max_saved, :tasks_kept, :jobs
+  attr_reader :max_memory, :max_saved, :tasks_kept, :jobs, :next_id
 
   # A nil limit means the caller resolved the config value already, so the
   # buffer's built-in default has to be passed in here.
@@ -173,6 +173,17 @@ class JobRegistry
     foreground_job&.buffer
   end
 
+  # -- Session-worthy (issue #548 increment 5) ------------------------------
+
+  # Does ANY retained job own session state worth saving? This is the honest
+  # cross-job question #548 wants in place of #188's foreground-emptiness test:
+  # a background/sub-agent job that did real work must count even when the
+  # foreground chain is empty. A job the run never drove (harness nil, OPEN
+  # QUESTION 5) owns no conversation, so it is not counted.
+  def any_job_has_session_state?
+    @jobs.any? { |job| job.harness && !job.harness.session.empty? }
+  end
+
   # -- Run record (issue #458 / #286) ---------------------------------------
   #
   # The run record is the FOREGROUND job's buffer, and the registry - not the
@@ -202,6 +213,16 @@ class JobRegistry
     return [] if @max_saved.zero?
 
     Array(foreground_buffer&.replay_tail(@max_saved)).map(&:to_h)
+  end
+
+  # issue #548 increment 4b: the saved tail of ANY retained job's buffer, not
+  # only the foreground one. The registry is the only writer of every job's
+  # buffer (the single-thread I/O rule), so reading a job's tail is main-safe
+  # for every job. A job id the registry does not retain has no tail.
+  def replay_tail_for_job(job_id)
+    return [] if @max_saved.zero?
+
+    Array(job(job_id)&.buffer&.replay_tail(@max_saved)).map(&:to_h)
   end
 
   # A resumed run seeds its record from the saved tail so the startup banner

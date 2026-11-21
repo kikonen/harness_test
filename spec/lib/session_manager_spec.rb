@@ -10,6 +10,7 @@ require 'output_buffer'
 require 'session_manager'
 require 'system_settings'
 require 'job_registry'
+require 'system_saver'
 require 'fileutils'
 require 'tmpdir'
 
@@ -485,7 +486,7 @@ RSpec.describe SessionManager do
         manager   = described_class.new(harness, file_list)
 
         expect(manager.session_file_path(sid))
-          .to eq(File.join(dir, '.harness/sessions', sid, 'session.json'))
+          .to eq(File.join(dir, '.harness/sessions', sid, 'system.json'))
       end
     end
 
@@ -607,10 +608,11 @@ RSpec.describe SessionManager do
       registry = JobRegistry.new
       registry.add_job(kind: :main)
       registry.foreground_buffer.restore(tail)
-      manager.registry = registry
+      manager.system_saver = SystemSaver.new(SessionLocator.new(dir), registry)
       session.add_user('hello')
       manager.save_session
-      JSON.parse(File.read(manager.session_file_path(session.session_id)), symbolize_names: true)
+      JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
+                                     'jobs', '0', 'replay.json')), symbolize_names: true)
     end
 
     it 'writes the saved tail as a replay_tail array' do
@@ -621,9 +623,51 @@ RSpec.describe SessionManager do
         # JSON round trip keeps the keys symbol (symbolize_names) but the
         # type/origin values come back as strings; the registry re-symbols them
         # on a resumed run.
-        expect(data[:replay_tail]).to eq(
+        expect(data).to eq(
           tail.map { |e| e.merge(type: e[:type].to_s, origin: e[:origin].to_s) }
         )
+      end
+    end
+  end
+
+  # issue #548 increment 4b: a job saves to its OWN jobs/<id>/ dir (so a
+  # sub-agent harness no longer writes into the foreground dir), and a per-job
+  # save keys on the RUN id (a sub-agent's own session uuid must not mint a
+  # stray top-level session dir).
+  describe 'per-job session save (issue #548 increment 4b)' do
+    it 'writes the job OWN dir when job_id is not the foreground' do
+      Dir.mktmpdir do |dir|
+        registry = JobRegistry.new
+        registry.add_job(kind: :main)
+        registry.add_job(kind: :sub_agent)
+        file_list = FileList.new([], workdir: dir)
+        mgr = described_class.new(harness, file_list)
+        mgr.system_saver = SystemSaver.new(SessionLocator.new(dir), registry)
+        mgr.job_id = 1 # this manager is the sub-agent job
+        session.add_user('sub-agent work')
+
+        mgr.save_session
+
+        job1 = File.join(dir, '.harness', 'sessions', session.session_id,
+                         'jobs', '1', 'session.json')
+        expect(File.file?(job1)).to be(true)
+        data = JSON.parse(File.read(job1), symbolize_names: true)
+        expect(data[:messages].map { |m| m[:content] }).to include('sub-agent work')
+      end
+    end
+
+    it 'save_job_session keys on the RUN id, not the harness own session id' do
+      Dir.mktmpdir do |dir|
+        file_list = FileList.new([], workdir: dir)
+        mgr = described_class.new(harness, file_list)
+        mgr.job_id = 2
+        session.add_user('chain')
+        run_id = '11111111-2222-3333-4444-555555555555'
+
+        expect(mgr.save_job_session(run_id)).to eq(run_id)
+
+        path = File.join(dir, '.harness', 'sessions', run_id, 'jobs', '2', 'session.json')
+        expect(File.file?(path)).to be(true)
       end
     end
   end
@@ -649,10 +693,10 @@ RSpec.describe SessionManager do
       double.define_singleton_method(:markdown?) { false }
 
       manager = described_class.new(double, FileList.new([], workdir: dir))
-      manager.registry = registry
+      manager.system_saver = SystemSaver.new(SessionLocator.new(dir), registry)
       manager.save_session
       JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
-                                     'session.json')), symbolize_names: true)
+                                     'system.json')), symbolize_names: true)
     end
 
     it 'writes the foreground as the retained job id' do
@@ -812,8 +856,10 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       session.add_user('hello')
       mgr.save_session
 
-      path = mgr.session_file_path(session.session_id)
-      data = JSON.parse(File.read(path))
+      # param_overrides is the foreground agent's per-agent state, so it lives in
+      # that agent's own job session.json (issue #548), not in system.json.
+      job_session = SessionLocator.new(dir).job_session_file_path(session.session_id, 0)
+      data = JSON.parse(File.read(job_session))
       expect(data['param_overrides']).to include('reasoning_effort')
     end
   end

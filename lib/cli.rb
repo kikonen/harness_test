@@ -10,6 +10,7 @@ require_relative "harness"
 require_relative "file_list"
 require_relative "error_text"
 require_relative "job_registry"
+require_relative "system_saver"
 require_relative "history_manager"
 require_relative "session_locator"
 require_relative "command_handler"
@@ -25,6 +26,7 @@ class CLI
     :file_list,
     :session_id,
     :commands,
+    :system_saver,
     :history,
     :ui
 
@@ -121,7 +123,10 @@ class CLI
     # registry.foreground_job.harness rather than a CLI-held reference. After
     # this line every read below goes through #foreground_harness, never a
     # @harness ivar.
-    @registry.add_job(kind: :main, harness:)
+    main_job = @registry.add_job(kind: :main, harness:)
+    # Each Harness saves its OWN job dir (issue #548 increment 4b): the id is
+    # wired when a harness is attached to a job. The main turn is this job.
+    harness.session_manager.job_id = main_job.id
 
     if resume_data
       @registry.restore_replay_tail(resume_data[:replay_tail])
@@ -132,9 +137,12 @@ class CLI
       end
     end
 
-    # The save side records from the registry the RUN owns (#286): SessionManager
-    # is built by Harness, which holds no registry, so its owner injects it.
-    foreground_harness.session_manager.registry = @registry
+    # The save side (system.json + per-job replay.json) belongs to the SYSTEM,
+    # not the single-LLM turn engine (#286 / #548): the CLI - not the Harness -
+    # builds the SystemSaver from its own registry and injects it, so a
+    # SessionManager never assembles the system file it does not own.
+    @system_saver = SystemSaver.new(@locator, @registry)
+    foreground_harness.session_manager.system_saver = @system_saver
 
     @history  = HistoryManager.new(@file_list.workdir, session_id:)
     foreground_harness.history = @history
@@ -264,12 +272,15 @@ class CLI
     # here is what stops a server outliving the CLI.
     foreground_harness.close_mcp
 
-    # issue #188: a run that changed settings (e.g. /model) but sent no
-    # prompt still has session-worthy state. The new history entry is the
-    # evidence - read it BEFORE #save, which clears it.
-    state_changed = @history.has_pending_entries?
+    # issue #548 increment 5: the exit decision asks the honest CROSS-JOB
+    # question - did ANY retained job accumulate session state? - instead of
+    # reading only the foreground conversation's emptiness (#188's bug). A run
+    # that changed settings (e.g. /model) WITHOUT building any conversation
+    # has no per-job chain to inspect, so the history entry stays the narrow
+    # evidence for that settings-only case. Read it BEFORE #save, which clears it.
+    settings_only_change = @history.has_pending_entries?
     @history.save
-    id = auto_save_session(state_changed)
+    id = auto_save_session(settings_only_change)
     ui.puts "Goodbye."
     if id
       ui.puts "Session saved as #{id} (#{foreground_harness.session_manager.session_file_path(id)})."
@@ -501,12 +512,20 @@ class CLI
 
   # Auto-save the session on exit (best-effort). Returns the session id,
   # or nil when there was nothing to save or saving failed.
-  # state_changed: the run submitted a command but built no conversation
-  # (issue #188) - settings like /model then still deserve a saved session.
-  def auto_save_session(state_changed = false)
-    return nil if foreground_harness.session.empty? && !state_changed
+  # issue #548 increment 5: the primary test is the cross-job predicate - does
+  # ANY retained job own session state? - not the foreground chain alone.
+  # settings_only_change keeps the #188 case (a settings change with no
+  # conversation ANYWHERE): no per-job chain exists to inspect, so a fresh
+  # history entry is the only evidence such a run is worth saving.
+  def auto_save_session(settings_only_change = false)
+    return nil unless @registry.any_job_has_session_state? || settings_only_change
 
-    foreground_harness.session_manager.save_session
+    # The SystemSaver (the system's owner-built object) writes every job's own
+    # conversation plus system.json + per-job replay.json in one call (issue
+    # #548 increment 4b, moved out of the CLI). At exit every job thread is
+    # joined (registry.run awaits :done, Task.stop joins), so each chain is
+    # quiescent and main may read it.
+    @system_saver.save_run(session_id)
   rescue StandardError => e
     foreground_harness.logger.error ErrorText.detailed(e, "auto-save failed")
     ui.puts "  [warning] could not auto-save session: #{e.message}"

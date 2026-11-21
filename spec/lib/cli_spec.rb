@@ -279,7 +279,7 @@ RSpec.describe CLI do
     end
   end
 
-  # issue #286: the JobRegistry is the run's own (the CLI builds it, registers the
+  # issue #286: the JobRegistry is the system's own (the CLI builds it, registers the
   # main turn as job #0, and seeds/restore it from a resumed session's record).
   describe 'the run registry (issue #286)' do
     it 'builds the registry with the main turn as job #0' do
@@ -312,12 +312,67 @@ RSpec.describe CLI do
       tail = cli.registry.foreground_buffer.replay_tail
 
       expect(tail.map { |e| [e.type, e.origin] }).to eq([[:user, :user], [:list, :grant]])
-      expect(cli.foreground_harness.session_manager.registry).to equal(cli.registry)
+      # The foreground job is a SYSTEM fact; #548 puts it on the CLI's SystemSaver.
+      expect(cli.system_saver.foreground_job).to eq(cli.registry.foreground)
+    end
+  end
+
+  # issue #548 merge gate: a REAL layered save (system.json + jobs/<id>/) must
+  # round-trip back through --resume. Every other resume spec here seeds a
+  # hand-built flat #207 session.json; this one writes the layered layout with
+  # the real save_session and resumes it, proving SessionLocator#assemble_system
+  # folds the job's session.json + replay.json back into one resume_data hash.
+  # system.json carries NO messages key - the conversation lives only in
+  # jobs/0/session.json - so a non-empty resumed conversation is the proof the
+  # assembly read the job file. A model PROFILE is configured so the active
+  # model resolves on BOTH runs (a bare -m id with no profile raises on resume's
+  # restore_session_model, unrelated to this round-trip).
+  describe 'layered save/resume round-trip (issue #548)' do
+    let(:layered_options) do
+      options.merge(model_profiles: [{ name: 'test-model', model: 'test-model' }])
+    end
+
+    it 'resumes the conversation and replay tail a layered save wrote' do
+      saver = described_class.new(layered_options, ui)
+      saver.setup
+      id = saver.session_id
+
+      saver.foreground_harness.session.add_user('earlier prompt')
+      saver.foreground_harness.session.add_assistant('earlier reply')
+      saver.registry.record_user_prompt('fix the parser')
+      saver.foreground_harness.session_manager.save_session
+
+      locator = SessionLocator.new(workdir)
+      expect(File.file?(locator.system_file_path(id))).to be true
+      expect(File.file?(locator.job_session_file_path(id, 0))).to be true
+      expect(File.file?(locator.job_replay_file_path(id, 0))).to be true
+
+      # The conversation is NOT in system.json - it moved to the job's own file.
+      system_data = JSON.parse(File.read(locator.system_file_path(id)))
+      expect(system_data).not_to have_key('messages')
+      expect(system_data['jobs'].map { |j| j['id'] }).to eq([0])
+      # The system records each job's conversation size so /sessions can report a
+      # per-job breakdown from metadata alone (SystemRecord#jobs_for_save).
+      expect(system_data['jobs'].map { |j| j['messages'] }).to eq([2])
+      job_data = JSON.parse(File.read(locator.job_session_file_path(id, 0)))
+      expect(job_data['messages'].map { |m| m['content'] }).to include('earlier prompt')
+
+      resumed = described_class.new(layered_options.merge(resume: id), ui)
+      resumed.setup
+
+      expect(resumed.session_id).to eq(id)
+      contents = resumed.foreground_harness.session.messages.map { |m| m[:content] }
+      expect(contents).to include('earlier prompt')
+      expect(contents).to include('earlier reply')
+
+      tail = resumed.registry.foreground_buffer.replay_tail
+      expect(tail.map { |e| [e.type, e.origin, e.content] })
+        .to include([:user, :user, 'fix the parser'])
     end
   end
 
   # issue #221 review (bug 2): the shell consent posture is stated in the startup
-  # banner so the run's approval behavior is visible from the first line.
+  # banner so the system's approval behavior is visible from the first line.
   describe 'startup banner - command consent posture' do
     it 'names the MANUAL posture and how to change it' do
       cli = build_cli
@@ -550,7 +605,7 @@ RSpec.describe CLI do
       expect(cli.file_list.readable?('.env')).to be false
     end
 
-    # The startup banner states the run's file consent, the same way it states
+    # The startup banner states the system's file consent, the same way it states
     # the command consent posture (#221): "no dialogs for your files" is a
     # claim that must be visible and auditable from the first line.
     it 'states the standing grant in the startup banner' do
@@ -665,8 +720,9 @@ RSpec.describe CLI do
       cli.setup
 
       cli.foreground_harness.session.add_user('keep this turn')
-      allow(cli.foreground_harness.session_manager).to receive(:save_session)
-        .and_raise(RuntimeError, 'save exploded')
+      # The exit-save now goes through the system's SystemSaver, not a single
+      # SessionManager, so the raise belongs on the object the CLI actually calls.
+      allow(cli.system_saver).to receive(:save_run).and_raise(RuntimeError, 'save exploded')
       allow(ui).to receive(:puts)
       stub_prompt_reader
 
@@ -684,8 +740,9 @@ RSpec.describe CLI do
   # orphaned under a throwaway id. The exit-save now also fires when the run
   # changed state (a new history entry is the evidence).
   describe 'exit-save on a state change with no conversation (issue #188)' do
-    def session_json(id)
-      File.join(workdir, '.harness', 'sessions', id, 'session.json')
+    def saved_run_entry(id)
+      # issue #548: a save now writes system.json as the system's entry point.
+      File.join(workdir, '.harness', 'sessions', id, 'system.json')
     end
 
     it 'saves the session when a command was typed but no prompt was sent' do
@@ -698,7 +755,7 @@ RSpec.describe CLI do
       cli.run
       id = cli.foreground_harness.session.session_id
 
-      expect(File.file?(session_json(id))).to be(true)
+      expect(File.file?(saved_run_entry(id))).to be(true)
     end
 
     it 'saves nothing when the session is empty and no command was typed' do
@@ -711,8 +768,8 @@ RSpec.describe CLI do
       id = cli.foreground_harness.session.session_id
 
       # The session dir exists (the run wrote its harness.log under the id),
-      # but no session.json was written for a run that changed nothing.
-      expect(File.exist?(session_json(id))).to be(false)
+      # but no system.json was written for a run that changed nothing.
+      expect(File.exist?(saved_run_entry(id))).to be(false)
     end
 
     it 'still saves a normal conversation (the empty? path is unchanged)' do
@@ -727,7 +784,7 @@ RSpec.describe CLI do
       cli.run
       id = cli.foreground_harness.session.session_id
 
-      expect(File.file?(session_json(id))).to be(true)
+      expect(File.file?(saved_run_entry(id))).to be(true)
     end
   end
 end

@@ -31,6 +31,8 @@ require_relative "lib/cli"
 
 # -- Entry point ----------------------------------------------------------
 
+Thread.current.name = "main"
+
 begin
   exit CLI.new.run
 rescue HarnessError => e

@@ -1,0 +1,366 @@
+# Session persistence layers: harness-session vs run (system) session (issue #548)
+
+Design notes for splitting session persistence along the ownership seam #286 has
+already established. This is a DESIGN document only; no code is written for #548
+yet. It states the conflation, the evidence in today's code, the proposed two-layer
+shape, the file layout the owner has chosen (dir per job), the log decision that
+layout forces, the increments, and the decisions still open. Issue #548 stays OPEN
+until the layout is implemented.
+
+Cross-refs: #548 (this), #286 (agent tasks / the Job model), #458 (the system record),
+#207 (session dir layout), #276 (identity resolution), #188 (the `state_changed`
+workaround this replaces), #405 (`mcp_connected`). Ownership decomposition:
+`doc/harness_job_design.md`; the job/queue model: `doc/task_model_design.md`.
+
+Verified against `master` `7ecb88c` (the merged slice-A postures branch).
+
+---
+
+## The conflation #548 names
+
+Session persistence has **one owner and one file** but carries **two structurally
+different kinds of state welded together**:
+
+- the **per-agent conversation** - a Harness' `Session` message chain, its file
+  digest cache, its access grants, and that agent's own model / param-override
+  state; and
+- the **system / world** - the `JobRegistry` record (the job list, which job was
+  foreground, the replay tail), the system-wide postures (`yolo`/`stream`/`markdown`/
+  `output_palette`), and `mcp_connected`.
+
+`doc/harness_job_design.md` already states that a Harness is three things welded
+together (the per-LLM turn engine, the conversation, and system/world state) and that
+the system/world half is being moved out increment by increment - postures went to
+`SystemSettings`, the system record went to `JobRegistry`, the FS-backed stores went
+to the tools/commands. **The persistence layer never got that split.** `save_session`
+is a method on `SessionManager`, which is built by and owned by ONE Harness, yet
+it serializes system-wide keys. The ownership doc names the smell directly in the
+present tense:
+
+> "SessionManager is built by Harness, which holds no registry, so its owner
+> injects it."
+
+That injection is the tell: an object is being made to serialize a run it does not
+own. `#548` is that sentence turned into a fix.
+
+## Evidence in today's code
+
+The conflation is not hypothetical; three concrete facts in the current tree make
+it concrete.
+
+**1. One id is shared between the run and the foreground agent.**
+`CLI#setup` resolves `@session_id` exactly once (`@locator.resolve_id`), and keys
+everything off it: the session directory, `SessionLogger.build(@locator.session_log_path(session_id))`,
+`HistoryManager.new(@file_list.workdir, session_id:)`, and the saved `session.json`.
+That same id is passed straight into `Harness.new(..., session_id:)`, which feeds it
+to `Session.new(..., session_id: log_id ...)` where `log_id = session_id || @locator.fresh_id`.
+So the **system's directory name** and the **foreground agent's conversation id** are the
+same number, and there is no place left for a second id that means "this run".
+
+**2. A sub-agent's session is minted but never saved.**
+`Job::KINDS` already includes `:sub_agent`, and `doc/task_model_design.md` Phase 1
+gives a sub-agent "its own session". `Session#initialize` defaults `@session_id ||=
+SecureRandom.uuid`, so a sub-agent Harness built without an injected id gets its own
+id, would resolve its own directory, and its own log - but **nothing ever saves it**.
+Every save trigger in the codebase is the *foreground* Harness' `SessionManager`:
+`CLI#auto_save_session` -> `foreground_harness.session_manager.save_session`,
+`SaveCommand` -> `foreground_harness.session_manager.save_session`, and
+`SessionManager#maybe_auto_save` from inside the foreground turn loop. A `#286`
+agent that does real work has no persistence path at all.
+
+**3. The exit save decides for the whole run from one agent's conversation.**
+`CLI#auto_save_session`:
+
+```ruby
+return nil if foreground_harness.session.empty? && !state_changed
+foreground_harness.session_manager.save_session
+```
+
+The system-level decision ("does this run deserve a saved session?") is made by reading
+only the *foreground agent's* emptiness. `state_changed` (a `@history.has_pending_entries?`
+heuristic, added by #188) is a bolt-on: it exists because a run that changed settings
+(`/model`) or ran a background job but sent no foreground prompt still has state worth
+saving, and the foreground conversation alone cannot see that.
+
+## The seam: two sessions, two owners
+
+Split persistence along the ownership line `doc/harness_job_design.md` already draws -
+a Harness is ONE LLM tool-loop and belongs to a Job; the CLI/`JobRegistry` is the
+"System / world" half, exactly one per process:
+
+- **Harness session** - one per agent/Job. Holds: the `Session` message chain, the
+  file digest cache, the access grants, and that agent's own `active_model` /
+  `param_overrides`. Owned by that agent's Harness / `SessionManager` (its persistence
+  half). Saved under the agent's own session id.
+- **System session** - exactly one per process. Holds: the `JobRegistry` record
+  (job list, the foreground id, the replay tail), the system-wide postures, `mcp_connected`,
+  and a **system -> agent-session-id map** (the piece that does not exist today). Owned by
+  CLI / `JobRegistry`.
+
+The distinction is not new vocabulary invented for this issue - it is exactly the
+`doc/harness_job_design.md` split of "conversation" from "system / world", applied to the
+one subsystem that never received it.
+
+With the seam in place, save is **system-driven, not foreground-driven**: the CLI owns the
+system session and, at exit, enumerates the retained Jobs and lets each Job's Harness
+persist its own harness session; resume reads the system record first (identity, job list,
+postures) and then restores each retained agent's harness session. `auto_save_session`
+then asks the honest question - "did ANY job in this run accumulate session-worthy
+state?" - instead of "is the foreground conversation empty?", and `state_changed`
+becomes unnecessary.
+
+## What each layer owns (the full key map)
+
+The keys `save_session` writes today, partitioned by which layer they belong to:
+
+| key | layer | today's owner | honest owner |
+|-----|-------|---------------|--------------|
+| `messages`, `file_cache`, `access`, `workdir`, `user_prompts`, `last_stats`, `created_at`, `session_id` | harness | `Session#to_h` | Harness session (correct already) |
+| `active_model`, `param_overrides` | harness | `SessionManager` | Harness session (per-agent model state) |
+| `yolo`, `stream`, `markdown`, `output_palette` | system | `SessionManager` (per-Harness) | system session |
+| `foreground_job`, `replay_tail` | system | `SessionManager` via injected `registry` | system session (the registry's own data) |
+| `mcp_connected` | system | `SessionManager` | system session |
+
+The `yolo`/`stream`/`markdown`/`palette` keys already carry comments calling them
+"harness posture, not conversation state" and "harness consent state, not conversation
+state" - they are system-level choices the harness happens to read, not part of any one
+agent's message chain. They belong to the system session. The `registry` injection exists
+only because a per-Harness object was asked to reach the system record; moving the record
+to its owner deletes the injection.
+
+## File-layout options (fork resolved: A, as dir per job)
+
+Two shapes were on the table; the owner picked **A**, sharpened into **one directory per
+job** (see "The layout decision" below). Recording both because the cost difference is
+what the increments are ordered around.
+
+**A. Separate system file plus per-agent files.** `.harness/sessions/<system-id>/system.json`
+plus an agent session per job. `system.json` carries the system record and the id list.
+- Pros: each layer is a standalone file the locator can read without decoding the
+  other; a sub-agent's session becomes a real saved object; the system id and the
+  foreground agent id stop being the same number; and a job can own FILES, not just
+  keys in a JSON blob - which is what per-job artifacts and per-job cleanup need.
+- Cons: identity resolution must now resolve a *run* id and then follow it to agent
+  ids; `/sessions` and `--resume` change what they list and what they read.
+
+**B. One file with two blocks.** a single `session.json` holding a `system:` block and an
+`agents:` block (the foreground agent's chain living where `messages` is today).
+- Pros: keeps today's one-file-per-session directory and the `#207`/`#276` identity
+  machinery almost unchanged; resume reads one file.
+- Cons: the system record and the conversation still share a file and the system id stays
+  coupled to the foreground id; a sub-agent's chain must go in a nested `agents:`
+  section rather than its own dir. **Disqualified by dir-per-job**: a single file cannot
+  hold "and other files per case", so B cannot express per-job retention at all.
+
+Increment 1 below still writes both halves into the current one file while the seam is
+proven, but that is a transitional step with no `agents:` block and no nested keys - not
+option B as a destination.
+
+## Increments (a suggested sequence)
+
+1. **Partition `save_session`.** Split it into a harness-session writer (the
+   `Session#to_h` keys + `active_model` + `param_overrides`) and a run-record writer
+   owned by CLI/`JobRegistry` (jobs/foreground/replay_tail/postures/mcp_connected).
+   Delete `SessionManager#registry` and its injection. No layout change yet - the two
+   writers can still emit into the existing file while the seam is proven.
+2. **Apply the chosen layout** (system.json + `jobs/<id>/`). This is where the system -> agent
+   map first appears and where `@next_id` becomes persisted.
+3. **`SessionLocator` learns the system record.** It becomes the reader of the system file and
+   the resolver that follows a system id to the agent ids it names, so list/resume/delete
+   understand both layers.
+4. **Save/resume enumerate the retained Jobs.** `CLI#auto_save_session` walks
+   `@registry.jobs` and asks each Job's Harness to persist its harness session; resume
+   reads the system record, restores postures/foreground, then restores each agent session.
+   Sub-agent sessions become saved objects.
+5. **Replace `state_changed`.** Exit decides on "any retained job has session state?"
+   rather than the history-entry heuristic.
+
+`doc/harness_job_design.md` already defers "the SessionManager split (per-LLM loop vs
+persistence/profile catalogue)" to a later increment; #548 is that deferral scheduled.
+
+## What this is NOT
+
+- **Not a rename of `Session`.** The `Session` class stays the conversation chain. The
+  new thing is a system-level record and a map to agent sessions, plus moving the system-level
+  keys out of a per-Harness writer.
+- **Not the KV cache or prefix cache.** Those are about what a single request sends
+  (`doc/compaction_cache_design.md`, #238); this is about what a whole run persists.
+- **Not #286's task scheduler.** #548 is a prerequisite seam: agent tasks cannot persist
+  their sessions until sessions know they are per-agent. It does not build the scheduler.
+- **Not a change to identity-first construction (#276).** Identity is still resolved
+  before anything is built from it; #548 extends "identity" to include the run-vs-agent
+  distinction rather than collapsing it into one id.
+
+## The layout decision: one system file, one directory per job
+
+`system.json` for system state plus a directory holding everything one job owns. The
+per-job part is what makes retention work: a job's artifacts are FILES under its own
+directory (a sub-agent transcript, a dump, a scratch note), which is exactly what a
+single `session.json` cannot express.
+
+```
+.harness/
+  harness_history              # legacy read-only fallback
+  memories/ plans/ skills/     # system-wide ON PURPOSE - never touched by job GC
+  sessions/<session-id>/       # SecureRandom.uuid == the run/system id (#276)
+    system.json                   # version, session_id, created_at, workdir, postures,
+                               # mcp_connected, access + file_cache (system-wide TODAY),
+                               # next_id, foreground_job,
+                               # jobs: [{id, kind, status, requested_by,
+                               #         dependencies, dir}]
+    harness.log                # ONE Logger object for the run; delimiter format;
+                               # every event stamped with the JOB id, not the thread id
+    harness_history            # Reline input only (#119), escaped one-per-line
+    jobs/<id>/                 # job.json   (kind, status, result, edges AS IDS)
+                               # session.json (that agent's chain; message 0 implicit
+                               #              exactly as Session#to_h does today)
+                               # replay.json
+                               # + any future per-job artifact
+```
+
+`memories/`, `plans/` and `skills/` stay outside the session id **on purpose**
+(`doc/memory_design.md`: "Not session state"; the owner's note that plans are not bound
+to a session). Only the *active-plan pointer* is session state. Per-job GC must never
+reach those directories.
+
+### Why a directory, not a set of flat per-job files
+
+Cleanup stays O(1) in the **number of file types** rather than O(job x file kind):
+dropping a job is one recursive delete. Retention never needs an inventory of what that
+job owned, and adding a new per-job artifact needs **no retention change at all**. Flat
+per-job files turn `tasks_kept` into a growing list of "which files belong to job 3".
+Precedent for the directory as the cleanup unit: `doc/sensitive_paths_design.md`
+scratch/keep zone.
+
+### The drop rule
+
+`Job#finish` hands the job to the registry's retention decision. `retain` plus
+`tasks_kept` drop **finished** jobs only - never a running job, never the foreground
+job - and a drop is two actions in one step:
+
+1. remove the job's entry from `system.json`'s `jobs:` list,
+2. `FileUtils.rm_rf` the job's directory.
+
+Unlink **before** deleting, so a crash between the two leaves an orphan directory
+(recoverable by a startup sweep that deletes any `jobs/<id>/` with no `system.json` entry)
+rather than a dangling id (unrecoverable, because code dereferences an id whose directory is
+gone). `@next_id` is persisted in `system.json` and, for legacy files without it, falls back
+to `max(existing job id)`; both, so an id is never reused. Job ids do not need to be
+globally unique because containment namespaces them: "job 3" always means
+`<session-id>/job-3`.
+
+## The log decision the layout forces: one system-wide `harness.log`
+
+Dir-per-job does **not** imply one log per job. The registry has one queue, which gives a
+**total order across jobs**; splitting the log discards that order, which is the thing a
+troubleshooting reader needs. The log is for finding the right line, and tolerating a
+large log is a requirement - it is read per line, never parsed as a whole file (the 8.5 MB
+sample is not even valid UTF-8). So: **one file for the run, one `Logger` object, every
+event stamped with its job's id.** Format and size are separate problems; delimiters make
+the log *attributable*, not small.
+
+Measured on this box (ruby 4.0.7 x64-mingw-ucrt, `logger.rb` v1.7.0) by
+`analysis/548/log_format_measure.rb`, which runs from a fresh clone and writes only into
+its own directory. Four results constrain the implementation:
+
+- **One `Logger` object per session is a hard requirement, and today's code can mint a
+  second one.** Two `Logger` objects opened on the same path share `Logger`'s
+  class-level `@log_mutex` (so lines never interleave) yet **lose writes**: 400 concurrent
+  writes leave 365-391 lines across eight runs (~10% gone), because each object keeps its
+  own file position. One object hammered from two threads leaves 400 lines in every run.
+  `Harness#initialize` currently does `@logger = logger || SessionLogger.build(...)`
+  (`lib/harness.rb:143`), so a Harness built with an injected session id and no injected
+  logger opens its own writer on the same path - which is exactly what a per-job
+  sub-agent Harness will do. Enforce one writer per session in the same increment that
+  gives sub-agents persistence.
+- **Stamp the job id, not the thread id.** One job is serviced by its task thread, by the
+  Poller on the main thread, and by nested threads; a thread-id stamp splits a single
+  job's output across stamps and defeats "show me job 3's lines". The main thread stamps
+  the foreground job (id 0).
+- **Whatever channel carries the stamp must be propagated explicitly at every
+  `Thread.new`.** `Logger#formatter` runs on the calling thread, so it *can* read
+  thread-local state, but `Thread.current.name` is `nil` inside a nested thread - as is
+  the channel the tree already uses (`Task` publishes `Thread.current[:harness_task]`,
+  `lib/task.rb:107`; `Task.emit` reads it at `:252`). `Logger#progname` does reach the
+  formatter as its third argument, and so does the block form `logger.info("tag") { ... }`;
+  both are viable per-call carriers.
+- **A payload containing a line-start delimiter is parsed as a new event** (tested with a
+  `web.fetch`-shaped body). "Unlikely to appear in practice" is not sufficient: escaping
+  or a length prefix is required.
+
+The naive delimiter `!E!<job>!<time>!<severity> <body>` with the body running to the next
+delimiter is the shape; unreconstructibility is the open part (see below). Today's format
+already fails on multi-line messages: of 95,177 lines in the sample only 10,183 carry a
+header, so ~89% are continuation lines with no job attribution. Nothing in `lib/` *reads*
+`harness.log` - only the path is constructed - so it is write-only and reformatting it
+breaks no reader.
+
+## Code constraints the layout imposes
+
+- Job ids are per-run: `@next_id` starts at 0 and increments by 1 (`lib/job_registry.rb`),
+  and job 0 exists in every session as the main turn.
+- Jobs are not persisted today at all: `foreground_job` (a single int) is the only job
+  fact `save_session` writes, and resume's `restore_foreground` early-returns when
+  `job(id)` is `nil`.
+- **Edges are live object references, not ids.** `Job#ready?` calls `dep.finished?` /
+  `dep.call`, and `finish` does `requested_by&.deliver(result)`; nothing serializes them.
+  Per-job storage forces edges into ids that resume must re-resolve, and a dropped job's
+  id can dangle in another job's `dependencies`. That re-resolution is the real work of
+  this change, not the file split.
+- Access grants are **system-wide today** (`doc/harness_job_design.md`: `Session#restore_access_grants`
+  still reaches the system-wide `FileList`), so `access` and `file_cache` stay in `system.json`
+  until `FileList` itself becomes per-job. That is a code dependency, not a design choice.
+- `replay_tail` moves to the job directory on **ownership** grounds, not size:
+  `JobRegistry#replay_tail_for_save` returns the foreground buffer's replay tail, i.e. a
+  system record currently stored in the job's conversation file.
+- `SessionLocator#session_files` globs `sessions/*/"session.json"` - exactly one level
+  deep - and `list`, `search`, `find_session_file` and `newest_session_path` all derive
+  from it. Nesting job directories under the run makes that glob return `[]`, breaking
+  `/sessions`, `--resume`, `--continue` and `--delete-session` unless the locator is
+  rewritten **in the same increment**. `valid_id?` accepts UUIDs only, and directory names
+  are matched by prefix.
+- `Session#to_h` persists `@messages[1..]` - message 0 is implicit and rebuilt from the
+  current `build_system_prompt`. A per-job chain inherits that convention.
+- Existing bug, fix while touching the locator: `SessionLocator#list` reads `data[:files]`
+  and nothing ever writes a `:files` key, so `/sessions` always reports `files: 0`.
+
+## Corrections to earlier reasoning (recorded so they are not re-litigated)
+
+- "One file for system state is already true" is **wrong**: that claim read the filename
+  instead of the writers. `session.json` mixes system state and foreground-job state, and the
+  writers are per-Harness.
+- The 370 MB `harness.log` (`stat` size 0, 377,984 blocks allocated) is a **Windows**
+  artifact: a file held open by the live `SessionLogger` cannot be truncated, so blocks
+  stay allocated after the size is zeroed. Judge log growth by `du`/block count rather
+  than size, and check for open handles before trusting a truncated sample.
+- The bulk of session volume is the conversation: in a measured 231,914 B `session.json`,
+  `messages` is 190,214 B (82%) and `replay_tail` 39,492 B (17%, 30 entries); every other
+  key is under 1.2 KB. Per-job storage relocates the bulk rather than shrinking it.
+  Log *size* is a separate, larger problem: ~400 MB of growth comes from unbounded raw
+  dumps (command output, fetched bodies).
+
+## Open decisions / deferred
+
+- **Unreconstructible delimiters (DECIDED: no change)**: the per-thread stamp shipped; the
+  owner declined any escape/length-prefix scheme for multi-line dumps ("logger works fine
+  like that"). `harness.log` is write-only, so the ~89% unattributed figure is accepted.
+- **Log size control**: cap raw dumps, move dumps into `jobs/<id>/`, or rotate. Delimiters
+  do not address this.
+- **Stamp channel mechanism**: a thread-local set explicitly at every `Thread.new` with a
+  main-thread fallback to the foreground job, versus `Logger#progname` per call. Thread ids
+  are rejected.
+- **Run id vs job id (DECIDED):** the run/system UUID lives only in the **directory name**
+  and **`system.json`** - never in a job's `session.json` / `job.json`. A job is identified by
+  its directory (`jobs/<id>/`) plus the `id` in `job.json`; it does not need the run UUID,
+  and a job file that also stores a `session_id` is a second source of one identity - which
+  is what invites drift bugs. Today's `Harness#initialize` already polices that copy (it
+  raises when `resume_data[:session_id]` disagrees with the directory id); dropping the field
+  removes that bug class rather than guarding it. The directory name IS the system id - there is
+  no separate run-UUID to invent.
+- **Whether a sub-agent's harness session is auto-saved at all**, or only saved when a
+  dependency needs it back (a read-only `agent.explore` may not need its transcript
+  persisted; a write-capable sub-agent will).
+- **How `/sessions`, `--resume`, `--continue`, and `--delete-session` read a layered
+  store** - list runs, list agent sessions, or both; which one `--resume` targets.
+- **Backward compatibility**: migrate existing one-file sessions into the layered shape
+  (`StateMigrator`), or read them as the degenerate one-job case.

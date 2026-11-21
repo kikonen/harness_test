@@ -105,7 +105,7 @@ class Task
     @started_at = Time.now
     @thread = Thread.new do
       Thread.current[:harness_task] = self
-
+      Thread.current.name = "job-#{@job.id}"
       begin
         value = @block.call(self)
       rescue => e

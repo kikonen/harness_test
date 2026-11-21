@@ -508,6 +508,75 @@ RSpec.describe JobRegistry do
     end
   end
 
+  # issue #548 increment 5: the exit decision asks "does ANY retained job own
+  # session state?" across the whole job list, not just the foreground one.
+  # issue #548 increment 4b: the saved tail of ANY retained job's own buffer,
+  # not only the foreground one (the registry owns every job.buffer).
+  describe '#replay_tail_for_job (issue #548)' do
+    it 'reads a NON-foreground job buffer tail' do
+      reg = JobRegistry.new
+      main = reg.add_job(kind: :main)
+      child = reg.add_job(kind: :sub_agent, requested_by: main)
+      child.buffer.put(type: :response, origin: :session_manager, content: 'child answer')
+      child.buffer.keep_window
+      reg.foreground = main.id # foreground stays job 0
+
+      expect(reg.replay_tail_for_job(child.id).map { |e| e[:content] }).to eq(['child answer'])
+    end
+
+    it 'returns empty for a job the registry does not retain' do
+      reg = JobRegistry.new
+      reg.add_job(kind: :main)
+
+      expect(reg.replay_tail_for_job(99)).to eq([])
+    end
+
+    it 'returns empty when the saved window is disabled' do
+      reg = JobRegistry.new(max_saved: 0)
+      child = reg.add_job(kind: :sub_agent)
+      child.buffer.put(type: :response, origin: :session_manager, content: 'x')
+
+      expect(reg.replay_tail_for_job(child.id)).to eq([])
+    end
+  end
+
+  describe '#any_job_has_session_state? (issue #548)' do
+    def harness_with_session(non_empty)
+      h = Object.new
+      sess = Object.new
+      sess.define_singleton_method(:empty?) { !non_empty }
+      h.define_singleton_method(:session) { sess }
+      h
+    end
+
+    it 'is false when no job has a harness (a bare registry)' do
+      registry.add_job(kind: :main)
+
+      expect(registry.any_job_has_session_state?).to be(false)
+    end
+
+    it 'is false when the only job harness has an empty chain' do
+      registry.add_job(kind: :main, harness: harness_with_session(false))
+
+      expect(registry.any_job_has_session_state?).to be(false)
+    end
+
+    it 'is true when a NON-foreground job accumulated a conversation' do
+      registry.add_job(kind: :main, harness: harness_with_session(false))
+      registry.add_job(kind: :sub_agent, harness: harness_with_session(true))
+      registry.foreground = 0 # foreground stays the empty main job
+
+      expect(registry.any_job_has_session_state?).to be(true)
+    end
+
+    it 'ignores a job the run never drove (harness nil)' do
+      registry.add_job(kind: :main, harness: harness_with_session(true))
+      registry.add_job(kind: :timed) # no harness - nothing to save
+
+      expect(registry.any_job_has_session_state?).to be(true)
+    end
+  end
+
   describe '#to_s' do
     it 'lists the jobs and names the foreground one' do
       main = registry.add_job(kind: :main)

@@ -1,0 +1,3 @@
+# Output written by log_format_measure.rb; the script itself is the tracked
+# artifact, its generated logs are local byproducts.
+*.log
