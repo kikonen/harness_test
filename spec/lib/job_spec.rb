@@ -123,6 +123,35 @@ RSpec.describe Job do
     end
   end
 
+  # issue #548: a job is created BEFORE its agent exists (a registry job, a job
+  # being restored) and receives its Harness afterwards. One harness per job -
+  # two would be two LLM loops driven by one inbox.
+  describe '#attach_harness (issue #548)' do
+    def stand_in_harness
+      Object.new.tap { |h| h.define_singleton_method(:name) { 'harness' } }
+    end
+
+    it 'starts with no harness - a job is not its agent' do
+      expect(add(:sub_agent).harness).to be_nil
+    end
+
+    it 'attaches the harness the system built for it' do
+      job = add(:sub_agent)
+
+      expect(job.attach_harness(stand_in_harness)).to be(job.harness)
+      expect(job.harness.name).to eq('harness')
+    end
+
+    it 'refuses a second harness for the same job' do
+      job = add(:main)
+      job.attach_harness(stand_in_harness)
+
+      expect { job.attach_harness(stand_in_harness) }
+        .to raise_error(HarnessError, /job 0 already has a harness/)
+      expect(job.harness.name).to eq('harness')
+    end
+  end
+
   describe '#push_event (fan-in)' do
     it 'pushes onto the registry queue with the job id on the event' do
       job = add(:main)

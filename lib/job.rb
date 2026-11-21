@@ -60,6 +60,17 @@ class Job
     @awaiting     = false
   end
 
+  # Attach the Harness that drives this job, once. A job is created before its
+  # agent exists (a registry job, a job being restored) and the agent is attached
+  # when the system builds or restores it; attaching twice would hand one job two
+  # LLM loops, so the second attempt raises rather than replacing the first.
+  def attach_harness(harness)
+    raise HarnessError, "job #{@id} already has a harness" if @harness
+
+    @harness = harness
+    harness
+  end
+
   def pending?
     @status == :pending
   end
