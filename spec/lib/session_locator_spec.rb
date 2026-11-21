@@ -255,6 +255,24 @@ RSpec.describe SessionLocator do
     end
   end
 
+  # issue #548: a layered run lists/searches by the foreground job's conversation
+  # (run.json itself has no messages key), so /sessions counts and #search hits
+  # describe the real conversation rather than an empty run record.
+  describe '#list / #search of a layered run (issue #548)' do
+    it 'counts the foreground job messages, not an empty run.json' do
+      seed_run(sid_c, jobs: [0])
+
+      entry = locator.list.find { |s| s[:id] == sid_c }
+      expect(entry[:messages]).to eq(1) # seed_run writes one message per job
+    end
+
+    it 'searches a layered run by its job conversation text' do
+      seed_run(sid_c, jobs: [0]) # message content is "job0"
+
+      expect(locator.search('job0').map { |m| m[:id] }).to eq([sid_c])
+    end
+  end
+
   # issue #279: find a saved session by what it was ABOUT (message text / id),
   # not just list them. The search shape SessionsSearchTool renders.
   describe '#search (issue #279)' do
