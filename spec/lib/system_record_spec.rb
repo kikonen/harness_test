@@ -69,7 +69,10 @@ RSpec.describe SystemRecord do
     expect(described_class.new(registry).next_id).to eq(2)
   end
 
-  it 'serializes each retained job with edges as IDS, not live Job refs' do
+  # The system.json index is enumeration + size metadata only (issue #548 E): it
+  # names each job (id/kind/status/dir/messages) and does NOT duplicate the per-job
+  # detail (result, requested_by, dependencies) - those live only in job.json.
+  it 'records the index as id/kind/status/dir/messages, with no per-job detail' do
     registry = JobRegistry.new
     main = registry.add_job(kind: :main)
     registry.add_job(kind: :command, requested_by: main, dependencies: [main])
@@ -78,18 +81,32 @@ RSpec.describe SystemRecord do
 
     expect(jobs.map { |j| j[:id] }).to eq([0, 1])
     expect(jobs[0][:kind]).to eq(:main)
-    expect(jobs[1][:requested_by]).to eq(main.id)        # id, not a Job object
-    expect(jobs[1][:dependencies]).to eq([main.id])      # ids, not Job objects
     expect(jobs[1][:dir]).to eq('jobs/1')
+    expect(jobs[1]).not_to have_key(:requested_by)
+    expect(jobs[1]).not_to have_key(:dependencies)
+    expect(jobs[1]).not_to have_key(:result)
   end
 
-  # A dependency that is a callable predicate (not a Job) has no id to record;
-  # it is omitted (its re-resolution belongs to increment 4).
-  it 'omits a non-Job dependency that has no id' do
-    registry = JobRegistry.new
-    registry.add_job(kind: :timed, dependencies: [-> { true }])
+  # Edges are ids, not live Job refs, and they live in the job's own record. A
+  # dependency that is a callable predicate (not a Job) has no id to record; it is
+  # omitted (its re-resolution belongs to increment 4).
+  it 'records job edges as ids in job.json, omitting a non-Job dependency' do
+    Dir.mktmpdir do |dir|
+      id      = 'edededed-0000-0000-0000-000000000000'
+      locator = SessionLocator.new(dir)
+      registry = JobRegistry.new
+      main = registry.add_job(kind: :main)
+      registry.add_job(kind: :command, requested_by: main, dependencies: [main])
+      registry.add_job(kind: :timed, dependencies: [-> { true }])
 
-    expect(described_class.new(registry).jobs_for_save.first[:dependencies]).to eq([])
+      described_class.new(registry).write_system_files(
+        locator, id, session_h(id, dir))
+
+      command = locator.read_job_record(id, 1)
+      expect(command[:requested_by]).to eq(main.id)   # id, not a Job object
+      expect(command[:dependencies]).to eq([main.id]) # ids, not Job objects
+      expect(locator.read_job_record(id, 2)[:dependencies]).to eq([])
+    end
   end
 
   def session_h(id, workdir)
@@ -174,8 +191,9 @@ RSpec.describe SystemRecord do
       run = JSON.parse(File.read(locator.system_file_path(id)), symbolize_names: true)
       expect(run[:next_id]).to eq(2)
       expect(run[:jobs].map { |j| j[:id] }).to eq([0, 1])
-      expect(run[:jobs][1][:requested_by]).to eq(main.id)
       expect(run[:yolo]).to be(true)
+      # Edges are not in the index (issue #548 E); they live in job.json.
+      expect(run[:jobs][1]).not_to have_key(:requested_by)
       replay = JSON.parse(File.read(locator.job_replay_file_path(id, 0)), symbolize_names: true)
       expect(replay.first[:content]).to eq('shown')
     end

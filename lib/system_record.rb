@@ -51,35 +51,21 @@ class SystemRecord
 
   # One system.json entry per retained job (issue #548): the system -> job map the
   # reader needs to know which job dirs a system owns, plus the per-file keys
-  # /sessions reports. EDGES ARE SERIALIZED AS IDS here (a Job reference is not
-  # JSON): requested_by and dependencies become int ids. Re-resolving those ids
-  # back to live Jobs on resume is the resume increment's work - this writer only
-  # writes the ids. A dependency
-  # that is not a Job (a timed job's clock predicate, a Job#ready? callable) has
-  # no id to record and is omitted: it cannot be re-resolved as a job edge until
-  # the resume increment gives the resume path a predicate-restoring form. A
-  # registry-less record writes the degenerate one-job system (job 0, the main
-  # turn).
+  # /sessions reports. The index is ENUMERATION + SIZE metadata only (issue #548 E):
+  # which jobs this system owns, what each was (kind/status), and its conversation
+  # size - the fields a listing reads without opening a job file. The per-job DETAIL
+  # (result, requested_by, dependencies) is written ONLY into the job's own job.json
+  # (see #job_record), so a fact has one source. A registry-less record writes the
+  # degenerate one-job system (job 0, the main turn).
   def jobs_for_save
-    return degenerate_job if @registry.nil?
+    return degenerate_index if @registry.nil?
 
-    @registry.jobs.map do |job|
-      {
-        id: job.id,
-        kind: job.kind,
-        status: job.status,
-        result: result_value(job),
-        requested_by: job.requested_by&.id,
-        dependencies: dependency_ids(job),
-        dir: "jobs/#{job.id}",
-        messages: conversation_size(job)
-      }
-    end
+    @registry.jobs.map { |job| index_entry(job) }
   end
 
   # Write the system half (issue #548): system.json plus, for every retained job,
-  # its own job.json (kind/status/result/edges as ids) and replay.json. The
-  # conversation itself is NOT here - that is the job's SessionManager's to write
+  # its own job.json (the per-job record: result and edges as ids) and replay.json.
+  # The conversation itself is NOT here - that is the job's SessionManager's to write
   # on its own thread. This is the record half the registry owns, so it is safe
   # for the system's owner to write.
   # session_h carries identity/access that Session#to_h produced; the postures
@@ -92,15 +78,15 @@ class SystemRecord
     # Every retained job gets its own job.json (what it was, how it ended, its
     # edges as ids) and its own replay.json (its own main-owned buffer), so a
     # background job's record and shown output survive a resume, not just the
-    # foreground one (issue #548 increments 1 and 4b).
-    jobs_for_save.each do |entry|
-      job_path    = locator.job_file_path(id, entry[:id])
-      replay_path = locator.job_replay_file_path(id, entry[:id])
+    # foreground one (issue #548 increments 1 and 4b). The job.json fields are read
+    # off the LIVE job, not derived from the index entry (issue #548 E: no second
+    # source of one fact).
+    each_saved_job do |job, job_id|
+      job_path    = locator.job_file_path(id, job_id)
+      replay_path = locator.job_replay_file_path(id, job_id)
       FileUtils.mkdir_p(File.dirname(job_path))
-      # The system.json entry carries every field but the result, so the entry IS
-      # the record - a second source of the same fields would drift from the index.
-      File.write(job_path, JSON.generate(job_record(entry)))
-      File.write(replay_path, JSON.generate(replay_tail_for_job(entry[:id])))
+      File.write(job_path, JSON.generate(job_record(job, job_id)))
+      File.write(replay_path, JSON.generate(replay_tail_for_job(job_id)))
     end
   end
 
@@ -150,16 +136,54 @@ class SystemRecord
     settings ? settings.output_palette.name : UI::Palette.fetch(nil).name
   end
 
-  # The job's OWN record (jobs/<id>/job.json): what the job was, how it ended,
-  # and its edges as ids. system.json's jobs[] is the index that points here; the
-  # id -> live Job re-resolution is the next increment, so a resume must treat a
-  # recorded id that names no retained job as a dropped edge.
-  # The index already carries all of it except the result, so a jobs[] entry is
-  # the record: a second source of the same fields would only invite them to
-  # drift apart. `dir` and `messages` index the job's FILES, not the job, so the
-  # record drops them (the dir is the directory the file already sits in).
-  def job_record(entry)
-    entry.reject { |key, _value| key == :dir || key == :messages }
+  # Yields [job, job_id] for every job a save records, so the index, the job.json
+  # and the replay tail are all read off the SAME live job (issue #548 E: one
+  # source per fact). A registry-less record yields the degenerate one-job system.
+  def each_saved_job
+    if @registry.nil?
+      yield nil, 0
+      return
+    end
+
+    @registry.jobs.each { |job| yield job, job.id }
+  end
+
+  # The system.json index entry for a job: enumeration + size metadata only. kind
+  # and status live here (a listing needs them); result and the edges do NOT - they
+  # belong in the job's own record. The degenerate (registry-less) main turn is a
+  # job 0 :main/:pending with no conversation.
+  def index_entry(job)
+    return degenerate_index.first if job.nil?
+
+    {
+      id: job.id,
+      kind: job.kind,
+      status: job.status,
+      dir: "jobs/#{job.id}",
+      messages: conversation_size(job)
+    }
+  end
+
+  # The job's OWN record (jobs/<id>/job.json): the per-job detail the index does
+  # not carry - how it ended (result) and its edges as ids (requested_by,
+  # dependencies). kind/status repeat here because this file must be readable on
+  # its own (a resume reads a job dir without the index), but result/edges have a
+  # single source: this file. The id -> live Job re-resolution is the next
+  # increment, so a resume treats a recorded id that names no retained job as a
+  # dropped edge. A dependency that is not a Job (a timed job's clock predicate, a
+  # Job#ready? callable) has no id to record and is omitted until the resume path
+  # can restore it as a predicate.
+  def job_record(job, job_id)
+    return degenerate_record if job.nil?
+
+    {
+      id: job_id,
+      kind: job.kind,
+      status: job.status,
+      result: result_value(job),
+      requested_by: job.requested_by&.id,
+      dependencies: dependency_ids(job)
+    }
   end
 
   def result_value(job)
@@ -168,20 +192,21 @@ class SystemRecord
     "(unserializable #{job.result.class})"
   end
 
-  # A registry-less save records a system whose only job is 0 (the main turn).
-  def degenerate_job
-    [
-      {
-        id: 0,
-        kind: :main,
-        status: :pending,
-        result: nil,
-        requested_by: nil,
-        dependencies: [],
-        dir: "jobs/0",
-        messages: 0
-      }
-    ]
+  # A registry-less save records a system whose only job is 0 (the main turn): its
+  # index entry and its job record, both the degenerate one-job facts.
+  def degenerate_index
+    [{ id: 0, kind: :main, status: :pending, dir: "jobs/0", messages: 0 }]
+  end
+
+  def degenerate_record
+    {
+      id: 0,
+      kind: :main,
+      status: :pending,
+      result: nil,
+      requested_by: nil,
+      dependencies: []
+    }
   end
 
   # A dependency is a Job (edge with an id) OR a callable predicate. Only the

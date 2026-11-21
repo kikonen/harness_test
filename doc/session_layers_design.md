@@ -432,6 +432,32 @@ to `max(existing job id)`; both, so an id is never reused. Job ids do not need t
 globally unique because containment namespaces them: "job 3" always means
 `<session-id>/job-3`.
 
+### One source per job fact: index vs job.json (issue #548 E)
+
+A job is described in two files - the `system.json` `jobs[]` **index** and the job's
+own `jobs/<id>/job.json`. When both carried the same keys, they were a second source
+of one fact and could drift. The split (DECIDED):
+
+- **Index = enumeration + size metadata** (`id`, `kind`, `status`, `dir`,
+  `messages`): which jobs the system owns and how big each conversation is - the
+  fields `/sessions` and `sessions.search` read **without opening a job file**.
+- **`job.json` = the per-job detail** (`result`, `requested_by`, `dependencies`):
+  how the job ended and its edges as ids. `result`/`requested_by`/`dependencies`
+  live ONLY here - the index no longer writes them, so they have one source.
+
+`kind`/`status` appear in **both** deliberately: the index needs them to list a job
+without opening its record, and `job.json` must stay readable on its own (a resume
+reads a job dir without the index). They are written from the **same live Job** in
+one pass (`SystemRecord#write_system_files` yields each job once and reads the index
+entry and the job record off it), so they cannot drift. `result`/edges are not
+duplicated because nothing in `lib/` reads them from the index - the only consumer
+of edges (`read_job_record`, and the resume increment) reads `job.json`.
+
+This also fixed a latent write bug: the job record was previously *derived from the
+index entry* (`entry.reject(...)`), so making the index metadata-only would have
+silently dropped the per-job detail from `job.json`. The record is now built from the
+live job, independent of the index.
+
 ## The log decision the layout forces: one system-wide `harness.log`
 
 Dir-per-job does **not** imply one log per job. The registry has one queue, which gives a
