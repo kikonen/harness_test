@@ -49,6 +49,27 @@ RSpec.describe JobRegistry do
         registry.add_job(kind: :ghost)
       }.to raise_error(ArgumentError, /unknown job kind/)
     end
+
+    # #548 A: a resumed registry seeds next_id from the saved system's next_id
+    # so its next job never reuses an id already on disk.
+    it 'starts numbering at a seeded next_id (#548 A)' do
+      resumed = JobRegistry.new(next_id: 3)
+      job = resumed.add_job(kind: :main)
+
+      expect(job.id).to eq(3)
+      expect(resumed.next_id).to eq(4)
+    end
+
+    # #548: a resumed run rebuilds a saved job at its SAVED id so the job's live
+    # id matches the jobs/<id>/ dir its files live under; next_id stays ahead.
+    it 'rebuilds a saved job at its explicit id and keeps next_id ahead (#548)' do
+      resumed = JobRegistry.new(next_id: 0)
+      job = resumed.add_job(kind: :main, id: 2)
+
+      expect(job.id).to eq(2)
+      expect(resumed.next_id).to eq(3)
+      expect(resumed.add_job(kind: :sub_agent).id).to eq(3)
+    end
   end
 
   describe 'the ONE fan-in queue' do
@@ -191,21 +212,16 @@ RSpec.describe JobRegistry do
 
       expect { registry.foreground = 7 }.to raise_error(ArgumentError, /not retained/)
     end
-    # The session stores the foreground as an ID, so a resumed run restores it on
-    # the registry it built. An id this run does not retain cannot be restored.
-    it 'restores a saved id that this run retains' do
-      resumed = JobRegistry.new
-      resumed.add_job(kind: :main)
-      node = resumed.add_job(kind: :command, requested_by: resumed.jobs.first)
-      resumed.restore_foreground(node.id)
-      expect(resumed.foreground).to eq(node.id)
-    end
+    # #548: a resumed run rebuilds its saved jobs at their saved ids and then
+    # sets the foreground explicitly with foreground= (no restore_foreground).
+    it 'sets a foreground to a job the run rebuilt at its saved id' do
+      resumed = JobRegistry.new(next_id: 3)
+      resumed.add_job(kind: :main, id: 2)
 
-    it 'leaves the default in place for an id it does not retain' do
-      resumed = JobRegistry.new
-      resumed.add_job(kind: :main)
+      resumed.foreground = 2
 
-      expect(resumed.restore_foreground(9)).to eq(0)
+      expect(resumed.foreground).to eq(2)
+      expect(resumed.foreground_job.id).to eq(2)
     end
   end
 

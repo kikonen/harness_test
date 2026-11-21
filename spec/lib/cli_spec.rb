@@ -411,11 +411,11 @@ end
       options.merge(model_profiles: [{ name: 'test-model', model: 'test-model' }])
     end
 
-    def seed_layered_system(id, job_ids)
+    def seed_layered_system(id, job_ids, foreground: 0)
       locator = SessionLocator.new(workdir)
       FileUtils.mkdir_p(File.dirname(locator.system_file_path(id)))
       File.write(locator.system_file_path(id), JSON.generate({
-        session_id: id, workdir:, next_id: job_ids.max + 1, foreground_job: 0,
+        session_id: id, workdir:, next_id: job_ids.max + 1, foreground_job: foreground,
         created_at: Time.now.iso8601,
         jobs: job_ids.map { |j| { id: j, kind: 'main', status: 'finished', messages: 1,
                                   dir: "jobs/#{j}" } }
@@ -450,6 +450,32 @@ end
       # was restored onto it; job 1 has no live Job under its id.
       expect(cli.registry.job(1)).to be_nil
       expect(cli.registry.job(0).status).to eq(:pending)
+    end
+
+    # #548 C: the foreground job is rebuilt at its SAVED id (not always 0), with
+    # its own saved chain and shown tail, and next_id continues past it (#548 A).
+    it 'rebuilds the foreground at its saved non-zero id and continues numbering' do
+      id = 'c3c3c3c3-1111-2222-3333-444444444444'
+      seed_layered_system(id, [0, 1, 2], foreground: 2)
+      allow(ui).to receive(:puts)
+
+      cli = described_class.new(layered_options.merge(resume: id), ui)
+      cli.setup
+
+      # The main turn this run drives IS job 2 (the saved foreground), not job 0.
+      expect(cli.registry.foreground).to eq(2)
+      expect(cli.registry.jobs.map(&:id)).to eq([2])
+      expect(cli.registry.job(2).harness).to be(cli.foreground_harness)
+      contents = cli.foreground_harness.session.messages.map { |m| m[:content] }
+      expect(contents).to include('job2 prompt')
+      tail = cli.registry.foreground_buffer.replay_tail
+      expect(tail.map(&:content)).to eq(['job2 shown'])
+      # next_id is seeded from the saved record, so a new job lands after every
+      # saved id (3 here: saved max was 2).
+      expect(cli.registry.add_job(kind: :sub_agent).id).to eq(3)
+      # Jobs 0 and 1 have saved dirs but no agent to rebuild them into, so they
+      # are stated as dropped, not rebuilt empty.
+      expect(cli.saved_jobs.map { |j| j[:id] }).to eq([0, 1, 2])
     end
 
     it 'restores nothing for a #207 flat session (no jobs/ tree to read)' do

@@ -251,10 +251,10 @@ class SessionLocator
 
   # -- Per-job restore (issue #548 increment 3) -----------------------------
 
-  # The conversations of the jobs a resumed system did NOT fold into its own
-  # resume_data: every retained job except the foreground one. #read_session
-  # already delivers the foreground chain, the postures and the access grants, so
-  # a sub-agent's transcript is the part a resume still has to attach job by job.
+  # EVERY retained job with a saved conversation dir: each job's own chain, kind,
+  # status and shown tail, keyed by its SAVED id. No job is excluded - on restore
+  # no job is foreground yet (#548); the system owner rebuilds these jobs with
+  # their saved ids, then decides which is foreground and restores its chain.
   # Each entry is {id:, kind:, status:, messages:, replay_tail:} - kind/status as
   # JSON gives them (Strings), and a job whose dir was dropped simply has no entry.
   # A #207 flat session has NO per-job tree at all, so it contributes nothing:
@@ -264,11 +264,9 @@ class SessionLocator
   def job_restores(id)
     return [] unless system_dir?(id)
 
-    record   = read_system(id)
-    excluded = record[:foreground_job]
-    Array(record[:jobs]).filter_map do |entry|
+    Array(read_system(id)[:jobs]).filter_map do |entry|
       job_id = entry[:id]
-      next if job_id.nil? || job_id == excluded
+      next if job_id.nil?
       next unless File.file?(job_session_file_path(id, job_id))
 
       chain = parse_json(job_session_file_path(id, job_id)) || {}
@@ -357,23 +355,14 @@ class SessionLocator
     JSON.parse(File.read(path), symbolize_names: true)
   end
 
-  # Re-join a layered system into the flat resume_data hash: system.json supplies the
-  # system/world keys (identity, postures, access, file_cache, foreground, jobs),
-  # the foreground job's session.json supplies its conversation and per-agent
-  # model state, replay.json supplies the saved tail. Disjoint by construction,
-  # so a plain merge is the whole assembly. A foreground job whose dir was
-  # dropped contributes nothing (an empty conversation) - the system-level state
-  # still restores.
+  # The system half of a layered resume: system.json AS IS (identity, postures,
+  # access, file_cache, foreground, jobs, next_id). It deliberately carries NO
+  # job conversation - the system's owner reads each job's own files
+  # (#read_job_session / #job_restores) and restores them job by job. No
+  # foreground special case here: which job is foreground is the system owner's
+  # decision (#548), not the locator's.
   def assemble_system(session_id)
-    record = read_system(session_id)
-    fg     = record[:foreground_job]
-    merged = record.dup
-    if fg && File.file?(job_session_file_path(session_id, fg))
-      merged.merge!(read_job_session(session_id, fg))
-    end
-    replay_path = job_replay_file_path(session_id, fg) if fg
-    merged[:replay_tail] = parse_json(replay_path) || []
-    merged
+    read_system(session_id)
   end
 
   # -- Reading helpers -------------------------------------------------------

@@ -106,6 +106,9 @@ class CLI
     # A resumed run seeds the record from the saved tail and restores which
     # job was foreground.
     @registry = JobRegistry.new(
+      # A resumed run continues numbering past its saved jobs, so its next job
+      # never reuses a job id already on disk (#548 A). A fresh run starts at 0.
+      next_id: resume_data ? resume_data[:next_id].to_i : 0,
       max_memory: @settings.output_tail_memory || OutputBuffer::DEFAULT_MAX_MEMORY,
       max_saved: @settings.resume_replay_entries,
       tasks_kept: @settings.output_tasks_kept,
@@ -137,27 +140,37 @@ class CLI
       file_list: @file_list,
       system_saver: @system_saver,
       logger: SessionLogger.build(@locator.session_log_path(session_id)))
+    # #548: resume is the SYSTEM's work, not a foreground special case folded
+    # into one flat hash. A fresh run builds the main turn (job 0) as its own
+    # agent. A resumed run rebuilds the FOREGROUND job at its SAVED id with its
+    # own saved chain (so it matches jobs/<fg>/), restores the system state,
+    # then rebuilds the other jobs at their ids. Only the foreground job gets a
+    # full agent today (lib has no second agent yet), so a non-foreground job is
+    # stated as dropped - it has no agent to resume a conversation into.
+    saved_fg = resume_data ? resume_data[:foreground_job] : nil
+    @saved_jobs = resume_data ? Array(resume_data[:jobs]) : []
+    # The saved foreground dir intact? If the drop rule removed it the foreground
+    # chain is gone and the main turn starts fresh at job 0 (0 < any saved id).
+    main_id = saved_fg if saved_fg && File.file?(@locator.job_session_file_path(session_id, saved_fg))
+    main_data = main_id ? @system_saver.resume_main(session_id, main_id, resume_data) : resume_data
     @harness_factory.add_harness_job(
       kind: :main,
       session_id:,
-      resume_data:,
-      base_file_list: @file_list)
-    @saved_jobs = resume_data ? Array(resume_data[:jobs]) : []
+      resume_data: main_data,
+      base_file_list: @file_list,
+      id: main_id)
 
     if resume_data
-      @registry.restore_replay_tail(resume_data[:replay_tail])
-      saved_fg = resume_data[:foreground_job]
-      if saved_fg
-        @registry.restore_foreground(saved_fg)
-        foreground_harness.logger.info "foreground job restored: ##{@registry.foreground}"
+      # A layered resume redraws the foreground job's OWN saved tail (its
+      # replay.json); a flat #207 session keeps its tail inline in the record.
+      if main_id
+        @registry.foreground = main_id
+        tail = @system_saver.replay_tail_of(session_id, main_id)
+        foreground_harness.logger.info "foreground job restored: ##{main_id}"
+      else
+        tail = resume_data[:replay_tail]
       end
-      # Each saved job that is not the foreground one keeps its own status and
-      # shown tail (issue #548 increment 3). A saved id with no live Job under it
-      # is a job the drop rule removed - the normal case, so it is stated rather
-      # than treated as a failure.
-      @system_saver.restore_job_states(session_id).each do |job|
-        foreground_harness.logger.info "job ##{job.id} restored: #{job.status}"
-      end
+      @registry.restore_replay_tail(tail)
       report_dropped_jobs
     end
 

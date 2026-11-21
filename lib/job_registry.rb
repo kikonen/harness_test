@@ -19,14 +19,18 @@ class JobRegistry
     max_memory: OutputBuffer::DEFAULT_MAX_MEMORY,
     max_saved: OutputBuffer::DEFAULT_MAX_SAVED,
     tasks_kept: nil,
-    settings: nil
+    settings: nil,
+    # A resumed run must continue numbering where its saved system left off, or
+    # its next job reuses an id already on disk (#548). 0 = a fresh run. The CLI
+    # seeds it from the saved system.json's next_id.
+    next_id: 0
   )
     @max_memory = max_memory
     @max_saved  = max_saved
     @tasks_kept = tasks_kept
     @queue      = Thread::Queue.new
     @jobs       = []
-    @next_id    = 0
+    @next_id    = next_id
     @foreground = nil
     # The run's SystemSettings: the postures a save records are SYSTEM state,
     # and the registry is the system-side object a record may read them from.
@@ -34,22 +38,28 @@ class JobRegistry
   end
 
   # Ids go in add order so the main turn, added first, is job #0 - the registry
-  # has no special case for it.
+  # has no special case for it. A resumed run REBUILDS a saved job with an explicit
+  # id: (its saved id) so a job's live id matches the job dir its files live under
+  # (#548); next_id is then advanced past every used id so a new job never reuses
+  # one (#548 A).
   def add_job(
     kind:,
     dependencies: [],
     requested_by: nil,
-    harness: nil
+    harness: nil,
+    id: nil
   )
+    job_id = id || @next_id
     job = Job.new(
-      id: @next_id,
+      id: job_id,
       kind:,
       registry: self,
       buffer: OutputBuffer.new(max_memory:, max_saved:),
       dependencies:,
       requested_by:,
       harness:)
-    @next_id += 1
+    # An explicit id (a rebuilt saved job) keeps next_id ahead of every id in use.
+    @next_id = job_id + 1 if job_id >= @next_id
     @jobs << job
     @foreground ||= job.id
     job
@@ -161,14 +171,6 @@ class JobRegistry
     @foreground == id
   end
 
-  # A resumed run can only restore an id IT retains - a saved job is not
-  # rebuilt by the resume, so an unknown id leaves the default in place.
-  def restore_foreground(id)
-    return @foreground if id.nil? || job(id).nil?
-
-    @foreground = id
-  end
-
   # issue #548: which saved job ids this registry can rebuild a live Job from -
   # the ones it already has. A saved id naming nothing is a dropped job, and an
   # edge naming it stays dangling. Main-safe: reads only, writes nothing.
@@ -246,21 +248,6 @@ class JobRegistry
     return if @max_saved.zero?
 
     foreground_buffer&.restore(entries)
-  end
-
-  # -- Per-job restore (issue #548 increment 3) ------------------------------
-
-  # The job this run rebuilt for a saved job id, or nil when the id names a job
-  # this run does not have (the drop rule removed it, or nothing rebuilt it).
-  # The CLI restores each saved job's chain and shown tail through this instead
-  # of reaching into @jobs.
-  def restore_job(job_id, status:, replay_tail:)
-    target = job(job_id)
-    return nil if target.nil?
-
-    target.restore_status(status)
-    target.buffer.restore(replay_tail) unless @max_saved.zero?
-    target
   end
 
   # -- Inbox routing ----------------------------------------------------------

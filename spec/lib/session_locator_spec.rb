@@ -210,8 +210,11 @@ RSpec.describe SessionLocator do
   # a #207 session provides, so the resume consumers read one shape. The run
   # keys come from system.json, the foreground conversation from its job dir, and
   # the replay tail from that job's replay.json.
-  describe '#read_session re-joins a layered system (issue #548)' do
-    it 'merges system.json + the foreground job session.json + replay.json' do
+  # #548: read_session returns the SYSTEM half only. No job conversation is
+# folded in - the system owner reads each job's own files to rebuild them, so
+# which job is foreground is the owner's decision, not the locator's.
+  describe '#read_session returns the system half (issue #548)' do
+    it 'returns system.json as-is, with no job conversation merged in' do
       seed_system(sid_c, jobs: [0])
       File.write(locator.job_replay_file_path(sid_c, 0),
                  JSON.generate([{ type: 'user', origin: 'user', content: 'do the thing' }]))
@@ -221,15 +224,18 @@ RSpec.describe SessionLocator do
       expect(data[:session_id]).to eq(sid_c)
       expect(data[:next_id]).to eq(1)
       expect(data[:foreground_job]).to eq(0)
-      expect(data[:messages].first[:content]).to eq('job0')
-      expect(data[:active_model]).to eq('m')
-      expect(data[:replay_tail].first[:content]).to eq('do the thing')
+      # The conversation lives only in the job's own file, not in the resume hash.
+      expect(data).not_to have_key(:messages)
+      expect(data).not_to have_key(:replay_tail)
     end
 
-    it 'defaults replay_tail to [] when the job has no replay.json' do
-      seed_system(sid_c, jobs: [0])
+    it 'is the system.json of a layered system unchanged' do
+      seed_system(sid_c, jobs: [0, 1])
 
-      expect(locator.read_session(sid_c)[:replay_tail]).to eq([])
+      data = locator.read_session(sid_c)
+
+      expect(data[:jobs].map { |j| j[:id] }).to eq([0, 1])
+      expect(data).not_to have_key(:messages)
     end
   end
 
@@ -237,16 +243,17 @@ RSpec.describe SessionLocator do
   # in resume_data, so job_restores delivers the OTHER jobs - each with its own
   # status and shown tail - and a #207 session has no job tree to read.
   describe '#job_restores (issue #548 per-job restore)' do
-    it 'returns every job except the foreground one, with its status and tail' do
+    it 'returns EVERY job with a saved dir, with its status and tail' do
       seed_system(sid_c, jobs: [0, 1, 2], statuses: { 1 => "pending", 2 => "finished" })
       File.write(locator.job_replay_file_path(sid_c, 1),
                  JSON.generate([{ type: 'response', origin: 'session_manager', content: 'shown' }]))
 
       restores = locator.job_restores(sid_c)
 
-      expect(restores.map { |r| r[:id] }).to eq([1, 2])
-      expect(restores.first[:messages].first[:content]).to eq('job1')
-      expect(restores.first[:replay_tail].first[:content]).to eq('shown')
+      expect(restores.map { |r| r[:id] }).to eq([0, 1, 2])
+      job1 = restores.find { |r| r[:id] == 1 }
+      expect(job1[:messages].first[:content]).to eq('job1')
+      expect(job1[:replay_tail].first[:content]).to eq('shown')
       # The status comes from the job's OWN record file (job.json), not from
       # system.json's index, which names the job rather than describing it.
       expect(File.basename(locator.job_file_path(sid_c, 2))).to eq('job.json')
@@ -259,7 +266,7 @@ RSpec.describe SessionLocator do
       seed_system(sid_c, jobs: [0, 1])
       FileUtils.remove_entry(locator.job_dir_path(sid_c, 1))
 
-      expect(locator.job_restores(sid_c).map { |r| r[:id] }).to eq([])
+      expect(locator.job_restores(sid_c).map { |r| r[:id] }).to eq([0])
     end
 
     it 'is empty for a #207 session (it has no jobs/ tree)' do
