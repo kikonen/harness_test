@@ -149,14 +149,16 @@ RSpec.describe HarnessFactory do
     end
   end
 
-  describe 'the system writer a job delegates to' do
-    it 'hands the system saver to the job harness it builds' do
+  # The system half is written once by the run owner (the CLI) over the run
+  # registry; a job SessionManager holds no saver of its own (#548).
+  describe 'the system writer the factory holds' do
+    it 'keeps the saver the caller passed over its own registry' do
       registry = registry_with(:main)
       saver    = SystemSaver.new(SessionLocator.new(workdir), registry)
-      harness  = factory(registry: registry, system_saver: saver)
-                   .build_for(registry.jobs.first, session_id: SESSION_ID)
+      built    = factory(registry: registry, system_saver: saver)
 
-      expect(harness.session_manager.system_saver).to be(saver)
+      expect(built.system_saver).to be(saver)
+      expect(built.system_saver.registry).to be(registry)
     end
   end
 
@@ -164,25 +166,19 @@ RSpec.describe HarnessFactory do
   # registry so a job harness cannot write a one-job system.json: with no
   # registry the record falls back to a degenerate single job, and a resume of a
   # multi-job run would rebuild only job 0.
-  describe 'the run system saver the factory builds' do
-    it 'builds one over the run registry when the caller passed none' do
-      registry  = JobRegistry.new
-      build     = factory(registry: registry)
-      main      = build.add_harness_job(kind: :main, session_id: SESSION_ID)
-      child     = build.add_harness_job(kind: :sub_agent, session_id: SESSION_ID)
-      saver     = main.harness.session_manager.system_saver
-
-      expect(saver).to be(child.harness.session_manager.system_saver)
-      expect(saver.registry).to be(registry)
-    end
-
-    it 'uses the saver the caller passed instead of building a second one' do
+  # The run owner (the CLI) builds the ONE SystemSaver over its registry and
+  # hands it to every factory, so the factory is the sole system writer - it
+  # never builds a second saver and a job manager never holds one (#548).
+  describe 'the run system saver the factory holds' do
+    it 'is the single saver the caller passed over the run registry' do
       registry = registry_with(:main)
       saver    = SystemSaver.new(SessionLocator.new(workdir), registry)
-      harness  = factory(registry: registry, system_saver: saver)
-                   .build_for(registry.jobs.first, session_id: SESSION_ID)
+      build    = factory(registry: registry, system_saver: saver)
+      build.add_harness_job(kind: :main, session_id: SESSION_ID)
+      build.add_harness_job(kind: :sub_agent, session_id: SESSION_ID)
 
-      expect(harness.session_manager.system_saver).to be(saver)
+      expect(build.system_saver).to be(saver)
+      expect(build.system_saver.registry).to be(registry)
     end
   end
 end

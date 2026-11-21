@@ -5,6 +5,8 @@ require 'tmpdir'
 require 'json'
 require 'job_registry'
 require 'session_locator'
+require 'session_manager'
+require 'file_list'
 require 'system_settings'
 require 'system_record'
 require 'system_saver'
@@ -61,8 +63,7 @@ RSpec.describe SystemSaver do
   describe 'the layered read side (issue #548)' do
     def saved_system(dir, id, registry)
       described_class.new(SessionLocator.new(dir), registry).write_system_files(
-        id, session_h(id, dir), harness_double(SystemSettings.from_options({}))
-      )
+        id, session_h(id, dir))
     end
 
     it 'restores a saved job status and replay tail onto the job this run has' do
@@ -138,6 +139,47 @@ RSpec.describe SystemSaver do
 
         expect(saver.job_restores('f3f3f3f3-0000-0000-0000-000000000000')).to eq([])
         expect(saver.dropped_job_ids('f3f3f3f3-0000-0000-0000-000000000000')).to eq([])
+      end
+    end
+  end
+
+  # The single-job save a SessionManager-less harness still produces: the job's
+  # own session.json plus a degenerate one-job system.json, in the two steps
+  # save_run uses. It is the only save that writes system.json WITHOUT a registry,
+  # so the record it writes carries default postures - a real run's postures only
+  # travel through save_run over a registry carrying the system settings (#548).
+  describe 'save_standalone (issue #548)' do
+    def standalone_harness(session, manager, workdir)
+      Object.new.tap do |h|
+        h.define_singleton_method(:session) { session }
+        h.define_singleton_method(:file_list) { FileList.new([], workdir:) }
+        h.define_singleton_method(:model_config) { ModelConfig.new({}) }
+        h.define_singleton_method(:session_manager) { manager }
+      end
+    end
+
+    it 'writes the job session.json and a one-job system.json under the run id' do
+      Dir.mktmpdir do |dir|
+        id      = 'a1a1a1a1-0000-0000-0000-000000000000'
+        session = Session.new('sys', file_cache: SessionFileCache.new)
+        session.add_user('standalone prompt')
+        manager = SessionManager.new(standalone_harness(session, nil, dir), FileList.new([], workdir: dir))
+        harness = standalone_harness(session, manager, dir)
+        saver   = described_class.new(SessionLocator.new(dir), nil)
+
+        expect(saver.save_standalone(id, harness)).to eq(id)
+
+        locator = SessionLocator.new(dir)
+        expect(File.file?(locator.job_session_file_path(id, 0))).to be true
+        expect(File.file?(locator.system_file_path(id))).to be true
+        job_data = JSON.parse(File.read(locator.job_session_file_path(id, 0)))
+        expect(job_data['messages'].map { |m| m['content'] }).to include('standalone prompt')
+        system_data = JSON.parse(File.read(locator.system_file_path(id)))
+        expect(system_data['session_id']).to eq(id)
+        expect(system_data['jobs'].map { |j| j['id'] }).to eq([0])
+        # A registry-less record records the default posture, exactly as a session
+        # saved before the key existed records nothing.
+        expect(system_data['yolo']).to be(false)
       end
     end
   end

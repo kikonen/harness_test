@@ -340,7 +340,8 @@ RSpec.describe CLI do
       saver.foreground_harness.session.add_user('earlier prompt')
       saver.foreground_harness.session.add_assistant('earlier reply')
       saver.registry.record_user_prompt('fix the parser')
-      saver.foreground_harness.session_manager.save_session
+      # The layered save is the run owner's single write (SystemSaver#save_run).
+      saver.system_saver.save_run(id)
 
       locator = SessionLocator.new(workdir)
       expect(File.file?(locator.system_file_path(id))).to be true

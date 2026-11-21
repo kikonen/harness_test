@@ -40,7 +40,7 @@ RSpec.describe SessionManager do
   # its outbox; specs that drive the real drain loop go through `Task.run`.
   let(:harness) do
     Class.new do
-      attr_accessor :session, :client, :history
+      attr_accessor :session, :client, :history, :file_list, :session_manager
 
       # #286: the postures SessionManager#save_session reads live on the
       # harness' SystemSettings, so this stub's accessors forward to @settings
@@ -69,6 +69,7 @@ RSpec.describe SessionManager do
         @settings = SystemSettings.from_options(
           { num_ctx: 65_536, auto_save: false })
         @model_config = ModelConfig.new({ num_ctx: 65_536, auto_save: false })
+        @file_list = FileList.new([], workdir: Dir.pwd)
       end
 
       attr_accessor :settings, :model_config, :logger
@@ -407,6 +408,23 @@ RSpec.describe SessionManager do
     end
   end
 
+  # The system.json a save writes - and every SYSTEM key in it (postures,
+# palette, mcp, the job map) - is produced by the run owner's save_run over a
+# registry carrying the system settings, never by a job SessionManager.
+  # save_system wires this harness as job #0 and drives that single write.
+  def read_system_json(dir, id)
+    JSON.parse(File.read(SessionLocator.new(dir).system_file_path(id)))
+  end
+
+  def save_system(manager, file_list, dir, registry = nil)
+    registry ||= JobRegistry.new(settings: harness.settings)
+    job = registry.add_job(kind: :main, harness: harness)
+    registry.foreground = job.id
+    harness.file_list = file_list
+    harness.session_manager = manager
+    SystemSaver.new(SessionLocator.new(dir), registry).save_run(session.session_id)
+  end
+
   describe 'auto-save at prompt boundaries (issue #107)' do
     # Each spec builds its own manager bound to a tmp workdir so the auto-
     # save writes land in an isolated .harness/sessions/ and never in the
@@ -438,8 +456,8 @@ RSpec.describe SessionManager do
     it 'persists the session when auto_save is on and there is content' do
       with_tmp_manager do |manager, _, dir|
         session.add_user('hello')
-        # issue #207: the JSON lives INSIDE the session's own directory.
-        path = manager.session_file_path(session.session_id)
+        # Auto-save writes only this job's own conversation file (issue #548).
+        path = SessionLocator.new(dir).job_session_file_path(session.session_id, 0)
         expect(manager).to receive(:save_session).and_call_original
         expect { manager.maybe_auto_save('test') }.to change { File.file?(path) }.from(false).to(true)
       end
@@ -496,7 +514,7 @@ RSpec.describe SessionManager do
         manager   = described_class.new(harness, file_list)
         session.add_user('hello')
 
-        expect(manager.save_session).to eq(session.session_id)
+        expect(save_system(manager, file_list, dir)).to eq(session.session_id)
 
         path = manager.session_file_path(session.session_id)
         expect(File.file?(path)).to be true
@@ -517,8 +535,8 @@ RSpec.describe SessionManager do
       manager   = described_class.new(harness, file_list)
       harness.yolo = on
       session.add_user('hello')
-      manager.save_session
-      JSON.parse(File.read(manager.session_file_path(session.session_id)))
+      save_system(manager, file_list, dir)
+      read_system_json(dir, session.session_id)
     end
 
     it 'saves the posture as a plain boolean' do
@@ -542,8 +560,8 @@ RSpec.describe SessionManager do
         file_list = FileList.new([], workdir: dir)
         manager   = described_class.new(harness, file_list)
         session.add_user('hello')
-        manager.save_session
-        data = JSON.parse(File.read(manager.session_file_path(session.session_id)))
+        save_system(manager, file_list, dir)
+        data = read_system_json(dir, session.session_id)
 
         expect(data['output_palette']).to eq('default')
       end
@@ -562,8 +580,8 @@ RSpec.describe SessionManager do
       manager   = described_class.new(harness, file_list)
       harness.mcp_connected_summary = summary
       session.add_user('hello')
-      manager.save_session
-      JSON.parse(File.read(manager.session_file_path(session.session_id)))
+      save_system(manager, file_list, dir)
+      read_system_json(dir, session.session_id)
     end
 
     it 'saves each connected server with the tool names it contributed' do
@@ -592,6 +610,7 @@ RSpec.describe SessionManager do
     def save_with_replay(dir, tail)
       harness_double = Class.new do
         attr_reader :settings, :model_config, :logger, :session
+        attr_accessor :file_list, :session_manager
         def initialize(session)
           @session = session
           @logger  = Logger.new(File::NULL)
@@ -604,13 +623,15 @@ RSpec.describe SessionManager do
         def stream? = false
         def markdown? = false
       end.new(session)
-      manager = described_class.new(harness_double, FileList.new([], workdir: dir))
+      fl = FileList.new([], workdir: dir)
+      manager = described_class.new(harness_double, fl)
       registry = JobRegistry.new
-      registry.add_job(kind: :main)
+      job = registry.add_job(kind: :main, harness: harness_double)
+      harness_double.file_list = fl
+      harness_double.session_manager = manager
       registry.foreground_buffer.restore(tail)
-      manager.system_saver = SystemSaver.new(SessionLocator.new(dir), registry)
       session.add_user('hello')
-      manager.save_session
+      SystemSaver.new(SessionLocator.new(dir), registry).save_run(session.session_id)
       JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
                                      'jobs', '0', 'replay.json')), symbolize_names: true)
     end
@@ -642,7 +663,6 @@ RSpec.describe SessionManager do
         registry.add_job(kind: :sub_agent)
         file_list = FileList.new([], workdir: dir)
         mgr = described_class.new(harness, file_list)
-        mgr.system_saver = SystemSaver.new(SessionLocator.new(dir), registry)
         mgr.job_id = 1 # this manager is the sub-agent job
         session.add_user('sub-agent work')
 
@@ -683,6 +703,8 @@ RSpec.describe SessionManager do
       sess = session
       double = Object.new
       double.define_singleton_method(:session) { sess }
+      double.define_singleton_method(:settings) { harness.settings }
+      double.singleton_class.attr_accessor :file_list, :session_manager
       double.define_singleton_method(:settings) { SystemSettings.from_options({ auto_save: false }) }
       double.define_singleton_method(:model_config) { ModelConfig.new({}) }
       double.define_singleton_method(:logger) { Logger.new(File::NULL) }
@@ -692,16 +714,19 @@ RSpec.describe SessionManager do
       double.define_singleton_method(:stream?) { false }
       double.define_singleton_method(:markdown?) { false }
 
-      manager = described_class.new(double, FileList.new([], workdir: dir))
-      manager.system_saver = SystemSaver.new(SessionLocator.new(dir), registry)
-      manager.save_session
+      fl = FileList.new([], workdir: dir)
+      manager = described_class.new(double, fl)
+      registry.foreground_job.attach_harness(double)
+      double.file_list = fl
+      double.session_manager = manager
+      SystemSaver.new(SessionLocator.new(dir), registry).save_run(session.session_id)
       JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
                                      'system.json')), symbolize_names: true)
     end
 
     it 'writes the foreground as the retained job id' do
       Dir.mktmpdir do |dir|
-        registry = JobRegistry.new
+        registry = JobRegistry.new(settings: harness.settings)
         registry.add_job(kind: :main)
         node = registry.add_job(kind: :command, requested_by: registry.jobs.first)
         registry.foreground = node.id
@@ -721,8 +746,8 @@ RSpec.describe SessionManager do
       manager   = described_class.new(harness, file_list)
       harness.stream = on
       session.add_user('hello')
-      manager.save_session
-      JSON.parse(File.read(manager.session_file_path(session.session_id)))
+      save_system(manager, file_list, dir)
+      read_system_json(dir, session.session_id)
     end
 
     it 'saves the posture as a plain boolean' do
@@ -741,8 +766,8 @@ RSpec.describe SessionManager do
       manager   = described_class.new(harness, file_list)
       harness.markdown = on
       session.add_user('hello')
-      manager.save_session
-      JSON.parse(File.read(manager.session_file_path(session.session_id)))
+      save_system(manager, file_list, dir)
+      read_system_json(dir, session.session_id)
     end
 
     it 'saves the posture as a plain boolean' do
@@ -854,7 +879,7 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       mgr = described_class.new(harness, fl)
       mgr.param_overrides.set('reasoning_effort', 'low')
       session.add_user('hello')
-      mgr.save_session
+      mgr.save_job_session
 
       # param_overrides is the foreground agent's per-agent state, so it lives in
       # that agent's own job session.json (issue #548), not in system.json.

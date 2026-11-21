@@ -223,6 +223,21 @@ single `session.json` cannot express.
 to a session). Only the *active-plan pointer* is session state. Per-job GC must never
 reach those directories.
 
+### Who writes `system.json` - exactly one writer
+
+**`system.json` has exactly one writer: `SystemSaver#save_run` (or its standalone
+twin `save_standalone`), never a job's `SessionManager`.** `system.json` carries the
+**system's** `access` list and `file_cache` digest cache, and every job Harness builds
+its **own** `SessionFileCache` (`lib/harness.rb`). A per-job writer would rewrite those
+system-wide keys with its own job's grants and digests on every auto-save (pre-send,
+post-turn, after in-loop compaction) - so `SessionManager#save_session` writes only its
+own `jobs/<id>/session.json`. The single system write happens once, by the run owner:
+`SystemSaver#save_run` walks every retained job (writing each job's own conversation)
+and writes the system record over the registry it holds; the CLI (`auto_save_session`,
+`/save`) is its only caller. `save_standalone` is the one-job, registry-less form for a
+harness with no run - it writes the same two files and, because it has no registry,
+records default postures (the same shape as a session saved before a key existed).
+
 ### Why a directory, not a set of flat per-job files
 
 Cleanup stays O(1) in the **number of file types** rather than O(job x file kind):

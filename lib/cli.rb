@@ -118,14 +118,17 @@ class CLI
     @registry = JobRegistry.new(
       max_memory: @settings.output_tail_memory || OutputBuffer::DEFAULT_MAX_MEMORY,
       max_saved: @settings.resume_replay_entries,
-      tasks_kept: @settings.output_tasks_kept)
+      tasks_kept: @settings.output_tasks_kept,
+      settings: @settings)
 
     # The save side (system.json + per-job job.json + per-job replay.json) and
     # the read side of the SAME layered record belong to the SYSTEM, not the
     # single-LLM turn engine (#286 / #548): the CLI - not the Harness - builds the
-    # SystemSaver from its own registry and injects it, so a SessionManager never
-    # assembles the system file it does not own. Built before the resume pass
-    # below, which restores job state through it.
+    # SystemSaver from its own registry - the registry carries the system settings
+    # and reaches the foreground job's own harness for the live MCP summary - so
+    # a SessionManager never assembles the system file it does not own and is
+    # never handed to the record writer. Built before the resume pass below,
+    # which restores job state through it.
     @system_saver = SystemSaver.new(@locator, @registry)
 
     # The Harness lives INSIDE the main job (#286): commands reach it through
@@ -155,8 +158,6 @@ class CLI
       report_dropped_jobs
     end
 
-    foreground_harness.session_manager.system_saver = @system_saver
-
     @history  = HistoryManager.new(@file_list.workdir, session_id:)
     foreground_harness.history = @history
 
@@ -164,7 +165,8 @@ class CLI
       registry: @registry,
       file_list: @file_list,
       ui: @ui,
-      settings: @settings)
+      settings: @settings,
+      system_saver: @system_saver)
 
     self
   end

@@ -13,7 +13,9 @@ module Commands
       see_also: %w[sessions saving])
 
     def handle(_args)
-      id = foreground_harness.session_manager.save_session
+      # The run's own writer: every job's chain plus the system record, in one
+      # write by the system's owner (a job SessionManager writes only its own).
+      id = system_saver.save_run(foreground_harness.session.session_id)
       # issue #207: the session JSON lives inside the session's own dir.
       # Contiguous prose ack -> ONE note call, two paragraphs; the renderer
       # owns the indent and wrap (#470), not the emitter. Resume is startup-only
