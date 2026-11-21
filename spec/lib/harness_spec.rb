@@ -1163,6 +1163,51 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #548 F: a save request flips a flag; the AGENT saves its own chain at the
+  # next tool-loop iteration (on the job's own thread), never read by another thread.
+  describe '#request_save (async job self-save)' do
+    let(:harness) { build_harness_with_responses }
+
+    def counted_saves(harness)
+      sm   = harness.session_manager
+      hits = 0
+      allow(sm).to receive(:save_job_session).and_wrap_original do |orig|
+        hits += 1
+        orig.call
+      end
+      [sm, -> { hits }]
+    end
+
+    it 'flags a pending save on request and clears it after consumption' do
+      harness.session.add_user('prompt')
+      expect(harness.save_requested?).to be(false)
+
+      harness.request_save
+      expect(harness.save_requested?).to be(true)
+
+      harness.call_llm # the flag is consumed at the iteration top
+      expect(harness.save_requested?).to be(false)
+    end
+
+    it 'persists the agent own chain when the request is consumed' do
+      harness.session.add_user('prompt')
+      _sm, hits = counted_saves(harness)
+
+      harness.request_save
+      harness.call_llm
+
+      expect(hits.call).to eq(1)
+    end
+
+    it 'does not save when no request was posted (no idle churn)' do
+      harness.session.add_user('prompt')
+
+      harness.call_llm
+
+      expect(harness.save_requested?).to be(false)
+    end
+  end
+
   describe '#read_system_prompt (issue #223)' do
     it 'reads the built-in default file when no system_file option is set' do
       harness = build_harness(system_file: nil)

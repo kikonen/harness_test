@@ -622,6 +622,30 @@ RSpec.describe JobRegistry do
     end
   end
 
+  # issue #548 F: the registry can ask a job to persist its own chain; it never
+  # reads a running chain itself.
+  describe '#request_save (issue #548 F)' do
+    def recording_harness
+      h = Object.new
+      h.instance_variable_set(:@hits, 0)
+      h.define_singleton_method(:request_save) { @hits += 1 }
+      h.define_singleton_method(:hits) { @hits }
+      h
+    end
+
+    it 'routes the request to the job own agent' do
+      harness = recording_harness
+      job = registry.add_job(kind: :sub_agent, harness: harness)
+
+      expect(registry.request_save(job.id)).not_to be_nil
+      expect(harness.hits).to eq(1)
+    end
+
+    it 'returns nil for an id that names no job' do
+      expect(registry.request_save(99)).to be_nil
+    end
+  end
+
   describe '#to_s' do
     it 'lists the jobs and names the foreground one' do
       main = registry.add_job(kind: :main)

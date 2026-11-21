@@ -87,6 +87,14 @@ class Job
     @status = :running
   end
 
+  # Ask this job's agent to persist its OWN conversation at its next safe point
+  # (issue #548 F). The main thread only flips a flag on the harness; the job's own
+  # thread does the save, so a running chain is never read across threads. No-op
+  # for a job with no agent (a job kind with no LLM round has nothing to save).
+  def request_save
+    @harness&.request_save
+  end
+
   # Restore the status a save recorded (issue #548). A resumed job was already
   # finished or interrupted in the run that saved it; without this every restored
   # job reads as :pending, so the retention rule (only finished jobs drop) would

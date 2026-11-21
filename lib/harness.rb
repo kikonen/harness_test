@@ -97,6 +97,20 @@ class Harness
   attr_accessor :history
 
   # Only one note is in flight: a new assignment replaces the note that has
+  # Ask THIS job's agent to persist its own conversation at its next safe point
+  # (issue #548 F). Set by the main thread (a save request to a running job), read
+  # and cleared on the JOB's own thread at the tool-loop iteration top - the main
+  # thread never reads the running chain, it only flips this flag. Idempotent: a
+  # second request before the consume is one save, not two.
+  def request_save
+    @save_requested = true
+  end
+
+  # True when a save request is waiting for this agent's next safe point.
+  def save_requested?
+    @save_requested == true
+  end
+
   # not been injected yet - the latest line wins.
   def user_note_text=(text)
     @user_note = text.to_s.strip.empty? ? nil : text.to_s.strip
@@ -157,6 +171,7 @@ class Harness
 
     @user_note     = nil
     @user_notes    = []
+    @save_requested = false
     StateMigrator.run(@file_list.workdir, HARNESS_DIR)
 
     # Harness-seeded because the model's file tools cannot write the sensitive
@@ -612,6 +627,17 @@ class Harness
         logger.info "user mid-turn note injected: #{note}"
         messages << { role: "user", content: "User note (mid-turn): #{note}" }
         Tool.push_status(label: "note", verdict: :info, message: "sent to model")
+      end
+
+      # issue #548 F: a save request posted by the main thread is consumed HERE,
+      # on the JOB's own thread, at the same safe point a mid-turn note lands. The
+      # agent saves its OWN chain (it never races a cross-thread read). The flag was
+      # already cleared; a failure is bookkeeping, not a turn abort (same as an
+      # auto-save failure).
+      if @save_requested
+        @save_requested = false
+        @session_manager.save_job_session
+        logger.info "save request consumed (job ##{@session_manager.job_id})"
       end
 
       # Each request announces its own wait, so an earlier re-point (an
