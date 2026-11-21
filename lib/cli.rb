@@ -10,7 +10,7 @@ require_relative "harness"
 require_relative "file_list"
 require_relative "error_text"
 require_relative "job_registry"
-require_relative "run_record"
+require_relative "system_record"
 require_relative "history_manager"
 require_relative "session_locator"
 require_relative "command_handler"
@@ -134,10 +134,10 @@ class CLI
     end
 
     # The save side records the run-record keys (foreground job, replay tail)
-    # the RUN owns (#286 / #548): the CLI - not the Harness - builds a RunRecord
+    # the SYSTEM owns (#286 / #548): the CLI - not the Harness - builds a SystemRecord
     # from its registry and injects it, so SessionManager never reaches a
     # scheduling registry it does not own.
-    foreground_harness.session_manager.run_record = RunRecord.new(@registry)
+    foreground_harness.session_manager.system_record = SystemRecord.new(@registry)
 
     @history  = HistoryManager.new(@file_list.workdir, session_id:)
     foreground_harness.history = @history

@@ -10,7 +10,7 @@ require 'output_buffer'
 require 'session_manager'
 require 'system_settings'
 require 'job_registry'
-require 'run_record'
+require 'system_record'
 require 'fileutils'
 require 'tmpdir'
 
@@ -486,7 +486,7 @@ RSpec.describe SessionManager do
         manager   = described_class.new(harness, file_list)
 
         expect(manager.session_file_path(sid))
-          .to eq(File.join(dir, '.harness/sessions', sid, 'run.json'))
+          .to eq(File.join(dir, '.harness/sessions', sid, 'system.json'))
       end
     end
 
@@ -608,7 +608,7 @@ RSpec.describe SessionManager do
       registry = JobRegistry.new
       registry.add_job(kind: :main)
       registry.foreground_buffer.restore(tail)
-      manager.run_record = RunRecord.new(registry)
+      manager.system_record = SystemRecord.new(registry)
       session.add_user('hello')
       manager.save_session
       JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
@@ -651,10 +651,10 @@ RSpec.describe SessionManager do
       double.define_singleton_method(:markdown?) { false }
 
       manager = described_class.new(double, FileList.new([], workdir: dir))
-      manager.run_record = RunRecord.new(registry)
+      manager.system_record = SystemRecord.new(registry)
       manager.save_session
       JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
-                                     'run.json')), symbolize_names: true)
+                                     'system.json')), symbolize_names: true)
     end
 
     it 'writes the foreground as the retained job id' do
@@ -815,7 +815,7 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       mgr.save_session
 
       # param_overrides is the foreground agent's per-agent state, so it lives in
-      # that agent's own job session.json (issue #548), not in run.json.
+      # that agent's own job session.json (issue #548), not in system.json.
       job_session = SessionLocator.new(dir).job_session_file_path(session.session_id, 0)
       data = JSON.parse(File.read(job_session))
       expect(data['param_overrides']).to include('reasoning_effort')
