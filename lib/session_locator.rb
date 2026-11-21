@@ -57,10 +57,9 @@ class SessionLocator
 
   # -- Layered (dir-per-job) layout (issue #548) ----------------------------
   # A saved RUN is a session directory holding run.json plus a jobs/<id>/ tree.
-  # These are the path primitives a writer/resolver build on. They do NOT yet
-  # replace the #207 #session_file_path / #session_files glob: the listing glob
-  # is rewritten in the same step that switches the writer, so old and new
-  # layouts stay listable at once (see doc/session_layers_design.md).
+  # These are the path primitives the layered writer (#save_session) and the
+  # reader (#read_session / #list / #search) build on. session_dirs /
+  # session_files below address BOTH a layered run and a #207 dir.
   def run_file_path(id)
     File.join(sessions_dir, id, RUN_FILE)
   end
@@ -226,7 +225,7 @@ class SessionLocator
   # than failing the whole listing.
   def list
     session_files.sort_by { |p| File.mtime(p) }.reverse.map do |path|
-      data = JSON.parse(File.read(path), symbolize_names: true)
+      data = entry_data(path)
       {
         id:       File.basename(File.dirname(path)),
         path:,
@@ -253,7 +252,7 @@ class SessionLocator
 
     session_files.sort_by { |p| File.mtime(p) }.reverse.filter_map do |path|
       data = begin
-        JSON.parse(File.read(path), symbolize_names: true)
+        entry_data(path)
       rescue StandardError
         nil
       end
@@ -276,6 +275,18 @@ class SessionLocator
   end
 
   private
+
+  # The flat data hash of one session ENTRY file: run.json for a layered run (the
+  # foreground job's conversation is folded in so a /sessions message count and a
+  # search hit describe the run's real conversation, not an empty run.json), or
+  # the #207 flat session.json as-is. A layered run with no readable foreground
+  # job still lists (its run-level keys remain); only its message count is 0.
+  def entry_data(path)
+    id = File.basename(File.dirname(path))
+    return assemble_run(id) if File.basename(path) == RUN_FILE
+
+    JSON.parse(File.read(path), symbolize_names: true)
+  end
 
   # Re-join a layered run into the flat resume_data hash: run.json supplies the
   # run/world keys (identity, postures, access, file_cache, foreground, jobs),
