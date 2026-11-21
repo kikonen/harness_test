@@ -101,14 +101,17 @@ When a run gains a second job Harness, the MCP machinery does **not** multiply: 
 run owns exactly one `Mcp::Manager` and one `ToolRegistry`, shared into every job
 Harness (sub-agents inherit the same `tools_payload`). Building them per Harness
 would re-spawn every declared server per job and leak the non-foreground ones
-(only the run owner closes them). **Sharing one live connection across concurrently
-running jobs is transport-dependent:** the gem's stdio transport matches responses
-by reading a single shared pipe (not multiplexed), so concurrent `tools/call` on one
-stdio connection needs a call lock or a per-job connection; its HTTP transport issues
-an independent request per call and is safe to share. Decision and full rationale:
+(only the run owner closes them). **Concurrent `tools/call` on one live connection is
+guarded by a per-server connection pool** (size 1 now, expandable): a tool call
+borrows the server's connection from its pool and always returns it, so a call to a
+busy server waits and a call to a different server does not. This is needed because
+the gem's stdio transport matches responses by reading a single shared pipe (not
+multiplexed); its HTTP transport issues an independent request per call, so a
+size-1 pool on it just serializes calls harmlessly. Decision and full rationale:
 `doc/session_layers_design.md` ("MCP when a run has several jobs"). Today the run
-has one Harness so this is latent; the code step (build once in the run owner,
-hand to `Harness.new`) lands with the increment that gives a job its own Harness.
+has one Harness so this is latent; the code step (build once in the run owner, hand
+to `Harness.new`, route `ToolAdapter#execute` through the pool) lands with the
+increment that gives a job its own Harness.
 
 ## Reporting and session persistence (issue #405)
 
