@@ -20,13 +20,19 @@ class SessionLogger
   @loggers        = {}
   @loggers_mutex  = Mutex.new
 
+  # The stamp is the calling thread's name (issue #548). Every thread sets its
+  # own name to the job it services (the task thread to its job id, the main
+  # thread to the foreground job id), so one line is attributed to the job that
+  # produced it. A thread that set no name gets no stamp.
   def self.build(log_path)
     @loggers_mutex.synchronize do
       @loggers[log_path] ||= begin
         FileUtils.mkdir_p(File.dirname(log_path))
         logger = Logger.new(log_path)
         logger.formatter = proc { |severity, datetime, _progname, msg|
-          "#{datetime.strftime('%Y-%m-%d %H:%M:%S')} [#{severity}] #{msg}\n"
+          label = Thread.current.name
+          stamp = label ? "[#{label}] " : ""
+          "#{datetime.strftime('%Y-%m-%d %H:%M:%S')} #{stamp}[#{severity}] #{msg}\n"
         }
         logger
       end
