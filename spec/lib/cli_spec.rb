@@ -379,6 +379,68 @@ RSpec.describe CLI do
     end
   end
 
+  # issue #548 increment 3: a resumed run restores each saved job's own status and
+  # shown tail onto the job it has under that id, and states the ids it cannot
+  # restore (a job the retention rule dropped). The resumed run here has rebuilt
+  # only job 0 (nothing in lib/ creates a non-main job yet), so a saved second job
+  # is exactly the dropped case.
+  describe 'per-job resume restore (issue #548)' do
+    let(:layered_options) do
+      options.merge(model_profiles: [{ name: 'test-model', model: 'test-model' }])
+    end
+
+    def seed_layered_system(id, job_ids)
+      locator = SessionLocator.new(workdir)
+      FileUtils.mkdir_p(File.dirname(locator.system_file_path(id)))
+      File.write(locator.system_file_path(id), JSON.generate({
+        session_id: id, workdir:, next_id: job_ids.max + 1, foreground_job: 0,
+        created_at: Time.now.iso8601,
+        jobs: job_ids.map { |j| { id: j, kind: 'main', status: 'finished', messages: 1,
+                                  dir: "jobs/#{j}" } }
+      }))
+      job_ids.each do |j|
+        FileUtils.mkdir_p(locator.job_dir_path(id, j))
+        File.write(locator.job_session_file_path(id, j),
+                   JSON.generate({ messages: [{ role: 'user', content: "job#{j} prompt" }] }))
+        File.write(locator.job_file_path(id, j),
+                   JSON.generate({ id: j, kind: 'main', status: 'finished', result: nil,
+                                   requested_by: nil, dependencies: [] }))
+        File.write(locator.job_replay_file_path(id, j),
+                   JSON.generate([{ type: 'response', origin: 'session_manager',
+                                    content: "job#{j} shown" }]))
+      end
+    end
+
+    it 'restores the job this run has and states the one it does not' do
+      id = 'a1a1a1a1-1111-2222-3333-444444444444'
+      seed_layered_system(id, [0, 1])
+      # setup prints nothing itself; the dropped-job line is the only output here.
+      expect(ui).to receive(:puts)
+        .with(a_string_matching(/jobs 1 were dropped from this session/))
+      allow(ui).to receive(:puts)
+
+      cli = described_class.new(layered_options.merge(resume: id), ui)
+      cli.setup
+
+      expect(cli.registry.jobs.map(&:id)).to eq([0])
+      expect(cli.saved_jobs.map { |j| j[:id] }).to eq([0, 1])
+      # Job 0 is the main turn this run rebuilt (and the foreground), so nothing
+      # was restored onto it; job 1 has no live Job under its id.
+      expect(cli.registry.job(1)).to be_nil
+      expect(cli.registry.job(0).status).to eq(:pending)
+    end
+
+    it 'restores nothing for a #207 flat session (no jobs/ tree to read)' do
+      saved = 'b2b2b2b2-1111-2222-3333-444444444444'
+      seed_saved_session(saved)
+
+      cli = described_class.new(options.merge(resume: saved), ui)
+      cli.setup
+
+      expect(cli.saved_jobs).to eq([])
+    end
+  end
+
   # issue #221 review (bug 2): the shell consent posture is stated in the startup
   # banner so the system's approval behavior is visible from the first line.
   describe 'startup banner - command consent posture' do

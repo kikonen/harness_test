@@ -7,6 +7,8 @@ class Job
   # job-to-job DAG is not enough.
   KINDS = %i[main sub_agent command timed].freeze
 
+  STATUSES = %i[pending running finished].freeze
+
   # Types the executor handles as control flow: they are never stored as
   # output, so the registry's single writer must skip them.
   CONTROL_TYPES = %i[error_ctrl __request__].freeze
@@ -72,6 +74,18 @@ class Job
 
   def mark_running
     @status = :running
+  end
+
+  # Restore the status a save recorded (issue #548). A resumed job was already
+  # finished or interrupted in the run that saved it; without this every restored
+  # job reads as :pending, so the retention rule (only finished jobs drop) would
+  # never see it. A result is NOT restored: Job#finish delivers it live to a live
+  # requester, and a requester this run does not have cannot be answered.
+  def restore_status(status)
+    symbol = status.to_sym
+    return nil unless Job::STATUSES.include?(symbol)
+
+    @status = symbol
   end
 
   # True while the executor is waiting for an ANSWER to a request it posted. An

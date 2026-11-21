@@ -49,11 +49,12 @@ class SystemRecord
     (@registry&.next_id) || 1
   end
 
-  # One system.json entry per retained job (issue #548). The system -> job map and
-  # the job list the reader needs to know which job dirs a system owns. EDGES ARE
-  # SERIALIZED AS IDS here (a Job reference is not JSON): requested_by and
-  # dependencies become int ids. Re-resolving those ids back to live Jobs on
-  # resume is increment 4's work - increment 2 only writes the ids. A dependency
+  # One system.json entry per retained job (issue #548): the system -> job map the
+  # reader needs to know which job dirs a system owns, plus the per-file keys
+  # /sessions reports. EDGES ARE SERIALIZED AS IDS here (a Job reference is not
+  # JSON): requested_by and dependencies become int ids. Re-resolving those ids
+  # back to live Jobs on resume is the resume increment's work - this writer only
+  # writes the ids. A dependency
   # that is not a Job (a timed job's clock predicate, a Job#ready? callable) has
   # no id to record and is omitted: it cannot be re-resolved as a job edge until
   # the resume increment gives the resume path a predicate-restoring form. A

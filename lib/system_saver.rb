@@ -4,7 +4,8 @@ require_relative "system_record"
 
 # Writes a whole layered system once - each job's conversation, system.json and
 # each job's replay.json - from the registry the system's owner holds, so a
-# per-job SessionManager never assembles a file it does not own.
+# per-job SessionManager never assembles a file it does not own. It is also the
+# read side of the same layered record: a resume restores job state through it.
 # Design: doc/session_layers_design.md.
 class SystemSaver
   def initialize(locator, registry)
@@ -23,13 +24,33 @@ class SystemSaver
     @record.write_system_files(@locator, id, session_h, harness)
   end
 
-  # Which saved job ids the registry this saver was built from can rebuild.
-  # A saved system.json reads kind/status back from JSON as Strings; the registry
-  # needs only the ids, so they are pulled out here rather than re-symbolizing
-  # the whole entry (a resumed Job is built with the real Job::KINDS symbol).
-  def resumable_job_ids(system_jobs)
-    ids = Array(system_jobs).map { |entry| entry[:id] || entry["id"] }
-    @registry&.resumable_job_ids(ids) || []
+  # The saved conversations of the jobs the system's own resume_data does not
+  # carry - every saved job except the foreground one (issue #548 increment 3).
+  # The saved system id is passed in: this object is built before the CLI has
+  # resolved one, and a resume reads the jobs of the session it resumed.
+  def job_restores(saved_system_id)
+    @locator.job_restores(saved_system_id)
+  end
+
+  # Re-attach each saved job's own status and shown tail to the job this run has
+  # under that id. A saved id with no live Job (a job the drop rule removed, or
+  # one nothing rebuilt) restores nothing and reports nil. Restoring a job to
+  # :finished makes it a retention candidate again, as it was in the saved run.
+  def restore_job_states(saved_system_id)
+    job_restores(saved_system_id).filter_map do |restore|
+      @registry&.restore_job(
+        restore[:id],
+        status: restore[:status],
+        replay_tail: restore[:replay_tail])
+    end
+  end
+
+  # Saved job ids with no live Job under them: dropped by the retention rule, or
+  # not rebuilt by this resume. The edges naming them stay dangling.
+  def dropped_job_ids(saved_system_id)
+    job_restores(saved_system_id).map { |restore| restore[:id] }.reject do |job_id|
+      @registry&.job(job_id)
+    end
   end
 
   # The system half is written on every call, even when no job chain is
