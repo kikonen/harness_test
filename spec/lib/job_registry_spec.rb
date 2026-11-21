@@ -510,6 +510,36 @@ RSpec.describe JobRegistry do
 
   # issue #548 increment 5: the exit decision asks "does ANY retained job own
   # session state?" across the whole job list, not just the foreground one.
+  # issue #548 increment 4b: the saved tail of ANY retained job's own buffer,
+  # not only the foreground one (the registry owns every job.buffer).
+  describe '#replay_tail_for_job (issue #548)' do
+    it 'reads a NON-foreground job buffer tail' do
+      reg = JobRegistry.new
+      main = reg.add_job(kind: :main)
+      child = reg.add_job(kind: :sub_agent, requested_by: main)
+      child.buffer.put(type: :response, origin: :session_manager, content: 'child answer')
+      child.buffer.keep_window
+      reg.foreground = main.id # foreground stays job 0
+
+      expect(reg.replay_tail_for_job(child.id).map { |e| e[:content] }).to eq(['child answer'])
+    end
+
+    it 'returns empty for a job the registry does not retain' do
+      reg = JobRegistry.new
+      reg.add_job(kind: :main)
+
+      expect(reg.replay_tail_for_job(99)).to eq([])
+    end
+
+    it 'returns empty when the saved window is disabled' do
+      reg = JobRegistry.new(max_saved: 0)
+      child = reg.add_job(kind: :sub_agent)
+      child.buffer.put(type: :response, origin: :session_manager, content: 'x')
+
+      expect(reg.replay_tail_for_job(child.id)).to eq([])
+    end
+  end
+
   describe '#any_job_has_session_state? (issue #548)' do
     def harness_with_session(non_empty)
       h = Object.new

@@ -35,6 +35,13 @@ class SystemRecord
     @registry ? @registry.replay_tail_for_save : []
   end
 
+  # issue #548 increment 4b: the saved tail of ANY retained job (its own buffer,
+  # which the registry owns). Reading it is main-safe because the registry is the
+  # only buffer writer. A registry-less record or an unretained id has no tail.
+  def replay_tail_for_job(job_id)
+    @registry ? @registry.replay_tail_for_job(job_id) : []
+  end
+
   # The id the NEXT job will take (issue #548): persisted so a resumed system
   # continues numbering instead of reusing an id. Read live, not snapshotted at
   # CLI#setup - a system adds jobs as it goes. A registry-less record starts at 1.
@@ -77,9 +84,14 @@ class SystemRecord
     FileUtils.mkdir_p(File.dirname(system_path))
     File.write(system_path, JSON.generate(system_json(id, session_h, harness)))
 
-    replay_path = locator.job_replay_file_path(id, foreground_job)
-    FileUtils.mkdir_p(File.dirname(replay_path))
-    File.write(replay_path, JSON.generate(replay_tail))
+    # Every retained job writes its own replay.json (its own main-owned buffer),
+    # so a background job's shown output survives a resume, not just the
+    # foreground one (issue #548 increment 4b).
+    jobs_for_save.each do |entry|
+      replay_path = locator.job_replay_file_path(id, entry[:id])
+      FileUtils.mkdir_p(File.dirname(replay_path))
+      File.write(replay_path, JSON.generate(replay_tail_for_job(entry[:id])))
+    end
   end
 
   private

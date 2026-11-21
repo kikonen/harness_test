@@ -630,6 +630,48 @@ RSpec.describe SessionManager do
     end
   end
 
+  # issue #548 increment 4b: a job saves to its OWN jobs/<id>/ dir (so a
+  # sub-agent harness no longer writes into the foreground dir), and a per-job
+  # save keys on the RUN id (a sub-agent's own session uuid must not mint a
+  # stray top-level session dir).
+  describe 'per-job session save (issue #548 increment 4b)' do
+    it 'writes the job OWN dir when job_id is not the foreground' do
+      Dir.mktmpdir do |dir|
+        registry = JobRegistry.new
+        registry.add_job(kind: :main)
+        registry.add_job(kind: :sub_agent)
+        file_list = FileList.new([], workdir: dir)
+        mgr = described_class.new(harness, file_list)
+        mgr.system_record = SystemRecord.new(registry)
+        mgr.job_id = 1 # this manager is the sub-agent job
+        session.add_user('sub-agent work')
+
+        mgr.save_session
+
+        job1 = File.join(dir, '.harness', 'sessions', session.session_id,
+                         'jobs', '1', 'session.json')
+        expect(File.file?(job1)).to be(true)
+        data = JSON.parse(File.read(job1), symbolize_names: true)
+        expect(data[:messages].map { |m| m[:content] }).to include('sub-agent work')
+      end
+    end
+
+    it 'save_job_session keys on the RUN id, not the harness own session id' do
+      Dir.mktmpdir do |dir|
+        file_list = FileList.new([], workdir: dir)
+        mgr = described_class.new(harness, file_list)
+        mgr.job_id = 2
+        session.add_user('chain')
+        run_id = '11111111-2222-3333-4444-555555555555'
+
+        expect(mgr.save_job_session(run_id)).to eq(run_id)
+
+        path = File.join(dir, '.harness', 'sessions', run_id, 'jobs', '2', 'session.json')
+        expect(File.file?(path)).to be(true)
+      end
+    end
+  end
+
   # issue #286: the foreground job travels with the session as an ID (harness
   # state, like the postures). The save side is guarded by respond_to? so a
   # harness double with no injected registry still saves; the RESUME side is

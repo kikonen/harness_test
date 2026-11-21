@@ -215,6 +215,16 @@ class JobRegistry
     Array(foreground_buffer&.replay_tail(@max_saved)).map(&:to_h)
   end
 
+  # issue #548 increment 4b: the saved tail of ANY retained job's buffer, not
+  # only the foreground one. The registry is the only writer of every job's
+  # buffer (the single-thread I/O rule), so reading a job's tail is main-safe
+  # for every job. A job id the registry does not retain has no tail.
+  def replay_tail_for_job(job_id)
+    return [] if @max_saved.zero?
+
+    Array(job(job_id)&.buffer&.replay_tail(@max_saved)).map(&:to_h)
+  end
+
   # A resumed run seeds its record from the saved tail so the startup banner
   # can redraw the last topic. restore() normalizes the JSON's string
   # type/origin back to symbols. A disabled window (max_saved 0) seeds nothing.

@@ -122,7 +122,10 @@ class CLI
     # registry.foreground_job.harness rather than a CLI-held reference. After
     # this line every read below goes through #foreground_harness, never a
     # @harness ivar.
-    @registry.add_job(kind: :main, harness:)
+    main_job = @registry.add_job(kind: :main, harness:)
+    # Each Harness saves its OWN job dir (issue #548 increment 4b): the id is
+    # wired when a harness is attached to a job. The main turn is this job.
+    harness.session_manager.job_id = main_job.id
 
     if resume_data
       @registry.restore_replay_tail(resume_data[:replay_tail])
@@ -192,6 +195,11 @@ class CLI
     return status if status
 
     setup
+
+    # issue #548: the main thread drains the foreground job's queue, so it
+    # names itself after that job - the log lines main writes are stamped with
+    # the foreground job id (the SessionLogger formatter reads Thread.current.name).
+    Thread.current.name = @registry.foreground.to_s
 
     @history.load
 
@@ -515,10 +523,37 @@ class CLI
   def auto_save_session(settings_only_change = false)
     return nil unless @registry.any_job_has_session_state? || settings_only_change
 
-    foreground_harness.session_manager.save_session
+    # The foreground save writes system.json + every job's replay.json + the
+    # foreground job's own conversation. Then each OTHER finished job's chain is
+    # serialized to its OWN jobs/<id>/session.json (issue #548 increment 4b): at
+    # exit every job thread is joined (registry.run awaits :done, Task.stop joins),
+    # so the chain is quiescent and main may read it. Keyed on the run id so a
+    # sub-agent harness with its own session uuid still lands under this run's
+    # directory. Best-effort per job so one failure does not abort the others.
+    id = foreground_harness.session_manager.save_session
+    save_finished_job_sessions(id)
+    id
   rescue StandardError => e
     foreground_harness.logger.error ErrorText.detailed(e, "auto-save failed")
     ui.puts "  [warning] could not auto-save session: #{e.message}"
     nil
+  end
+
+  # issue #548 increment 4b: persist each finished job's own conversation that
+  # the foreground save did not already write. A job the run never drove (harness
+  # nil) or an empty chain has nothing to save, so it is skipped.
+  def save_finished_job_sessions(run_id)
+    written = foreground_harness.session_manager.job_id
+    @registry.jobs.each do |job|
+      harness = job.harness
+      next if harness.nil? || job.id == written || !job.finished? || harness.session.empty?
+
+      begin
+        harness.session_manager.job_id = job.id
+        harness.session_manager.save_job_session(run_id)
+      rescue StandardError => e
+        harness.logger.error ErrorText.detailed(e, "auto-save job ##{job.id} failed")
+      end
+    end
   end
 end
