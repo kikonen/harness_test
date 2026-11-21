@@ -4,6 +4,7 @@ require_relative "file_list"
 require_relative "harness_error"
 require_relative "harness"
 require_relative "session_locator"
+require_relative "system_saver"
 
 # Builds the Harness that lives INSIDE one job (issue #548), and creates the job
 # it lives in. A Harness is one LLM tool-loop and belongs to a Job (#286), so
@@ -92,7 +93,15 @@ class HarnessFactory
   def attach(harness, job)
     manager             = harness.session_manager
     manager.job_id      = job.id
-    manager.system_saver = @system_saver if @system_saver
+    manager.system_saver = run_system_saver
     job.attach_harness(harness)
+  end
+
+  # ONE writer for the whole run: the caller's if it passed one, else a single
+  # saver built over the run's registry (memoized - a saver per job would be a
+  # second source of the system half, and SessionManager's own default has no
+  # registry at all).
+  def run_system_saver
+    @run_system_saver ||= @system_saver || SystemSaver.new(@locator, @registry)
   end
 end
