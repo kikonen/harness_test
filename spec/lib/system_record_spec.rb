@@ -147,6 +147,30 @@ RSpec.describe SystemRecord do
     end
   end
 
+  # issue #548 increment 4b: write_system_files writes a replay.json for EVERY
+  # retained job, not just the foreground one.
+  it 'writes replay.json for every retained job (not only the foreground)' do
+    Dir.mktmpdir do |dir|
+      id       = 'dddddddd-0000-0000-0000-000000000000'
+      locator  = SessionLocator.new(dir)
+      registry = JobRegistry.new
+      main = registry.add_job(kind: :main)
+      child = registry.add_job(kind: :sub_agent, requested_by: main)
+      child.buffer.put(type: :response, origin: :session_manager, content: 'child shown')
+      child.buffer.keep_window
+      registry.foreground = main.id
+
+      described_class.new(registry).write_system_files(
+        locator, id, session_h(id, dir), harness_double(SystemSettings.from_options({}))
+      )
+
+      fg = JSON.parse(File.read(locator.job_replay_file_path(id, 0)), symbolize_names: true)
+      job1 = JSON.parse(File.read(locator.job_replay_file_path(id, 1)), symbolize_names: true)
+      expect(fg).to eq([])
+      expect(job1.first[:content]).to eq('child shown')
+    end
+  end
+
   it 'writes the system -> job map from a real registry, postures read live off the harness' do
     Dir.mktmpdir do |dir|
       id       = 'cccccccc-0000-0000-0000-000000000000'

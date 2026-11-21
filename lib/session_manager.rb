@@ -42,6 +42,7 @@ class SessionManager
     @locator     = SessionLocator.new(file_list.workdir)
     @rules_mtime = current_rules_mtime
     @last_autosave = 0
+    @job_id = 0
   end
 
   # The system/world persistence record the system's owner injects (#286 / #548): the
@@ -50,6 +51,12 @@ class SessionManager
   # own. nil for a Harness built without an owner that injects one - a save then
   # writes neither system-record key.
   attr_accessor :system_record
+
+  # The id of the job this Harness lives in (issue #548 increment 4b): a save
+  # writes this job's OWN jobs/<id>/session.json, so a background/sub-agent
+  # harness no longer writes into the foreground job's dir. The run's owner sets
+  # it when wiring a harness into a job; the main turn is job 0 (the default).
+  attr_accessor :job_id
 
   # -- Prompt flow ---------------------------------------------------------
 
@@ -713,13 +720,26 @@ class SessionManager
     id        = @harness.session.session_id
     session_h = @harness.session.to_h(@file_list)
     record    = system_record || SystemRecord.new(nil)
-    fg        = record.foreground_job
 
-    FileUtils.mkdir_p(@locator.job_dir_path(id, fg))
-    write_json(@locator.job_session_file_path(id, fg), job_session_json(session_h))
+    write_own_job_session(id, session_h)
     record.write_system_files(@locator, id, session_h, @harness)
 
     @harness.logger.info "session saved: #{id} (#{@locator.system_file_path(id)})"
+    id
+  end
+
+  # Save ONLY this job's own conversation file (issue #548 increment 4b), no
+  # system half. At exit the run's owner (CLI) calls it on each finished job
+  # whose threads are quiescent, so every job's chain lands in its own dir; the
+  # system.json + per-job replay.json are written once by the foreground save.
+  # run_id is the SESSION DIRECTORY key (the run's id), not this harness' own
+  # session id: a #286 sub-agent harness may mint its own uuid, and its chain
+  # must land under this run's jobs/<id>/, not a stray top-level session dir.
+  # It defaults to this harness' id only for a standalone (single-job) save.
+  def save_job_session(run_id = nil)
+    id        = run_id || @harness.session.session_id
+    session_h = @harness.session.to_h(@file_list)
+    write_own_job_session(id, session_h)
     id
   end
 
@@ -747,6 +767,12 @@ class SessionManager
   # Write a hash as JSON to a path (the two per-job files share this).
   def write_json(path, data)
     File.write(path, JSON.generate(data))
+  end
+
+  # Write this job's own jobs/<job_id>/session.json (the conversation half).
+  def write_own_job_session(id, session_h)
+    FileUtils.mkdir_p(@locator.job_dir_path(id, job_id))
+    write_json(@locator.job_session_file_path(id, job_id), job_session_json(session_h))
   end
 
   # The foreground agent's own conversation half: its message chain (message 0
