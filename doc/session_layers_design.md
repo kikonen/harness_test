@@ -238,6 +238,22 @@ and writes the system record over the registry it holds; the CLI (`auto_save_ses
 harness with no run - it writes the same two files and, because it has no registry,
 records default postures (the same shape as a session saved before a key existed).
 
+### How a run gets its main harness: the factory, from the first job on
+
+`CLI#setup` no longer builds `Harness.new` and hand-attaches it to a pre-made
+job. It calls `HarnessFactory#add_harness_job(kind: :main, ...)` - the factory's
+first production caller - so the main turn is created the SAME way a second agent
+will be (job added, agent built and attached, `session_manager.job_id` wired in
+one step). A run starts with no jobs, so the main add takes id 0.
+
+One deliberate exception: the **initial (main) job reuses the run's own
+`FileList`** (`add_harness_job(..., base_file_list: @file_list)`). The main turn's
+access grants and digest cache are system-wide state today - the CLI and every
+command hold `@file_list` - so the main harness must keep that object. A *second*
+agent gets a fresh per-job `FileList` rooted at the run workdir (the isolation the
+factory exists for). Making the main turn itself per-job is deferred with Blocker A
+(job->id) and the grant-prompt routing it would need.
+
 ### Why a directory, not a set of flat per-job files
 
 Cleanup stays O(1) in the **number of file types** rather than O(job x file kind):
