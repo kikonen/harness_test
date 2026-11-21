@@ -281,6 +281,83 @@ conversation into (lib builds only one agent per run today), so it stays a
 **dropped** job - stated, not silently rebuilt empty. `job_restores` no longer
 excludes the foreground job: on restore no job is foreground yet.
 
+### MCP when a run has several jobs: one manager per run, shared (DECIDED)
+
+**A run owns exactly one `Mcp::Manager` and one `ToolRegistry`; every job
+Harness shares them.** MCP is run/world state, not per-Harness state, and this
+decision follows three facts already in the design rather than inventing a new
+rule:
+
+1. `doc/harness_job_design.md` already lists `mcp` and `tool_registry` under
+   target #3, "Run / world (exactly one per process)" - the machinery is meant
+   to leave the per-Harness turn engine; only the code has not moved it yet.
+   The `mcp_connected` key is already a **system** key in the layer map above.
+2. `settings` is the shared run-wide `SystemSettings` handed to every Harness
+   (the CLI's only run-config holder), so `settings.mcp_servers` is identical
+   across jobs. Nothing job-specific decides **which** servers to reach.
+3. `doc/mcp_design.md` states the tool set is **fixed for the run** and MCP
+   tools enter `tools_payload`, which #246 requires to be **identical on every
+   request**. Reconnecting per job would mint per-job tool sets that then have
+   to be reconciled back into one payload; sharing one set is the invariant,
+   not merely the cheaper option. The single-`Logger`-per-path rule (above) is
+   the same shape: run-wide machinery is built once by the run owner.
+
+The cost today is latent, not paid: every `Harness.new` runs
+`ToolRegistryBuilder#build`, which does `Mcp::Manager.new(logger)` then
+`@mcp.load(registry, settings.mcp_servers)` -> `connect_server` ->
+`ServerConnection` **spawns a subprocess (or opens an HTTP endpoint) per
+declared server**. Because today's run has exactly one Harness (job 0), each
+server connects once. The moment `/jobs add` builds a second Harness, every
+server is re-spawned, and only `foreground_harness.close_mcp` runs at exit
+(`CLI#run`), so a second job's spawned subprocesses **leak** - the leak is a
+correctness bug, not only a cost.
+
+**Sharing is conditional on thread safety, and the transport decides it.** A shared
+`Mcp::Manager` is safe to *build* once and *close* once, but concurrent `tools/call`
+from several job threads on the **same live connection** is a different question - and
+the answer is measured in the `mcp` gem (1.10.0 on this box), not inferable from our
+`ServerConnection`, which just forwards to `@client.call_tool`:
+
+- **stdio is NOT multiplexed.** `MCP::Client::Stdio#send_request` writes under a
+  per-connection `@write_mutex`, then `read_response` reads the single shared stdout
+  pipe and **skips every line whose id != its own** `request_id` (ids are per-client
+  `SecureRandom.uuid`). If two job threads call one shared stdio client at once, one
+  read loop can consume the other's response line (id mismatch, discarded) and then
+  both stall. One stdio connection is safe for **one caller at a time**; today that
+  holds only because there is exactly one Harness. Sharing it across concurrently
+  running jobs therefore requires either a per-connection call lock (serialize
+  `call_tool` on a stdio server) or a distinct connection per concurrent job.
+- **HTTP is effectively per-request.** `MCP::Client::HTTP#send_request` issues its own
+  `post` with its own `SSEStream` and matches the response by `request_id`, so two
+  threads sharing one HTTP client do not cross responses. The only shared mutable is
+  `@session_id`/`@protocol_version`, learned once on connect (`capture_session_info`);
+  a benign first-time write race, not a per-call one.
+
+So the decision is: share the *machinery* (manager + registry + close), and honor
+whichever transport its servers use. A run whose MCP servers are all HTTP can share
+connections freely. A stdio server needs a call lock on the shared connection, or its
+own connection per concurrent job, before two jobs may `tools/call` it at once. A
+job only pays this while it is *actually running concurrently* with another job that
+calls the same server - the sequential foreground is already safe.
+
+Consequences the decision commits to:
+
+- **Sub-agents inherit the run's MCP tools** (the same `tools_payload`); they
+  do not get their own server set. The per-job `FileList` isolation the factory
+  provides does **not** extend to MCP/ToolRegistry.
+- **Close once**, by the run owner (the CLI already calls `close_mcp` on the
+  foreground Harness), not per-Harness. The single `Mcp::Manager` is owned by
+  the object that builds the run's Harnesses.
+- **`mcp_connected` stays a system key**: one `connected_summary` for the run,
+  not one per job, matching the layer map above.
+
+This is a DECISION only in this pass - no code moves. The deferred code step is
+mechanical: build the `ToolRegistry` + `Mcp::Manager` once (in the factory / run
+owner) and hand them into `Harness.new` as collaborators instead of Harness
+assembling its own builder. It lands in the same increment that gives a second
+job its Harness (the main polling loop), because a leak only exists once there
+is a second Harness to leak.
+
 ### Why a directory, not a set of flat per-job files
 
 Cleanup stays O(1) in the **number of file types** rather than O(job x file kind):
@@ -415,6 +492,12 @@ breaks no reader.
   raises when `resume_data[:session_id]` disagrees with the directory id); dropping the field
   removes that bug class rather than guarding it. The directory name IS the system id - there is
   no separate run-UUID to invent.
+- **MCP-per-job reconnect (DECIDED: one manager per run, shared)**: see the section above.
+  A run owns one `Mcp::Manager` + one `ToolRegistry` shared into every job Harness; the
+  deferred step is to build them in the run owner and hand them to `Harness.new`. The
+  sharing is conditional on transport-level thread safety: HTTP connections share
+  freely, a stdio connection needs a per-connection call lock (or one connection per
+  concurrent job) before two running jobs may call the same server at once.
 - **Whether a sub-agent's harness session is auto-saved at all**, or only saved when a
   dependency needs it back (a read-only `agent.explore` may not need its transcript
   persisted; a write-capable sub-agent will).

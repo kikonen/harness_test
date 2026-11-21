@@ -95,6 +95,21 @@ value when it reaches the HTTP request).
   on shutdown and on a mid-run `/resume` rebuild (the run being replaced owns its
   own servers).
 
+### MCP and multi-job runs (issue #548, DECIDED)
+
+When a run gains a second job Harness, the MCP machinery does **not** multiply: a
+run owns exactly one `Mcp::Manager` and one `ToolRegistry`, shared into every job
+Harness (sub-agents inherit the same `tools_payload`). Building them per Harness
+would re-spawn every declared server per job and leak the non-foreground ones
+(only the run owner closes them). **Sharing one live connection across concurrently
+running jobs is transport-dependent:** the gem's stdio transport matches responses
+by reading a single shared pipe (not multiplexed), so concurrent `tools/call` on one
+stdio connection needs a call lock or a per-job connection; its HTTP transport issues
+an independent request per call and is safe to share. Decision and full rationale:
+`doc/session_layers_design.md` ("MCP when a run has several jobs"). Today the run
+has one Harness so this is latent; the code step (build once in the run owner,
+hand to `Harness.new`) lands with the increment that gives a job its own Harness.
+
 ## Reporting and session persistence (issue #405)
 
 `Mcp::Manager` keeps one `ServerState` per **declared** server (name, transport,

@@ -45,9 +45,11 @@ The three targets:
   job's buffer; the `JobRegistry` owns it, not Harness. The CLI builds the
   registry (from the settings' buffer limits), registers the main turn as job
   #0, seeds a resumed run's record (`restore_replay_tail`) and its foreground
-  job (`restore_foreground`), and injects the registry into `SessionManager` so
-  `save_session` writes `foreground_job` and `replay_tail` from it. Harness
-  holds ZERO registry references. Buffer rules: `doc/output_buffer_design.md`;
+  job (the #548 resume model sets `@registry.foreground` directly - the old
+  `restore_foreground` special case is gone), and injects the registry into
+  `SessionManager` so `save_session` writes `foreground_job` and `replay_tail`
+  from it. Harness holds ZERO registry references. Buffer rules:
+  `doc/output_buffer_design.md`;
   the job/queue model: `doc/task_model_design.md`.
 
   The Harness itself is now the JOB's, not a CLI- or command-held global: a
