@@ -9,10 +9,11 @@ require 'system_settings'
 require 'system_record'
 require 'system_saver'
 
-# SystemSaver is the system's owner-built writer: the CLI hands it its own
-# registry so a per-Harness SessionManager never assembles a file it does not
-# own. These are the seam's own guarantees (the layered WRITE shapes are covered
-# in system_record_spec.rb, the whole-run save in cli_spec.rb).
+# SystemSaver is the system's owner-built half of persistence: the CLI hands it
+# its own registry so a per-Harness SessionManager never assembles a file it does
+# not own, and the SAME object is the read side a resume restores job state
+# through. The layered WRITE shapes are covered in system_record_spec.rb, the
+# whole-run save in cli_spec.rb.
 RSpec.describe SystemSaver do
   def harness_double(settings)
     Object.new.tap do |h|
@@ -54,31 +55,89 @@ RSpec.describe SystemSaver do
     end
   end
 
-  describe 'the saved job list a resume needs (issue #548)' do
-    it 're-resolves the ids a save wrote against a resumed registry (dangling ids dropped)' do
+  # issue #548 increment 3: the layered READ side. A save wrote one dir per job;
+  # a resume reads each job's own status and shown tail back onto the job this
+  # run has under that id, and names the ids it cannot.
+  describe 'the layered read side (issue #548)' do
+    def saved_system(dir, id, registry)
+      described_class.new(SessionLocator.new(dir), registry).write_system_files(
+        id, session_h(id, dir), harness_double(SystemSettings.from_options({}))
+      )
+    end
+
+    it 'restores a saved job status and replay tail onto the job this run has' do
       Dir.mktmpdir do |dir|
-        id      = 'c0c0c0c0-0000-0000-0000-000000000000'
+        id = 'c0c0c0c0-0000-0000-0000-000000000000'
         locator = SessionLocator.new(dir)
-        registry = JobRegistry.new
-        registry.add_job(kind: :main)
-        registry.add_job(kind: :sub_agent)
-        registry.add_job(kind: :timed)
+        saved_registry = JobRegistry.new
+        main = saved_registry.add_job(kind: :main)
+        child = saved_registry.add_job(kind: :sub_agent, requested_by: main)
+        child.buffer.put(type: :response, origin: :session_manager, content: 'child shown')
+        child.buffer.keep_window
+        child.finish('child answer')
+        saved_registry.foreground = main.id
+        saved_system(dir, id, saved_registry)
+        # The job's own conversation file (that job's SessionManager writes it).
+        File.write(locator.job_session_file_path(id, 1),
+                   JSON.generate({ messages: [{ role: 'assistant', content: 'child work' }] }))
 
-        saver = described_class.new(locator, registry)
-        saver.write_system_files(id, session_h(id, dir), harness_double(SystemSettings.from_options({})))
-        # Read the record back the way a resume does: JSON gives Strings for the
-        # kind/status Symbols a save wrote.
-        saved = locator.read_system(id)[:jobs]
-        expect(saved[1][:kind]).to eq('sub_agent')
-
-        # A resumed registry has rebuilt only the main turn and one job: the
-        # third saved id names a job this run does not have.
         resumed = JobRegistry.new
         resumed.add_job(kind: :main)
         resumed.add_job(kind: :command)
         saver = described_class.new(locator, resumed)
 
-        expect(saver.resumable_job_ids(saved)).to eq([0, 1])
+        expect(saver.job_restores(id).map { |r| r[:id] }).to eq([1])
+        expect(saver.job_restores(id).first[:messages].first[:content]).to eq('child work')
+
+        restored = saver.restore_job_states(id)
+        expect(restored.map(&:id)).to eq([1])
+        # The status the save recorded was the Symbol :finished; the JSON round
+        # trip gives the String "finished", and Job#restore_status maps it back.
+        expect(resumed.job(1).status).to eq(:finished)
+        expect(resumed.job(1).buffer.tail.map(&:content)).to eq(['child shown'])
+        # A restored :finished job is a retention candidate again, as in the saved run.
+        expect(resumed.job(1).finished?).to be true
+      end
+    end
+
+    it 'names a saved id with no live Job under it as dropped' do
+      Dir.mktmpdir do |dir|
+        id = 'd1d1d1d1-0000-0000-0000-000000000000'
+        locator = SessionLocator.new(dir)
+        saved_registry = JobRegistry.new
+        main = saved_registry.add_job(kind: :main)
+        child = saved_registry.add_job(kind: :sub_agent, requested_by: main)
+        child.finish('answer')
+        saved_registry.foreground = main.id
+        saved_system(dir, id, saved_registry)
+        File.write(locator.job_session_file_path(id, 1), JSON.generate({ messages: [] }))
+
+        resumed = JobRegistry.new
+        resumed.add_job(kind: :main)
+        saver = described_class.new(locator, resumed)
+
+        expect(saver.restore_job_states(id)).to eq([])
+        expect(saver.dropped_job_ids(id)).to eq([1])
+      end
+    end
+
+    it 'restores nothing for a #207 flat session (no per-job tree exists)' do
+      Dir.mktmpdir do |dir|
+        id = 'e2e2e2e2-0000-0000-0000-000000000000'
+        locator = SessionLocator.new(dir)
+        FileUtils.mkdir_p(File.dirname(locator.session_file_path(id)))
+        File.write(locator.session_file_path(id), JSON.generate({ session_id: id, messages: [] }))
+
+        expect(described_class.new(locator, JobRegistry.new).job_restores(id)).to eq([])
+      end
+    end
+
+    it 'restores nothing for an id with no saved session at all' do
+      Dir.mktmpdir do |dir|
+        saver = described_class.new(SessionLocator.new(dir), JobRegistry.new)
+
+        expect(saver.job_restores('f3f3f3f3-0000-0000-0000-000000000000')).to eq([])
+        expect(saver.dropped_job_ids('f3f3f3f3-0000-0000-0000-000000000000')).to eq([])
       end
     end
   end

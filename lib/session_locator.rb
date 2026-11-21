@@ -242,6 +242,42 @@ class SessionLocator
     JSON.parse(File.read(path), symbolize_names: true)
   end
 
+  # -- Per-job restore (issue #548 increment 3) -----------------------------
+
+  # The conversations of the jobs a resumed system did NOT fold into its own
+  # resume_data: every retained job except the foreground one. #read_session
+  # already delivers the foreground chain, the postures and the access grants, so
+  # a sub-agent's transcript is the part a resume still has to attach job by job.
+  # Each entry is {id:, kind:, status:, messages:, replay_tail:} - kind/status as
+  # JSON gives them (Strings), and a job whose dir was dropped simply has no entry.
+  # A #207 flat session has NO per-job tree at all, so it contributes nothing:
+  # read_system would raise for it, hence the system_dir? guard. Reading a saved
+  # file is main-safe; the restore that puts these chains into live jobs is the
+  # system owner's.
+  def job_restores(id)
+    return [] unless system_dir?(id)
+
+    record   = read_system(id)
+    excluded = record[:foreground_job]
+    Array(record[:jobs]).filter_map do |entry|
+      job_id = entry[:id]
+      next if job_id.nil? || job_id == excluded
+      next unless File.file?(job_session_file_path(id, job_id))
+
+      chain = parse_json(job_session_file_path(id, job_id)) || {}
+      # Status and kind come from the job's OWN record (job.json is what a save
+      # writes them into); the index entry names the job, the record describes it.
+      record_data = parse_json(job_file_path(id, job_id)) || {}
+      {
+        id: job_id,
+        kind: record_data[:kind] || entry[:kind],
+        status: record_data[:status] || entry[:status],
+        messages: Array(chain[:messages]),
+        replay_tail: Array(parse_json(job_replay_file_path(id, job_id)))
+      }
+    end
+  end
+
   # Saved sessions, newest first (pure data; Commands::SessionsCommand is the
   # single renderer of this shape, so /sessions and --list-sessions show the
   # same columns from the same source). An unreadable file is skipped rather
@@ -332,6 +368,8 @@ class SessionLocator
     merged[:replay_tail] = parse_json(replay_path) || []
     merged
   end
+
+  # -- Reading helpers -------------------------------------------------------
 
   # Parse a JSON file symbolized, or nil when it does not exist. Used for the
   # job's replay.json so the assembled replay_tail is symbol-keyed like every

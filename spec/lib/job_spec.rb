@@ -96,6 +96,33 @@ RSpec.describe Job do
     end
   end
 
+  # issue #548: a save records the status, a resume reads it back. The JSON round
+  # trip gives a String, and the retention rule needs the Symbol the job uses.
+  describe '#restore_status (issue #548)' do
+    it 'maps a saved status back to the Symbol the job uses' do
+      job = add(:main)
+
+      expect(job.restore_status('finished')).to eq(:finished)
+      expect(job.status).to eq(:finished)
+      expect(job.finished?).to be true
+    end
+
+    it 'accepts a Symbol too' do
+      job = add(:main)
+
+      expect(job.restore_status(:running)).to eq(:running)
+      expect(job.status).to eq(:running)
+    end
+
+    it 'leaves the status alone for a value that is not a status' do
+      job = add(:main)
+      job.mark_running
+
+      expect(job.restore_status('cancelled')).to be_nil
+      expect(job.status).to eq(:running)
+    end
+  end
+
   describe '#push_event (fan-in)' do
     it 'pushes onto the registry queue with the job id on the event' do
       job = add(:main)

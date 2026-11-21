@@ -28,7 +28,8 @@ class CLI
     :commands,
     :system_saver,
     :history,
-    :ui
+    :ui,
+    :saved_jobs
 
   # Defaults keep the entry point (`CLI.new.run`) unchanged; the tests inject
   # pre-parsed options and a stubbed UI instead. The options hash is resolved
@@ -119,6 +120,14 @@ class CLI
       max_saved: @settings.resume_replay_entries,
       tasks_kept: @settings.output_tasks_kept)
 
+    # The save side (system.json + per-job job.json + per-job replay.json) and
+    # the read side of the SAME layered record belong to the SYSTEM, not the
+    # single-LLM turn engine (#286 / #548): the CLI - not the Harness - builds the
+    # SystemSaver from its own registry and injects it, so a SessionManager never
+    # assembles the system file it does not own. Built before the resume pass
+    # below, which restores job state through it.
+    @system_saver = SystemSaver.new(@locator, @registry)
+
     # The Harness lives INSIDE the main job (#286): commands reach it through
     # registry.foreground_job.harness rather than a CLI-held reference. After
     # this line every read below goes through #foreground_harness, never a
@@ -127,6 +136,7 @@ class CLI
     # Each Harness saves its OWN job dir (issue #548 increment 4b): the id is
     # wired when a harness is attached to a job. The main turn is this job.
     harness.session_manager.job_id = main_job.id
+    @saved_jobs = resume_data ? Array(resume_data[:jobs]) : []
 
     if resume_data
       @registry.restore_replay_tail(resume_data[:replay_tail])
@@ -135,16 +145,16 @@ class CLI
         @registry.restore_foreground(saved_fg)
         foreground_harness.logger.info "foreground job restored: ##{@registry.foreground}"
       end
-      # The saved job list is carried for the resume increment that will rebuild
-      # jobs from it (issue #548); today only the foreground id is restorable.
-      @saved_jobs = Array(resume_data[:jobs])
+      # Each saved job that is not the foreground one keeps its own status and
+      # shown tail (issue #548 increment 3). A saved id with no live Job under it
+      # is a job the drop rule removed - the normal case, so it is stated rather
+      # than treated as a failure.
+      @system_saver.restore_job_states(session_id).each do |job|
+        foreground_harness.logger.info "job ##{job.id} restored: #{job.status}"
+      end
+      report_dropped_jobs
     end
 
-    # The save side (system.json + per-job replay.json) belongs to the SYSTEM,
-    # not the single-LLM turn engine (#286 / #548): the CLI - not the Harness -
-    # builds the SystemSaver from its own registry and injects it, so a
-    # SessionManager never assembles the system file it does not own.
-    @system_saver = SystemSaver.new(@locator, @registry)
     foreground_harness.session_manager.system_saver = @system_saver
 
     @history  = HistoryManager.new(@file_list.workdir, session_id:)
@@ -473,6 +483,20 @@ class CLI
     end
     ui.puts rule
     ui.puts
+  end
+
+  # A saved job whose dir is intact but has no live Job under its id was dropped
+  # by the retention rule in the run that saved it (or nothing rebuilt it here).
+  # Say which ids those are: a resumed run that silently has fewer jobs than the
+  # session recorded reads as a broken resume, and the edges naming a dropped id
+  # stay dangling on purpose (doc/session_layers_design.md, the drop rule).
+  def report_dropped_jobs
+    dropped = @system_saver.dropped_job_ids(session_id)
+    return if dropped.empty?
+
+    foreground_harness.logger.info "dropped job ids: #{dropped.join(', ')}"
+    ui.puts "  (jobs #{dropped.join(', ')} were dropped from this session - " \
+            "their output is not resumed)"
   end
 
   # issue #221 review (bug 2): one-line description of the shell consent

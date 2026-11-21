@@ -244,6 +244,21 @@ class JobRegistry
     foreground_buffer&.restore(entries)
   end
 
+  # -- Per-job restore (issue #548 increment 3) ------------------------------
+
+  # The job this run rebuilt for a saved job id, or nil when the id names a job
+  # this run does not have (the drop rule removed it, or nothing rebuilt it).
+  # The CLI restores each saved job's chain and shown tail through this instead
+  # of reaching into @jobs.
+  def restore_job(job_id, status:, replay_tail:)
+    target = job(job_id)
+    return nil if target.nil?
+
+    target.restore_status(status)
+    target.buffer.restore(replay_tail) unless @max_saved.zero?
+    target
+  end
+
   # -- Inbox routing ----------------------------------------------------------
 
   def answer(id, value)

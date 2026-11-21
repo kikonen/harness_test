@@ -37,7 +37,9 @@ RSpec.describe SessionLocator do
 
   # Seed a layered system directory (issue #548, layout A):
   # <sessions>/<id>/system.json plus <sessions>/<id>/jobs/<job>/session.json.
-  def seed_system(id, jobs: [0, 1])
+  # statuses is what each job's own job.json records (the index names the job,
+  # the record describes it).
+  def seed_system(id, jobs: [0, 1], statuses: {})
     dir = File.join(workdir, '.harness', 'sessions', id)
     FileUtils.mkdir_p(dir)
     run_data = { session_id: id, workdir:, next_id: jobs.max + 1,
@@ -51,16 +53,12 @@ RSpec.describe SessionLocator do
       File.write(File.join(jdir, 'session.json'),
                  JSON.generate({ messages: [{ role: 'user', content: "job#{j}" }],
                                  active_model: 'm', param_overrides: {} }))
+      status = statuses.fetch(j, 'pending')
+      File.write(File.join(jdir, 'job.json'),
+                 JSON.generate({ id: j, kind: 'main', status: status, result: nil,
+                                 requested_by: nil, dependencies: [] }))
     end
     run_path
-  end
-
-  describe '#sessions_dir / #session_file_path' do
-    it 'derives both from the workdir alone' do
-      expect(locator.sessions_dir).to eq(File.join(workdir, '.harness', 'sessions'))
-      expect(locator.session_file_path(sid_a))
-        .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'session.json'))
-    end
   end
 
   describe 'construction (issue #276)' do
@@ -68,6 +66,14 @@ RSpec.describe SessionLocator do
       locator
 
       expect(Dir.exist?(File.join(workdir, '.harness'))).to be false
+    end
+  end
+
+  describe '#sessions_dir / #session_file_path' do
+    it 'derives both from the workdir alone' do
+      expect(locator.sessions_dir).to eq(File.join(workdir, '.harness', 'sessions'))
+      expect(locator.session_file_path(sid_a))
+        .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'session.json'))
     end
   end
 
@@ -224,6 +230,42 @@ RSpec.describe SessionLocator do
       seed_system(sid_c, jobs: [0])
 
       expect(locator.read_session(sid_c)[:replay_tail]).to eq([])
+    end
+  end
+
+  # issue #548 increment 3: the per-job read side. The foreground chain is already
+  # in resume_data, so job_restores delivers the OTHER jobs - each with its own
+  # status and shown tail - and a #207 session has no job tree to read.
+  describe '#job_restores (issue #548 per-job restore)' do
+    it 'returns every job except the foreground one, with its status and tail' do
+      seed_system(sid_c, jobs: [0, 1, 2], statuses: { 1 => "pending", 2 => "finished" })
+      File.write(locator.job_replay_file_path(sid_c, 1),
+                 JSON.generate([{ type: 'response', origin: 'session_manager', content: 'shown' }]))
+
+      restores = locator.job_restores(sid_c)
+
+      expect(restores.map { |r| r[:id] }).to eq([1, 2])
+      expect(restores.first[:messages].first[:content]).to eq('job1')
+      expect(restores.first[:replay_tail].first[:content]).to eq('shown')
+      # The status comes from the job's OWN record file (job.json), not from
+      # system.json's index, which names the job rather than describing it.
+      expect(File.basename(locator.job_file_path(sid_c, 2))).to eq('job.json')
+      expect(restores.last[:status]).to eq('finished')
+      expect(restores.first[:kind]).to eq('main')
+      expect(restores.first[:status]).to eq('pending')
+    end
+
+    it 'skips a job whose conversation file was dropped' do
+      seed_system(sid_c, jobs: [0, 1])
+      FileUtils.remove_entry(locator.job_dir_path(sid_c, 1))
+
+      expect(locator.job_restores(sid_c).map { |r| r[:id] }).to eq([])
+    end
+
+    it 'is empty for a #207 session (it has no jobs/ tree)' do
+      seed_session(sid_a)
+
+      expect(locator.job_restores(sid_a)).to eq([])
     end
   end
 
