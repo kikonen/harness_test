@@ -83,6 +83,15 @@ class SystemSaver
     # files, in ONE call by the run's owner. A SessionManager never assembles
     # this - system.json carries the SYSTEM's access list and digest cache, and
     # each job Harness has its own SessionFileCache.
+    #
+    # A main thread may not read a RUNNING job's messages (they are being mutated
+    # on its own thread; a lock would be needed, which we avoid - issue #548 F). A
+    # job's CONVERSATION is written here only when quiescent: a FINISHED job (its
+    # thread exited) or the FOREGROUND job (its turn was awaited/joined). A RUNNING
+    # non-foreground job persists ITSELF on its own thread - its periodic auto-save
+    # already wrote jobs/<id>/session.json, and Job#request_save makes it save again
+    # at its next safe point. The system half below records that job's job.json +
+    # replay.json for every job (registry data, no chain read).
     fg = @registry.foreground_job
     @registry.jobs.each do |job|
       harness = job.harness

@@ -152,6 +152,31 @@ RSpec.describe Job do
     end
   end
 
+  # issue #548 F: a save request reaches the job's agent, which saves on its own
+  # thread. The job never saves a chain itself (it would be a cross-thread read).
+  describe '#request_save (issue #548 F)' do
+    def saving_harness
+      Object.new.tap do |h|
+        h.instance_variable_set(:@hits, 0)
+        h.define_singleton_method(:request_save) { @hits += 1 }
+        h.define_singleton_method(:hits) { @hits }
+      end
+    end
+
+    it 'asks the attached agent to save (one request, one flag flip)' do
+      job = add(:main)
+      harness = saving_harness
+      job.attach_harness(harness)
+
+      job.request_save
+      expect(harness.hits).to eq(1)
+    end
+
+    it 'is a no-op for a job with no agent (nothing to save)' do
+      expect { add(:command).request_save }.not_to raise_error
+    end
+  end
+
   describe '#push_event (fan-in)' do
     it 'pushes onto the registry queue with the job id on the event' do
       job = add(:main)

@@ -259,6 +259,16 @@ class JobRegistry
     target.deliver(value)
   end
 
+  # Ask a retained job's own agent to persist its conversation at its next safe
+  # point (issue #548 F). The registry only reaches the job; the save happens on
+  # that job's own thread. A job with no agent (no LLM round) saves nothing.
+  def request_save(job_id)
+    target = job(job_id)
+    return nil if target.nil?
+
+    target.request_save
+  end
+
   # -- Retention (tasks_kept) -------------------------------------------------
 
   # A dropped job can no longer be answered or read, so a running job and the

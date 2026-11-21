@@ -458,6 +458,54 @@ index entry* (`entry.reject(...)`), so making the index metadata-only would have
 silently dropped the per-job detail from `job.json`. The record is now built from the
 live job, independent of the index.
 
+### Saving a running job: async, on the job's own thread (issue #548 F)
+
+**A main thread must never read a running job's messages.** They are being mutated on
+the job's task thread; cross-thread reading is unsafe unless a lock/sync layer is
+added, and neither is wanted. So a job persists **itself**, on **its own thread**, and
+saving separate jobs need not be synchronous. The bug F names is purely on the main
+thread: `SystemSaver#save_run` walked every job and read its chain from the main
+thread, and had to *refuse* anything unfinished
+(`next if !job.equal?(fg) && !job.finished?`) because reading a running job is exactly
+the unsafe thing.
+
+The primitive already exists. `SessionManager#maybe_auto_save` saves a job's **own**
+conversation on the **job's own thread** at its safe points (pre-send, in-loop
+compaction, post-turn), gated by `settings.auto_save` + a min-interval; `save_job_session`
+writes only that job's `jobs/<id>/session.json`. That *is* "the task does saving when it
+has a chance." The DECIDE-to-save side already agrees: `JobRegistry#any_job_has_session_state?`
+counts a job with a harness and a non-empty chain regardless of `finished?`. Only the WRITE
+side (the main thread reading) refused - and that refusal was really the correct thread rule
+expressed as a save bug.
+
+The model (DECIDED):
+
+- **`save_run` (main thread) reads NO running job.** It writes only what the system
+  owns and can read safely: `system.json` + each job's `job.json` + `replay.json` (all
+  from the live registry, no message reads), plus the **foreground** job's `session.json`
+  when it is quiescent (at exit the foreground turn has finished/joined). A running
+  non-foreground job's chain is **not** read by `save_run`.
+- **Periodic:** a running job keeps saving itself through its own auto-save points, so a
+  crash/interrupt already loses at most one safe-point interval.
+- **On-demand:** a save request lets `/save` and exit ask a running job to persist **now**.
+  The main thread posts a save request to the job; the job's own loop consumes it at its
+  next safe point (the same tool-loop iteration boundary where a mid-turn note is injected
+  and where `maybe_auto_save` fires) and calls `save_job_session` on its own thread. The
+  request travels like a mid-turn note (a flag read at the iteration top), not through the
+  answer/inbox FIFO - so it never collides with the request/answer ordering rules.
+
+**Honest limit:** a job force-killed mid-tool-call can miss one on-demand request (it
+never reached the consume point); its last periodic auto-save is still on disk. The main
+thread never reads the chain to fill that gap - that refusal is the thread-safety rule, not
+a bug. This model is latent in today's single-job run (the only job is the foreground, which
+is quiescent at exit) and is the shape the main polling loop needs once a job runs
+concurrently.
+
+This also fixed a latent write bug: the job record was previously *derived from the
+index entry* (`entry.reject(...)`), so making the index metadata-only would have
+silently dropped the per-job detail from `job.json`. The record is now built from the
+live job, independent of the index.
+
 ## The log decision the layout forces: one system-wide `harness.log`
 
 Dir-per-job does **not** imply one log per job. The registry has one queue, which gives a
