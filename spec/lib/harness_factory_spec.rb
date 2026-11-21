@@ -159,4 +159,30 @@ RSpec.describe HarnessFactory do
       expect(harness.session_manager.system_saver).to be(saver)
     end
   end
+
+  # The one writer every job delegates its system half to. Built over the run's
+  # registry so a job harness cannot write a one-job system.json: with no
+  # registry the record falls back to a degenerate single job, and a resume of a
+  # multi-job run would rebuild only job 0.
+  describe 'the run system saver the factory builds' do
+    it 'builds one over the run registry when the caller passed none' do
+      registry  = JobRegistry.new
+      build     = factory(registry: registry)
+      main      = build.add_harness_job(kind: :main, session_id: SESSION_ID)
+      child     = build.add_harness_job(kind: :sub_agent, session_id: SESSION_ID)
+      saver     = main.harness.session_manager.system_saver
+
+      expect(saver).to be(child.harness.session_manager.system_saver)
+      expect(saver.registry).to be(registry)
+    end
+
+    it 'uses the saver the caller passed instead of building a second one' do
+      registry = registry_with(:main)
+      saver    = SystemSaver.new(SessionLocator.new(workdir), registry)
+      harness  = factory(registry: registry, system_saver: saver)
+                   .build_for(registry.jobs.first, session_id: SESSION_ID)
+
+      expect(harness.session_manager.system_saver).to be(saver)
+    end
+  end
 end
