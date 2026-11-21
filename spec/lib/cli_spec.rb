@@ -279,7 +279,7 @@ RSpec.describe CLI do
     end
   end
 
-  # issue #286: the JobRegistry is the run's own (the CLI builds it, registers the
+  # issue #286: the JobRegistry is the system's own (the CLI builds it, registers the
   # main turn as job #0, and seeds/restore it from a resumed session's record).
   describe 'the run registry (issue #286)' do
     it 'builds the registry with the main turn as job #0' do
@@ -312,13 +312,13 @@ RSpec.describe CLI do
       tail = cli.registry.foreground_buffer.replay_tail
 
       expect(tail.map { |e| [e.type, e.origin] }).to eq([[:user, :user], [:list, :grant]])
-      expect(cli.foreground_harness.session_manager.run_record.foreground_job)
+      expect(cli.foreground_harness.session_manager.system_record.foreground_job)
         .to eq(cli.registry.foreground)
     end
   end
 
   # issue #221 review (bug 2): the shell consent posture is stated in the startup
-  # banner so the run's approval behavior is visible from the first line.
+  # banner so the system's approval behavior is visible from the first line.
   describe 'startup banner - command consent posture' do
     it 'names the MANUAL posture and how to change it' do
       cli = build_cli
@@ -551,7 +551,7 @@ RSpec.describe CLI do
       expect(cli.file_list.readable?('.env')).to be false
     end
 
-    # The startup banner states the run's file consent, the same way it states
+    # The startup banner states the system's file consent, the same way it states
     # the command consent posture (#221): "no dialogs for your files" is a
     # claim that must be visible and auditable from the first line.
     it 'states the standing grant in the startup banner' do
@@ -686,8 +686,8 @@ RSpec.describe CLI do
   # changed state (a new history entry is the evidence).
   describe 'exit-save on a state change with no conversation (issue #188)' do
     def saved_run_entry(id)
-      # issue #548: a save now writes run.json as the run's entry point.
-      File.join(workdir, '.harness', 'sessions', id, 'run.json')
+      # issue #548: a save now writes system.json as the system's entry point.
+      File.join(workdir, '.harness', 'sessions', id, 'system.json')
     end
 
     it 'saves the session when a command was typed but no prompt was sent' do
@@ -713,7 +713,7 @@ RSpec.describe CLI do
       id = cli.foreground_harness.session.session_id
 
       # The session dir exists (the run wrote its harness.log under the id),
-      # but no run.json was written for a run that changed nothing.
+      # but no system.json was written for a run that changed nothing.
       expect(File.exist?(saved_run_entry(id))).to be(false)
     end
 

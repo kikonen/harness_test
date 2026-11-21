@@ -2,13 +2,13 @@
 
 require 'spec_helper'
 require 'job_registry'
-require 'run_record'
+require 'system_record'
 
-# #548 increment 1: RunRecord is the run-owned persistence half the CLI injects
+# #548 increment 1: SystemRecord is the run-owned persistence half the CLI injects
 # into SessionManager in place of the raw JobRegistry, so a per-Harness save
 # reads only the two run keys (foreground job, replay tail) and never the
 # scheduling registry itself.
-RSpec.describe RunRecord do
+RSpec.describe SystemRecord do
   def registry_with_tail(tail)
     registry = JobRegistry.new
     registry.add_job(kind: :main)
@@ -25,7 +25,7 @@ RSpec.describe RunRecord do
     expect(described_class.new(registry).foreground_job).to eq(node.id)
   end
 
-  # The keys are read live, not snapshotted when RunRecord is built: a run adds
+  # The keys are read live, not snapshotted when SystemRecord is built: a run adds
   # jobs and switches the foreground after CLI#setup, and the save must record
   # the registry as it is at save time.
   it 'reads the registry live, not a snapshot taken at construction' do
@@ -56,7 +56,7 @@ RSpec.describe RunRecord do
 
     expect(described_class.new(registry).replay_tail).to eq([])
   end
-  # issue #548 increment 2: the writer persists the run -> job map and the next
+  # issue #548 increment 2: the writer persists the system -> job map and the next
   # job id. next_id is read live so a resumed run continues numbering.
   it 'reports next_id so a resumed run never reuses a job id' do
     registry = JobRegistry.new
