@@ -10,7 +10,7 @@ require 'output_buffer'
 require 'session_manager'
 require 'system_settings'
 require 'job_registry'
-require 'system_record'
+require 'system_saver'
 require 'fileutils'
 require 'tmpdir'
 
@@ -608,7 +608,7 @@ RSpec.describe SessionManager do
       registry = JobRegistry.new
       registry.add_job(kind: :main)
       registry.foreground_buffer.restore(tail)
-      manager.system_record = SystemRecord.new(registry)
+      manager.system_saver = SystemSaver.new(SessionLocator.new(dir), registry)
       session.add_user('hello')
       manager.save_session
       JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
@@ -642,7 +642,7 @@ RSpec.describe SessionManager do
         registry.add_job(kind: :sub_agent)
         file_list = FileList.new([], workdir: dir)
         mgr = described_class.new(harness, file_list)
-        mgr.system_record = SystemRecord.new(registry)
+        mgr.system_saver = SystemSaver.new(SessionLocator.new(dir), registry)
         mgr.job_id = 1 # this manager is the sub-agent job
         session.add_user('sub-agent work')
 
@@ -693,7 +693,7 @@ RSpec.describe SessionManager do
       double.define_singleton_method(:markdown?) { false }
 
       manager = described_class.new(double, FileList.new([], workdir: dir))
-      manager.system_record = SystemRecord.new(registry)
+      manager.system_saver = SystemSaver.new(SessionLocator.new(dir), registry)
       manager.save_session
       JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
                                      'system.json')), symbolize_names: true)

@@ -312,8 +312,8 @@ RSpec.describe CLI do
       tail = cli.registry.foreground_buffer.replay_tail
 
       expect(tail.map { |e| [e.type, e.origin] }).to eq([[:user, :user], [:list, :grant]])
-      expect(cli.foreground_harness.session_manager.system_record.foreground_job)
-        .to eq(cli.registry.foreground)
+      # The foreground job is a SYSTEM fact; #548 puts it on the CLI's SystemSaver.
+      expect(cli.system_saver.foreground_job).to eq(cli.registry.foreground)
     end
   end
 
@@ -717,8 +717,9 @@ RSpec.describe CLI do
       cli.setup
 
       cli.foreground_harness.session.add_user('keep this turn')
-      allow(cli.foreground_harness.session_manager).to receive(:save_session)
-        .and_raise(RuntimeError, 'save exploded')
+      # The exit-save now goes through the system's SystemSaver, not a single
+      # SessionManager, so the raise belongs on the object the CLI actually calls.
+      allow(cli.system_saver).to receive(:save_run).and_raise(RuntimeError, 'save exploded')
       allow(ui).to receive(:puts)
       stub_prompt_reader
 

@@ -10,7 +10,7 @@ require_relative "harness"
 require_relative "file_list"
 require_relative "error_text"
 require_relative "job_registry"
-require_relative "system_record"
+require_relative "system_saver"
 require_relative "history_manager"
 require_relative "session_locator"
 require_relative "command_handler"
@@ -26,6 +26,7 @@ class CLI
     :file_list,
     :session_id,
     :commands,
+    :system_saver,
     :history,
     :ui
 
@@ -136,11 +137,12 @@ class CLI
       end
     end
 
-    # The save side records the run-record keys (foreground job, replay tail)
-    # the SYSTEM owns (#286 / #548): the CLI - not the Harness - builds a SystemRecord
-    # from its registry and injects it, so SessionManager never reaches a
-    # scheduling registry it does not own.
-    foreground_harness.session_manager.system_record = SystemRecord.new(@registry)
+    # The save side (system.json + per-job replay.json) belongs to the SYSTEM,
+    # not the single-LLM turn engine (#286 / #548): the CLI - not the Harness -
+    # builds the SystemSaver from its own registry and injects it, so a
+    # SessionManager never assembles the system file it does not own.
+    @system_saver = SystemSaver.new(@locator, @registry)
+    foreground_harness.session_manager.system_saver = @system_saver
 
     @history  = HistoryManager.new(@file_list.workdir, session_id:)
     foreground_harness.history = @history
@@ -518,37 +520,15 @@ class CLI
   def auto_save_session(settings_only_change = false)
     return nil unless @registry.any_job_has_session_state? || settings_only_change
 
-    # The foreground save writes system.json + every job's replay.json + the
-    # foreground job's own conversation. Then each OTHER finished job's chain is
-    # serialized to its OWN jobs/<id>/session.json (issue #548 increment 4b): at
-    # exit every job thread is joined (registry.run awaits :done, Task.stop joins),
-    # so the chain is quiescent and main may read it. Keyed on the run id so a
-    # sub-agent harness with its own session uuid still lands under this run's
-    # directory. Best-effort per job so one failure does not abort the others.
-    id = foreground_harness.session_manager.save_session
-    save_finished_job_sessions(id)
-    id
+    # The SystemSaver (the system's owner-built object) writes every job's own
+    # conversation plus system.json + per-job replay.json in one call (issue
+    # #548 increment 4b, moved out of the CLI). At exit every job thread is
+    # joined (registry.run awaits :done, Task.stop joins), so each chain is
+    # quiescent and main may read it.
+    @system_saver.save_run(session_id)
   rescue StandardError => e
     foreground_harness.logger.error ErrorText.detailed(e, "auto-save failed")
     ui.puts "  [warning] could not auto-save session: #{e.message}"
     nil
-  end
-
-  # issue #548 increment 4b: persist each finished job's own conversation that
-  # the foreground save did not already write. A job the run never drove (harness
-  # nil) or an empty chain has nothing to save, so it is skipped.
-  def save_finished_job_sessions(run_id)
-    written = foreground_harness.session_manager.job_id
-    @registry.jobs.each do |job|
-      harness = job.harness
-      next if harness.nil? || job.id == written || !job.finished? || harness.session.empty?
-
-      begin
-        harness.session_manager.job_id = job.id
-        harness.session_manager.save_job_session(run_id)
-      rescue StandardError => e
-        harness.logger.error ErrorText.detailed(e, "auto-save job ##{job.id} failed")
-      end
-    end
   end
 end

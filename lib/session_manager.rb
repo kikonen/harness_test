@@ -8,7 +8,7 @@ require_relative "session_locator"
 require_relative "param_overrides"
 require_relative "error_text"
 require_relative "harness_config"
-require_relative "system_record"
+require_relative "system_saver"
 
 # Manages all session-related logic: prompt flow, compaction, rules file,
 # model switching, and persistence (save/resume/list).
@@ -42,15 +42,13 @@ class SessionManager
     @locator     = SessionLocator.new(file_list.workdir)
     @rules_mtime = current_rules_mtime
     @last_autosave = 0
+    @system_saver = SystemSaver.new(@locator, nil)
     @job_id = 0
   end
 
-  # The system/world persistence record the system's owner injects (#286 / #548): the
-  # foreground job id and the foreground replay tail, read through SystemRecord so
-  # a per-Harness SessionManager never reaches a scheduling registry it does not
-  # own. nil for a Harness built without an owner that injects one - a save then
-  # writes neither system-record key.
-  attr_accessor :system_record
+  # Writes the system half (system.json + per-job replay.json). A per-job
+  # SessionManager never assembles that file itself - it delegates here.
+  attr_accessor :system_saver
 
   # The id of the job this Harness lives in (issue #548 increment 4b): a save
   # writes this job's OWN jobs/<id>/session.json, so a background/sub-agent
@@ -712,17 +710,16 @@ class SessionManager
   # Save this job's conversation and the system record (issue #548 increment 4a).
   # The ownership seam: this Harness' SessionManager writes ONLY its own job's
   # session.json - the conversation this single LLM loop owns, safe to read on
-  # this thread. The system half (system.json + the foreground replay.json) is the
-  # SystemRecord's to write, so this object never assembles the system file. A
-  # save with no injected record writes a degenerate one-job system (job 0 = the
-  # main turn), which is what a standalone SessionManager produces today.
+  # this thread. The system half (system.json + the foreground replay.json) is
+  # the SystemSaver's to assemble, so this object never assembles the system
+  # file itself - it delegates. A save with no injected saver writes a
+  # degenerate one-job system (job 0 = the main turn), a standalone save.
   def save_session
     id        = @harness.session.session_id
     session_h = @harness.session.to_h(@file_list)
-    record    = system_record || SystemRecord.new(nil)
 
     write_own_job_session(id, session_h)
-    record.write_system_files(@locator, id, session_h, @harness)
+    system_saver.write_system_files(id, session_h, @harness)
 
     @harness.logger.info "session saved: #{id} (#{@locator.system_file_path(id)})"
     id
