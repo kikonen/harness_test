@@ -12,11 +12,15 @@ module Mcp
   # the USER declared the server in config.yml. It is NOT a shell command, so the
   # run.command disaster denylist does not apply to the call itself; the server is
   # the trust boundary the user chose.
+  #
+  # CONCURRENCY (issue #548): the adapter borrows the server's connection from a
+  # per-server ConnectionPool for the duration of each call, so a second concurrent
+  # call to the same server waits while a call to a different server does not.
   class ToolAdapter < Tool
-    def initialize(server_name:, mcp_tool:, connection:)
+    def initialize(server_name:, mcp_tool:, pool:)
       @server_name = server_name
       @mcp_tool    = mcp_tool
-      @connection  = connection
+      @pool        = pool
       super(
         name: "#{server_name}.#{mcp_tool.name}",
         description: mcp_tool.description.to_s,
@@ -30,7 +34,7 @@ module Mcp
     end
 
     def execute(args)
-      @connection.call_tool(@mcp_tool.name, args)
+      @pool.checkout { |connection| connection.call_tool(@mcp_tool.name, args) }
     end
 
     private

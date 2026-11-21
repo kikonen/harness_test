@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "server_connection"
+require_relative "connection_pool"
 require_relative "tool_adapter"
 require_relative "../error_text"
 
@@ -13,6 +14,11 @@ module Mcp
   #
   # Opt-in: #load returns before the `mcp` gem is required when no servers are
   # configured, so a run without MCP servers never loads it.
+  #
+  # CONCURRENCY (issue #548): each connected server gets its own ConnectionPool
+  # (size 1 today). Tools borrow from their server's pool, so a concurrent call to
+  # one server serializes on that server's connection while a call to another
+  # server never waits. A run has ONE Manager shared by every job Harness.
   class Manager
     # One declared server as this run actually reached it: the transport kind and
     # its target, whether it connected, and WHICH tools it contributed. This is
@@ -31,9 +37,17 @@ module Mcp
 
     def initialize(logger)
       @logger       = logger
-      @connections  = []
       @status_notes = []
       @servers      = []
+      # One ConnectionPool per connected server, keyed by name. The pool owns the
+      # connection(s), so close walks the pools rather than a flat connection list.
+      @pools        = {}
+    end
+
+    # The pool a connected server's tools borrow from (nil for a server that never
+    # connected). Exposed so a caller can reason about a server's concurrency.
+    def pool(name)
+      @pools[name]
     end
 
     # Connect each declared server and register its tools into the registry.
@@ -86,10 +100,13 @@ module Mcp
     end
 
     # Close every server connection this run opened, so a spawned server is not
-    # left running after the CLI exits.
+    # left running after the CLI exits. The pools own the connections, so close
+    # closes each pool's connections (every size) - the close-once rule unchanged.
     def close
-      @connections.each(&:close)
-      @connections = []
+      @pools.each_value do |pool|
+        pool.connections.each(&:close)
+      end
+      @pools = {}
     end
 
     # A collision note is per TOOL, not per server, so /mcp reports it apart from
@@ -146,14 +163,18 @@ module Mcp
         note("MCP server '#{server[:name]}' failed to start (#{error})", :warn)
         return
       end
-      @connections << connection
+      # One size-1 pool per connected server (issue #548). The pool owns the
+      # connection and hands it out one borrower at a time. Building N connections
+      # to one server (a size > 1 pool) is the later capacity knob; today it is 1.
+      pool = ConnectionPool.new([connection])
+      @pools[server[:name]] = pool
 
       registered_names = []
       mcp_tools.each do |mcp_tool|
         adapter = ToolAdapter.new(
           server_name: server[:name],
           mcp_tool:,
-          connection:)
+          pool:)
         if registry.get(adapter.name)
           msg = "skipped MCP tool '#{adapter.name}' (name collides with a built-in tool)"
           note(msg, :warn)

@@ -109,9 +109,13 @@ the gem's stdio transport matches responses by reading a single shared pipe (not
 multiplexed); its HTTP transport issues an independent request per call, so a
 size-1 pool on it just serializes calls harmlessly. Decision and full rationale:
 `doc/session_layers_design.md` ("MCP when a run has several jobs"). Today the run
-has one Harness so this is latent; the code step (build once in the run owner, hand
-to `Harness.new`, route `ToolAdapter#execute` through the pool) lands with the
-increment that gives a job its own Harness.
+has one Harness so this is latent. **First version implemented:** every connected
+server already has a size-1 `Mcp::ConnectionPool` in `Mcp::Manager` (`@pools`),
+`ToolAdapter#execute` borrows through it, and `Manager#close` closes the pools. The
+deferral is the sharing half: build the `Mcp::Manager` + `ToolRegistry` once in the
+run owner and hand them to `Harness.new` (instead of per-Harness), which lands with
+the increment that gives a job its own Harness - the point where a pool is actually
+shared across concurrent jobs.
 
 ## Reporting and session persistence (issue #405)
 

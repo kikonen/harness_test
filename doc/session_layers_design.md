@@ -338,13 +338,13 @@ a per-Harness one. It is the shape that satisfies the thread-safety rule above f
 *every* transport uniformly, so the run does not have to branch on stdio vs HTTP at
 the call site.
 
-#### Per-server MCP connection pool (DECIDED mechanism, code deferred)
+#### Per-server MCP connection pool (DECIDED; first version implemented)
 
 Each MCP server gets its own pool. `Mcp::Manager` already holds exactly one
-`ServerConnection` per server (`@connections`, `@servers`), and every `ToolAdapter`
-for that server forwards to that same connection
-(`ToolAdapter#execute` -> `connection.call_tool`). The pool wraps **one server's
-connection(s)**, so it keys exactly the way the Manager already keys.
+`ServerConnection` per connected server, and every `ToolAdapter` for that server
+borrows from that server's pool. `Mcp::Manager` now keys a `ConnectionPool` by
+server name (`@pools`), so a pool is per server exactly the way the Manager already
+keys a connection - `ToolAdapter#execute` -> `pool.checkout { |c| c.call_tool(...) }`.
 
 - **Pool unit = a server's connection. Pool per server, never global.** Two job
   Harnesses calling *different* servers draw from *different* pools and never block
@@ -392,13 +392,19 @@ Consequences the decision commits to:
 - **`mcp_connected` stays a system key**: one `connected_summary` for the run,
   not one per job, matching the layer map above.
 
-This is a DECISION only in this pass - no code moves. The deferred code step is
-mechanical: build the `ToolRegistry` + `Mcp::Manager` once (in the factory / run
-owner) and hand them into `Harness.new` as collaborators instead of Harness
-assembling its own builder, and route `ToolAdapter#execute` through a per-server
-connection pool (size 1 now) owned by the `Mcp::Manager`. Both land in the same
-increment that gives a second job its Harness (the main polling loop), because a
-leak and a real cross-job call only exist once there is a second Harness.
+**First version implemented** (in `Mcp::Manager` / `Mcp::ConnectionPool` /
+`Mcp::ToolAdapter`): each connected server gets a size-1 `ConnectionPool` in
+`Manager`'s `@pools`; `ToolAdapter#execute` borrows through `pool.checkout` (always
+returned); `Manager#close` closes every pool's connections. For today's single-Harness
+run this is behavior-preserving (one caller, so a size-1 pool never blocks).
+
+**Still deferred** (lands with the main polling loop, when a second job Harness
+exists): build the `ToolRegistry` + `Mcp::Manager` ONCE in the run owner/factory and
+hand them into `Harness.new` as collaborators instead of every Harness assembling its
+own builder - that is what stops the re-spawn/leak, and it is also the point where a
+pool is shared across real concurrent jobs. Growing a server's pool size > 1 (N
+connections to one server) is a later capacity knob, not a redesign: `ConnectionPool`
+already takes the connection list and pops/returns with a `Thread::Queue`.
 
 ### Why a directory, not a set of flat per-job files
 
