@@ -9,6 +9,7 @@ require_relative "safety_check"
 require_relative "text_normalizer"
 require_relative "error_text"
 require_relative "ui/renderer"
+require_relative "output_budget"
 
 # Shared consent + execution logic for shell commands (issue #129).
 #
@@ -67,9 +68,10 @@ require_relative "ui/renderer"
 #     The child runs in its OWN process group; on timeout the whole tree is
 #     killed (taskkill /T on Windows, SIGKILL to the pgroup elsewhere), so a
 #     hung command can never hold the harness' streams open again.
-#   - Output is truncated to a line limit (default 500, max 5000); that
-#     limit exists because the tool path returns output into the LLM
-#     context window - the bang path prints it as-is.
+#   - Output is truncated to a line limit (default 500, max 5000) AND to the
+#     result byte budget (OutputBudget, issue #551): a line count is not a size
+#     limit, and a tool result bigger than the context window is what makes the
+#     backend refuse the whole request - the bang path prints it as-is.
 class CommandRunner
   DEFAULT_TIMEOUT = 60    # seconds
   MAX_TIMEOUT     = 300   # hard cap
@@ -730,22 +732,26 @@ class CommandRunner
 
   # Keep the first and last halves of `limit` lines with the dropped middle
   # named. Returns [text, truncated?].
-  def truncate(text, limit)
-    # Plain split drops a trailing empty element from a final newline,
-    # so line counts match what the user actually sees.
-    lines = text.split("\n")
-    return [text, false] if lines.size <= limit
+  # A LINE count is not a size limit (issue #551): output with few newlines and
+  # huge lines passes the line gate whole and the tool result then overflows the
+  # context window, so OutputBudget bounds the same kept window in bytes too and
+  # clips a single grossly oversized line within itself.
+  def truncate(text, limit, bytes: output_result_bytes)
+    budget = OutputBudget.fit(text, limit: bytes, limit_lines: limit)
+    [budget.text + line_notice(budget), budget.truncated?]
+  end
 
-    # Head AND tail, never just the head: a test/build runner prints its
-    # failure block and summary at the TAIL, so head-only truncation cut the
-    # very lines that explain a failure (issue #537). The kept budget splits
-    # head-biased (ceil/2 head) so the command header survives; the dropped
-    # middle is named.
-    tail    = limit / 2
-    head    = limit - tail
-    dropped = lines.size - head - tail
-    notice  = "... (output truncated: #{dropped} line(s) omitted from the " \
-              "middle - raise 'limit' or narrow the command to see them)"
-    [(lines.first(head) + [notice] + lines.last(tail)).join("\n"), true]
+  # The line-count half of the notice. OutputBudget owns the byte half; when
+  # whole lines were dropped the line count is named as well, because 'limit'
+  # is the knob for that half (issue #537: head AND tail, never head only).
+  def line_notice(budget)
+    return "" if budget.lines_dropped.zero?
+
+    "\n... (output truncated: #{budget.lines_dropped} line(s) omitted from the " \
+      "middle - raise 'limit' or narrow the command to see them)"
+  end
+
+  def output_result_bytes
+    @settings&.output_result_bytes || OutputBudget::DEFAULT_RESULT_BYTES
   end
 end

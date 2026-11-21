@@ -39,13 +39,16 @@ module Tools
                      "before they run; previously approved command prefixes are " \
                      "auto-approved. Use this for tasks no dedicated tool covers " \
                      "(running tests, build steps, one-off scripts). Output is " \
-                     "captured and returned with the exit code.",
+                     "captured and returned with the exit code. A result larger " \
+                     "than the byte budget is capped to a head+tail preview and " \
+                     "the full output is saved to a path named in the preview - " \
+                     "pipe the command through head/tail to see more of it.",
         parameters: {
           type: "object",
           properties: {
             command: {
               type: "string",
-              description: 'The full shell command to execute (e.g. "bundle exec rspec spec/foo_spec.rb"). ' \
+              description: 'The full shell command to execute (e.g. "bin/rspec spec/foo_spec.rb"). ' \
                            "Shown verbatim to the user for confirmation unless its prefix is already approved."
             },
             cwd: {

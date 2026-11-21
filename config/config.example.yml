@@ -78,6 +78,16 @@ compact:
 #   tail_memory: 4096
 #   tasks_kept: 20
 
+# Byte budget for ONE tool result that reaches the conversation (issue #551).
+# A result bigger than this is capped to a head+tail preview and the full text is
+# saved under the session's own directory (the path is named in the preview).
+# The reason a budget exists at all: a tool result big enough to push the next
+# request past the backend's context window makes that backend refuse the request
+# outright ("requests are never truncated") - and the auto-compaction that would
+# repair it fails on the same oversized chain, so the run is bricked. Omit the key
+# for the built-in default (48000). Config-only (no CLI flag).
+# output_result_bytes: 48000
+
 # Auto-save the session at every prompt boundary (crash-proof, issue #107).
 auto_save: true
 

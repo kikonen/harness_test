@@ -91,6 +91,7 @@ class HarnessConfig
 
     @double_enter_submit = data[:double_enter_submit] == true
     @max_tool_iterations = int_or_nil(data[:max_tool_iterations])
+    @output_result_bytes = int_or_nil(data[:output_result_bytes])
     @max_memories = int_or_nil(data[:max_memories])
 
     # Opt-in streamed LLM responses (default off: a profile or global key
@@ -311,6 +312,14 @@ class HarnessConfig
   # Max tool-loop iterations for one turn (or nil; the built-in default then applies).
   def max_tool_iterations
     @max_tool_iterations
+  end
+
+  # Byte budget for one tool result in the conversation (issue #551); nil = the
+  # built-in default. Config-only: a run whose result overflows the backend's
+  # context window cannot be repaired from inside that run, so the size a project
+  # allows is persistent policy, not a per-run flag.
+  def output_result_bytes
+    @output_result_bytes
   end
 
   # Max memory notes for one store (or nil; the built-in default applies).

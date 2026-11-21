@@ -1,0 +1,66 @@
+# frozen_string_literal: true
+
+require "fileutils"
+
+require_relative "session_locator"
+require_relative "sensitive_files"
+
+# Where the full text of a tool result too large for the conversation goes
+# (issue #551). Design: doc/tool_output_budget_design.md.
+#
+# The chain keeps a bounded preview plus this path; the full result is filed in
+# the session's OWN directory, under the job that produced it:
+#   .harness/sessions/<id>/jobs/<job>/results/<tool>-<seq>.txt
+#
+# A session dir is harness state, so FileList blocks it for the model's file tools
+# (only .harness/skills and a scratch zone are exempt - SensitiveFiles::SENSITIVE_DIRS
+# matches every component). The model's recovery route is therefore the SHELL (a
+# pipe through head/tail, which is exactly what narrows an oversized dump), and the
+# path is named so the USER can open the file.
+class ResultSpill
+  SPILL_DIR = "results"
+
+  def initialize(locator, session_id, job_id: 0, dir: SPILL_DIR)
+    @locator    = locator
+    @session_id = session_id
+    @job_id     = job_id
+    @dir        = dir
+  end
+
+  attr_reader :job_id
+
+  # Writes `text` under the job's results dir and returns the working-dir-relative
+  # path. Returns nil when there is no session id to file under (a run that has
+  # not resolved one, or a tool used standalone).
+  def write(tool_name, seq, text)
+    return nil if @session_id.nil? || @session_id.to_s.empty?
+
+    dir  = File.join(@locator.job_dir_path(@session_id, @job_id), @dir)
+    name = "#{safe_name(tool_name)}-#{seq}.txt"
+    path = File.join(dir, name)
+    FileUtils.mkdir_p(dir)
+    File.write(path, text.to_s)
+    @locator.relative_path(path)
+  end
+
+  # True when a model-supplied path names one of this job's spill files: the file
+  # tools cannot open a session dir, so the tool that spilled answers the read
+  # itself (Harness#read_spilled_result). The prefix is built from THIS job's own
+  # paths, and a name carrying ".." is refused rather than resolved.
+  def covers?(path)
+    rel = path.to_s
+    return false if rel.empty? || rel.include?("..")
+
+    rel == prefix || rel.start_with?("#{prefix}/")
+  end
+
+  private
+
+  def prefix
+    @locator.relative_path(@locator.job_dir_path(@session_id, @job_id)) + "/#{@dir}"
+  end
+
+  def safe_name(tool_name)
+    tool_name.to_s.gsub(/[^A-Za-z0-9_.-]/, "_")
+  end
+end

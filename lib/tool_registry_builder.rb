@@ -88,7 +88,8 @@ class ToolRegistryBuilder
     registry.register(Tools::DialogTool.new)
     registry.register(Tools::GetTimeTool.new)
     registry.register(Tools::FileListTool.new(@file_list))
-    registry.register(Tools::FileReadTool.new(@file_list, @file_cache))
+    registry.register(
+      Tools::FileReadTool.new(@file_list, @file_cache, spill_reader: @harness))
     registry.register(Tools::FileImageTool.new(@file_list))
     registry.register(Tools::FileWriteTool.new(@file_list, @file_cache))
     registry.register(Tools::FileRenameTool.new(@file_list, @file_cache))
