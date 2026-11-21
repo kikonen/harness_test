@@ -56,8 +56,9 @@ class SystemRecord
   # resume is increment 4's work - increment 2 only writes the ids. A dependency
   # that is not a Job (a timed job's clock predicate, a Job#ready? callable) has
   # no id to record and is omitted: it cannot be re-resolved as a job edge until
-  # increment 4 gives the resume path a predicate-restoring form. A registry-less
-  # record writes the degenerate one-job system (job 0, the main turn).
+  # the resume increment gives the resume path a predicate-restoring form. A
+  # registry-less record writes the degenerate one-job system (job 0, the main
+  # turn).
   def jobs_for_save
     return degenerate_job if @registry.nil?
 
@@ -66,6 +67,7 @@ class SystemRecord
         id: job.id,
         kind: job.kind,
         status: job.status,
+        result: result_value(job),
         requested_by: job.requested_by&.id,
         dependencies: dependency_ids(job),
         dir: "jobs/#{job.id}",
@@ -74,10 +76,11 @@ class SystemRecord
     end
   end
 
-  # Write the system half (issue #548 increment 4a): system.json and the
-  # foreground job's replay.json. The conversation itself is NOT here - that is
-  # the job's SessionManager's to write on its own thread. This is the record
-  # half the registry owns, so it is safe for the system's owner to write.
+  # Write the system half (issue #548): system.json plus, for every retained job,
+  # its own job.json (kind/status/result/edges as ids) and replay.json. The
+  # conversation itself is NOT here - that is the job's SessionManager's to write
+  # on its own thread. This is the record half the registry owns, so it is safe
+  # for the system's owner to write.
   # `harness` supplies the system-wide postures and the MCP summary live;
   # session_h carries identity/access that Session#to_h produced.
   def write_system_files(locator, id, session_h, harness)
@@ -85,12 +88,17 @@ class SystemRecord
     FileUtils.mkdir_p(File.dirname(system_path))
     File.write(system_path, JSON.generate(system_json(id, session_h, harness)))
 
-    # Every retained job writes its own replay.json (its own main-owned buffer),
-    # so a background job's shown output survives a resume, not just the
-    # foreground one (issue #548 increment 4b).
+    # Every retained job gets its own job.json (what it was, how it ended, its
+    # edges as ids) and its own replay.json (its own main-owned buffer), so a
+    # background job's record and shown output survive a resume, not just the
+    # foreground one (issue #548 increments 1 and 4b).
     jobs_for_save.each do |entry|
+      job_path    = locator.job_file_path(id, entry[:id])
       replay_path = locator.job_replay_file_path(id, entry[:id])
-      FileUtils.mkdir_p(File.dirname(replay_path))
+      FileUtils.mkdir_p(File.dirname(job_path))
+      # The system.json entry carries every field but the result, so the entry IS
+      # the record - a second source of the same fields would drift from the index.
+      File.write(job_path, JSON.generate(job_record(entry)))
       File.write(replay_path, JSON.generate(replay_tail_for_job(entry[:id])))
     end
   end
@@ -123,6 +131,24 @@ class SystemRecord
     }
   end
 
+  # The job's OWN record (jobs/<id>/job.json): what the job was, how it ended,
+  # and its edges as ids. system.json's jobs[] is the index that points here; the
+  # id -> live Job re-resolution is the next increment, so a resume must treat a
+  # recorded id that names no retained job as a dropped edge.
+  # The index already carries all of it except the result, so a jobs[] entry is
+  # the record: a second source of the same fields would only invite them to
+  # drift apart. `dir` and `messages` index the job's FILES, not the job, so the
+  # record drops them (the dir is the directory the file already sits in).
+  def job_record(entry)
+    entry.reject { |key, _value| key == :dir || key == :messages }
+  end
+
+  def result_value(job)
+    return job.result if JSON.parse(JSON.generate(job.result)) == job.result
+
+    "(unserializable #{job.result.class})"
+  end
+
   # A registry-less save records a system whose only job is 0 (the main turn).
   def degenerate_job
     [
@@ -130,6 +156,7 @@ class SystemRecord
         id: 0,
         kind: :main,
         status: :pending,
+        result: nil,
         requested_by: nil,
         dependencies: [],
         dir: "jobs/0",

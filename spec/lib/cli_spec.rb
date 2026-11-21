@@ -346,6 +346,7 @@ RSpec.describe CLI do
       expect(File.file?(locator.system_file_path(id))).to be true
       expect(File.file?(locator.job_session_file_path(id, 0))).to be true
       expect(File.file?(locator.job_replay_file_path(id, 0))).to be true
+      expect(File.file?(locator.job_file_path(id, 0))).to be true
 
       # The conversation is NOT in system.json - it moved to the job's own file.
       system_data = JSON.parse(File.read(locator.system_file_path(id)))
@@ -356,6 +357,13 @@ RSpec.describe CLI do
       expect(system_data['jobs'].map { |j| j['messages'] }).to eq([2])
       job_data = JSON.parse(File.read(locator.job_session_file_path(id, 0)))
       expect(job_data['messages'].map { |m| m['content'] }).to include('earlier prompt')
+      # Each job also gets its own record next to its conversation: the job's
+      # facts and edges as ids, with no run UUID and no conversation.
+      job_record = JSON.parse(File.read(locator.job_file_path(id, 0)))
+      expect(job_record['id']).to eq(0)
+      expect(job_record['kind']).to eq('main')
+      expect(job_record).not_to have_key('messages')
+      expect(job_record).not_to have_key('session_id')
 
       resumed = described_class.new(layered_options.merge(resume: id), ui)
       resumed.setup
