@@ -101,6 +101,26 @@ results dir and which refuses a name carrying `..`. Measured in a second session
 a spill path reached `file.read`'s denial first and the bypass was never consulted
 - the order is the bug, not the guard.
 
+### A spill read is already capped, so it is not capped again
+
+A spill file is slightly BIGGER than the byte budget, because the "bytes omitted"
+notice is added on the way out. So a spill read handed back through
+`budget_tool_result` re-fit a text that was already inside the budget: it spilled
+the spill (`results/file.read-2.txt`) and `harness.log` reported a cap the model
+never received. `ResultSpill::ALREADY_CAPPED_MARK` is what makes such a read
+recognisable to the guard, and `FileReadTool` only accepts the bypass result that
+carries it.
+
+### The shell is the other way in, and it is not closed
+
+A second session pulled a spilled result into its chain with `cat
+.harness/sessions/.../results/...` after `file.read` denied it. A shell is not
+path-scoped, so no file-tool rule can refuse that; what limits it is the run.command
+consent model (a redirect makes a segment non-auto-approvable, so the recovery route
+is an explicit user Allow, not a silent read) plus the byte budget every command
+result passes through. `file.list` on a spill dir stays refused: listing harness
+state would expose other sessions' and other jobs' files to one job's agent.
+
 ## Not done, deliberately
 
 - **No pre-request `MAX_REQUEST_BYTES` gate.** It cannot shrink a chain that is

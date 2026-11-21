@@ -18,6 +18,11 @@ require_relative "sensitive_files"
 # pipe through head/tail, which is exactly what narrows an oversized dump), and the
 # path is named so the USER can open the file.
 class ResultSpill
+  # Prefix a spill read's result carries so the result guard can tell the read is
+  # already capped: re-fitting it would spill the spill and log a cap the model
+  # never got. The guard strips it before the text enters the chain.
+  ALREADY_CAPPED_MARK = "spilled tool output, already capped: "
+
   SPILL_DIR = "results"
 
   def initialize(locator, session_id, job_id: 0, dir: SPILL_DIR)
