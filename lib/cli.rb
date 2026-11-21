@@ -196,11 +196,6 @@ class CLI
 
     setup
 
-    # issue #548: the main thread drains the foreground job's queue, so it
-    # names itself after that job - the log lines main writes are stamped with
-    # the foreground job id (the SessionLogger formatter reads Thread.current.name).
-    Thread.current.name = @registry.foreground.to_s
-
     @history.load
 
     # issue #198: the double-Enter submit switch is process-global and
