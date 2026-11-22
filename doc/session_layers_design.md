@@ -89,7 +89,7 @@ a Harness is ONE LLM tool-loop and belongs to a Job; the CLI/`JobRegistry` is th
 "System / world" half, exactly one per process:
 
 - **Harness session** - one per agent/Job. Holds: the `Session` message chain, the
-  file digest cache, the access grants, and that agent's own `active_model` /
+  file digest cache, the access grants, and that agent's own `active_profile_id` /
   `param_overrides`. Owned by that agent's Harness / `SessionManager` (its persistence
   half). Saved under the agent's own session id.
 - **System session** - exactly one per process. Holds: the `JobRegistry` record
@@ -116,7 +116,7 @@ The keys `save_session` writes today, partitioned by which layer they belong to:
 | key | layer | today's owner | honest owner |
 |-----|-------|---------------|--------------|
 | `messages`, `file_cache`, `access`, `workdir`, `user_prompts`, `last_stats`, `created_at`, `session_id` | harness | `Session#to_h` | Harness session (correct already) |
-| `active_model`, `param_overrides` | harness | `SessionManager` | Harness session (per-agent model state) |
+| `active_profile_id`, `param_overrides` | harness | `SessionManager` | Harness session (per-agent model state) |
 | `yolo`, `stream`, `markdown`, `output_palette` | system | `SessionManager` (per-Harness) | system session |
 | `foreground_job`, `replay_tail` | system | `SessionManager` via injected `registry` | system session (the registry's own data) |
 | `mcp_connected` | system | `SessionManager` | system session |
@@ -159,7 +159,7 @@ option B as a destination.
 ## Increments (a suggested sequence)
 
 1. **Partition `save_session`.** Split it into a harness-session writer (the
-   `Session#to_h` keys + `active_model` + `param_overrides`) and a run-record writer
+   `Session#to_h` keys + `active_profile_id` + `param_overrides`) and a run-record writer
    owned by CLI/`JobRegistry` (jobs/foreground/replay_tail/postures/mcp_connected).
    Delete `SessionManager#registry` and its injection. No layout change yet - the two
    writers can still emit into the existing file while the seam is proven.

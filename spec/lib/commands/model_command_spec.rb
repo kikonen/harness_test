@@ -8,18 +8,18 @@ require 'tmpdir'
 require 'commands/model_command'
 
 # /model talks only to harness.session_manager (active model, target display,
-# switch_model, param_overrides), so a thin double exposing those is enough -
+# switch_profile, param_overrides), so a thin double exposing those is enough -
 # same approach as param_command_spec.
 RSpec.describe Commands::ModelCommand do
   def session_manager(profiles, active, target: '/v1/chat/completions', vision: false)
     sm = Object.new
     sm.define_singleton_method(:model_profiles) { profiles }
-    sm.define_singleton_method(:active_model_name) { active }
+    sm.define_singleton_method(:active_profile_name) { active }
     sm.define_singleton_method(:target_display) { target }
     # issue #449: image support is a session_manager fact (the active profile's
     # 'vision:'), so /model reads it from there.
     sm.define_singleton_method(:vision?) { vision }
-    sm.define_singleton_method(:switch_model) { |name| profiles.find { |p| p[:name] == name } }
+    sm.define_singleton_method(:switch_profile) { |id| profiles.find { |p| (p[:id] || p[:name]) == id } }
     po = Object.new
     po.define_singleton_method(:list_items) do
       [{ key: 'temperature', value: '0.7', annotation: '' }]
@@ -40,7 +40,7 @@ RSpec.describe Commands::ModelCommand do
   end
 
   def run_command(args = '', manager: nil, vision: false)
-    manager ||= session_manager([{ name: 'qwen' }], 'qwen', vision: vision)
+    manager ||= session_manager([{ name: 'qwen', id: 'qwen' }], 'qwen', vision: vision)
     stdout = StringIO.new
     # #286: the command reaches the Harness through the foreground job's harness,
     # so the spec builds a registry whose main job carries the double.
@@ -71,7 +71,7 @@ RSpec.describe Commands::ModelCommand do
       expect(row).to include('0.7')
     end
 
-    it 'closes with the pointers to /models, /model <name> and /param' do
+    it 'closes with the pointers to /models, /model <id> and /param' do
       out = run_command
       # The pointer line is a :note paragraph the renderer re-wraps to a fixed
       # width; match on whitespace-collapsed text so a wrap point inside a
@@ -94,8 +94,8 @@ RSpec.describe Commands::ModelCommand do
 
   describe 'with a name (switch the model)' do
     it 'reports the profile it switched to' do
-      sm = session_manager([{ name: 'qwen' },
-                            { name: 'big', url: 'http://other:11434/v1' }],
+      sm = session_manager([{ name: 'qwen', id: 'qwen' },
+                            { name: 'big', id: 'big', url: 'http://other:11434/v1' }],
                            'qwen')
       out = run_command('big', manager: sm)
 
@@ -107,33 +107,33 @@ RSpec.describe Commands::ModelCommand do
     # A profile that declares no url of its own falls back to the run's base url,
     # which is what keeps the line complete.
     it 'falls back to the global base url for the endpoint' do
-      mgr = session_manager([{ name: 'bare' }], 'qwen')
+      mgr = session_manager([{ name: 'bare', id: 'bare' }], 'qwen')
       out = run_command('bare', manager: mgr)
 
       expect(out).to include('Switched to model: bare (bare @ http://srv:11434/v1)')
     end
 
     it 'prints the parameter table after a switch too' do
-      sm = session_manager([{ name: 'qwen' },
-                            { name: 'big' }], 'qwen')
+      sm = session_manager([{ name: 'qwen', id: 'qwen' },
+                            { name: 'big', id: 'big' }], 'qwen')
       row = run_command('big', manager: sm).lines.map(&:chomp).find { |l| l.include?('temperature') }
 
       expect(row).to include('temperature')
       expect(row).to include('0.7')
     end
 
-    # An unknown name finds no profile: switch_model returns nil and the command
+    # An unknown id finds no profile: switch_profile returns nil and the command
     # must fail loudly rather than print an empty line.
-    it 'raises when the name matches no profile' do
-      expect { run_command('ghost', manager: session_manager([{ name: 'qwen' }], 'qwen')) }
+    it 'raises when the id matches no profile' do
+      expect { run_command('ghost', manager: session_manager([{ name: 'qwen', id: 'qwen' }], 'qwen')) }
         .to raise_error(NoMethodError)
     end
   end
 
   it 'declares both accepted forms in its HELP' do
     help = described_class::HELP
-    expect(help.usage).to eq('model [name]')
-    expect(help.forms).to eq(['model', 'model <name>'])
+    expect(help.usage).to eq('model [id]')
+    expect(help.forms).to eq(['model', 'model <id>'])
     expect(help.group).to eq(:model)
   end
 end

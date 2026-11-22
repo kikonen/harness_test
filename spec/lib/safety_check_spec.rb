@@ -103,7 +103,7 @@ RSpec.describe SafetyCheck do
     # must reach chat untouched.
     it 'forwards the caller tools payload to chat unchanged' do
       client = FakeClient.new
-      tools  = [{ type: 'function', function: { name: 'file.read' } }]
+      tools  = [{ type: 'function', function: { name: 'file.read', id: 'file.read' } }]
       described_class.run(client, mid_loop_chain, [command], tools:)
 
       expect(client.calls.first[:tools]).to eq(tools)
@@ -244,7 +244,7 @@ RSpec.describe SafetyCheck do
       allow(client).to receive(:chat).and_return({
         choices: [{ message: { content: nil,
                               tool_calls: [{ id: 'z1',
-                                            function: { name: 'run.command' } }] } }]
+                                            function: { name: 'run.command', id: 'run.command' } }] } }]
       })
       logged = []
       logger = double('logger')

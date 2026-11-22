@@ -117,10 +117,10 @@ RSpec.describe Harness do
     declared  = PER_CONNECTION_KEYS.select { |k| opts.key?(k) }
     return if declared.empty?
 
-    profile = { name: requested }
+    profile = { name: requested, id: requested }
     declared.each { |k| profile[k == :base_url ? :url : k] = opts[k] }
     opts[:model_profiles] = [profile]
-    opts[:active_model]   = requested
+    opts[:active_profile_id]   = requested
     (declared + %i[base_url model]).each { |k| opts.delete(k) }
   end
 
@@ -450,31 +450,31 @@ RSpec.describe Harness do
     it 'resumes on the run model when the saved model is no longer configured' do
       id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
       seed_saved_session(id)
-      data = saved_data(id).merge(active_model: 'gone-model')
+      data = saved_data(id).merge(active_profile_id: 'gone-model')
 
       harness = build_harness(session_id: id, resume_data: data)
 
-      expect(harness.session_manager.active_model_name).to eq('test-model')
-      expect(harness.model_config.active_model).to eq('test-model')
+      expect(harness.session_manager.active_profile_name).to eq('test-model')
+      expect(harness.model_config.active_profile_id).to eq('test-model')
       expect(harness.session.pending?).to be(false)
     end
 
     # A profile-less run (-m as a raw id) has no default to fall back to either.
     # Aborting here was the owner's crash: a config with models configured but no
-    # default_model, resuming a session whose saved name is gone.
+    # default_profile_id, resuming a session whose saved name is gone.
     it 'resumes on the raw model of a profile-less run over an unknown saved name' do
       id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
       seed_saved_session(id)
-      data = saved_data(id).merge(active_model: 'gone-model')
+      data = saved_data(id).merge(active_profile_id: 'gone-model')
 
       harness = build_harness(
         session_id: id,
         resume_data: data,
-        model_profiles: [{ name: 'other-model' }])
+        model_profiles: [{ name: 'other-model', id: 'other-model' }])
 
       # No selection and no default: this run has no model to resume onto, so it
       # keeps the raw seed it was built with instead of aborting the resume.
-      expect(harness.model_config.active_model).to be_nil
+      expect(harness.model_config.active_profile_id).to be_nil
       expect(harness.model_config.base_url).to be_nil
     end
 
@@ -707,7 +707,7 @@ RSpec.describe Harness do
     end
 
     it 'falls back to message content when there is no reasoning' do
-      msg = { reasoning: nil, content: 'checking the test suite', tool_calls: [{ id: 'c1', function: { name: 'run.command' } }] }
+      msg = { reasoning: nil, content: 'checking the test suite', tool_calls: [{ id: 'c1', function: { name: 'run.command', id: 'run.command' } }] }
 
       harness.send(:emit_step, 2, msg)
       lines = drained_lines
@@ -726,7 +726,7 @@ RSpec.describe Harness do
     end
 
     it 'emits only the tool line when there is no reasoning text at all' do
-      msg = { reasoning: nil, content: nil, tool_calls: [{ id: 'c1', function: { name: 'file.search' } }] }
+      msg = { reasoning: nil, content: nil, tool_calls: [{ id: 'c1', function: { name: 'file.search', id: 'file.search' } }] }
 
       harness.send(:emit_step, 4, msg)
       lines = drained_lines
@@ -2341,7 +2341,7 @@ RSpec.describe Harness do
     end
 
     it 'an empty or missing arguments payload is not a parse error' do
-      calls = [run_command_calls('a')[0], { id: 'c2', function: { name: 'run.command' } }]
+      calls = [run_command_calls('a')[0], { id: 'c2', function: { name: 'run.command', id: 'run.command' } }]
 
       expect(harness.run_command_batch_commands(calls)).to eq(['a'])
       expect(File.read(harness.session_log_path)).not_to include('did not parse')
@@ -2800,7 +2800,7 @@ RSpec.describe Harness do
       h.record_last_rate({ completion_tokens: 100, completion_tokens_per_second: 31.4 }, 4.0)
       expect(h.last_rate_segment).to eq('31.4 tok/s (last)')
 
-      h.session_manager.switch_model('two')
+      h.session_manager.switch_profile('two')
 
       expect(h.last_rate_segment).to be_nil
       expect(h.request_wait_suffix.call).to eq(h.context_indicator_live)
@@ -3088,7 +3088,7 @@ RSpec.describe Harness do
     end
 
     def server_entry(name: 'fs', command: 'ruby')
-      { name: name, command: command, args: [], env: {} }
+      { name: name, id: name, command: command, args: [], env: {} }
     end
 
     it 'runs no MCP code path when no servers are configured' do
@@ -3216,11 +3216,11 @@ RSpec.describe Harness, 'tool-result images (issue #449)' do
 
   def build_harness_vision(options = {})
     # A profile that declares vision (SessionManager#vision? reads the active one).
-    # model_profiles is run-wide config (settings); active_model is live per-
+    # model_profiles is run-wide config (settings); active_profile_id is live per-
     # connection state (#286), so a #286 settings carries only the catalogue and
     # the Harness seeds its ModelConfig from it at build time.
     opts = { model_profiles: [{ name: 'v', vision: true }],
-             active_model: 'v' }.merge(options)
+             active_profile_id: 'v' }.merge(options)
     h = build(opts)
     h
   end

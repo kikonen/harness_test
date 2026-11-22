@@ -22,7 +22,7 @@ RSpec.describe CLI do
       workdir:   workdir,
       # What CLIOptions.parse hands the CLI: the active model PROFILE NAME
       # (there are no models: configured here, so it is the raw -m id).
-      active_model: 'test-model',
+      active_profile_id: 'test-model',
       system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE
     }
   end
@@ -42,7 +42,7 @@ RSpec.describe CLI do
   end
 
   # Seed a saved session in the issue #207 layout (issue #276) so a resume has
-  # something real to resolve: <sessions>/<id>/session.json. active_model is
+  # something real to resolve: <sessions>/<id>/session.json. active_profile_id is
   # nil by default - the "use whatever the config default is" state - because
   # these specs are about identity, not model profiles.
   def seed_saved_session(id, model: nil, yolo: false)
@@ -56,7 +56,7 @@ RSpec.describe CLI do
       messages:      [{ role: 'system', content: 'saved system prompt' },
                       { role: 'user', content: 'earlier prompt' },
                       { role: 'assistant', content: 'earlier reply' }],
-      active_model:  model,
+      active_profile_id:  model,
       yolo:          yolo,
       workdir:       workdir
     }
@@ -368,10 +368,10 @@ end
   # jobs/0/session.json - so a non-empty resumed conversation is the proof the
   # assembly read the job file. A model PROFILE is configured so the active
   # model resolves on BOTH runs (a bare -m id with no profile raises on resume's
-  # restore_session_model, unrelated to this round-trip).
+  # restore_session_profile, unrelated to this round-trip).
   describe 'layered save/resume round-trip (issue #548)' do
     let(:layered_options) do
-      options.merge(model_profiles: [{ name: 'test-model' }])
+      options.merge(model_profiles: [{ name: 'test-model', id: 'test-model' }])
     end
 
     it 'resumes the conversation and replay tail a layered save wrote' do
@@ -475,7 +475,7 @@ end
   # genuinely cannot (a job whose dir the retention rule dropped).
   describe 'per-job resume restore (issue #548)' do
     let(:layered_options) do
-      options.merge(model_profiles: [{ name: 'test-model' }])
+      options.merge(model_profiles: [{ name: 'test-model', id: 'test-model' }])
     end
 
     def seed_layered_system(id, job_ids, foreground: 0)
@@ -643,7 +643,7 @@ end
     it 'says inlined when the active profile declares vision' do
       allow(Mcp::ServerConnection).to receive(:new).and_return(fake_connection)
       cli = described_class.new(
-        mcp_options(active_model: 'sees',
+        mcp_options(active_profile_id: 'sees',
                     model_profiles: [{ name: 'sees', vision: true }]), ui)
       stub_prompt_reader
 

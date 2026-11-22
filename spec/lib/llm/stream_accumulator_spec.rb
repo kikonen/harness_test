@@ -109,7 +109,7 @@ RSpec.describe LLM::StreamAccumulator do
 
     it 'defaults empty arguments to an empty JSON object' do
       acc.feed({ choices: [{ delta: { tool_calls: [
-        { index: 0, id: "a", function: { name: "tools.list" } }
+        { index: 0, id: "a", function: { name: "tools.list", id: "tools.list" } }
       ] } }] })
 
       expect(acc.to_response[:choices][0][:message][:tool_calls][0][:function][:arguments]).to eq("{}")

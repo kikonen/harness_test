@@ -25,7 +25,7 @@ RSpec.describe LLM::BaseBackend do
     private
 
     def build_body(messages, _tools, stream: false)
-      { model: @config.active_model, messages: messages, stream: stream }
+      { model: @config.active_profile_id, messages: messages, stream: stream }
     end
 
     # Returns the raw JSON so the usage of either wire shape is visible.
@@ -67,7 +67,7 @@ RSpec.describe LLM::BaseBackend do
   let(:options) do
     # retry_delay 0 keeps the retry spec fast; the attempt counter in the log
     # line is what is being checked, not the backoff.
-    { base_url: 'http://127.0.0.1:11434/v1', active_model: 'test-model', api: 'openai',
+    { base_url: 'http://127.0.0.1:11434/v1', active_profile_id: 'test-model', api: 'openai',
       retry_count: 2, retry_delay: 0 }
   end
   let(:backend) { MinimalBackend.new(ModelConfig.new(options), logger) }

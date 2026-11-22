@@ -99,7 +99,7 @@ RSpec.describe SessionManager do
       # Mirrors Harness#tools_payload: the summary call sends the SAME tool
       # definitions the live turn sends (#246; doc/compaction_cache_design.md).
       def tools_payload
-        [{ type: 'function', function: { name: 'test.echo' } }]
+        [{ type: 'function', function: { name: 'test.echo', id: 'test.echo' } }]
       end
 
       # Delegates to the (stubbed) client so the spec can record call order.
@@ -202,8 +202,11 @@ RSpec.describe SessionManager do
     # Issue #271 compacted the line: the who sits in parentheses after the
     # verb and only the API TYPE is named (the endpoint path stays in
     # target_display for /model, /models and the startup banner).
+    # The who is the profile's DISPLAY name (ModelConfig#active_profile_name);
+    # the id is the selection key and never reaches the spinner line.
     it 'emits exactly one spinner_detail with the model and the api type' do
-      harness.model_config.active_model = 'qwen2.5-coder:32b'
+      harness.model_config.active_profile_id = 'local'
+      harness.model_config.active_profile_name = 'qwen2.5-coder:32b'
 
       events = emitted_details
 
@@ -215,14 +218,15 @@ RSpec.describe SessionManager do
     end
 
     it 'names the api type only when the client reports a backend' do
-      harness.model_config.active_model = 'raw-model'
+      harness.model_config.active_profile_id = 'raw-model'
+      harness.model_config.active_profile_name = 'raw-model'
       harness.client = Class.new { def chat(*) = nil; }.new
 
       expect(emitted_details.first[:content][:message]).to eq('Sending (raw-model)')
     end
 
     it 'still emits a bare Sending line when no model is configured' do
-      harness.model_config.active_model = nil
+      harness.model_config.active_profile_id = nil
 
       expect(emitted_details.first[:content][:message])
         .to eq('Sending (openai)')
@@ -525,7 +529,7 @@ RSpec.describe SessionManager do
     end
   end
   # issue #221: the YOLO consent posture travels with the session save
-  # (like active_model / param_overrides - it is harness state, not
+  # (like active_profile_id / param_overrides - it is harness state, not
   # conversation state) and is written as a plain boolean, so a session saved
   # before the feature has no key. The RESUME side of the round trip is
   # Harness#apply_resume_state, covered in spec/lib/harness_spec.rb.
@@ -815,7 +819,7 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       model_profiles: [
         { name: 'local', reasoning_effort: 'medium', num_ctx: 65_536 }
       ],
-      active_model: 'local'
+      active_profile_id: 'local'
     }
   end
   let(:harness) do
@@ -942,7 +946,7 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
       end
 
       def tools_payload
-        [{ type: 'function', function: { name: 'test.echo' } }]
+        [{ type: 'function', function: { name: 'test.echo', id: 'test.echo' } }]
       end
 
       # issue #126: the spinner calls this every frame (with the local chain).
@@ -1222,7 +1226,7 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
         { role: 'system', content: 'system prompt' },
         { role: 'user', content: 'implement X' },
         { role: 'assistant', content: nil,
-          tool_calls: [{ id: 't1', function: { name: 'x' } }] },
+          tool_calls: [{ id: 't1', function: { name: 'x', id: 'x' } }] },
         { role: 'tool', tool_call_id: 't1', content: 'r1' },
         { role: 'assistant', content: 'done' }
       ]
@@ -1401,7 +1405,7 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
   end
 
   it 'is text-only when no profiles are configured (a raw -m id)' do
-    mgr = manager_with(model: 'some-model', active_model: nil)
+    mgr = manager_with(model: 'some-model', active_profile_id: nil)
 
     expect(mgr.active_profile).to be_nil
     expect(mgr.vision?).to be(false)
@@ -1409,7 +1413,7 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
 
   it 'is text-only for a profile that did not declare vision' do
     mgr = manager_with(
-      model: 'qwen', active_model: 'local',
+      model: 'qwen', active_profile_id: 'local',
       model_profiles: [{ name: 'local', vision: false }])
 
     expect(mgr.vision?).to be(false)
@@ -1417,7 +1421,7 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
 
   it 'reports vision for the active profile that declared it' do
     mgr = manager_with(
-      model: 'vision', active_model: 'v',
+      model: 'vision', active_profile_id: 'v',
       model_profiles: [{ name: 'v', vision: true }])
 
     expect(mgr.vision?).to be(true)
@@ -1425,7 +1429,7 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
 
   it 'takes the image limits from the active profile when it declares its own' do
     mgr = manager_with(
-      model: 'vis', active_model: 'v',
+      model: 'vis', active_profile_id: 'v',
       model_profiles: [
         { name: 'v', model: 'vis', vision: true,
           mcp_images: { inline_max_bytes: 900, inline_max_images: 1, inline_max_tokens: 200 } }])
@@ -1436,7 +1440,7 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
 
   it 'falls back to the config-level limits when the profile says nothing' do
     mgr = manager_with(
-      model: 'vis', active_model: 'v',
+      model: 'vis', active_profile_id: 'v',
       mcp_image_limits: { inline_max_bytes: 500, inline_max_images: 2, inline_max_tokens: 100 },
       model_profiles: [{ name: 'v', vision: true, mcp_images: nil }])
 
@@ -1445,7 +1449,7 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
   end
 
   it 'falls back to the built-in defaults when neither names a budget' do
-    mgr = manager_with(model: 'vis', active_model: 'v',
+    mgr = manager_with(model: 'vis', active_profile_id: 'v',
                        model_profiles: [{ name: 'v', vision: true }])
 
     expect(mgr.image_limits).to eq(HarnessConfig::MCP_IMAGE_LIMIT_DEFAULTS)
@@ -1454,9 +1458,9 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
   # A /model switch propagates the profile's vision flag and budget into the
   # shared options hash so the backend and the per-turn ImageDelivery see them.
   it 'apply_profile propagates vision and the image budget' do
-    mgr = manager_with(model: 'qwen', active_model: 'plain',
+    mgr = manager_with(model: 'qwen', active_profile_id: 'plain',
                        model_profiles: [
-                         { name: 'plain' },
+                         { name: 'plain', id: 'plain' },
                          { name: 'eyes', model: 'vis', vision: true,
                            mcp_images: { inline_max_images: 3 } }])
     target = mgr.send(:find_profile, 'eyes')
@@ -1475,10 +1479,10 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
   it 'apply_profile preserves the config-level budget for a profile with no block' do
     global = { inline_max_bytes: 1_500_000, inline_max_images: 4, inline_max_tokens: 80_000 }
     mgr = manager_with(
-      model: 'qwen', active_model: 'plain',
+      model: 'qwen', active_profile_id: 'plain',
       mcp_image_limits: global,
       model_profiles: [
-        { name: 'plain' },
+        { name: 'plain', id: 'plain' },
         { name: 'strata', vision: true, mcp_images: nil }])
     target = mgr.send(:find_profile, 'strata')
     mgr.send(:apply_profile, target)

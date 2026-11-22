@@ -4,16 +4,16 @@ require_relative "../command"
 require_relative "../param_overrides"
 
 module Commands
-  # /model <name> - switch the active model for this run.
-  # /model        - show the currently active model and its parameters
+  # /model <id> - switch this run's connection to a configured profile by id.
+  # /model      - show the currently active model and its parameters
   #                 (issue #219: every parameter plus the session overrides).
   class ModelCommand < Command
     HELP = CommandHelp.new(
-      usage: "model [name]",
+      usage: "model [id]",
       summary: "Show the active model (with every parameter and its session " \
                "override), or switch it for this run",
       group: :model,
-      forms: ["model", "model <name>"],
+      forms: ["model", "model <id>"],
       see_also: %w[models param])
 
     def handle(args)
@@ -28,7 +28,7 @@ module Commands
         emit_role(
           :note,
           [
-            "Current model: #{foreground_harness.session_manager.active_model_name} " \
+            "Current model: #{foreground_harness.session_manager.active_profile_name} " \
               "(#{foreground_harness.session_manager.target_display} " \
               "@ #{foreground_harness.model_config.base_url})",
             "Tool-result images: #{images}"
@@ -36,20 +36,20 @@ module Commands
         emit_params
         emit_role(
           :note,
-          "List models with /models, switch with /model <name>, " \
+          "List models with /models, switch with /model <id>, " \
           "adjust parameters with /param.")
         return
       end
 
-      profile = foreground_harness.session_manager.switch_model(name)
-      # A profile's name IS the model the harness asks the endpoint for, so the
-      # switch line states that name once plus the endpoint it now hits.
-      display = profile[:name]
+      profile = foreground_harness.session_manager.switch_profile(name)
+      # The profile id is what the endpoint is asked for; the name is its label.
+      id      = profile[:id]
+      display = profile[:name] || id
       url     = profile[:url] || foreground_harness.model_config.base_url
       # issue #217: the API type can CHANGE with the profile - say it.
       emit_role(
         :note,
-        "Switched to model: #{display} (#{display} @ #{url}) " \
+        "Switched to model: #{display} (#{id} @ #{url}) " \
         "-> #{foreground_harness.session_manager.target_display}")
       emit_params
     end

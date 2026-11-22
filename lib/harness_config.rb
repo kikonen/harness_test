@@ -69,13 +69,15 @@ class HarnessConfig
     inline_max_tokens: 40_000
   }.freeze
 
-  attr_reader :models, :default_model, :system_prompt_file
+  attr_reader :models, :default_profile_id, :system_prompt_file
 
   def initialize(data = {})
     data          = {} if data.nil?
     @raw          = data
     @models       = normalize_models(Array(data[:models]))
-    @default_model = nonblank(data[:default_model])
+    # 'default_profile_id' names what it is: the profile a new run uses.
+    # 'default_model:' is the historical key and is still read.
+    @default_profile_id = nonblank(data[:default_profile_id]) || nonblank(data[:default_model])
     @system_prompt_file = nonblank(data[:system_prompt_file])
     @auto_save = data[:auto_save].nil? ? true : data[:auto_save]
     @command_safety_check = data[:command_safety_check] == true
@@ -439,18 +441,19 @@ class HarnessConfig
     @retry[:delay]
   end
 
-  # Resolve the active model profile. selection is the value of -m (or nil).
-  # Returns a normalized hash { name:, url:, token:, num_ctx:, ... } when model
-  # profiles are configured, or nil when none are (so the caller can fall back
-  # to treating -m as a raw model id).
-  def resolve_model(selection)
+  # Resolve the selected model profile. selection is the value of -m (a profile
+  # id) or nil. Returns a normalized profile { id:, name:, url:, token:, ... }
+  # when profiles are configured, or nil when none are (so the caller can fall
+  # back to treating -m as a raw model id).
+  def resolve_profile(selection)
     return nil unless models_configured?
 
-    key = nonblank(selection) || @default_model
-    raise HarnessError, "no model selected and no default_model configured" if key.nil?
+    key = nonblank(selection) || @default_profile_id
+    raise HarnessError, "no model selected and no default_profile_id configured" if key.nil?
 
-    match = @models.find { |m| m[:name] == key }
-    raise HarnessError, "unknown model '#{key}'. Available: #{@models.map { |m| m[:name] }.join(', ')}" unless match
+    match = @models.find { |m| m[:id] == key }
+    raise HarnessError,
+      "unknown model '#{key}'. Available: #{@models.map { |m| m[:id] }.join(', ')}" unless match
 
     match
   end
@@ -462,15 +465,20 @@ class HarnessConfig
 
   private
 
+  # An id is semi-unique: it is what a selection and a saved session resolve,
+  # so one id resolving to two entries is refused at load - a duplicate makes
+  # -m and a resumed run silently ambiguous. A name: is a display label and
+  # may repeat.
   def normalize_models(list)
-    list.map do |m|
+    entries = list.map do |m|
       raise HarnessError, "each entry in 'models' must be a mapping" unless m.is_a?(Hash)
 
-      name = require_model_name(m)
-      url  = require_http_url("model profile '#{name}'", nonblank(m[:url]))
+      id   = require_profile_id(m)
+      url  = require_http_url("model profile '#{id}'", nonblank(m[:url]))
 
       {
-        name:,
+        id:,
+        name: nonblank(m[:name]) || id,
         url:,
         api:              nonblank(m[:api]),
         token:            expand_env(nonblank(m[:token]), "a model token"),
@@ -493,6 +501,13 @@ class HarnessConfig
         mcp_images:       m[:mcp_images].is_a?(Hash) ? normalize_mcp_images(m[:mcp_images]) : nil
       }
     end
+
+    duplicate = entries.map { |e| e[:id] }.tally.find { |_, count| count > 1 }&.first
+    raise HarnessError,
+      "model profile id '#{duplicate}' is used by more than one entry " \
+        "(an id selects exactly one profile)" if duplicate
+
+    entries
   end
 
   # Normalize each mcp_servers entry. A server needs a name (the tool namespace)
@@ -567,15 +582,14 @@ class HarnessConfig
     name
   end
 
-  # A profile's :name is both the selection key and the id the endpoint is
-  # asked for, so an entry without one describes nothing.
-  def require_model_name(profile)
-    name = nonblank(profile[:name])
-    return name unless name.nil?
+  # A profile's id selects it; a config that predates 'id:' keys its entries
+  # with 'name:', so name is read as the id when id is absent.
+  def require_profile_id(profile)
+    id = nonblank(profile[:id]) || nonblank(profile[:name])
+    return id unless id.nil?
 
     raise HarnessError,
-      "model profile needs a 'name' (the name is the model the harness asks " \
-        "for) - got #{profile.inspect}"
+      "model profile needs an 'id' (it identifies the profile) - got #{profile.inspect}"
   end
 
   # Both outbound transports speak HTTP(S): a bad scheme fails deep inside

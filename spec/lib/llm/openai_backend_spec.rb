@@ -8,7 +8,7 @@ require 'llm/openai_backend'
 RSpec.describe LLM::OpenAIBackend do
   let(:logger) { Logger.new(File::NULL) }
   let(:options) do
-    { base_url: 'http://127.0.0.1:11434', active_model: 'test-model', api: 'openai' }
+    { base_url: 'http://127.0.0.1:11434', active_profile_id: 'test-model', api: 'openai' }
   end
   let(:backend) { described_class.new(ModelConfig.new(options), logger) }
 

@@ -19,7 +19,7 @@ RSpec.describe PromptReader do
                    command_label: 'MANUAL', stream_label: nil,
                    plan_label: nil, ctx: nil)
     sm = Object.new
-    sm.define_singleton_method(:active_model_name) { model }
+    sm.define_singleton_method(:active_profile_name) { model }
     po = Object.new
     po.define_singleton_method(:reasoning_effort_display) { effort }
     sm.define_singleton_method(:param_overrides) { po }

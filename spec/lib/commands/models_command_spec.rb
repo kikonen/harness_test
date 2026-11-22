@@ -5,7 +5,7 @@ require 'stringio'
 require 'commands/models_command'
 require 'system_settings'
 
-# /models reads EVERY model fact - the catalogue (model_profiles, default_model)
+# /models reads EVERY model fact - the catalogue (model_profiles, default_profile_id)
 # and the active-model name - off @settings. It reaches nothing through harness
 # and knows no per-connection endpoint: a profile's url is the only endpoint a
 # listing shows, and there is no built-in default to fabricate (#286).
@@ -14,7 +14,7 @@ RSpec.describe Commands::ModelsCommand do
   # the active name, plus the palette/width main_thread_renderer needs.
   def settings(profiles:, active:, default: nil)
     SystemSettings.from_options(
-      model_profiles: profiles, active_model: active, default_model: default)
+      model_profiles: profiles, active_profile_id: active, default_profile_id: default)
   end
 
   def run_command(settings)
@@ -46,7 +46,7 @@ RSpec.describe Commands::ModelsCommand do
 
   it 'marks the default profile and the active one, together when both apply' do
     out = run_command(settings(
-      profiles: [{ name: 'qwen' }, { name: 'other' }],
+      profiles: [{ name: 'qwen', id: 'qwen' }, { name: 'other', id: 'other' }],
       active: 'qwen', default: 'qwen'))
 
     expect(out).to include('[default, active]')
@@ -56,9 +56,9 @@ RSpec.describe Commands::ModelsCommand do
   end
 
   it 'ends with the switch hint naming the current model' do
-    out = run_command(settings(profiles: [{ name: 'qwen' }], active: 'qwen'))
+    out = run_command(settings(profiles: [{ name: 'qwen', id: 'qwen' }], active: 'qwen'))
 
-    expect(out).to include('Switch with: /model <name>   (current: qwen)')
+    expect(out).to include('Switch with: /model <id>   (current: qwen)')
   end
 
   # issue #449: vision is per-profile, so /models says which model a tool-result
@@ -76,7 +76,7 @@ RSpec.describe Commands::ModelsCommand do
   # A profile with no url in a run that has other profiles lists with no
   # endpoint, not a fabricated default host.
   it 'lists a profile with no url without inventing an endpoint' do
-    out = run_command(settings(profiles: [{ name: 'qwen' }], active: 'qwen'))
+    out = run_command(settings(profiles: [{ name: 'qwen', id: 'qwen' }], active: 'qwen'))
 
     expect(out).not_to include('localhost')
     expect(out).to include('qwen  ->  qwen @ ')

@@ -150,8 +150,8 @@ RSpec.describe HarnessFactory do
   end
 
   # A job built fresh (a /jobs add) seeds its model from settings alone, where a
-  # config DEFAULT model leaves active_model nil. Without the run's own name on it,
-  # the job's model display and the active_model it then saves would both be nil.
+  # config DEFAULT model leaves active_profile_id nil. Without the run's own name on it,
+  # the job's model display and the active_profile_id it then saves would both be nil.
   describe 'the model a fresh job agent seeds from' do
     def factory_with(registry:, options:)
       described_class.new(
@@ -167,12 +167,12 @@ RSpec.describe HarnessFactory do
       registry = registry_with(:main)
       factory  = factory_with(registry:, options: {
         system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE,
-        default_model: 'cfg-model',
-        model_profiles: [{ name: 'cfg-model' }] })
+        default_profile_id: 'cfg-model',
+        model_profiles: [{ name: 'cfg-model', id: 'cfg-model' }] })
       job = factory.add_harness_job(kind: :sub_agent, session_id: SESSION_ID)
 
-      expect(job.harness.model_config.active_model).to eq('cfg-model')
-      expect(job.harness.session_manager.active_model_name).to eq('cfg-model')
+      expect(job.harness.model_config.active_profile_id).to eq('cfg-model')
+      expect(job.harness.session_manager.active_profile_name).to eq('cfg-model')
     end
   end
 

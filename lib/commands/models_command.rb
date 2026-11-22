@@ -13,10 +13,10 @@ module Commands
       see_also: %w[model param])
 
     def handle(_args)
-      # Every model fact - the catalogue and the active-model name - is run-wide
+      # Every model fact - the catalogue and the resolved profile - is run-wide
       # state read straight from the settings (#286), not routed through Harness.
       profiles = @settings.model_profiles
-      current  = @settings.active_model_name
+      current  = @settings.resolved_profile_id
 
       if profiles.empty?
         # Contiguous prose -> ONE note call, two paragraphs (the renderer owns
@@ -30,18 +30,20 @@ module Commands
         return
       end
 
-      default_name = @settings.default_model
+      default_id = @settings.default_profile_id
 
       # issue #474: emit the listing as STRUCTURE (title + per-profile fields),
       # not a fused row string, so the run record and a future remote sink carry
-      # the fields themselves. UI::Renderer#row_for draws the arrow row; the
-      # note field is the tag + mark suffix exactly as the old line appended
-      # them. A profile's name IS the model, so :name feeds both name and model.
+      # the fields themselves. UI::Renderer#row_for draws the arrow row: a
+      # profile's id is what the endpoint is asked for, so the row reads
+      # `display name  ->  profile id @ url`. The note field is the tag + mark
+      # suffix exactly as the old line appended them.
       items = profiles.map do |p|
-        name   = p[:name]
+        id = p[:id] || p[:name]
+        display = p[:name] || id
         marks  = []
-        marks << "default" if default_name && name == default_name
-        marks << "active"  if name == current
+        marks << "default" if default_id && id == default_id
+        marks << "active"  if id == current
         suffix = marks.empty? ? "" : "   [#{marks.join(', ')}]"
         # issue #217: tag the API type so it is obvious which endpoint a
         # profile hits (openai -> /v1-compatible, ollama -> native /api/chat).
@@ -50,7 +52,7 @@ module Commands
         # models a tool-result image could actually be sent to.
         url  = p[:url]
         tags = p[:vision] ? " (#{api}) [vision]" : " (#{api})"
-        { name:, model: name, location: url, note: "#{tags}#{suffix}" }
+        { name: display, model: id, location: url, note: "#{tags}#{suffix}" }
       end
       emit_list(
         title: "Configured models (#{profiles.size}):",
@@ -58,7 +60,7 @@ module Commands
         columns: %i[name model location note],
         items:,
         gap: true,
-        footer: ["Switch with: /model <name>   (current: #{current})"],
+        footer: ["Switch with: /model <id>   (current: #{current})"],
         origin: "models")
     end
   end

@@ -1295,7 +1295,7 @@ class Harness
 
   # Not conversation state, so Session#restore cannot apply it.
   def apply_resume_state(data)
-    @session_manager.restore_session_model(data[:active_model])
+    @session_manager.restore_session_profile(resume_profile_id(data))
     @session_manager.param_overrides.load(data[:param_overrides])
     @session_manager.param_overrides.restore!
 
@@ -1326,5 +1326,13 @@ class Harness
     # A session saved before #405 has no key at all, which reads as nothing to
     # compare - the run's own banner is then the whole story.
     @mcp.report_saved_session(data[:mcp_connected])
+  end
+
+  # The profile id a saved session recorded. 'active_model' is the key sessions
+  # saved before the selection was renamed, so it is still read.
+  def resume_profile_id(data)
+    return data[:active_profile_id] if data.key?(:active_profile_id)
+
+    data[:active_model]
   end
 end

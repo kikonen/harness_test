@@ -21,11 +21,11 @@ class CLIOptions
     opts = parse_argv
     resolve_workdir(opts)
 
-    # Load the YAML config file (models, default_model, compact, system).
+    # Load the YAML config file (models, default_profile_id, compact, system).
     config = HarnessConfig.load(opts[:config_path], opts[:workdir])
 
     profile = resolve_profile(opts, config)
-    apply_model_tracking(opts, profile, config)
+    apply_profile_tracking(opts, profile, config)
     apply_config(opts, config, profile)
     validate!(opts, config)
 
@@ -148,7 +148,7 @@ class CLIOptions
     end
   end
 
-  # Resolve the active model profile from the config. When no models are
+  # Resolve the selected model profile from the config. When no profiles are
   # configured, -m is treated as a raw model id (backward compatible).
   def resolve_profile(opts, config)
     # --list-sessions and --delete-session act on saved sessions without ever
@@ -156,24 +156,24 @@ class CLIOptions
     return nil if opts[:list_sessions] || opts[:delete_session]
     return nil unless config.models_configured?
 
-    config.resolve_model(opts[:model])
+    config.resolve_profile(opts[:model])
   end
 
-  # Expose the configured model profiles so /models can list them and
-  # /model can switch between them at runtime. The active model name is
-  # tracked separately (options[:active_model]) for display and persistence.
-  # It is stored as nil when the config default is active: a null value in
-  # the session means "use whatever the config default is", so sessions
-  # keep working even if the default model changes later.
-  def apply_model_tracking(opts, profile, config)
+  # Expose the configured profiles so /models can list them and /model can
+  # switch between them at runtime. The SELECTION is tracked separately
+  # (options[:active_profile_id]) for persistence. It stays nil when the config
+  # default is what is used: a null value in a session means "use whatever the
+  # config default is", so sessions keep working if the default changes later.
+  def apply_profile_tracking(opts, profile, config)
     opts[:model_profiles] = config.models
-    opts[:default_model]  = config.default_model
+    opts[:default_profile_id] = config.default_profile_id
     explicit_model = !opts[:model].nil? && !opts[:model].to_s.strip.empty?
-    default_key    = config.default_model
+    default_key    = config.default_profile_id
     using_default = profile && !explicit_model &&
       (default_key.nil? ||
-       profile[:name] == default_key)
-    opts[:active_model] = using_default ? nil : (profile ? profile[:name] : opts[:model])
+       profile[:id] == default_key)
+    opts[:active_profile_id] =
+      using_default ? nil : (profile ? profile[:id] : opts[:model])
   end
 
   # The config-derived defaults. A CLI flag already in opts wins (each line
@@ -308,13 +308,14 @@ class CLIOptions
     opts[:editor] = opts[:editor_cli] || env_editor
   end
 
-  # A conversation run needs a model to talk to. -m supplies the active model
-  # PROFILE NAME; without it a configured default_model satisfies the need
+  # A conversation run needs a model to talk to. -m supplies the profile ID;
+  # without it a configured default_profile_id satisfies the need
   # (resolve_profile resolved that profile above). list/delete need no model.
   def validate!(opts, config)
     return if opts[:list_sessions] || opts[:delete_session]
-    return if opts[:model] || config.default_model
+    return if opts[:model] || config.default_profile_id
 
-    raise HarnessError, "-m / --model is required (or set default_model in the config)"
+    raise HarnessError,
+      "-m / --model is required (or set default_profile_id in the config)"
   end
 end

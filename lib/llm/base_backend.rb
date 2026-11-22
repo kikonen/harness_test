@@ -81,7 +81,7 @@ module LLM
     def build_uri
       if base_url.nil? || base_url.strip.empty?
         raise HarnessError,
-          "no endpoint configured for model '#{@config.active_model_name}' - " \
+          "no endpoint configured for model '#{@config.active_profile_id}' - " \
             "a model needs a url (set 'url:' on its profile under 'models:')"
       end
 
