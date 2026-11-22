@@ -11,17 +11,18 @@ require 'harness'
 require 'session'
 require 'tools/dialog_tool'
 
-RSpec.configure do |config|
-  # Specs assert exact WRAPPED text, so the width they wrap at must be a spec
-  # fact, never the machine's. The machine-dependent hop is Tins' last-resort
-  # answer (this box reports 176, CI reports something else), so it is pinned -
-  # at 176, the width the suite was written against (renderer_spec: "the default
-  # basis at a 176-col terminal is 120"). Detection itself stays live: a spec
-  # about detection (width_spec, spinner_spec) must still see a StringIO answer
-  # nil. A spec wanting another terminal stubs UI::Width itself.
-  SPEC_TERMINAL_COLUMNS = 176
-  Tins::Terminal.define_singleton_method(:columns) { SPEC_TERMINAL_COLUMNS }
+# The terminal width specs wrap at. Specs assert exact WRAPPED text, so that
+# width must be a spec fact, never the machine's: Tins' last-resort answer is
+# this box's real terminal (176 here, something else in CI), so a wrapped spec
+# could pass locally and fail in CI. 176 is the width the suite was written
+# against (renderer_spec: "the default basis at a 176-col terminal is 120").
+# Detection itself stays live - a spec about detection (width_spec, spinner_spec)
+# must still see a StringIO answer nil. A spec wanting another terminal stubs
+# UI::Width itself.
+SPEC_TERMINAL_COLUMNS = 176
+Tins::Terminal.define_singleton_method(:columns) { SPEC_TERMINAL_COLUMNS }
 
+RSpec.configure do |config|
   # Keep specs deterministic and independent of execution order.
   config.order = :random
   config.expect_with :rspec do |c|
