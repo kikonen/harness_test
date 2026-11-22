@@ -21,9 +21,8 @@ module UI
       error: "error: "
     }.freeze
 
-    # The verdict IS the type; the bracket label travels in the event's origin,
-    # never in the content. status_info has no glyph: a count or a progress
-    # line is not a verdict about an operation.
+    # The verdict IS the type; the bracket label travels in the event's origin.
+    # status_info has no glyph: a count is not a verdict about an operation.
     STATUS_GLYPHS = {
       status_ok: "✓",
       status_fail: "✗",
@@ -34,129 +33,92 @@ module UI
     }.freeze
     STATUS_TYPES = STATUS_GLYPHS.keys.freeze
 
-    # The bracketed one-word badge a command prints as its ack (/yolo ->
-    # [YOLO ON], /markdown -> [markdown: ON], /stream -> [BUFFERED]). The
-    # bracket shape is the RENDERER's, not baked into the emitted string
-    # (#146). Deliberately UNPAINTED: these acks are printed with the
-    # terminal's own color today, so coloring them would change terminal
-    # bytes - the role exists to move the shape out of the emitter, and a
-    # front-end adds its own styling (the palette entry stays nil).
-    # :kind is the same bracket shape with a message after it ([LLM error] msg,
-    # [palette: default] (unchanged)) - the bracket names a KIND, not a verdict.
+    # The bracketed one-word badge a command prints as its ack. The bracket shape
+    # is the renderer's, not baked into the string. UNPAINTED: these acks print in
+    # the terminal's own color today, so coloring them would change terminal bytes.
+    # :kind is the same bracket shape with a message after it - the bracket names a
+    # KIND, not a verdict.
     ACK = :ack
     KIND = :kind
     ACK_TYPES = [ACK, KIND].freeze
 
-    # An ack whose body is a PARAGRAPH (a steering note: "[note] got it" plus the
-    # text the user typed). The renderer lays the ack and the body out as ONE
-    # block at the note width, the first wrapped line continuing the ack line -
-    # so the ack is not a short fixed line above a body at a different width
-    # (#561). UNPAINTED like NOTE. The buffer still stores the RAW paragraph as
+    # An ack whose body is a PARAGRAPH (a steering note). The renderer lays the ack
+    # and body out as ONE block at the note width, the first wrapped line continuing
+    # the ack line. UNPAINTED like NOTE; the buffer still stores the paragraph as
     # NOTE, so a replay redraws it as a plain paragraph.
     ACK_NOTE = :ack_note
 
-    # A paragraph of harness EXPLANATORY PROSE (a command report's body). The
-    # emitter states ONE unwrapped paragraph with no leading indent; the renderer
-    # owns the indent AND the wrap (#470 - #466's theme from the other side: the
-    # line-break was the emitter's, baked into source \ continuations, so it read
-    # ragged and a remote client could not re-lay it out). UNPAINTED: only the
-    # wrap/indent move, no color changes. The wrap width is a FIXED column
-    # count, not the terminal width - a paragraph that re-wraps on every resize
-    # is as unlocatable as a boundary that moves (see RULE_WIDTH). The raw
-    # paragraph is what lands in the OutputBuffer, so a browser re-wraps it in CSS.
+    # A paragraph of harness explanatory prose. The emitter states ONE unwrapped
+    # paragraph with no leading indent; the renderer owns the indent AND the wrap.
+    # UNPAINTED. The wrap width is a fixed column count, not the terminal width. The
+    # raw paragraph is what lands in the OutputBuffer, so a browser re-wraps it in CSS.
     NOTE = :note
 
-    # A STORE BODY read by name (a plan, a memory, a skill): the emitter states the
-    # RAW markdown text and the renderer renders it, so a stored file's markers are
-    # consumed by the render instead of printed. It is NOT the :note role (a note is
-    # harness prose that gets wrapped); a body keeps its own markdown structure and
-    # its own paragraphs, and a body that no renderer can render stays as stored.
+    # A store body read by name (a plan, a memory, a skill): the emitter states the RAW
+    # markdown and the renderer renders it. NOT the :note role - a body keeps its own
+    # markdown structure, and a body no renderer can render stays as stored.
     BODY = :body
 
-    # A BLANK LINE between entries. It is a role because the shape of the spacing
-    # around a report is the renderer's, not the emitter's: an emitter that calls
-    # the sink directly cannot be re-laid out by another sink (a browser adds its
-    # own margin). Inside one :list payload the gap is a key instead, because the
-    # payload is a single entry. Unpainted.
+    # A BLANK LINE between entries. A role because the spacing shape is the renderer's,
+    # not the emitter's (a browser adds its own margin). Inside one :list payload the
+    # gap is a key instead, because the payload is a single entry. Unpainted.
     GAP = :gap
 
-    # The emitter still owns these lines' shape. :spinner_detail is listed
-    # because the drain loop animates it - it must never produce a line.
-    # :rule is listed because the content IS the rule the emitter drew: the type
-    # exists only to carry the palette's rule color, which was previously
-    # unreachable because no type named it.
+    # The emitter still owns these lines' shape. :spinner_detail is listed because the
+    # drain loop animates it - it must never produce a line. :rule is listed because the
+    # content IS the rule the emitter drew: the type exists only to carry the palette's
+    # rule colour, which no other type named.
     VERBATIM = %i[system text stats compact spinner_detail rule].freeze
 
     INDENT      = "  "
     GUTTER      = "#{INDENT}|"
     STATUS_RULE = "#{INDENT}#{"-" * 12}"
-    # Fixed width, NOT the terminal width: a boundary that depends on a
-    # terminal setting is a boundary that moves.
+    # Fixed width, NOT the terminal width: a boundary that depends on a terminal setting
+    # is a boundary that moves.
     RULE_WIDTH = 80
-    # The FALLBACK page width when no terminal can be detected (a spec console, a
-    # pipe). A live terminal resolves its own through UI::Width (chars or a
-    # percentage, capped for prose), so a paragraph is never a 170-column line.
-    # NOTE_WIDTH is the content budget that fallback implies: RULE_WIDTH - INDENT.
+    # The FALLBACK page width when no terminal can be detected (a spec console, a pipe).
+    # A live terminal resolves its own through UI::Width. NOTE_WIDTH is the content budget
+    # that fallback implies: RULE_WIDTH - INDENT.
     RULE_FALLBACK_WIDTH = RULE_WIDTH
     NOTE_WIDTH = RULE_WIDTH - INDENT.length
 
-    # A structured list/table report (issue #474). The emitter states the DATA
-    # - a title, a kind, a columns list and per-item field values - never a
-    # fused row string, so a remote sink can lay out a real list/table from the
-    # fields instead of regexing the separators back out (#146's machinery).
-    # The renderer owns the layout and reproduces today's terminal bytes for the
-    # converted reports byte-for-byte. UNPAINTED like :note. Payload is a Hash
-    # { title:, kind:, columns:, items:, footer:, gap: }. Footer lines carry an
-    # INDENT LEVEL, never baked leading spaces (see #footer_line). A row is built
-    # from NAMED item fields (see LIST_KIND_FIELDS), never by reading the columns
-    # array by position, so a payload that lists its columns in another order
-    # renders the same row.
+    # A structured list/table report. The emitter states the DATA (title, kind, columns,
+    # per-item field values) - never a fused row string - so a remote sink can lay out a
+    # real list/table from the fields. The renderer owns the layout. UNPAINTED like :note.
+    # Footer lines carry an INDENT LEVEL, never baked leading spaces (see #footer_line).
     LIST = :list
 
-    # The item fields each :list kind's terminal row reads, BY NAME. The order is
-    # the row template's own, not the columns array's, so a reordered columns
-    # list cannot scramble a row. :kv renders an optional trailing annotation
-    # (:annotation) straight from its template. An unknown kind, or columns that
-    # do not name a kind's required fields, is a loud diagnostic - never a
-    # garbled or field-dropping row (#146).
+    # The item fields each :list kind's row reads, BY NAME. The order is the row template's
+    # own, not the columns array's, so a reordered columns list cannot scramble a row. An
+    # unknown kind, or columns missing a kind's required fields, is a loud diagnostic.
     LIST_KIND_FIELDS = {
       bullet: %i[value],
       kv: %i[name description],
-      # :table needs no fixed field list: the payload's columns array IS the
-      # schema (each column a named field). #table_lines builds a markdown table
-      # from the fields and hands it to the kramdown renderer. See #table_lines.
+      # :table needs no fixed field list: the columns array IS the schema. See #table_lines.
       table: []
     }.freeze
 
-    # The start of an iteration and the start of the final answer are the two
-    # BLOCK boundaries, and both get the same fused rule. plan / say / tools /
-    # warn / error stay plain labels: they are lines INSIDE a block.
+    # The start of an iteration and the start of the final answer are the two block
+    # boundaries, and both get the same fused rule. plan / say / tools / warn / error
+    # stay plain labels: they are lines INSIDE a block.
     BOUNDARY_ROLES = %i[step_label response].freeze
 
-    # The labeled roles whose content is MODEL PROSE that may carry markdown
-    # (issue #106): the plan line and the say line. :tool_plan is a comma-joined
-    # tool list (not prose) and warn / error are harness messages - both stay plain.
+    # The labeled roles whose content is model prose that may carry markdown (the plan
+    # and say lines). :tool_plan is a tool list (not prose) and warn / error are harness
+    # messages - both stay plain.
     MARKDOWN_ROLES = %i[plan interstitial].freeze
 
-    # The word a boundary rule fuses: the role's label without its ":  " padding
-    # ("model") - a rule reads like a short word, not like a label.
+    # The word a boundary rule fuses: the role's label without its ":  " padding - a rule
+    # reads like a short word, not a label.
     def self.boundary_label(type)
       LABELS.fetch(type.to_sym).sub(/:\s+\z/, "")
     end
 
-    # The palette a line written TO A GIVEN SINK should render with (#466,
-    # issue #388 direction): the sink that receives the line owns its color.
-    # A sink that cannot answer a palette AT ALL (a browser console seam, which
-    # deliberately has no #palette method) paints NOTHING: handing it a terminal
-    # palette would bake SGR it has no terminal to interpret, so the escape
-    # bytes show up as literal "[38;5;240m" text in the browser. A palette-AWARE
-    # sink (a UI::Console) keeps the run's colors: its own palette wins (the CLI
-    # wires the live SystemSettings palette into it, cli.rb), and when it answers
-    # nil the settings palette applies - that is how a terminal built before the
-    # Harness exists still honors a mid-session /palette switch (the palette lives
-    # in SystemSettings, not in the per-LLM Harness). Terminal output stays
-    # byte-identical (the CLI console's palette IS the settings palette) and
-    # "paint nothing" is the automatic behavior of a non-paintable sink.
+    # The palette a line written TO A GIVEN SINK should render with: the sink that receives
+    # the line owns its colour. A sink with no #palette method (a browser console seam) paints
+    # NOTHING - a terminal palette would bake SGR it has no terminal to interpret. A
+    # palette-aware sink (UI::Console) keeps its own palette, else the settings palette - so a
+    # terminal built before the Harness exists still honours a mid-session /palette switch.
     def self.palette_for(ui:, settings: nil)
       return nil unless ui.respond_to?(:palette)
 
@@ -165,15 +127,12 @@ module UI
 
     attr_reader :palette
 
-    # palette: a UI::Palette, or nil to render without color (a Task with no
-    # harness: specs, a bare console).
-    # markdown: render an assistant :response as markdown (issue #106). Default
-    # false keeps every existing line byte-for-byte; only an opted-in run renders
-    # :response and the MARKDOWN_ROLES prose lines. markdown_max_width is the
-    # table-width basis (nil = 80% of the terminal); the boundary chrome stays at
-    # the fixed RULE_WIDTH whatever this says.
-    # ui: the SINK the lines are written to, so the width can be resolved from the
-    # terminal that will actually receive them.
+    # palette: a UI::Palette, or nil to render without color (specs, a bare console).
+    # markdown: render an assistant :response and the MARKDOWN_ROLES lines as markdown.
+    #   Default false keeps every existing line byte-for-byte.
+    # markdown_max_width: the table-width basis (nil = 80% of the terminal); the boundary
+    #   chrome stays at the fixed RULE_WIDTH whatever this says.
+    # ui: the SINK the lines are written to, so width is resolved from that terminal.
     def initialize(
       palette: nil,
       markdown: false,
@@ -183,39 +142,33 @@ module UI
       @palette  = palette
       @markdown = markdown ?
         MarkdownRenderer.new(palette:, max_width: markdown_max_width) : nil
-      # A :table (sessions / mcp / tools) sizes from this same basis even when
-      # markdown opt-in is off, so a configured width constrains the table too.
+      # A :table sizes from this basis even when markdown opt-in is off, so a configured
+      # width constrains the table too.
       @ui = ui
-      # The RAW basis stays as data: a percentage is the only form a sink with no
-      # column count of its own (a browser, variable-width font) can lay out from,
-      # so the record must carry "85%" and not this run's resolved number.
+      # The RAW basis stays as data: a percentage is the only form a sink with no column
+      # count of its own can lay out from, so the record must carry "85%" not this run's number.
       @markdown_max_width = markdown_max_width
     end
 
-    # The resolved content width for THIS renderer: the paragraph budget, the
-    # table basis, and the wrap width all read it.
+    # The resolved content width for THIS renderer: the paragraph budget, table basis, and
+    # wrap width all read it.
     def width
       UI::Width.resolve(
         value: @markdown_max_width,
-        # terminal_columns, not columns_for: the sink alone often cannot answer
-        # (a redirected or closed stdout raises on #winsize), and columns_for has
-        # no terminal of its own - with a nil terminal UI::Width#resolve returns
-        # the fallback, so RULE_FALLBACK_WIDTH became the WIDTH instead of 80% of
-        # the real terminal (issue #561).
+        # terminal_columns, not columns_for: the sink alone often cannot answer (a redirected
+        # or closed stdout raises on #winsize), and columns_for has no terminal of its own.
         terminal: UI::Width.terminal_columns(@ui),
         fallback: RULE_FALLBACK_WIDTH)
     end
 
-    # The prose budget: the page width minus the indent a paragraph carries, so a
-    # wrapped line stays inside the page width.
+    # The prose budget: the page width minus the indent a paragraph carries, so a wrapped
+    # line stays inside the page width.
     def note_width
       width - INDENT.length
     end
 
-    # origin: for a status type, the bracket label ("file.read", "access",
-    # "run.command"). Ignored by every other type.
-    # ack: the badge word an :ack_note puts BEFORE its body ("got it"). Ignored
-    # by every other type.
+    # origin: for a status type, the bracket label ("file.read", "access"). Ignored otherwise.
+    # ack: the badge word an :ack_note puts before its body. Ignored otherwise.
     def line(type:, content:, origin: nil, ack: nil)
       type = type.to_sym
       text = content.to_s
@@ -250,34 +203,24 @@ module UI
 
     private
 
-    # A bracketed ack: the content IS the badge word, the renderer wraps it.
-    # [YOLO ON] / [markdown: ON] / [BUFFERED]. Unpainted (see ACK_TYPES).
+    # A bracketed ack: the content IS the badge word, the renderer wraps it. Unpainted.
     def ack_line(type, badge, origin)
       return "#{INDENT}[#{badge}]" if type == ACK
 
-      # :kind - the bracket names a KIND (origin), the message follows it.
-      # [LLM error] message / [palette: default] (unchanged). Unpainted.
+      # :kind - the bracket names a KIND (origin), the message follows it. Unpainted.
       "#{INDENT}[#{origin || badge}] #{badge}"
     end
 
-    # An ack with a PARAGRAPH body (a steering note): the ack keeps its badge
-    # word and the body starts on the NEXT line at the same indent, so ack and
-    # body are one block laid out at the note width. Two separate puts had put
-    # the ack on a short fixed line above a body at another width (#561);
-    # folding the body onto the ack line instead swallows the badge word, since
-    # the wrapped body would start exactly where the badge sits.
-    # UNPAINTED like NOTE; the body wraps to note_width exactly as #note_line.
+    # An ack with a paragraph body (a steering note): the body starts on the NEXT line at
+    # the same indent, so ack and body are one block at the note width. UNPAINTED like NOTE.
     def ack_note_line(paragraph, origin, badge)
       ack = "#{INDENT}[#{origin}] #{badge}"
       ([ack] + note_line(paragraph).split("\n")).join("\n")
     end
 
-    # A paragraph of harness prose: indent every wrapped line and re-wrap the
-    # text to the resolved note width (UI::Width: a count or a terminal percentage
-    # capped for prose), so the paragraph is a function of the renderer, not of
-    # where the emitter happened to break the source string (#470). Unpainted -
-    # only the wrap/indent move. A continuation line is the INDENT alone (a
-    # paragraph line, not a status gutter).
+    # A paragraph of harness prose: indent every wrapped line and re-wrap the text to the
+    # resolved note width, so the paragraph is a function of the renderer, not of where the
+    # emitter broke the source string. Unpainted. A continuation line is the INDENT alone.
     def note_line(paragraph)
       lines = paragraph.to_s.split("\n")
       out = []
@@ -289,12 +232,10 @@ module UI
       out.join("\n")
     end
 
-    # Layout a structured list/table (#474). Unpainted (see LIST). A kind reads its
-    # item fields BY NAME (LIST_KIND_FIELDS); the columns array is checked only to
-    # confirm it NAMES those fields, never read by position. Names are matched by
-    # #to_sym so a JSON round-trip (string keys re-symbolized by read_session) and
-    # an in-memory payload read the same item. A kind, or columns, that break the
-    # contract render a diagnostic - never a garbled row.
+    # Layout a structured list/table. Unpainted. A kind reads its item fields BY NAME; the
+    # columns array is checked only to confirm it NAMES those fields, never read by position.
+    # Names are matched by #to_sym so a JSON round-trip and an in-memory payload read the same
+    # item. A kind or columns that break the contract render a diagnostic, never a garbled row.
     def list_line(payload)
       data    = payload.is_a?(Hash) ? payload : {}
       kind    = (data[:kind] || :bullet).to_sym
@@ -325,10 +266,9 @@ module UI
       lines.join("\n")
     end
 
-    # A :table: state the fields as a markdown table and let kramdown lay it out -
-    # the sizing and word-wrap are the gem's (#106), not re-invented here. With no
-    # palette there is no kramdown, so the raw markdown is the fallback (it is
-    # itself a readable, re-lay-out-able table).
+    # A :table: state the fields as a markdown table and let kramdown lay it out (its sizing
+    # and word-wrap, not re-invented here). With no palette there is no kramdown, so the raw
+    # markdown is the fallback (it is itself a readable, re-lay-out-able table).
     def table_lines(columns, items)
       markdown = markdown_table(columns, items)
       return [markdown] if kramdown.nil?
@@ -336,10 +276,9 @@ module UI
       kramdown.render(markdown).split("\n")
     end
 
-    # A store body read by name: the content is RAW markdown and the render IS the
-    # line, and kramdown is used whatever the opt-in flag says (a stored file renders
-    # whenever a palette exists, #416). The gem closes its last block with a blank
-    # line, so the render is trimmed to the single newline the sink writes.
+    # A store body: the content is RAW markdown and the render IS the line, and kramdown is
+    # used whatever the opt-in flag says (a stored file renders whenever a palette exists). The
+    # gem closes its last block with a blank line, so trim to the single newline the sink writes.
     def body_line(content)
       rendered = kramdown&.render(content)
       return content if rendered.nil?
@@ -347,8 +286,8 @@ module UI
       rendered.sub(/\n+\z/, "")
     end
 
-    # A multi-paragraph cell expands to simulated rows (see #table_rows); every
-    # cell is pipe-neutralised (see #escape_cell).
+    # A multi-paragraph cell expands to simulated rows (see #table_rows); every cell is
+    # pipe-neutralised (see #escape_cell).
     def markdown_table(columns, items)
       headers = columns.map { |c| escape_cell(c.to_s) }
       rule    = headers.map { |h| "-" * h.length }
@@ -356,10 +295,9 @@ module UI
       ([headers, rule] + rows).map { |row| "| #{row.join(" | ")} |" }.join("\n")
     end
 
-    # Expand each item into 1..N rows: a multi-paragraph cell becomes one row per
-    # paragraph, because kramdown-ansi cannot stack paragraphs inside a single
-    # cell. A column that runs out of paragraphs contributes a blank cell on the
-    # continuation rows (so the tool name shows only on the item's first row). A
+    # Expand each item into 1..N rows: a multi-paragraph cell becomes one row per paragraph
+    # (kramdown-ansi cannot stack paragraphs in one cell). A column out of paragraphs gives a
+    # blank cell on continuation rows (so the name shows only on the first row). A
     # single-paragraph item is one row - a plain table like /sessions is unchanged.
     def table_rows(columns, items)
       items.flat_map do |item|
@@ -371,8 +309,8 @@ module UI
       end
     end
 
-    # Split a cell into paragraphs on blank lines; each paragraph's soft line
-    # breaks collapse to spaces. nil/blank -> one empty paragraph.
+    # Split a cell into paragraphs on blank lines; each paragraph's soft line breaks collapse
+    # to spaces. nil/blank -> one empty paragraph.
     def cell_paragraphs(value)
       text = value.to_s
       return [""] if text.strip.empty?
@@ -382,16 +320,14 @@ module UI
       end
     end
 
-    # A single-paragraph cell: a pipe is neutralised so it cannot be read as a
-    # column boundary (no newlines remain after #cell_paragraphs).
+    # A single-paragraph cell: a pipe is neutralised so it cannot be read as a column boundary.
     def escape_cell(paragraph)
       paragraph.gsub("|", "\\|")
     end
 
-    # The kramdown instance the renderer renders with. A :table renders as a table
-    # in any colored terminal regardless of the opt-in markdown flag, and so does a
-    # :body: both need a palette (no palette means no kramdown, and both fall back
-    # to the raw markdown / the text as stored).
+    # The kramdown instance to render with. A :table renders as a table in any colored terminal
+    # regardless of the opt-in flag, and so does a :body; both need a palette (no palette means
+    # no kramdown, and both fall back to raw markdown / the text as stored).
     def kramdown
       return @markdown if @markdown
       return nil unless @palette
@@ -400,8 +336,8 @@ module UI
         MarkdownRenderer.new(palette: @palette, max_width: @markdown_max_width)
     end
 
-    # A row built from NAMED fields the item hash carries; the columns array's
-    # order never decides what a field is.
+    # A row built from NAMED fields the item hash carries; the columns array's order never
+    # decides what a field is.
     def row_for(kind, item)
       row = item.is_a?(Hash) ? item : {}
       case kind
@@ -414,27 +350,23 @@ module UI
       end
     end
 
-    # A :list payload the layout cannot draw: name the kind and what was wrong,
-    # so a broken payload is loud instead of a garbled row (#146).
+    # A :list payload the layout cannot draw: name the kind and what was wrong, so a broken
+    # payload is loud instead of a garbled row.
     def list_error(tag, detail)
       "#{INDENT}[#{tag}] #{detail}"
     end
 
-    # A footer line. Its indent is a LEVEL in the data, not baked leading
-    # spaces: the renderer turns the level into columns (INDENT * level) for the
-    # terminal, and a remote sink maps the same level to CSS margin. Baked
-    # spaces mean nothing in a variable-width font, so the level is the only
-    # robust form (#474). A footer entry is a String (indent 0, verbatim) or a
-    # Hash { text:, indent: }.
+    # A footer line. Its indent is a LEVEL in the data, not baked leading spaces: the renderer
+    # turns the level into columns (INDENT * level) for the terminal, and a remote sink maps the
+    # same level to CSS margin. Baked spaces mean nothing in a variable-width font.
     def footer_line(entry)
       text   = entry.is_a?(Hash) ? entry[:text].to_s : entry.to_s
       indent = entry.is_a?(Hash) ? entry[:indent].to_i : 0
       "#{INDENT * indent}#{text}"
     end
 
-    # A multi-line message (a pasted multiline script is the everyday case)
-    # renders as several lines with a gutter and a closing rule, so its END is
-    # visible instead of blurring into the next entry.
+    # A multi-line message renders as several lines with a gutter and a closing rule, so its
+    # END is visible instead of blurring into the next entry.
     def status_line(type, message, origin)
       glyph = STATUS_GLYPHS[type]
       head  = "#{INDENT}[#{origin.nil? ? "tool" : origin}]"
@@ -451,9 +383,9 @@ module UI
       out.join("\n")
     end
 
-    # A full-width fused rule naming the role, then the content EXACTLY as
-    # emitted (no label, no indent: a model answer keeps its own paragraphs).
-    # :step_label IS its rule - its content is the number fused inside it.
+    # A full-width fused rule naming the role, then the content EXACTLY as emitted (no label,
+    # no indent: a model answer keeps its own paragraphs). :step_label IS its rule - its content
+    # is the number fused inside it.
     def boundary_line(type, content)
       label = type == :step_label ? "step #{content}" : self.class.boundary_label(type)
       rule  = fused_rule(label, type)
@@ -462,16 +394,16 @@ module UI
       "#{rule}\n#{boundary_body(type, content)}"
     end
 
-    # An opted-in :response is rendered as markdown (issue #106); every other
-    # boundary and a markdown-off :response stay exactly as emitted.
+    # An opted-in :response is rendered as markdown; every other boundary and a markdown-off
+    # :response stay exactly as emitted.
     def boundary_body(type, content)
       return @markdown.render(content) if type == :response && @markdown
 
       paint(type, content)
     end
 
-    # The spare is split in two; an odd one (a wider label) gives its extra dash
-    # to the right, so the line is always exactly RULE_WIDTH wide.
+    # The spare is split in two; an odd one (a wider label) gives its extra dash to the right,
+    # so the line is always exactly RULE_WIDTH wide.
     def fused_rule(label, type)
       spare = [RULE_WIDTH - label.length - 2, 2].max
       left  = spare / 2
@@ -483,8 +415,8 @@ module UI
       return content if VERBATIM.include?(type)
 
       label = LABELS[type]
-      # An entry whose type is in neither list is a MISSING type: render it,
-      # but say so loudly, so a new output kind cannot pass unnoticed (#146).
+      # A type in neither list is a MISSING type: render it, but say so loudly, so a new
+      # output kind cannot pass unnoticed.
       return "#{content} [untyped:#{type}]" if label.nil?
 
       "#{label}#{content}"
@@ -494,11 +426,9 @@ module UI
       @markdown && MARKDOWN_ROLES.include?(type)
     end
 
-    # A labeled model-prose line (plan / say) whose markdown renders multi-line:
-    # the label keeps its role color on the FIRST line, and every continuation
-    # line is padded to align under the label text, so the block still reads as
-    # one labeled entry. The body carries the gem's own (palette-seeded) colors;
-    # only the label is painted here.
+    # A labeled model-prose line (plan / say) whose markdown renders multi-line: the label keeps
+    # its role color on the FIRST line, continuations pad to align under the label text. Only
+    # the label is painted here - the body carries the gem's own colors.
     def labeled_markdown_line(type, content)
       label = LABELS[type]
       return paint(type, label) if content.empty?
@@ -510,11 +440,9 @@ module UI
       out.join("\n")
     end
 
-    # A labeled prose line (plan / say) with markdown OFF: wrap to the fixed
-    # RULE_WIDTH minus the label and align continuations under the label
-    # (#485 - a single-liner plan spilled past the terminal as one long line).
-    # TextWrap.line keeps a fitting line verbatim, so a short plan stays
-    # byte-identical; the buffer still holds the raw content (a browser re-wraps).
+    # A labeled prose line (plan / say) with markdown OFF: wrap to RULE_WIDTH minus the label and
+    # align continuations under the label. TextWrap.line keeps a fitting line verbatim, so a short
+    # plan stays byte-identical; the buffer still holds the raw content.
     def wrapped_labeled_line(type, content)
       label = LABELS[type]
       return paint(type, label) if content.empty?
@@ -532,8 +460,8 @@ module UI
       palette.nil? ? text : palette.paint(type, text)
     end
 
-    # One colored RUN, not the whole line: marker and message are different
-    # roles. Palette#paint resets every run, so no run bleeds into the next.
+    # One colored RUN, not the whole line: marker and message are different roles. Palette#paint
+    # resets every run, so no run bleeds into the next.
     def segment(role, text)
       return "" if text.empty?
       return text if palette.nil?

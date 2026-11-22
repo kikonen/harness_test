@@ -8,45 +8,32 @@ require_relative "image_store"
 require_relative "model_profile"
 require_relative "config_scalar"
 
-# -- HarnessConfig --------------------------------------------------------
-#
-# Central configuration, loaded from a YAML config file. This replaces the
-# old per-value ENV-based configuration (HARNESS_MODEL, HARNESS_BASE_URL,
-# HARNESS_TOKEN, HARNESS_NUM_CTX, ...) which had become unmanageable.
-#
-# Precedence for every setting is:
-#   CLI flag  >  config file  >  built-in default (constants in harness.rb)
-#
-# Config file schema (every key is optional). Sampling / generation values
-# are OWNED BY THE CONFIG: a missing key is NOT sent to the API, so the
-# server's own default applies (issue #215).
-#
+# Central configuration loaded from a YAML file. Precedence for every setting is
+# CLI flag > config file > built-in default. Sampling/generation values are owned
+# by the config: a missing key is not sent to the API, so the server's default applies.
 class HarnessConfig
   include ConfigScalar
 
   HARNESS_DIR = ".harness"
 
-  # issue #260: the user home is the default place for configuration - a repo
-  # .harness/config.yml is only an override for that one project. The old
-  # install-dir tier is deliberately NOT part of the lookup: HARNESS_CONFIG
-  # (or -c) already covers that special case.
+  # The user home is the default place for configuration; a repo .harness/config.yml is
+  # only an override for that project. The old install-dir tier is not part of the lookup
+  # (HARNESS_CONFIG or -c covers that special case).
   HOME_CONFIG_DIR = File.join(".config", "harness")
 
-  # The user-home config file. Computed per call rather than baked into a
-  # constant so the home directory can be resolved (and stubbed) at run time.
+  # The user-home config file. Computed per call rather than a constant so the home
+  # directory can be resolved (and stubbed) at run time.
   def self.home_config_path
     File.join(Dir.home, HOME_CONFIG_DIR, "config.yml")
   end
 
-  # The config template lives in the repo (config/config.example.yml), not
-  # embedded in this file: it is the single source for both the committed
-  # example and what a first run writes to the user home config (issue #260).
+  # The config template lives in the repo (config/config.example.yml), not embedded here:
+  # single source for both the committed example and what a first run writes to the home config.
   TEMPLATE_FILE = File.expand_path("../config/config.example.yml", __dir__)
 
-  # command_safety_auto_approve as an enum (issue #389): ONE key for both
-  # relaxations of the consent flow. They stay orthogonal - 'denylist' fires only
-  # on a real "safe:" verdict, so it is a legal mode with AUTO-APPROVE off. A
-  # legacy boolean maps to safe/manual. Rationale:
+  # command_safety_auto_approve as an enum: ONE key for both relaxations of the consent
+  # flow. They stay orthogonal - 'denylist' fires only on a real "safe:" verdict, so it is a
+  # legal mode with AUTO-APPROVE off. A legacy boolean maps to safe/manual. Rationale:
   # doc/denylist_safe_approve_design.md.
   SAFETY_MODES = {
     "manual"        => { approve: false, denylist: false },
@@ -55,10 +42,9 @@ class HarnessConfig
     "safe_denylist" => { approve: true,  denylist: true }
   }.freeze
 
-  # Tool-result image inline budget (issue #449): the built-in the harness
-  # enforces when neither the config nor a profile names one. A profile may
-  # override it (#normalize_models); a run with no vision profile simply never
-  # inlines anything, so these values are read whatever the active model is.
+  # Tool-result image inline budget: the built-in the harness enforces when neither the
+  # config nor a profile names one. A profile may override it; a run with no vision profile
+  # never inlines anything, so these values are read whatever the active model is.
   MCP_IMAGE_LIMIT_DEFAULTS = {
     inline_max_bytes:  1_500_000,
     inline_max_images: 4,
@@ -71,8 +57,8 @@ class HarnessConfig
     data          = {} if data.nil?
     @raw          = data
     @models       = normalize_models(Array(data[:models]))
-    # 'default_profile_id' names what it is: the profile a new run uses.
-    # 'default_model:' is the historical key and is still read.
+    # 'default_profile_id' names what it is: the profile a new run uses. 'default_model:'
+    # is the historical key and is still read.
     @default_profile_id = nonblank(data[:default_profile_id]) || nonblank(data[:default_model])
     raise HarnessError, "'default_profile_id' must name a configured model profile" if
       @default_profile_id && @models.none? { |m| m[:id] == @default_profile_id }
@@ -81,9 +67,8 @@ class HarnessConfig
     @auto_save = data[:auto_save].nil? ? true : data[:auto_save]
     @command_safety_check = data[:command_safety_check] == true
 
-    # issue #389: the two safety relaxations fold into ONE enum key; the separate
-    # denylist boolean ORs in when both keys are given. Rationale:
-    # doc/denylist_safe_approve_design.md.
+    # The two safety relaxations fold into ONE enum key; the separate denylist boolean ORs
+    # in when both keys are given.
     mode = command_safety_mode(data[:command_safety_auto_approve])
 
     @command_safety_auto_approve = mode[:approve]
@@ -95,45 +80,41 @@ class HarnessConfig
     @output_result_bytes = int_or_nil(data[:output_result_bytes])
     @max_memories = int_or_nil(data[:max_memories])
 
-    # Opt-in streamed LLM responses (default off: a profile or global key
-    # that does not ask for it gets the buffered request unchanged).
+    # Opt-in streamed LLM responses (default off: a profile or global key that does not ask
+    # for it gets the buffered request unchanged).
     @streaming = data[:streaming] == true
 
-    # Opt-in markdown rendering of the assistant answer (issue #106, default off).
+    # Opt-in markdown rendering of the assistant answer (default off).
     @markdown = data[:markdown] == true
 
-    # Table-width basis for markdown rendering (issue #106). nil = the renderer's
-    # default (80% of the detected terminal, capped for prose); an explicit column
-    # count is used as-is, and a percentage ("85%") is stored RAW because it is the
-    # only form a sink with no column count of its own can lay out from.
+    # Table-width basis for markdown rendering. nil = the renderer's default (80% of the
+    # terminal, capped for prose); an explicit column count is used as-is, and a percentage
+    # ("85%") is stored RAW because it is the only form a sink with no column count of its
+    # own can lay out from.
     @markdown_max_width = width_or_nil(data[:markdown_max_width])
 
-    # External MCP servers (issue #48). Opt-in: an empty list means no MCP code
-    # path runs at all. Each entry is normalized to { name:, command:, args:, env: }.
+    # External MCP servers. Opt-in: an empty list means no MCP code path runs at all. Each
+    # entry is normalized to { name:, command:, args:, env: }.
     @mcp_servers = normalize_mcp_servers(Array(data[:mcp_servers]))
 
-    # Tool-result image limits (issue #449). Read whether or not a vision profile
-    # exists: the values describe the rule, and a run with no vision profile
-    # simply never inlines anything. nil = the built-in default.
+    # Tool-result image limits. Read whether or not a vision profile exists: the values
+    # describe the rule. nil = the built-in default.
     @mcp_image_limits = normalize_mcp_images(data[:mcp_images])
     @mcp_images_dir   = nonblank(data.dig(:mcp_images, :dir)) || ImageStore::DEFAULT_DIR
 
-    # Workdir-relative dirs the YOLO posture never auto-covers (issue #385).
-    # nil (key absent) = FileList's default (the owner's space, local/); an
-    # explicit list replaces it, and an explicit empty list protects nothing.
+    # Workdir-relative dirs the YOLO posture never auto-covers. nil (key absent) = FileList's
+    # default (the owner's space, local/); an explicit list replaces it, an empty list protects nothing.
     @protected_dirs =
       if data.key?(:protected_dirs)
         normalize_protected_dirs(Array(data[:protected_dirs]))
       end
 
-    # issue #303: rendered-output palette name (nil = the default palette).
-    # Validated by UI::Palette.validate! in the CLI, not here: this class does
-    # not know the palette list and must not start requiring the UI layer.
+    # Rendered-output palette name (nil = the default). Validated by UI::Palette.validate!
+    # in the CLI, not here: this class must not start requiring the UI layer.
     @output_palette = nonblank(data[:output_palette])
 
-    # issue #221: YOLO is opt-in (default off) - the harness never assumes
-    # the user wants consent removed. Bang confirmation defaults to ON
-    # (today's behavior): the user has to explicitly turn it off.
+    # YOLO is opt-in (default off) - the harness never assumes the user wants consent removed.
+    # Bang confirmation defaults to ON: the user has to explicitly turn it off.
     @yolo = data[:yolo] == true
 
     @bang_requires_confirmation =
@@ -141,21 +122,17 @@ class HarnessConfig
       true :
       data[:bang_requires_confirmation] == true
 
-    # issue #33: web.fetch private-address opt-in. Default OFF: fetching a
-    # loopback / private / link-local address is the SSRF-shaped case, so it is
-    # never allowed unless the user asked for it. Like yolo, a USER-side
-    # posture: the model cannot set it.
+    # web.fetch private-address opt-in. Default OFF: fetching a loopback/private/link-local
+    # address is the SSRF-shaped case. Like yolo, a USER-side posture the model cannot set.
     @web_fetch_allow_private = data[:web_fetch_allow_private] == true
 
-    # issue #298: the editor command (nil = Ctrl+G is not taken at all).
+    # The editor command (nil = Ctrl+G is not taken at all).
     @editor = nonblank(data[:editor])
 
-    # issue #384: standing file-access grant on the working directory. Default
-    # ON (key absent = true): a run starts covering every path inside the
-    # working directory for read, write and delete, so per-file consent is no
-    # longer the default. Sensitive names (.git, .harness, .env*) stay blocked -
-    # FileList#sensitive? runs BEFORE any grant lookup, so a path grant on an
-    # ancestor never reaches them. Set false for the old per-file consent back.
+    # Standing file-access grant on the working directory. Default ON (key absent = true): a
+    # run starts covering every path inside the workdir for read/write/delete. Sensitive names
+    # (.git, .harness, .env*) stay blocked - FileList#sensitive? runs BEFORE any grant lookup.
+    # Set false for the old per-file consent back.
     @grant_workdir = data[:grant_workdir].nil? ? true : data[:grant_workdir]
 
     @compact = {
@@ -169,12 +146,9 @@ class HarnessConfig
       replay_entries: int_or_nil(data.dig(:resume, :replay_entries))
     }
 
-    # Two OutputBuffer tail limits per task (issue #286): tail_memory bounds how
-    # much of a buffer's tail lives in RAM, tasks_kept how many recent finished
-    # jobs the registry retains for review. The SAVED limit is
-    # 'resume: replay_entries' above - it is already the window a save writes, so
-    # there is no second key for it. tasks_kept is read here and enforced by
-    # JobRegistry#retain, the first consumer of the key.
+    # Two OutputBuffer tail limits per task: tail_memory bounds how much of a buffer's tail
+    # lives in RAM, tasks_kept how many recent finished jobs the registry retains. The SAVED
+    # limit is 'resume: replay_entries' above (it is already the window a save writes).
     @output = {
       tail_memory: int_or_nil(data.dig(:output, :tail_memory)),
       tasks_kept:    int_or_nil(data.dig(:output, :tasks_kept))
@@ -186,15 +160,11 @@ class HarnessConfig
     }
   end
 
-  # Load the config from the first existing file among the candidates.
-  # When no config file exists anywhere, a default template is written to the
-  # user home config (issue #260): the project's .harness dir holds session
-  # state only, so a per-project config is an override the user creates
-  # deliberately, not something the harness drops there on its own.
-  # Best-effort: if that location cannot be written (read-only home, ...),
-  # loading simply continues with built-in defaults. An explicitly given
-  # config path (-c) that does not exist is NOT auto-created - that is a
-  # user error, not a first run.
+  # Load from the first existing file among the candidates. When none exists, a default
+  # template is written to the user home config: the project's .harness dir holds session
+  # state only, so a per-project config is an override the user creates deliberately.
+  # Best-effort: if that location cannot be written, loading continues with built-in defaults.
+  # An explicitly given config path (-c) that does not exist is NOT auto-created - a user error.
   def self.load(cli_path, workdir)
     path = find_file(cli_path, workdir)
     if path.nil?
@@ -206,8 +176,8 @@ class HarnessConfig
     new(parse(path))
   end
 
-  # Write the default template to path (creating parent directories).
-  # Never overwrites an existing file. Returns true when written.
+  # Write the default template to path (creating parent directories). Never overwrites an
+  # existing file. Returns true when written.
   def self.write_default_template(path)
     return false unless File.file?(TEMPLATE_FILE)
 
@@ -242,9 +212,8 @@ class HarnessConfig
     nil
   end
 
-  # Parse a YAML config file into a plain hash with symbol keys. Symbolizing
-  # here (once, at parse time) means every accessor below works with symbol
-  # keys at every nesting level - no per-key symbolize/aliasing.
+  # Parse a YAML config file into a plain hash with symbol keys. Symbolizing once at parse
+  # time means every accessor works with symbol keys at every nesting level.
   def self.parse(path)
     YAML.safe_load(File.read(path), symbolize_names: true) || {}
   rescue Psych::SyntaxError => e
@@ -292,10 +261,9 @@ class HarnessConfig
     @max_tool_iterations
   end
 
-  # Byte budget for one tool result in the conversation (issue #551); nil = the
-  # built-in default. Config-only: a run whose result overflows the backend's
-  # context window cannot be repaired from inside that run, so the size a project
-  # allows is persistent policy, not a per-run flag.
+  # Byte budget for one tool result in the conversation (nil = the built-in default).
+  # Config-only: a run whose result overflows the backend's context window cannot be repaired
+  # from inside that run, so the size a project allows is persistent policy, not a per-run flag.
   def output_result_bytes
     @output_result_bytes
   end
@@ -305,20 +273,19 @@ class HarnessConfig
     @max_memories
   end
 
-  # Opt-in streamed LLM responses (global key). Default false; a model
-  # profile's own 'streaming' key overrides it for that profile.
+  # Opt-in streamed LLM responses (global key). Default false; a model profile's own
+  # 'streaming' key overrides it for that profile.
   def streaming_enabled?
     @streaming == true
   end
 
-  # Opt-in markdown rendering of the assistant answer (issue #106). Default false.
+  # Opt-in markdown rendering of the assistant answer. Default false.
   def markdown_enabled?
     @markdown == true
   end
 
-  # Table-width basis for markdown rendering (issue #106), or nil for the
-  # renderer's default (80% of the detected terminal, capped for prose). A
-  # percentage is returned as the raw "N%" string, never as a resolved number.
+  # Table-width basis for markdown rendering, or nil for the renderer's default. A percentage
+  # is returned as the raw "N%" string, never as a resolved number.
   def markdown_max_width
     @markdown_max_width
   end
@@ -327,8 +294,8 @@ class HarnessConfig
     @mcp_servers
   end
 
-  # The tool-result image budget (issue #449): the three integers
-  # (inline_max_bytes / inline_max_images / inline_max_tokens) this run enforces.
+  # The tool-result image budget: the three integers (inline_max_bytes / inline_max_images /
+  # inline_max_tokens) this run enforces.
   def mcp_image_limits
     @mcp_image_limits
   end
@@ -338,28 +305,26 @@ class HarnessConfig
     @mcp_images_dir
   end
 
-  # Workdir-relative dirs the YOLO posture never auto-covers (issue #385). nil
-  # when the key is absent (FileList applies its default, local/); an array
-  # (possibly empty) when the config names one.
+  # Workdir-relative dirs the YOLO posture never auto-covers. nil when the key is absent
+  # (FileList applies its default, local/); an array (possibly empty) when the config names one.
   def protected_dirs
     @protected_dirs
   end
 
-  # True when the run starts with a standing grant on the working directory
-  # (issue #384). Decided here, in the user's config, so FileList keeps its own
-  # constructor default (no standing grant) and every caller that builds one
-  # directly - specs, tools, library users - is untouched by this key.
+  # True when the run starts with a standing grant on the working directory. Decided here, in
+  # the user's config, so FileList keeps its own constructor default (no standing grant) and
+  # every caller that builds a list directly is untouched.
   def grant_workdir?
     @grant_workdir == true
   end
 
-  # Rendered-output palette name (issue #303), or nil for the default one.
+  # Rendered-output palette name, or nil for the default one.
   def output_palette_name
     @output_palette
   end
 
-  # The external-editor command for Ctrl+G (issue #298), or nil when the config
-  # does not set one - the ENV tiers are applied by UI::ExternalEditor.command.
+  # The external-editor command for Ctrl+G, or nil when the config does not set one - the
+  # ENV tiers are applied by UI::ExternalEditor.command.
   def editor_command
     @editor
   end
@@ -379,28 +344,27 @@ class HarnessConfig
     @compact[:max_size]
   end
 
-  # Absolute headroom (tokens) reserved for the compaction summary call
-  # before auto-compact fires (or nil; the built-in default then applies).
+  # Absolute headroom (tokens) reserved for the compaction summary call before auto-compact
+  # fires (or nil; the built-in default then applies).
   def compact_reserved_tokens
     @compact[:reserved_tokens]
   end
 
-  # How many OutputBuffer entries a resumed session redraws at startup
-  # (issue #458). nil = the built-in default; 0 disables the replay.
+  # How many OutputBuffer entries a resumed session redraws at startup. nil = the built-in
+  # default; 0 disables the replay.
   def resume_replay_entries
     @resume[:replay_entries]
   end
 
-  # How much of a per-task OutputBuffer tail lives in RAM (issue #286). nil = the
-  # buffer's built-in default. This gates the consumed-front trim, never a pending
-  # entry, so a renderer that polls later still sees everything it has not read.
+  # How much of a per-task OutputBuffer tail lives in RAM. nil = the buffer's built-in default.
+  # This gates the consumed-front trim, never a pending entry, so a renderer that polls later
+  # still sees everything it has not read.
   def output_tail_memory
     @output[:tail_memory]
   end
 
-  # How many finished jobs the registry retains for review (issue #286). nil =
-  # the default (nothing dropped). Read here, enforced by JobRegistry#retain, which
-  # is the first consumer of the key.
+  # How many finished jobs the registry retains for review. nil = the default (nothing dropped).
+  # Read here, enforced by JobRegistry#retain, the first consumer of the key.
   def output_tasks_kept
     @output[:tasks_kept]
   end
@@ -415,9 +379,9 @@ class HarnessConfig
     @retry[:delay]
   end
 
-  # Resolve the selected model profile: selection is the value of -m (a profile
-  # id) or nil (the config default). Raises unless a configured profile matches -
-  # there is no raw-id fallback: a model is selected from 'models:' only.
+  # Resolve the selected model profile: selection is the value of -m (a profile id) or nil (the
+  # config default). Raises unless a configured profile matches - a model is selected from
+  # 'models:' only, with no raw-id fallback.
   def resolve_profile(selection)
     return nil if selection.nil? && @default_profile_id.nil?
 
@@ -438,15 +402,14 @@ class HarnessConfig
 
   private
 
-  # Each entry becomes a ModelProfile (which validates its own fields); the only
-  # cross-entry rule HarnessConfig enforces is that ids are unique - a duplicate
-  # makes a selection and a resumed run silently ambiguous.
+  # Each entry becomes a ModelProfile (which validates its own fields); the only cross-entry
+  # rule is that ids are unique - a duplicate makes a selection and a resumed run silently ambiguous.
   def normalize_models(list)
     profiles = list.map { |entry| ModelProfile.new(entry) }
     # Each profile answers its own validity; a config error names the profile.
     profiles.each(&:valid!)
-    # A profile that declares an mcp_images: block owns a full budget (the same
-    # defaults fill a half-typed block as the global key uses).
+    # A profile that declares an mcp_images: block owns a full budget (the same defaults fill
+    # a half-typed block as the global key uses).
     profiles.each { |p| p.normalize_image_limits(MCP_IMAGE_LIMIT_DEFAULTS) }
 
     duplicate = profiles.map(&:id).tally.find { |_, count| count > 1 }&.first
@@ -457,17 +420,12 @@ class HarnessConfig
     profiles
   end
 
-  # Normalize each mcp_servers entry. A server needs a name (the tool namespace)
-  # and exactly ONE way to reach it: a command to spawn (stdio) or a url to
-  # connect to (HTTP/SSE, issue #402). args/env belong to a command entry,
-  # headers to a url entry; both are optional.
-  #
-  # Every mismatch here is a config error rather than a silently degraded server,
-  # for the reason that has always applied to this key: a server the user typed
-  # that quietly did not load reads as "my MCP tools are there" when they are not.
-  # An entry with BOTH transports is refused too - the harness would have to guess
-  # which one the user meant, and the two reach different trust boundaries (a
-  # program the user can inspect locally vs. a remote host).
+  # Normalize each mcp_servers entry. A server needs a name (the tool namespace) and exactly
+  # ONE way to reach it: a command to spawn (stdio) or a url to connect to (HTTP/SSE). args/env
+  # belong to a command entry, headers to a url entry; both optional. Every mismatch is a config
+  # error rather than a silently degraded server: a server that quietly did not load reads as
+  # "my MCP tools are there" when they are not. An entry with BOTH transports is refused too -
+  # they reach different trust boundaries (a local program vs. a remote host).
   def normalize_mcp_servers(list)
     list.map do |entry|
       raise HarnessError, "each entry in 'mcp_servers' must be a mapping" unless entry.is_a?(Hash)
@@ -512,27 +470,23 @@ class HarnessConfig
     name
   end
 
-  # A non-Hash is treated as empty (the shape today's env handling already uses);
-  # keys and values are stringified because they reach HTTP headers / the
-  # subprocess environment, which hold strings.
+  # A non-Hash is treated as empty; keys and values are stringified because they reach HTTP
+  # headers / the subprocess environment, which hold strings.
   def stringified(val)
     return {} unless val.is_a?(Hash)
 
     val.transform_keys(&:to_s).transform_values { |v| expand_env(v.to_s, "an mcp_servers value") }
   end
 
-  # Normalize each protected_dirs entry to a workdir-relative dir. A blank entry
-  # is dropped (it would match nothing useful); a trailing slash is trimmed so a
-  # config 'local/' still matches the exact-prefix shape FileList applies
-  # (rel == dir || rel.start_with?("#{dir}/")).
+  # Normalize each protected_dirs entry to a workdir-relative dir. A blank entry is dropped;
+  # a trailing slash is trimmed so a config 'local/' still matches the exact-prefix shape FileList applies.
   def normalize_protected_dirs(list)
     list.map { |entry| nonblank(entry)&.sub(%r{/\z}, "") }.compact
   end
 
-  # command_safety_auto_approve accepts the enum or a legacy boolean. An
-  # unrecognised value is a config error rather than a silent fallback: a
-  # posture that quietly became manual would read as "my relaxation is on", and
-  # the reverse would quietly relax the disaster floor.
+  # command_safety_auto_approve accepts the enum or a legacy boolean. An unrecognised value is
+  # a config error rather than a silent fallback: a posture that quietly became manual would
+  # read as "my relaxation is on", and the reverse would quietly relax the disaster floor.
   def command_safety_mode(val)
     return SAFETY_MODES["manual"] if val.nil? || val == false
     return SAFETY_MODES["safe"] if val == true

@@ -57,7 +57,7 @@ class Harness
 
   # The console line naming WHY a mid-turn note could not be applied (:late -
   # the answer was already being written; :leftover - the turn that received it
-  # died before any request could take it). Issue #430.
+  # died before any request could take it).
   NOTE_DISCARD_MESSAGES = {
     late: "arrived too late to steer this answer - it was NOT sent to the model. " \
           "Send it again if you still mean it.",
@@ -67,21 +67,15 @@ class Harness
 
   # Fed back to the model when it wrote a tool call as text the harness could
   # not run, so it re-issues it instead of the failure only reaching the user
-  # (issue #487).
   UNSOLVED_TEXT_CALL_FEEDBACK = "Your previous message contained a tool call the " \
     "harness could not run (its tool name matched no registered tool), so NO tool " \
     "was executed. Re-issue it as a structured tool call using the exact name of a " \
     "registered tool, or answer directly in plain text if you do not need a tool."
 
-  # rules_repair_note: what the LAST rules-file read had to replace (nil when the
-  # file was clean). A repair must not be silent - the prompt the model was given
-  # is then not byte-for-byte what harness.md holds.
-  # mcp: the Mcp::Manager that owns the declared servers, their connections and
-  # startup notes (issue #48). The MCP machinery lives there, not in Harness.
-  # sandbox_gemfile: the harness-seeded, model-managed project Ruby sandbox
-  # (issue #340). doc/sandbox_gemfile_design.md.
-  # image_store: the harness' own blob store for tool-result images
-  # (issue #449). doc/mcp_images_design.md.
+  # rules_repair_note: what the last rules-file read had to replace (nil when
+  # clean) - a repair must not be silent, so the model's prompt differs from
+  # harness.md's bytes. mcp/sandbox_gemfile/image_store are collaborators owned
+  # elsewhere (doc/sandbox_gemfile_design.md, doc/mcp_images_design.md).
   attr_reader :logger,
     :settings,
     :sandbox_gemfile,
@@ -98,22 +92,17 @@ class Harness
 
   attr_accessor :history
 
-  # Only one note is in flight: a new assignment replaces the note that has
-  # Ask THIS job's agent to persist its own conversation at its next safe point
-  # (issue #548 F). Set by the main thread (a save request to a running job), read
-  # and cleared on the JOB's own thread at the tool-loop iteration top - the main
-  # thread never reads the running chain, it only flips this flag. Idempotent: a
-  # second request before the consume is one save, not two.
+  # Set by the main thread, consumed on the JOB's own thread: it only flips
+  # this flag, never reads the running chain.
   def request_save
     @save_requested = true
   end
 
-  # True when a save request is waiting for this agent's next safe point.
   def save_requested?
     @save_requested == true
   end
 
-  # not been injected yet - the latest line wins.
+  # Only one note is in flight: the latest line wins.
   def user_note_text=(text)
     @user_note = text.to_s.strip.empty? ? nil : text.to_s.strip
   end
@@ -122,10 +111,9 @@ class Harness
     @user_notes
   end
 
-  # The commit-time ack is optimistic - only a finished turn can tell a late
-  # note from a usable one - so a note still pending when a turn ends is
-  # dropped here rather than injected into the NEXT prompt as a phantom
-  # mid-turn note (issue #430).
+  # A note still pending when a turn ends is dropped here, not injected into
+  # the next prompt as a phantom mid-turn note - only a finished turn can tell
+  # a late note from a usable one.
   def discard_pending_user_note(kind)
     return nil if @user_note.nil?
 
@@ -135,9 +123,7 @@ class Harness
     Tool.push_status(
       label: "note",
       verdict: :warn,
-      # The console line names WHY it was dropped; it must also name WHICH
-      # note, or the user cannot tell which of their steering lines to resend
-      # (issue #450 - the log line already had the text, the console did not).
+      # It must also name WHICH note, or the user can't tell which line to resend.
       message: "#{NOTE_DISCARD_MESSAGES.fetch(kind)} The note was: #{note}"
     )
     note
@@ -148,15 +134,10 @@ class Harness
     @settings  = settings
     @locator   = SessionLocator.new(file_list.workdir)
 
-    # The digest cache is SHARED (#286): this run builds ONE SessionFileCache
-    # and hands the same object to Session and to the tool registry, so the
-    # digests a tool records on read/write are exactly the ones this session
-    # compares a later write against. Ownership sits with the run, not Session.
+    # One shared cache for Session and the tool registry: a digest a tool
+    # records must be the one a later write is checked against.
     @file_cache = SessionFileCache.new
 
-    # The per-session log path is keyed by the session id. The run's owner (CLI)
-    # injects a finished logger; when none is passed Harness builds it from the
-    # id this run resolves, so every consumer reads one logger (#286).
     log_id  = session_id || @locator.fresh_id
     @logger = logger || SessionLogger.build(@locator.session_log_path(log_id))
 
@@ -176,10 +157,7 @@ class Harness
     @save_requested = false
     StateMigrator.run(@file_list.workdir, HARNESS_DIR)
 
-    # Harness-seeded because the model's file tools cannot write the sensitive
-    # .harness/. A fresh seed also locks it offline (no network); the outcome is
-    # logged so a seed that could NOT lock (a gem absent on this box) is visible
-    # rather than surfacing as a mid-run LoadError. doc/sandbox_gemfile_design.md.
+    # Seeded here because the model's file tools cannot write .harness/.
     @sandbox_gemfile = SandboxGemfile.new(@file_list.workdir)
     case @sandbox_gemfile.ensure_starter!
     when :seeded_locked
@@ -191,9 +169,6 @@ class Harness
       @logger.warn "ruby sandbox NOT seeded - the default Gemfile " \
                    "#{SandboxGemfile::STARTER_TEMPLATE_FILE} is unreadable"
     end
-    # The default gem list is a floor even for a sandbox this model has edited:
-    # a gem the starter declares that went missing mid-run would otherwise only
-    # surface as a LoadError in the middle of a script.
     case @sandbox_gemfile.ensure_default_gems!
     when :resynced_locked
       @logger.info "ruby sandbox resynced with the default gems and re-locked"
@@ -202,9 +177,6 @@ class Harness
                    "lock failed - bundle install it"
     end
 
-    # The tool registry and the MCP machinery are built by ToolRegistryBuilder
-    # from collaborators handed in (#286), not from Harness state: it owns the
-    # Mcp::Manager it connects and exposes it, so Harness only reads it back.
     builder = ToolRegistryBuilder.new(
       file_list: @file_list,
       file_cache: @file_cache,
@@ -215,55 +187,35 @@ class Harness
     )
     @tool_registry = builder.build
     @mcp           = builder.mcp
-    # issue #461: recovers a tool call a model wrote as text instead of a
-    # structured tool_calls array (see doc/text_tool_call_design.md).
     @text_tool_call_parser = TextToolCallParser.new(@tool_registry)
-    # Each Harness owns ONE LLM connection, so its model / endpoint / token /
-    # sampling / context-window parameters are per-Harness live state in a
-    # ModelConfig seeded from the run-wide settings - NOT the shared settings
-    # object (a #286 sub-agent shares settings; writing the model there would
-    # switch every agent's model at once). /model and /param mutate only this
-    # view; settings stays the seed + catalogue carrier. Ownership:
-    # doc/harness_job_design.md.
+    # Per-Harness model state (not shared settings): writing the model there
+    # would switch every sub-agent's model at once. doc/harness_job_design.md.
     @model_config = ModelConfig.from_settings(settings)
     @client = LLMClient.new(@model_config, @logger)
     @session_manager = SessionManager.new(self, file_list)
 
-    # Consent + display postures (yolo/stream/markdown/palette, the two
-    # command-safety flags) are run-wide SystemSettings state read through
-    # @settings (#286). The planning posture is the exception - per-conversation
-    # Harness state, seeded from the config only - so a #286 sub-agent is NOT
-    # forced into planning mode by a [PLAN] toggle on the foreground
-    # (doc/planning_mode_design.md).
+    # The planning posture is per-conversation Harness state, not run-wide
+    # settings: a foreground [PLAN] toggle must not drag a sub-agent into planning.
     @plan = settings.plan_seed?
     @stream_preview  = nil
 
-    # The same posture the shell consent reads live (issue #274): a lambda, so a
-    # /yolo at the idle prompt or a mid-turn flip applies to the very next tool
-    # call and switching it off removes the coverage at once. FileList never
-    # stores a grant from it, so a resume cannot turn it into a standing grant.
+    # A live lambda so a mid-turn /yolo flip applies to the next call and off
+    # removes coverage at once; never stored, so a resume can't persist it.
     @file_list.posture      = -> { @settings.yolo? }
     @file_list.audit_logger = @logger
 
-    # The blob store for tool-result images (issue #449): the harness' own
-    # content dir under THIS session's id, so a path a saved session names still
-    # resolves when that session is resumed.
+    # A dir under this session id, so a saved path still resolves on resume.
     @image_store = ImageStore.new(
       @file_list.workdir, dir: image_content_dir(@session.session_id))
 
-    # The rate of the request that last completed, for the spinner's "recent"
-    # segment (issue #285). nil until a request of THIS process has finished;
-    # a resumed session seeds it from its saved per-request performance when
-    # the server measured one.
+    # The last completed request's rate, for the spinner; nil until one finishes.
     @last_rate = nil
 
     apply_resume_state(resume_data) if resume_data
   end
 
-  # The rules file read is a read boundary like every other (issue #341): the
-  # result is the FIRST message of every chain, and a raw File.read of a file the
-  # model is invited to edit raised in .strip - at startup, and again on the next
-  # prompt through SessionManager#check_rules_reload.
+  # Rules file is a read boundary: its result is the first message of every
+  # chain and a model-editable file.
   def build_system_prompt
     base = read_system_prompt
     project_file = File.join(@file_list.workdir, "harness.md")
@@ -283,10 +235,7 @@ class Harness
     @locator.session_log_path(@session.session_id)
   end
 
-  # EVERY request - the live turn and both advisory forks - must send THIS same
-  # payload: a chat template renders the tools into the prompt, so a fork that
-  # omits them is a different prompt, not a longer one (#246,
-  # doc/compaction_cache_design.md).
+  # Same payload for every request: omitting tools makes a different prompt.
   def tools_payload
     tool_registry.empty? ? nil : tool_registry.to_openai
   end
@@ -299,8 +248,7 @@ class Harness
     settings.compact_auto_threshold || Session::AUTO_COMPACT_THRESHOLD
   end
 
-  # The summary call itself needs headroom, so a small window compacts
-  # proportionally earlier. nil/0 = percentage trigger only.
+  # A small window compacts earlier to leave headroom for the summary call.
   def compact_reserved_tokens
     settings.compact_reserved || Session::COMPACT_RESERVED_TOKENS
   end
@@ -330,13 +278,8 @@ class Harness
     plan? ? "PLAN" : nil
   end
 
-  # -- Tool-result images (issue #449) --------------------------------------
-  #
-  # Built per TURN: the inline budget it carries is turn-scoped and must not
-  # leak into the next turn. Whether the model may see images at all is a
-  # PROFILE fact (SessionManager#vision?), so a /model switch between a vision
-  # profile and a text profile changes what the NEXT tool result does with its
-  # image - the harness never guesses that an unconfigured model can see.
+  # Per-turn inline budget must not leak to the next turn; vision is a profile
+  # fact, never guessed for an unconfigured model.
   def image_delivery
     limits = @session_manager.image_limits
     ImageDelivery.new(
@@ -347,57 +290,33 @@ class Harness
       max_inline_tokens: limits[:inline_max_tokens])
   end
 
-  # True when the ACTIVE model may be sent images (startup banner, /model,
-  # the delivery decision).
   def vision?
     @session_manager.vision?
   end
 
-  # Workdir-relative blob dir for one session id.
   def image_content_dir(session_id)
     base = settings.mcp_images_dir || ImageStore::DEFAULT_DIR
     File.join(base, session_id.to_s)
   end
 
-  # The live tail of the answer currently streaming, for the spinner suffix.
-  # nil when nothing has arrived yet (prefill) or when not streaming - the
-  # caller then shows the waiting line (context + the last request's rate,
-  # see #request_wait_suffix).
-  # THREADING: written by the task thread (the on_delta callback) and read by
-  # the main thread (the spinner's per-frame suffix call); StreamPreview
-  # publishes one frozen group so the reader never sees a partial append.
+  # Task thread writes it, main thread reads it per spinner frame; StreamPreview
+  # publishes a frozen group so the reader never sees a partial append.
   def stream_preview_line
     @stream_preview&.tail_line
   end
 
-  # The spinner suffix for the wait this request owns (issue #285):
-  #   while a streamed answer is arriving  "<newest text> ~38 tok/s"
-  #   before that (prefill) or when buffered  "🧠 12% (160K) 31 tok/s (last)"
-  #   while a streamed TOOL CALL is being written  "writing tool call: file.write
-  #   🧠 12% (160K)" - no rate, and the (frozen) tail is not shown either
-  #   (issue #368).
-  # The live rate is '~' because its tokens are ESTIMATED from the stream's
-  # characters; the "(last)" rate is the previous request's own measurement,
-  # '~' only when the server did not measure it. Neither is ever shown for the
-  # request it describes as if it were that request's number.
+  # A live rate is '~' (estimated from stream chars); a "(last)" rate is the
+  # previous request's own measurement, never the in-flight request's number.
   def request_wait_suffix
     -> { streaming_wait_line || waiting_line }
   end
 
-  # The spinner suffix for a TOOL wait (issue #362): the live context estimate
-  # and NO rate segment - no request is in flight while a tool runs, so there is
-  # no speed to show. CommandRunner's own re-point reads it through this one
-  # place: a :spinner_detail payload with no suffix key would silently drop the
-  # suffix from the runner's remembered detail, so every tool wait carries it.
+  # A tool wait carries NO rate: nothing is in flight, so there is no speed.
   def tool_wait_suffix
     -> { context_indicator_live }
   end
 
-  # The rate shown for the wait BEFORE the answer's text starts (prefill, or a
-  # buffered request): the request that last completed. nil when this process
-  # has not finished one yet - a spinner must not invent a speed.
-  # pad: the width-stable number for the SPINNER (issue #364). A log line that
-  # names the same rate reads it without padding - prose does not need a column.
+  # pad gives the spinner a width-stable number; a log line reads it unpadded.
   def last_rate_segment(pad: false)
     return nil if @last_rate.nil?
 
@@ -409,30 +328,21 @@ class Harness
     )
   end
 
-  # Called after each completed request with that request's usage and its own
-  # elapsed seconds: the server's number is preferred over the harness's wall
-  # clock. A request that supports no rate at all keeps the previous measurement
-  # rather than blanking the segment (the "(last)" tag is what says the number
-  # is not the request in flight's).
   def record_last_rate(usage, seconds)
     rate = LLM::UsageStats.recent_generation_rate(usage, seconds)
     @last_rate = rate if rate
   end
 
-  # A model switch changes the server a rate was measured against, so the
-  # previous one no longer describes anything this run will do.
+  # A model switch changes the server, so the old rate describes nothing here.
   def forget_last_rate
     @last_rate = nil
   end
 
-  # ONE check call per tool batch (never one per command). SafetyCheck
-  # never touches Session, so it cannot trigger in-loop compaction.
+  # SafetyCheck never touches Session, so a batch check cannot trigger compaction.
   def precheck_batch_safety(message_calls)
     return nil unless @settings.command_safety_check
 
-    # YOLO's auto-approval branch in CommandRunner#run returns before
-    # safety_verdict_for is reached, so a batch check here would pay for a
-    # forked round trip whose verdicts can only be thrown away (#238's cost).
+    # YOLO consumes no verdicts, so pre-checking it pays for a forked round trip.
     if @settings.yolo?
       logger.info "safety pre-check skipped (YOLO consumes no verdicts)"
       return nil
@@ -503,8 +413,7 @@ class Harness
       reserved_tokens: compact_reserved_tokens)
   end
 
-  # Returns [args, nil] or [{}, error_message]: rescuing straight to {} erased
-  # the difference between "no arguments sent" and "this call lost its shape".
+  # [args, nil] or [{}, err]: rescuing straight to {} hides a call that lost shape.
   def parse_tool_arguments(raw)
     return [{}, nil] if raw.nil? || raw.to_s.strip.empty?
 
@@ -515,8 +424,7 @@ class Harness
     [{}, ErrorText.label(e)]
   end
 
-  # Returns true only for 'length' - the reason that makes the tool round below
-  # report truncation rather than a malformed call.
+  # Only 'length' makes the tool round report truncation, not a malformed call.
   def report_finish_reason(data, iteration)
     reason = data[:finish_reason]
     return false if reason.nil? || FINISH_EXPECTED.include?(reason)
@@ -533,8 +441,7 @@ class Harness
     reason == "length"
   end
 
-  # The OpenAI endpoint reads max_tokens, the native one num_predict; an unset
-  # key means the SERVER's own default is what cut the answer.
+  # An unset key means the server's own default is what cut the answer.
   def budget_note(data)
     limit = [model_config.max_tokens, model_config.num_predict].map(&:to_i).find(&:positive?)
     parts = []
@@ -544,14 +451,9 @@ class Harness
     parts.join(", ")
   end
 
-  # Name a text-shaped tool call the harness could NOT recover on the console +
-  # log (issue #461). The parsing lives in TextToolCallParser; a recoverable call
-  # is parsed and run in call_llm before this is reached, so this fires only for
-  # markers with no resolvable name - the user then sees the model tried to act
-  # and can re-prompt.
+  # Fires only for a text-shaped call with no resolvable name (a recoverable
+  # one is parsed and run in call_llm first).
   def report_unresolved_text_tool_call(content)
-    #logger.info "-----text_tool_call-----\n#{content}\n----------------"
-
     return false unless @text_tool_call_parser.text_call?(content)
 
     msg = "the model wrote a tool call as text the harness could not run " \
@@ -566,10 +468,7 @@ class Harness
     true
   end
 
-  # True when content carries a text-shaped call the harness could not run;
-  # records it to the log only. The user-facing warn is left to the terminal
-  # fallback (report_unresolved_text_tool_call) so the first occurrence can
-  # instead be fed back to the model (issue #487).
+  # Log-only variant: the user-facing warn is left to the re-issue path below.
   def log_unresolved_text_tool_call(content)
     return false unless @text_tool_call_parser.text_call?(content)
 
@@ -578,11 +477,8 @@ class Harness
     true
   end
 
-  # -- LLM call logic -------------------------------------------------------
-
-  # The session IS the working chain: every round is appended AS IT HAPPENS,
-  # so a turn that dies mid-loop keeps its rounds and /retry resumes from
-  # exactly that point instead of replaying the prompt from zero.
+  # Each round is appended as it happens, so a turn that dies mid-loop keeps its
+  # rounds and /retry resumes from that point, not from the prompt.
   def call_llm
     messages = @session.messages
 
@@ -600,10 +496,8 @@ class Harness
     # Iterations whose request came back: the loop counter runs ahead of it.
     answered = 0
 
-    # One ImageDelivery per turn: its inline budget is turn-scoped (issue #449).
-    # Tool results that carried images append base64 to the WORKING chain only
-    # - the token estimate and the compact trigger must see the cost - and the
-    # payload is stripped as soon as a request has carried it (see #sent_images).
+    # One per turn: its inline budget is turn-scoped, and its base64 must reach
+    # the token estimate before a request carries it.
     delivery = image_delivery
 
     # The LAST call's prompt_tokens is the context size: each call already
@@ -633,11 +527,8 @@ class Harness
         Tool.push_status(label: "note", verdict: :info, message: "sent to model")
       end
 
-      # issue #548 F: a save request posted by the main thread is consumed HERE,
-      # on the JOB's own thread, at the same safe point a mid-turn note lands. The
-      # agent saves its OWN chain (it never races a cross-thread read). The flag was
-      # already cleared; a failure is bookkeeping, not a turn abort (same as an
-      # auto-save failure).
+      # Consumed on the JOB's own thread at the same safe point a note lands, so
+      # the agent saves its own chain with no cross-thread read.
       if @save_requested
         @save_requested = false
         @session_manager.save_job_session
@@ -653,15 +544,12 @@ class Harness
       data    = request_chain(messages, tools)
       message = data[:choices][0][:message]
 
-      # The image payloads this request carried have been SEEN by the model.
-      # Keeping them would re-send the same megabytes in every later request of
-      # the turn (issue #449); the text beside them - which names the stored
-      # file - is what survives.
+      # The model has seen them; keeping them would re-send the same bytes in
+      # every later request. The text naming the stored file survives.
       strip_image_payloads(messages)
 
-      # issue #461: no structured tool_calls, but the model may have written one
-      # as text. Parse and run it (lenient) so the turn does not silently break;
-      # a name that matches no tool stays prose and the round ends as an answer.
+      # A text-shaped call is parsed leniently so the turn does not silently
+      # break; an unresolvable name stays prose and ends as an answer.
       if !message[:tool_calls] && @text_tool_call_parser.text_call?(message[:content])
         committed = messages.filter_map { |m| m[:tool_calls] }.flatten
         recovered = @text_tool_call_parser.parse(message[:content], committed:)
@@ -688,16 +576,12 @@ class Harness
       end
       answered = iteration
 
-      # #285: this request's rate is now the RECENT one the spinner can show
-      # during the next request's prefill (or in buffered mode). It is taken
-      # from the request's own clock and its reported counts, never from
-      # stats[:elapsed_seconds] (the TURN's time, tool execution included).
+      # The request's own clock and counts, never stats[:elapsed_seconds] (the
+      # TURN's time, tool execution included).
       record_last_rate(data[:usage], @request_seconds)
 
-      # #251: the server-side performance of THIS request only (cache depth,
-      # durations, draft counts). The LAST call describes the state the next
-      # request will face, so it replaces the earlier ones instead of adding
-      # to them - measurements of different requests cannot be summed.
+      # The LAST call describes the next request's state, so it replaces the
+      # earlier ones - measurements of different requests cannot be summed.
       last_performance = LLM::UsageStats.performance_snapshot(data[:usage])
 
       @session.record_prompt_tokens(last_prompt_tokens, messages.size)
@@ -738,8 +622,8 @@ class Harness
           messages << tool_msg
         end
 
-        # The model cannot see this harness' token budget, so the cut is named
-        # once per round (issue #332: it retried the same shape forever).
+        # The model cannot see the harness' budget, so the cut is named once per
+        # round - otherwise it retried the same oversized call forever.
         if truncated
           messages << {
             role: "user",
@@ -773,14 +657,9 @@ class Harness
 
       discard_pending_user_note(:late)
 
-      # issue #461 / #487: a text-shaped call whose name matched no tool (or an
-      # ambiguous short name the harness will not guess). A name that DID resolve
-      # was recovered above and ran. For one that did NOT:
-      #   - the first time this turn produces it, feed it back so the model can
-      #     re-issue it (issue #487 - the model never learned its call failed);
-      #   - bounded to ONE retry (text_call_retried), so prose that merely QUOTES
-      #     a call cannot spin the loop - the second occurrence falls through to
-      #     the honest warn + commit.
+      # An unresolved text call is fed back ONCE (the model would otherwise never
+      # learn its call failed); the second occurrence falls through to warn +
+      # commit, so quoted prose cannot spin the loop.
       if text_call_retried
         report_unresolved_text_tool_call(message[:content])
       elsif log_unresolved_text_tool_call(message[:content])
@@ -804,8 +683,7 @@ class Harness
       @session.record_stats(stats)
       @session.record_reasoning(message[:reasoning])
 
-      # A committed chain is text state: no base64 belongs in it or in a
-      # session file (issue #449).
+      # A committed chain is text state: no base64 belongs in it or a session file.
       strip_image_payloads(messages)
 
       return {
@@ -816,11 +694,8 @@ class Harness
     end
   end
 
-  # Turn a tool's raw result into the message that goes into the chain
-  # (issue #449). A String result is the ordinary case and passes through
-  # untouched. A ToolResult (an MCP server returned image blocks) is handed to
-  # this turn's ImageDelivery, which names each image's fate in the text and
-  # returns the base64 payloads a vision request may carry.
+  # A String passes through; a ToolResult goes to ImageDelivery, which names each
+  # image's fate and returns the base64 a vision request carries.
   def tool_result_message(tool_call, raw, delivery)
     msg = { role: "tool", tool_call_id: tool_call[:id], content: raw.to_s }
     return msg unless raw.is_a?(ToolResult)
@@ -845,8 +720,8 @@ class Harness
     "#{text}\n#{notes}"
   end
 
-  # Every image decision is logged - inline or not - because "the model cannot
-  # see it" is a fact the user needs when the answer looks blind to a screenshot.
+  # Logged inline or not: "the model cannot see it" matters when an answer looks
+  # blind to a screenshot.
   def log_image_decision(tool_name, decisions)
     decisions.each do |d|
       detail = d.inline? ? "inlined" : "#{d.mode} (#{d.reason})"
@@ -854,14 +729,12 @@ class Harness
     end
   end
 
-  # Drop the base64 payloads from a chain once they have been sent (or the turn
-  # has committed). The text that names the stored file stays.
+  # Text naming the stored file stays; only base64 is dropped.
   def strip_image_payloads(messages)
     messages.each { |m| m.delete(:images) }
   end
 
-  # Buffer the note fact so it survives the transient tool result and reaches
-  # the chain on the turn commit.
+  # Buffered so it survives the transient tool result and reaches the chain on commit.
   def record_note(tool_call, result)
     return unless tool_call[:function][:name] == "ui.note"
     return unless result.is_a?(String) && result.start_with?("ok: noted")
@@ -876,8 +749,6 @@ class Harness
     # A malformed note must never break the turn.
   end
 
-  # The summary line of this job's turn when it aborted before committing (#567),
-  # nil when the job owes none.
   def aborted_turn_stats_line(job_id)
     snapshot = aborted_turn_stats
     return nil if snapshot.nil? || snapshot[:job_id] != job_id
@@ -892,8 +763,8 @@ class Harness
     Task.emit(:stats, origin: :harness, content: line)
   end
 
-  # An aborted turn (#567) reports answered-over-sent iterations only: a token or
-  # performance figure would describe requests that never returned.
+  # An aborted turn reports answered-over-sent iterations only: token and
+  # performance figures would describe requests that never returned.
   def stats_line(stats)
     return nil if stats.nil?
 
@@ -940,14 +811,8 @@ class Harness
     "🧠 ctx #{label}#{used[:tokens]}/#{window} (#{pct}%)"
   end
 
-  # Unlike #context_indicator (the LAST response's number), this measures the
-  # CURRENT chain, including mid-turn tool results. An explicit messages:
-  # chain (in-loop compaction's local chain) is always an estimate.
-  #
-  # This one is the SPINNER's context segment, so it is the glanceable form
-  # (issue #271): the percentage, plus the window it is a percentage of. The
-  # raw token arithmetic stays in #context_indicator (modeline, stats line)
-  # and in the /ctx report.
+  # The SPINNER's context segment: the CURRENT chain (mid-turn results included)
+  # as a glanceable percentage. Raw token arithmetic stays in #context_indicator.
   def context_indicator_live(messages = nil)
     window = model_config.num_ctx || LLMClient::NUM_CTX
     if messages
@@ -964,10 +829,8 @@ class Harness
     "🧠 #{label}#{pct}% (#{window_label(window)})"
   end
 
-  # The context facts as DATA (issue #474, increment 21): the arithmetic that
-  # decides a compaction stays here, and the row shape belongs to UI::Renderer, so
-  # /ctx states these fields rather than baking a padded value column. nil when
-  # there is nothing to measure yet (the command then answers with the prose note).
+  # Arithmetic stays here, the row shape is UI::Renderer's; nil with nothing to
+  # measure.
   def context_usage
     window = model_config.num_ctx || LLMClient::NUM_CTX
     used   = @session.context_used
@@ -990,9 +853,7 @@ class Harness
     }
   end
 
-  # Thin delegators to the Mcp::Manager (issue #48). The CLI calls close_mcp on
-  # shutdown and reads mcp_status_notes for the banner; the machinery itself
-  # lives in Mcp::Manager, not here.
+  # The machinery lives in Mcp::Manager; these are its thin delegators.
   def close_mcp
     @mcp.close
   end
@@ -1001,25 +862,17 @@ class Harness
     @mcp.status_notes
   end
 
-  # issue #405: what THIS run connected, for the saved session. The saved run's
-  # own servers are what the conversation had tools from, so the summary is read
-  # at save time from the live Manager rather than tracked separately.
+  # Read at save time from the live Manager rather than tracked separately.
   def mcp_connected_summary
     @mcp.connected_summary
   end
 
-  # The conversation's size gate (issue #551): a tool result that would make the
-  # NEXT request exceed the backend's context window is refused by that backend
-  # outright ("requests are never truncated"), and the auto-compact retry then
-  # fails on the same oversized chain. So the cap is applied HERE, before the
-  # result becomes a message; the full text goes to the session's own dir so
-  # nothing is invented about what the command printed. A ToolResult is left to
-  # ImageDelivery (its bytes are images, not text). doc/tool_output_budget_design.md.
+  # The backend refuses an over-window request and auto-compact then fails on the
+  # same chain, so the cap lands HERE, before the result is a message; full text
+  # spills to the session dir. doc/tool_output_budget_design.md.
   def budget_tool_result(name, result)
     return result if result.is_a?(ToolResult)
 
-    # A spill read came back already capped and is exempt: re-fitting it would
-    # spill the spill and log a cap the model never received.
     if (capped = spill_read_result?(name, result))
       return capped
     end
@@ -1035,24 +888,19 @@ class Harness
     fit.text + OutputBudget.notice(fit.bytes_dropped, spill:)
   end
 
-  # A spilled result is harness state the file tools cannot open (a session dir is
-  # blocked for every component), so the tool that spilled answers a read of its
-  # own spill file - capped, so reading the overflow back cannot overflow again.
-  # nil when the path names no spill of this job.
+  # A session dir is blocked for the file tools, so the tool that spilled reads
+  # its own spill file, capped - reading the overflow cannot overflow again.
   def read_spilled_result(path)
     rel = @file_list.relative_path(@file_list.resolve(path))
     return nil unless rel && result_spill.covers?(rel)
 
-    # read_capped so an oversized spill is never loaded whole; the mark tells
-    # budget_tool_result this text is already inside the byte budget.
     ResultSpill::ALREADY_CAPPED_MARK +
       OutputBudget.read_capped(@file_list.resolve(path), limit: output_result_bytes)[0]
   rescue SystemCallError => e
     "error: cannot read #{path} (#{e.message})"
   end
 
-  # The mark a spill read carries (FileReadTool#read_spilled sets it): the text
-  # with the mark stripped, or nil when this result is not one.
+  # The mark FileReadTool#read_spilled sets: returns the stripped text, or nil.
   def spill_read_result?(name, result)
     return nil unless name == "file.read" && result.is_a?(String)
     return nil unless result.start_with?(ResultSpill::ALREADY_CAPPED_MARK)
@@ -1064,8 +912,7 @@ class Harness
     settings.output_result_bytes || OutputBudget::DEFAULT_RESULT_BYTES
   end
 
-  # The session dir is harness state, so the spill path is named as such: the
-  # model tells the USER where the full output is instead of trying to read it.
+  # A spill is harness state: the model tells the user where it is, not reads it.
   def result_spill
     return @result_spill if defined?(@result_spill)
 
@@ -1075,7 +922,6 @@ class Harness
 
   private
 
-  # -- Turn measurements (issue #567) ---------------------------------------
   def open_turn_stats(iteration:, answered:, usage:)
     @turn_stats = {
       job_id: @session_manager.job_id,
@@ -1096,8 +942,8 @@ class Harness
     @turn_stats = closed
   end
 
-  # An elapsed-time-only line over a turn that answered nothing reads as a whole
-  # turn's duration, so a turn with no answered request reports nothing.
+  # A turn with no answered request reports nothing (elapsed-only would read as
+  # the whole turn's duration).
   def aborted_turn_stats
     open = @turn_stats
     return nil if open.nil? || open[:committed]
@@ -1110,26 +956,20 @@ class Harness
     )
   end
 
-  # One LLM request. The streaming posture applies to THIS request only, so a
-  # streamed turn publishes its live tail for the spinner. The preview is
-  # cleared in the ensure, not after the call: a request that died mid-stream
-  # must not leave its partial tail for the NEXT request to show. Posture
-  # ownership and the retry boundary: doc/streaming_design.md.
+  # Cleared in the ensure, not after the call: a request that died mid-stream
+  # must not leave its partial tail for the next request. doc/streaming_design.md.
   def request_chain(messages, tools)
     streaming = @settings.stream?
-    # The estimate ratio is injected, not fixed here: the token estimate the
-    # spinner's rate and the context indicator both need belongs to Session.
+    # Session owns the ratio the spinner's rate and context indicator need.
     preview = streaming ? LLM::StreamPreview.new(
       chars_per_token: Session::EST_CHARS_PER_TOKEN
     ) : nil
     @stream_preview = preview
-    # The callback holds THIS request's object, not the ivar: the ivar is the
-    # main thread's reader handle and the ensure below clears it, so a delta
-    # that arrives after a clear would call record on nil (issue #378).
+    # The callback holds THIS request's object, not the ivar the ensure clears:
+    # a late delta would call record on nil.
     on_delta = preview ? ->(delta) { preview.record(delta) } : nil
 
-    # The request's OWN clock: stats[:elapsed_seconds] is the TURN's (tool
-    # execution included), so it can never serve as a request's speed.
+    # stats[:elapsed_seconds] is the TURN's, so this request needs its own clock.
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     begin
       @client.chat(messages, tools:, stream: streaming, on_delta:)
@@ -1139,20 +979,14 @@ class Harness
     end
   end
 
-  # The tool-call segment plus the live context estimate, and NO rate: with no
-  # text arriving there is nothing to measure, and a rate computed over an
-  # arriving-nothing window decays frame by frame (9.0 -> 4.5 -> 2.2, measured),
-  # which is the exact "connection is dying" reading this segment exists to
-  # replace. The context estimate is the live part that stays on the line.
+  # No rate: a rate over an arriving-nothing window decays frame by frame
+  # (9.0 -> 4.5 -> 2.2), the "connection is dying" reading this replaces.
   def tool_phase_line(phase)
     [phase, context_indicator_live].compact.join(" ")
   end
 
-  # The streaming segment of the spinner suffix, or nil while nothing has
-  # arrived so the waiting line applies instead. A tool call being written
-  # REPLACES the tail: while the model writes one, no text is arriving, so the
-  # tail has stopped moving and a line built on it reads as a frozen connection
-  # (issue #368).
+  # A tool call REPLACES the tail: while one is written no text arrives, so a
+  # line built on a stopped tail reads as a frozen connection.
   def streaming_wait_line
     phase = @stream_preview&.tool_call_line
     return tool_phase_line(phase) if phase
@@ -1166,10 +1000,8 @@ class Harness
     rate ? "#{tail} #{rate}" : tail
   end
 
-  # The wait before an answer's text starts (prefill, or a buffered request): the
-  # live context estimate, plus the last request's rate when this process has one
-  # to show. nil when NEITHER has anything (no conversation yet and no completed
-  # request) - the spinner's contract is "no suffix", not an empty segment.
+  # nil when neither part has anything: the spinner's contract is "no suffix",
+  # not an empty segment.
   def waiting_line
     parts = [context_indicator_live, last_rate_segment(pad: true)].compact
     return nil if parts.empty?
@@ -1187,11 +1019,8 @@ class Harness
     content = first_line.call(:content)
 
     tools = message[:tool_calls].map { |tc| tc[:function][:name] }
-    # One ROLE per event (issue #146): the old single :step type carried the
-    # label, the reasoning digest, the interstitial and the tool list, with the
-    # pattern baked into each string - a renderer could not tell them apart
-    # without regexing the markers back out. The number is emitted here, the
-    # word "step" belongs to UI::Renderer.
+    # One ROLE per event so UI::Renderer does not regex markers back out; only
+    # the number is emitted here, "step" is the renderer's word.
     Task.emit(:step_label, origin: :harness, content: iteration)
     Task.emit(:plan, origin: :harness, content: reason) if reason
     Task.emit(:interstitial, origin: :harness, content:) if content
@@ -1202,9 +1031,8 @@ class Harness
     ENV.fetch("HARNESS_STEP_DISPLAY", "") == "off" || settings.step_display == false
   end
 
-  # A prompt file is the FIRST message of every chain this harness will ever send
-  # or save, so it is a read boundary: an unnormalized one survives until
-  # JSON.generate (the request body AND the session save) raises on its bytes.
+  # A read boundary: it is the first message of every chain, so an unnormalized
+  # one would raise in JSON.generate at request or save time.
   def read_system_prompt
     path = settings.system_file
     return TextNormalizer.normalize(File.read(path)) if path && File.file?(path)
@@ -1212,10 +1040,7 @@ class Harness
     TextNormalizer.normalize(File.read(DEFAULT_SYSTEM_PROMPT_FILE))
   end
 
-  # Names what a rules-file read had to replace, so the repair is not silent: the
-  # prompt the model got is then NOT byte-for-byte what harness.md holds. Counts
-  # bytes (the assertion is about bytes, the #318 rule); nil when the file read
-  # as UTF-8 cleanly.
+  # Counts bytes (the assertion is about bytes); nil when the file read as UTF-8 cleanly.
   def byte_repair_note(source)
     return nil if source.valid_encoding?
 
@@ -1226,20 +1051,16 @@ class Harness
     "#{label} replaced - harness.md is not valid UTF-8"
   end
 
-  # 65536 -> "66K", 160000 -> "160K", 1000 -> "1K". A window size is only
-  # ever read as an order of magnitude, and five digits of it is noise in a
-  # per-frame line; windows under 1000 stay exact.
+  # A window is read as an order of magnitude; five digits is noise in a
+  # per-frame line, so windows under 1000 stay exact.
   def window_label(window)
     w = window.to_i
     w < 1000 ? w.to_s : "#{(w / 1000.0).round}K"
   end
 
-  # Re-points the spinner for ONE tool execution (issue #362). A tool that waits
-  # (a slow command, a consent dialog, a model safety check) leaves the outbox
-  # quiet, so the drain loop animates - and the detail it replays is the LLM
-  # request that already finished, so a long run.command reads as if the model
-  # were still generating. The message is the tool NAME only: the spinner appends
-  # its own "..." to every message, so a marker here would double the dots.
+  # A waiting tool leaves the outbox quiet, so the drain loop replays the
+  # already-finished request - a long command reads as if the model were still
+  # generating. Tool NAME only: the spinner adds its own "...".
   def announce_tool_call(name)
     Task.emit(
       :spinner_detail,
@@ -1247,9 +1068,8 @@ class Harness
       content: { message: name, suffix: tool_wait_suffix })
   end
 
-  # truncated: the request that produced this call was cut by the token budget.
-  # A parse failure is then reported as truncation - the honest cause - instead
-  # of a malformed call the model is invited to repeat.
+  # A parse failure on a truncated call is reported as truncation - the honest
+  # cause - not a malformed call the model is invited to repeat.
   def execute_tool_call(tool_call, truncated: false)
     func_name = tool_call[:function][:name]
     args, parse_error = parse_tool_arguments(tool_call[:function][:arguments])
@@ -1280,11 +1100,8 @@ class Harness
     begin
       result = tool.execute(args)
       logger.info "tool #{func_name} → #{OutputBudget.log_excerpt(result)}"
-      # A byte invalid in UTF-8 would make the NEXT JSON.generate raise -
-      # including the save that should record the failure.
-      # A ToolResult is normalized where its text is built (ToolResult#new) and
-      # carries raw image bytes beside it - normalizing the OBJECT would flatten
-      # it to its #to_s and lose the images (issue #449).
+      # A ToolResult is normalized where its text is built and carries raw image
+      # bytes beside it; flattening the object to #to_s would lose the images.
       text = result.is_a?(ToolResult) ? result : TextNormalizer.normalize(result)
       budget_tool_result(func_name, text)
     rescue => e
@@ -1299,32 +1116,24 @@ class Harness
     @session_manager.param_overrides.load(data[:param_overrides])
     @session_manager.param_overrides.restore!
 
-    # The four session-persisted postures (yolo/stream/markdown/palette) are
-    # applied over the resolved settings by SystemSettings#restore_persisted;
-    # a key the session does not carry keeps its config value (a session saved
-    # before the posture existed falls back to the default, #28/#106/#303).
+    # A key the session does not carry keeps its config value, so a session
+    # saved before the posture existed falls back to the default.
     @settings.restore_persisted(data)
     logger.info "yolo posture restored: #{@settings.yolo? ? 'ON' : 'OFF'}"
     logger.info "streaming posture restored: #{@settings.stream? ? 'ON' : 'OFF'}"
     logger.info "markdown posture restored: #{@settings.markdown? ? 'ON' : 'OFF'}"
 
-    # #285: the saved per-request performance (#251) is a server measurement, so
-    # a resumed session can show a recent rate immediately - a client-timed one
-    # would need seconds it does not have, hence nil there.
+    # Server-measured, so a resumed session shows a rate immediately; a
+    # client-timed one would need seconds it does not have.
     saved_rate = LLM::UsageStats.recent_generation_rate(data.dig(:last_stats, :performance), nil)
     @last_rate = saved_rate if saved_rate
     logger.info "recent generation rate restored: #{last_rate_segment}" if saved_rate
 
     logger.info "output palette restored: #{@settings.output_palette.name}"
 
-    # issue #405: the saved session names the MCP tools its conversation had.
-    # THIS run already connected what its own config declared (the tool-registry
-    # builder runs before this), so the two can be compared: a server the saved
-    # conversation used that this run cannot reach is stated out loud rather than
-    # left as a tool set the model quietly lost. The notes land in the startup
-    # banner next to the run's own MCP lines.
-    # A session saved before #405 has no key at all, which reads as nothing to
-    # compare - the run's own banner is then the whole story.
+    # Compare the saved session's tools with what this run connected, so a server
+    # this run cannot reach is stated out loud, not a tool set the model quietly
+    # lost. A session with no key reads as nothing to compare.
     @mcp.report_saved_session(data[:mcp_connected])
   end
 

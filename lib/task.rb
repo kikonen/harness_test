@@ -14,29 +14,24 @@ require_relative "ui/spinner"
 require_relative "error_text"
 
 class Task
-  # Default spinner message while the runner waits for the task thread.
-  # Any :spinner_detail event may override it (and its suffix) for the
-  # rest of the wait.
+  # Default spinner message; a :spinner_detail event may override it (and its
+  # suffix) for the rest of the wait.
   DEFAULT_SPINNER_MESSAGE = "Working"
 
   # Sentinel pushed to inbox when #stop is called, to unblock a pending
   # #request so the task thread can exit cleanly.
   STOP = Object.new.freeze
 
-  # Timeout (seconds) for polling the outbox in the drain loop.
   DEFAULT_POLL_TIMEOUT = 0.1
 
-  # Grace the force-stop gives the task thread before killing it.
+  # Grace #stop gives the task thread before killing it.
   DEFAULT_STOP_JOIN_TIMEOUT = 0.5
 
-  # Raised by the drain loop when the note editor saw EOF (Ctrl-D pressed
-  # inside it while editing a mid-turn note): aborts the running turn like
-  # Ctrl+C (the drain loop stops the task and returns normally).
+  # Raised by the drain loop when the note editor saw EOF (Ctrl-D inside it
+  # while editing a mid-turn note): aborts the turn like Ctrl+C.
   class NoteAbort < StandardError; end
 
-  # Event types handled by the drain loop as control flow (never stored or
-  # rendered): the task finished ([:done]) and a pending user request
-  # ([:__request__], answered on the main thread).
+  # Event types the drain loop treats as control flow (never stored or rendered).
   CONTROL_EVENTS = %i[error_ctrl __request__].freeze
 
   attr_reader :thread, :buffer, :ui, :renderer, :job, :registry, :input_path
@@ -48,26 +43,23 @@ class Task
   attr_accessor :note_editor
   attr_accessor :harness
 
-  # A task built for a job reads the registry's ONE queue instead of its own
-  # outbox, and its inbox IS the job's inbox (the registry routes answers to it).
+  # A task built for a job reads the registry's ONE queue, and its inbox IS the
+  # job's inbox (the registry routes answers to it).
   def initialize(registry:, job:, input_path: nil, &block)
     @block   = block
     # main -> task (the job's inbox), where the registry routes steering notes
     # (and STOP for a task servicing no live request). #request answers come back
     # on the SEPARATE @pending_reply, so a note can never be mistaken for a
-    # dialog answer (issue #424).
+    # dialog answer.
     @inbox         = job.inbox
     @pending_reply = nil            # live request's reply channel (one at a time)
     @registry = registry
     @job      = job
-    # The task uses the job's buffer (issue #286): the run record belongs to the
-    # job's registry. The task never builds one - the buffer's limits belong to
-    # the buffer. The drain loop is the single writer; the task thread never
-    # touches it.
+    # The task uses the job's buffer: the run record belongs to the job's
+    # registry. The drain loop is the single writer; the task thread never touches it.
     @buffer       = job.buffer
-    # Patterns and colors are the renderer's decision, so the drain loop asks
-    # it instead of printing content as the emitter wrote it. #run replaces it
-    # with the harness's configured palette; this one colors nothing.
+    # The drain loop asks the renderer for patterns/colors; #run replaces it with
+    # the harness's configured palette, so this one colors nothing.
     @renderer  = UI::Renderer.new
     @spinner = nil
     @thread  = nil
@@ -75,7 +67,7 @@ class Task
     @dialog_open = false           # true while perform_direct is on stdin
     @note_editor  = nil
     @input_path   = input_path
-    @started_at   = nil            # turn clock (issue #277), set by #start
+    @started_at   = nil            # turn clock, set by #start
     @harness      = nil
   end
 
@@ -87,8 +79,7 @@ class Task
     @dialog_open
   end
 
-  # True while the poll loop is in the edit state (the user is typing); the
-  # loop enters it when the shared input path's peek sees a keypress.
+  # True while the poll loop is in the edit state (the user is typing).
   def edit_state?
     input_path&.edit_state?
   end
@@ -97,10 +88,9 @@ class Task
 
   # -- Lifecycle ---------------------------------------------------------------
 
-  # Spawn the task thread and start running the block. The task reference is
-  # published on Thread.current so nested code in the task can find it via
-  # `Task.current` and push events onto its outbox. No buffer reference is
-  # exposed to task code - the buffer is runner-side only.
+  # Spawn the task thread and run the block. The task reference is published on
+  # Thread.current so nested code finds it via `Task.current`. No buffer
+  # reference is exposed to task code - the buffer is runner-side only.
   def start
     @started_at = Time.now
     @thread = Thread.new do
@@ -123,9 +113,8 @@ class Task
     end
   end
 
-  # The turn clock for the spinner's elapsed segment (issue #277): whole
-  # seconds under a minute ("12s"), minutes beyond it ("2m 03s"). nil before
-  # #start (a spinner built by a unit test that never started the task).
+  # The turn clock for the spinner's elapsed segment: whole seconds under a
+  # minute ("12s"), minutes beyond it ("2m 03s"). nil before #start.
   def elapsed_label
     return nil if @started_at.nil?
 
@@ -135,9 +124,8 @@ class Task
     "#{(secs / 60)}m #{format('%02d', secs % 60)}s"
   end
 
-  # Non-blocking poll: returns one message from the queue, or nil after the
-  # timeout elapses with nothing available. Over the registry an event naming
-  # ANOTHER job is recorded into that job's own buffer and skipped - the
+  # Non-blocking poll: returns one message, or nil after the timeout. An event
+  # naming ANOTHER job is recorded into that job's buffer and skipped - the
   # foreground task never renders another job's lines.
   def poll(timeout = DEFAULT_POLL_TIMEOUT)
     event = @registry.poll(timeout)
@@ -150,13 +138,13 @@ class Task
     nil
   end
 
-  # True when no events are waiting (used by the drain loop to decide whether
-  # to show the spinner).
+  # True when no events are waiting (the drain loop uses it to decide
+  # whether to show the spinner).
   def outbox_empty?
     @registry.queue_empty?
   end
 
-  # Reply to a pending request (called from the main thread). Unblocks the
+  # Reply to a pending request (called from the main thread), unblocking the
   # task thread's #request call with the given value.
   def respond(value)
     @job.mark_awaiting(false)
@@ -167,7 +155,6 @@ class Task
     end
   end
 
-  # True when the task thread has been started and has not yet exited.
   def alive?
     !@thread.nil? && @thread.alive?
   end
@@ -226,9 +213,9 @@ class Task
   # Blocks until the main thread answers with #respond.
   def request(type, **payload)
     # While a request is unanswered, an input event must queue BEHIND the answer
-    # it gets, so the job is marked awaiting (issue #198 FIFO rule). The answer
-    # comes back on a channel SEPARATE from @inbox (issue #424): a steering note
-    # already resident in the job inbox can no longer be mistaken for the answer.
+    # it gets, so the job is marked awaiting (FIFO rule). The answer comes back
+    # on a channel SEPARATE from @inbox: a steering note already resident in the
+    # job inbox can no longer be mistaken for the answer.
     @pending_reply = Thread::Queue.new
     @job.mark_awaiting(true)
     push_event(type: :__request__, kind: type, **payload)
@@ -244,16 +231,14 @@ class Task
   # These find the current task via Thread.current and push events onto
   # ITS outbox (the single event queue). They NEVER write to a stream and
   # NEVER touch the buffer. Main-thread startup/shutdown output goes through
-  # the CLI's UI::Console instead - there is no Kernel fallback, and none
-  # should ever be needed (production callers run on a task thread).
+  # the CLI's UI::Console instead.
 
   # The Task running on the current thread (set by #start), or nil.
   def self.current
     Thread.current[:harness_task]
   end
 
-  # Emit ONE typed event onto the active task's outbox (the single event
-  # queue). No-op when no task is active (nothing to drain for).
+  # Emit ONE typed event onto the active task's outbox. No-op when no task is active.
   def self.emit(type, origin:, content: nil)
     task = current
     return nil unless task
@@ -262,8 +247,7 @@ class Task
   end
 
   # Write lines as :text events on the active task's outbox. One event per
-  # argument (like Kernel.puts). No-op when no task is active (the CLI owns
-  # main-thread output through its UI::Console).
+  # argument (like Kernel.puts). No-op when no task is active.
   def self.puts(*args)
     task = current
     return unless task
@@ -299,9 +283,8 @@ class Task
   #
   # Builds the task and hands it to a Poller, which runs the poll loop over the
   # single event queue, drives the spinner, serves dialogs and reads mid-turn
-  # notes, and returns when the task finishes (issue #286: the loop is the
-  # poller's, not the task's). The required `ui:` console is the single sink for
-  # ALL output; tests can pass a StringIO-backed UI::Console to capture it.
+  # notes, and returns when the task finishes. The required `ui:` console is the
+  # single sink for ALL output; tests can pass a StringIO-backed UI::Console.
   #
   # Returns [error_msg, task] where error_msg is nil on success.
   def self.run(
@@ -312,29 +295,27 @@ class Task
     input_path: nil,
     &block
   )
-    # The task runs on its job's registry, buffer and inbox (#286: the run
-    # record is the registry's, not the harness'). The drain loop is the single
-    # main-thread writer, so every put lands in the same record a save reads.
+    # The task runs on its job's registry, buffer and inbox. The drain loop is
+    # the single main-thread writer, so every put lands in the same record a save reads.
     task = Task.new(registry:, job:, input_path:, &block)
     task.ui = ui
     # The input path is the ONE reader the main thread's poll loop shares with
     # the idle prompt. It only PEEKS stdin until typing starts, so nothing races
     # for the keyboard. Input needs a harness to land on (nil = unit test).
     task.harness = harness
-    # The palette is the run's settings (issue #303, #286): a nil harness (a
-    # unit-test run with no harness) colors nothing, so the plain renderer stays.
+    # The palette is the run's settings: a nil harness (a unit-test run) colors
+    # nothing, so the plain renderer stays.
     palette = harness&.settings&.output_palette
-    # Markdown rendering of the assistant answer is opt-in (issue #106): the
-    # posture is read here (a Task builds its renderer once per turn), so a
-    # mid-run /markdown toggle lands on the next turn (the same as /palette).
+    # Markdown rendering of the assistant answer is opt-in; the posture is read
+    # here (a Task builds its renderer once per turn), so a mid-run /markdown
+    # toggle lands on the next turn.
     markdown = harness&.settings&.markdown?
-    # The table-width basis (issue #106): config-derived, read once per turn
-    # like the palette. nil = the renderer's default (80% of the terminal).
+    # The table-width basis: config-derived, read once per turn like the
+    # palette. nil = the renderer's default (80% of the terminal).
     max_width = harness&.settings&.markdown_max_width
     task.renderer = UI::Renderer.new(palette:, markdown:, markdown_max_width: max_width)
     task.note_editor = UI::Editor.new(ui.stdin) if ui.stdin && harness
-    # The Poller owns the main-thread loop, the spinner, stdin and dialog
-    # serving - none of that is the Task's concern (issue #286).
+    # The Poller owns the main-thread loop, the spinner, stdin and dialog serving.
     Poller.new(task).run
   end
 end

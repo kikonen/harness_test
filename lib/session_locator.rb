@@ -5,43 +5,27 @@ require "securerandom"
 
 require_relative "harness_error"
 
-# -- SessionLocator ---------------------------------------------------------
-#
-# The single place that knows WHERE a session lives and WHICH session this
-# run is. Pure path logic: it needs the working directory and nothing else -
-# no Harness, no LLM client, no logger.
-#
-# WHY THIS EXISTS (issue #276): a session id is identity, and almost every
-# piece of harness state is DERIVED from it (the log file, the history file,
-# the session directory). The old bootstrap minted a fresh random id inside
-# Session#initialize, built the logger and the client under it, and only
-# afterwards let --resume / --continue swap in a different saved id - so every
-# derived resource had to be chased and re-pointed afterwards (issues #113,
-# #119, #123, #135, #270). That rebind chase was a construction-order bug, not
-# a logging bug. Resolving identity here, BEFORE anything is constructed, is
-# what makes the whole rebind machinery unnecessary: the id is never wrong, so
-# no resource is ever built under the wrong one.
+# The single place that knows WHERE a session lives and WHICH session this run is. Pure
+# path logic: it needs only the working directory. Identity is resolved here, BEFORE any
+# derived resource (log, history, session dir) is built, so nothing is built under the wrong
+# id. The layered (dir-per-job) layout this reads: doc/session_layers_design.md.
 class SessionLocator
   HARNESS_DIR  = ".harness"
   SESSIONS_DIR = File.join(HARNESS_DIR, "sessions")
-  # issue #207: the session JSON lives INSIDE its own directory
-  # (.harness/sessions/<id>/session.json), alongside its log and history.
+  # The session JSON lives inside its own directory (sessions/<id>/session.json).
   SESSION_FILE = "session.json"
-  # issue #548 (dir per job): a saved run directory holds system.json + jobs/<id>/...
+  # A saved run directory holds system.json + jobs/<id>/...
   SYSTEM_FILE = "system.json"
   JOBS_DIR = "jobs"
-  # A job's replay tail (issue #548): the foreground buffer's saved entries,
-  # moved into the job dir on ownership grounds (JobRegistry owns it, not Session).
+  # A job's replay tail: the foreground buffer's saved entries, in the job dir (JobRegistry owns it).
   REPLAY_FILE = "replay.json"
-  # A job's own record (issue #548 increment 1): kind, status, result and edges
-  # AS IDS - the per-job detail the system.json jobs[] index points at.
+  # A job's own record (kind, status, result and edges as ids), the detail system.json's jobs[] points at.
   JOB_FILE = "job.json"
-  # issue #113: each session logs to its own file inside its session dir, so
-  # concurrent sessions in one workdir do not interleave in a shared log.
+  # Each session logs to its own file inside its session dir, so concurrent sessions in one
+  # workdir do not interleave in a shared log.
   SESSION_LOG_FILE = "harness.log"
-  # issue #279: characters of surrounding text #search shows around a match,
-  # so a hit reads as context rather than a bare id. Fixed window - the whole
-  # conversation is never dumped to the model, only these windows.
+  # Characters of surrounding text #search shows around a match, so a hit reads as context
+  # rather than a bare id. Fixed window - the whole conversation is never dumped, only these windows.
   SNIPPET_RADIUS = 80
 
   def initialize(workdir)
@@ -54,8 +38,8 @@ class SessionLocator
     File.join(@workdir, SESSIONS_DIR)
   end
 
-  # A path in the working directory as the model sees it (relative), so a spill
-  # the model is told about is a path the USER can open.
+  # A path in the working directory as the model sees it (relative), so a spill the model is
+  # told about is a path the USER can open.
   def relative_path(path)
     prefix = "#{@workdir}/"
     path.start_with?(prefix) ? path[prefix.length..] : path
@@ -65,11 +49,10 @@ class SessionLocator
     File.join(sessions_dir, id, SESSION_FILE)
   end
 
-  # -- Layered (dir-per-job) layout (issue #548) ----------------------------
-  # A saved SYSTEM is a session directory holding system.json plus a jobs/<id>/ tree.
-  # These are the path primitives the layered writer (#save_session) and the
-  # reader (#read_session / #list / #search) build on. session_dirs /
-  # session_files below address BOTH a layered system and a #207 dir.
+  # -- Layered (dir-per-job) layout -------------------------------------------
+  # A saved SYSTEM is a session directory holding system.json plus a jobs/<id>/ tree. These are
+  # the path primitives the layered writer and reader build on; session_dirs / session_files
+  # below address BOTH a layered system and a flat (one-file) session.
   def system_file_path(id)
     File.join(sessions_dir, id, SYSTEM_FILE)
   end
@@ -78,15 +61,13 @@ class SessionLocator
     File.join(sessions_dir, id, JOBS_DIR, job_id.to_s)
   end
 
-  # A job's conversation file. It carries NO session_id (a job is named by this
-  # path, doc/session_layers_design.md); the run UUID lives in the dir name and
-  # system.json only.
+  # A job's conversation file. It carries NO session_id (a job is named by this path); the run
+  # UUID lives in the dir name and system.json only.
   def job_session_file_path(id, job_id)
     File.join(job_dir_path(id, job_id), SESSION_FILE)
   end
 
-  # A job's own record file (kind/status/result/edges), the per-job detail the
-  # system.json jobs[] index points at (issue #548 increment 1).
+  # A job's own record file (kind/status/result/edges), the detail system.json's jobs[] points at.
   def job_file_path(id, job_id)
     File.join(job_dir_path(id, job_id), JOB_FILE)
   end
@@ -95,25 +76,21 @@ class SessionLocator
     File.join(job_dir_path(id, job_id), REPLAY_FILE)
   end
 
-  # True when the directory is a layered SYSTEM (it has system.json). A #207 layout
-  # dir (top-level session.json, no system.json) is not.
+  # True when the directory is a layered SYSTEM (it has system.json). A flat layout dir
+  # (top-level session.json, no system.json) is not.
   def system_dir?(id)
     File.file?(system_file_path(id))
   end
 
-  # The session's own log file (issue #113). It is part of WHERE a session
-  # lives, so it is spelled once, here.
+  # The session's own log file. It is part of WHERE a session lives, so it is spelled once here.
   def session_log_path(id)
     File.join(sessions_dir, id, SESSION_LOG_FILE)
   end
 
-  # Session DIRECTORY names (issue #548). The unit of a saved session is its
-  # directory, which is either the #207 layout (a top-level session.json) or a
-  # layered RUN (a system.json + jobs/<id>/). Enumerating directories - not a
-  # one-level session.json glob - is what lets both layouts coexist: the old
-  # glob returned [] for a layered system (its session.json is nested under jobs/),
-  # which would break /sessions, --resume, --continue and --delete-session the
-  # moment the writer switched layouts. A stray loose file is not a directory.
+  # Session DIRECTORY names. The unit of a saved session is its directory, either the flat layout
+  # (a top-level session.json) or a layered run (system.json + jobs/<id>/). Enumerating directories
+  # - not a one-level session.json glob - lets both layouts coexist: a glob would return [] for a
+  # layered system (its session.json is nested under jobs/). A stray loose file is not a directory.
   def session_dirs
     return [] unless File.directory?(sessions_dir)
 
@@ -124,9 +101,9 @@ class SessionLocator
   end
 
   # The saved JSON that names each session directory: system.json for a layered system,
-  # session.json for a #207 session. Callers that need the directory take
-  # File.dirname of the path. #find_session_file / #list / #search / #newest_*
-  # all derive from this so both layouts are addressed the same way.
+  # session.json for a flat session. Callers that need the directory take File.dirname.
+  # #find_session_file / #list / #search / #newest_* all derive from this so both layouts
+  # are addressed the same way.
   def session_files
     session_dirs.map do |dir|
       sys_path = File.join(dir, SYSTEM_FILE)
@@ -141,8 +118,7 @@ class SessionLocator
   def find_session_file(id)
     raise HarnessError, "invalid session id: #{id}" unless valid_id?(id)
 
-    # issue #207: the id is the session DIRECTORY name, so an abbreviated id
-    # is matched by prefix.
+    # The id is the session DIRECTORY name, so an abbreviated id is matched by prefix.
     matches = session_files.select do |p|
       File.basename(File.dirname(p)).downcase.start_with?(id.to_s.downcase)
     end
@@ -158,12 +134,10 @@ class SessionLocator
 
   # -- Identity resolution (the point of this class) -------------------------
 
-  # The id THIS run must use, settled before anything is built from it:
-  # an existing session for --resume / --continue, a fresh UUID otherwise.
-  # Raises rather than silently falling back to a new id: a typo'd resume id
-  # must not quietly start an unrelated empty session the user thinks is
-  # theirs, and (unlike the old order) raising here means NO directory was
-  # ever created for an id this run does not use.
+  # The id THIS run must use, settled before anything is built from it: an existing session for
+  # --resume / --continue, a fresh UUID otherwise. Raises rather than silently falling back to a
+  # new id: a typo'd resume id must not quietly start an unrelated empty session the user thinks
+  # is theirs, and raising here means NO directory was ever created for an unused id.
   def resolve_id(resume: nil, newest: false)
     return newest_id if newest
     return find_id!(resume) if resume
@@ -192,16 +166,12 @@ class SessionLocator
     File.basename(File.dirname(path))
   end
 
-  # The saved conversation data of a session id (used to fill a session whose
-  # id is ALREADY settled - which is why this returns data instead of doing
-  # the restore itself).
-  #
-  # A layered SYSTEM (issue #548) stores its data split across system.json and the
-  # foreground job's files; a #207 session stores one flat session.json. Both
-  # are reassembled into the SAME flat hash so the resume consumers (Harness#
-  # restore, apply_resume_state, CLI#setup) read one shape regardless of layout
-  # - the layout stays the locator's knowledge, not the caller's. A #207 session
-  # is read as the degenerate one-job case: its flat file already IS that hash.
+  # The saved conversation data of a session id (used to fill a session whose id is ALREADY
+  # settled - which is why this returns data instead of doing the restore itself). A layered
+  # system stores its data split across system.json and the job files; a flat session stores one
+  # session.json. Both are reassembled into the SAME flat hash so resume consumers read one shape
+  # regardless of layout - the layout stays the locator's knowledge. A flat session is read as
+  # the degenerate one-job case: its flat file already IS that hash.
   def read_session(id)
     path = find_session_file(id)
     raise HarnessError, "no saved session matching '#{id}' (see /sessions)" unless path
@@ -214,8 +184,8 @@ class SessionLocator
     assemble_system(session_id)
   end
 
-  # The layered system record (issue #548): system.json of a session directory, parsed
-  # symbolized. Raises when the id has no system record (a #207 session has none).
+  # The layered system record: system.json of a session directory, parsed symbolized. Raises
+  # when the id has no system record (a flat session has none).
   def read_system(id)
     path = system_file_path(id)
     unless File.file?(path)
@@ -225,9 +195,8 @@ class SessionLocator
     JSON.parse(File.read(path), symbolize_names: true)
   end
 
-  # A job's conversation file (jobs/<id>/session.json), parsed symbolized. Raises
-  # when that job has no conversation file (its dir was dropped, or it is the
-  # degenerate layout with no per-job tree).
+  # A job's conversation file (jobs/<id>/session.json), parsed symbolized. Raises when that job
+  # has no conversation file (its dir was dropped, or it is the degenerate layout with no per-job tree).
   def read_job_session(id, job_id)
     path = job_session_file_path(id, job_id)
     unless File.file?(path)
@@ -237,9 +206,8 @@ class SessionLocator
     JSON.parse(File.read(path), symbolize_names: true)
   end
 
-  # A job's own record (jobs/<id>/job.json): kind, status, result and edges as
-  # ids. Read by the per-job resume path (issue #548 increment 1 write side; the
-  # id -> live Job re-resolution is increment 2). Raises when the job has no record.
+  # A job's own record (jobs/<id>/job.json): kind, status, result and edges as ids. Read by the
+  # per-job resume path. Raises when the job has no record.
   def read_job_record(id, job_id)
     path = job_file_path(id, job_id)
     unless File.file?(path)
@@ -249,18 +217,15 @@ class SessionLocator
     JSON.parse(File.read(path), symbolize_names: true)
   end
 
-  # -- Per-job restore (issue #548 increment 3) -----------------------------
+  # -- Per-job restore --------------------------------------------------------
 
-  # EVERY retained job with a saved conversation dir: each job's own chain, kind,
-  # status and shown tail, keyed by its SAVED id. No job is excluded - on restore
-  # no job is foreground yet (#548); the system owner rebuilds these jobs with
-  # their saved ids, then decides which is foreground and restores its chain.
-  # Each entry is {id:, kind:, status:, messages:, replay_tail:} - kind/status as
-  # JSON gives them (Strings), and a job whose dir was dropped simply has no entry.
-  # A #207 flat session has NO per-job tree at all, so it contributes nothing:
-  # read_system would raise for it, hence the system_dir? guard. Reading a saved
-  # file is main-safe; the restore that puts these chains into live jobs is the
-  # system owner's.
+  # EVERY retained job with a saved conversation dir: each job's own chain, kind, status and shown
+  # tail, keyed by its SAVED id. No job is excluded - on restore no job is foreground yet; the
+  # system owner rebuilds these jobs with their saved ids, then decides which is foreground. Each
+  # entry is {id:, kind:, status:, messages:, replay_tail:}; a job whose dir was dropped has no
+  # entry. A flat session has no per-job tree so contributes nothing (read_system would raise -
+  # hence the system_dir? guard). Reading a saved file is main-safe; putting these into live jobs
+  # is the system owner's.
   def job_restores(id)
     return [] unless system_dir?(id)
 
@@ -269,8 +234,8 @@ class SessionLocator
       next if job_id.nil?
       next unless File.file?(job_session_file_path(id, job_id))
 
-      # Status and kind come from the job's OWN record (job.json is what a save
-      # writes them into); the index entry names the job, the record describes it.
+      # Status and kind come from the job's OWN record (job.json is what a save writes them into);
+      # the index entry names the job, the record describes it.
       record_data = parse_json(job_file_path(id, job_id)) || {}
       {
         id: job_id,
@@ -282,10 +247,9 @@ class SessionLocator
     end
   end
 
-  # Saved sessions, newest first (pure data; Commands::SessionsCommand is the
-  # single renderer of this shape, so /sessions and --list-sessions show the
-  # same columns from the same source). An unreadable file is skipped rather
-  # than failing the whole listing.
+  # Saved sessions, newest first (pure data; Commands::SessionsCommand is the single renderer of
+  # this shape, so /sessions and --list-sessions show the same columns from the same source). An
+  # unreadable file is skipped rather than failing the whole listing.
   def list
     session_files.sort_by { |p| File.mtime(p) }.reverse.map do |path|
       id   = File.basename(File.dirname(path))
@@ -306,13 +270,11 @@ class SessionLocator
     end.compact
   end
 
-  # Saved sessions whose CONTENT mentions a query (issue #279). The point is to
-  # let the model answer "which session was I doing X in?" - /sessions only
-  # shows counts, so the only way to find a session by what it was ABOUT was to
-  # open each one. Matches the id and every message's text, case-insensitively,
-  # by substring. Each hit carries a snippet around the first match so the
-  # model can tell the sessions apart without reading them whole. An unreadable
-  # file is skipped, the same as #list. Newest first, like #list.
+  # Saved sessions whose CONTENT mentions a query. The point is to let the model answer "which
+  # session was I doing X in?" - /sessions only shows counts. Matches the id and every message's
+  # text, case-insensitively, by substring. Each hit carries a snippet around the first match so
+  # the model can tell sessions apart without reading them whole. An unreadable file is skipped,
+  # like #list. Newest first.
   def search(query)
     q = query.to_s.strip.downcase
     return [] if q.empty?
@@ -343,10 +305,9 @@ class SessionLocator
 
   private
 
-  # The data hash of one session ENTRY file for the list/search side: system.json
-  # for a layered system (its recorded jobs carry each job's conversation size), or
-  # the #207 flat session.json as-is. Resume keeps its own assemble_system - a
-  # listing never needs the conversation folded back in.
+  # The data hash of one session ENTRY file for the list/search side: system.json for a layered
+  # system (its recorded jobs carry each job's conversation size), or the flat session.json as-is.
+  # Resume keeps its own assemble_system - a listing never needs the conversation folded back in.
   def entry_data(path)
     id = File.basename(File.dirname(path))
     return read_system(id) if File.basename(path) == SYSTEM_FILE
@@ -354,30 +315,26 @@ class SessionLocator
     JSON.parse(File.read(path), symbolize_names: true)
   end
 
-  # The system half of a layered resume: system.json AS IS (identity, postures,
-  # access, file_cache, foreground, jobs, next_id). It deliberately carries NO
-  # job conversation - the system's owner reads each job's own files
-  # (#read_job_session / #job_restores) and restores them job by job. No
-  # foreground special case here: which job is foreground is the system owner's
-  # decision (#548), not the locator's.
+  # The system half of a layered resume: system.json AS IS (identity, postures, access, file_cache,
+  # foreground, jobs, next_id). It carries NO job conversation - the system's owner reads each job's
+  # own files and restores them job by job. Which job is foreground is the system owner's decision,
+  # not the locator's.
   def assemble_system(session_id)
     read_system(session_id)
   end
 
   # -- Reading helpers -------------------------------------------------------
 
-  # Parse a JSON file symbolized, or nil when it does not exist. Used for the
-  # job's replay.json so the assembled replay_tail is symbol-keyed like every
-  # other resume_data value (the resume side re-symbols entry type/origin).
+  # Parse a JSON file symbolized, or nil when it does not exist. Used for a job's replay.json so
+  # the assembled replay_tail is symbol-keyed like every other resume_data value.
   def parse_json(path)
     return nil unless path && File.file?(path)
 
     JSON.parse(File.read(path), symbolize_names: true)
   end
 
-  # [{id:, messages:}] for one session: the per-job conversation sizes a save
-  # records in system.json's job entries (no job-file reads). A #207 flat
-  # session is the degenerate one-job case, read from its own messages.
+  # [{id:, messages:}] for one session: the per-job conversation sizes a save records in system.json's
+  # job entries (no job-file reads). A flat session is the degenerate one-job case, read from its own messages.
   def job_breakdown(data)
     return Array(data[:jobs]).map do |job|
       { id: job[:id], messages: job[:messages].to_i }
@@ -386,8 +343,8 @@ class SessionLocator
     [{ id: 0, messages: (data[:messages] || []).size }]
   end
 
-  # A modern save keeps grants under the per-mode access hash; a pre-#92 file
-  # used the flat files/dirs/trees lists. Count the union of distinct paths.
+  # A modern save keeps grants under the per-mode access hash; a legacy file used the flat
+  # files/dirs/trees lists. Count the union of distinct paths.
   def grant_count(data)
     access = data[:access] || data["access"]
     return legacy_grant_count(data) unless access.is_a?(Hash)
@@ -410,10 +367,9 @@ class SessionLocator
     !id.to_s.strip.empty? && id.to_s.match?(/\A[0-9a-fA-F-]+\Z/)
   end
 
-  # Where a query appears in one session: the id, then every job's message text.
-  # A layered system stores each conversation in its own jobs/<id>/session.json,
-  # so a search reads them all (a sub-agent transcript must be findable, not just
-  # the foreground's). Returns one snippet per matching location.
+  # Where a query appears in one session: the id, then every job's message text. A layered system
+  # stores each conversation in its own jobs/<id>/session.json, so a search reads them all (a
+  # sub-agent transcript must be findable, not just the foreground's). One snippet per matching location.
   def match_all(id, data, query)
     found = []
     found << snippet(id.to_s, query) if id.to_s.downcase.include?(query)
@@ -424,8 +380,8 @@ class SessionLocator
     found
   end
 
-  # The message contents of every conversation a session owns: the flat file for
-  # a #207 session, every retained job's session.json for a layered system.
+  # The message contents of every conversation a session owns: the flat file for a flat session,
+  # every retained job's session.json for a layered system.
   def job_texts(id, data)
     return Array(data[:messages]).map { |m| m[:content] } unless system_dir?(id)
 
@@ -435,8 +391,8 @@ class SessionLocator
     end
   end
 
-  # A compact window of text centred on the first case-insensitive occurrence
-  # of the query, with leading/trailing ellipses when the real text is longer.
+  # A compact window of text centred on the first case-insensitive occurrence of the query, with
+  # leading/trailing ellipses when the real text is longer.
   def snippet(text, query)
     down = text.downcase
     at   = down.index(query)
