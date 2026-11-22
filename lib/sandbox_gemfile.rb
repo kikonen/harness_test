@@ -2,11 +2,12 @@
 
 require "bundler"
 require "fileutils"
+require_relative "sensitive_files"
 
 # The blessed location for project-specific Ruby scripts and their gems
 # (issue #340). Rationale and the measured load-path trap: doc/sandbox_gemfile_design.md.
 class SandboxGemfile
-  DIR = ".harness/sandbox"
+  DIR = SensitiveFiles::SANDBOX_DIR
   GEMFILE_NAME = "Gemfile"
 
   # The starter lives in the repo (config/sandbox_gemfile.example.rb), not

@@ -155,13 +155,17 @@ class FileList
   # The single decision point for "blocked whatever the grants": a sensitive NAME,
   # unless the path sits inside a scratch zone (a nested .git there is a disposable
   # clone) or inside the project's own skills directory (repo content the owner
-  # chose to keep in .harness/skills) - where only a .env* NAME still blocks, since
-  # the exemption lifts the .harness component and never the secret-file rule.
-  # doc/sensitive_paths_design.md, doc/skills_design.md.
+  # chose to keep in .harness/skills) or inside the Ruby sandbox (issue #340: the
+  # model manages that Gemfile with bundle, which already writes it from a shell) -
+  # where only a .env* NAME still blocks, since the exemption lifts the .harness
+  # component and never the secret-file rule.
+  # doc/sensitive_paths_design.md, doc/skills_design.md, doc/sandbox_gemfile_design.md.
   def sensitive?(path)
     rel = relative_path(path)
     return false if SensitiveFiles.scratch_zone?(rel)
-    return SensitiveFiles.env_named?(path) if SensitiveFiles.skills_zone?(rel)
+    if SensitiveFiles.skills_zone?(rel) || SensitiveFiles.sandbox_zone?(rel)
+      return SensitiveFiles.env_named?(path)
+    end
 
     SensitiveFiles.sensitive?(path)
   end

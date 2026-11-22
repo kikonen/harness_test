@@ -105,6 +105,28 @@ RSpec.describe SensitiveFiles do
     end
   end
 
+  # The Ruby sandbox (issue #340): the second grantable subtree of .harness/.
+  describe '.sandbox_zone? (the grantable sandbox subtree of .harness/)' do
+    it 'recognises the sandbox directory itself and anything under it' do
+      expect(described_class.sandbox_zone?('.harness/sandbox')).to be(true)
+      expect(described_class.sandbox_zone?('.harness/sandbox/Gemfile')).to be(true)
+      expect(described_class.sandbox_zone?('.harness/sandbox/a/b.lock')).to be(true)
+    end
+
+    it 'is one directory - a sibling of it is not the zone' do
+      expect(described_class.sandbox_zone?('.harness/sandboxx')).to be(false)
+      expect(described_class.sandbox_zone?('.harness/sandbox-backup/Gemfile')).to be(false)
+      expect(described_class.sandbox_zone?('.harness/sessions')).to be(false)
+      expect(described_class.sandbox_zone?('.harness')).to be(false)
+    end
+
+    it 'is relative to the working directory, so an absolute or nested path is not it' do
+      expect(described_class.sandbox_zone?(nil)).to be(false)
+      expect(described_class.sandbox_zone?('lib/.harness/sandbox')).to be(false)
+      expect(described_class.sandbox_zone?('tmp/keep/340/.harness/sandbox')).to be(false)
+    end
+  end
+
   # The owner's own space (issue #274). NOT a sensitive dir: a human grant on it is
   # legal and today the human's dialog is what protects it. The list exists so a
   # posture that auto-covers the rest of the working directory leaves local/ asking.

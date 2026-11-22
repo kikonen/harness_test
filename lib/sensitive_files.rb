@@ -26,6 +26,12 @@ module SensitiveFiles
   # grantable - the exemption lifts the .harness component only, never a .env* name.
   SKILLS_DIR = ".harness/skills"
 
+  # The project Ruby sandbox (issue #340), relative to the working directory;
+  # SandboxGemfile::DIR is this same constant. The model manages that Gemfile with
+  # `bundle add`/`bundle install`, which already write it from a shell, so blocking
+  # it from the file tools only refuses the one path the model is told to edit.
+  SANDBOX_DIR = ".harness/sandbox"
+
   # The default entry of the posture-exemption list (FileList#protected_dirs,
   # issue #385): the owner's space, workdir-relative. NOT a sensitive dir - a human
   # grant on it is legal, and the human's dialog is what protects it. The list
@@ -62,6 +68,13 @@ module SensitiveFiles
   # relative_path has already resolved .harness/skills/../sessions out of the zone.
   def self.skills_zone?(rel_path)
     !rel_path.nil? && (rel_path == SKILLS_DIR || rel_path.start_with?("#{SKILLS_DIR}/"))
+  end
+
+  # True when a workdir-relative path IS the sandbox directory or lies inside it.
+  # The same exact-prefix shape as #skills_zone?, so .harness/sandboxx and a
+  # resolved escape (.harness/sandbox/../sessions) are not the zone.
+  def self.sandbox_zone?(rel_path)
+    !rel_path.nil? && (rel_path == SANDBOX_DIR || rel_path.start_with?("#{SANDBOX_DIR}/"))
   end
 
   # True when a workdir-relative path IS dir or lies inside it. The exact-prefix
