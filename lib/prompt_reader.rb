@@ -76,9 +76,17 @@ class PromptReader
     tags   = ["[#{model ? "#{model} (#{effort})" : effort}]"]
     badge  = Poller.mode_badge(harness)
     tags  << badge if badge
-    prefix = "#{tags.join(' ')} > "
+    prefix = "#{tags.join(' ')}#{job_tag} > "
     ctx = harness.context_indicator
     @ui.puts ctx ? "#{ctx} #{prefix}" : prefix
     @ui.flush
+  end
+
+  # Which job the next prompt goes to (#548): the SAME builder the spinner uses,
+  # so the idle line and a live turn cannot name different things. Every job is
+  # named, job 0 (:main) included - consistency over omitting the common case.
+  def job_tag
+    tag = Poller.job_tag(@registry.foreground_job)
+    tag ? " #{tag}" : ""
   end
 end

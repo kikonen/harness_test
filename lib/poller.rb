@@ -149,16 +149,32 @@ class Poller
     detail  = task.buffer.latest_head(:spinner_detail)&.content || {}
     spinner = UI::Spinner.new(detail[:message] || Task::DEFAULT_SPINNER_MESSAGE,
                               detail[:suffix], ui: task.ui)
-    # A live badge so a mid-turn /yolo toggle is visible at once.
-    harness = task.harness
-    if harness
-      spinner.badge = -> { self.class.mode_badge(harness) }
-    end
+    # A live badge: which job is working (#548) plus the posture tags, so a
+    # mid-turn /yolo toggle is visible at once. The badge exists even for a
+    # harness-less task (the job half does not need a harness).
+    spinner.badge = -> { self.class.turn_badge(task:, harness: task.harness) }
     # The turn clock (issue #277): a live callable, so every rebuilt spinner
     # of the same turn keeps counting from the turn's start, not its own.
     spinner.elapsed = -> { task.elapsed_label }
     spinner.start
     task.spinner = spinner
+  end
+
+  # The spinner's badge: the job that is working (#548) then the posture tags.
+  def self.turn_badge(task:, harness: nil)
+    tags = [job_tag(task.job), mode_badge(harness)].compact
+    tags.empty? ? nil : tags.join(" ")
+  end
+
+  # Which job a turn belongs to (#548): a drain loop drains ONE job's queue, so
+  # the spinner line during a turn is that job's, and the idle modeline names
+  # the job the next prompt goes to. EVERY job is named, main included: the tag
+  # is the same on every prompt of a run that has several agents, so the active
+  # one never reads differently from the others.
+  def self.job_tag(job)
+    return nil if job.nil?
+
+    "[job #{job.id} #{job.kind}]"
   end
 
   # The spinner's posture tags: one bracket per NON-default posture (the command

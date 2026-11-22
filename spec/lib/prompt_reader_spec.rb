@@ -73,7 +73,7 @@ RSpec.describe PromptReader do
     allow(editor).to receive(:read_multiline).and_return(
       editor_result('x', :submitted))
 
-    expect(ui).to receive(:puts).with(/test-model .* \[MANUAL\] > /)
+    expect(ui).to receive(:puts).with(/test-model .* \[MANUAL\] \[job 0 main\] > /)
 
     build_reader.read
   end
@@ -82,7 +82,7 @@ RSpec.describe PromptReader do
     allow(editor).to receive(:read_multiline).and_return(
       editor_result('x', :submitted))
 
-    expect(ui).to receive(:puts).with(/\[YOLO\] > /)
+    expect(ui).to receive(:puts).with(/\[YOLO\] \[job 0 main\] > /)
 
     build_reader(harness_stub(command_label: 'YOLO')).read
   end
@@ -93,7 +93,7 @@ RSpec.describe PromptReader do
     allow(editor).to receive(:read_multiline).and_return(
       editor_result('x', :submitted))
 
-    expect(ui).to receive(:puts).with(/\[MANUAL\] \[STREAM\] > /)
+    expect(ui).to receive(:puts).with(/\[MANUAL\] \[STREAM\] \[job 0 main\] > /)
 
     build_reader(harness_stub(stream_label: 'STREAM')).read
   end
@@ -104,7 +104,7 @@ RSpec.describe PromptReader do
     allow(editor).to receive(:read_multiline).and_return(
       editor_result('x', :submitted))
 
-    expect(ui).to receive(:puts).with(/\[MANUAL\] > /)
+    expect(ui).to receive(:puts).with(/\[MANUAL\] \[job 0 main\] > /)
 
     build_reader.read
   end
@@ -113,9 +113,31 @@ RSpec.describe PromptReader do
     allow(editor).to receive(:read_multiline).and_return(
       editor_result('x', :submitted))
 
-    expect(ui).to receive(:puts).with(/ctx: 1k\/8k .* \[MANUAL\] > /)
+    expect(ui).to receive(:puts).with(/ctx: 1k\/8k .* \[MANUAL\] \[job 0 main\] > /)
 
     build_reader(harness_stub(ctx: 'ctx: 1k/8k')).read
+  end
+
+  # #548: once a run has several agents, the idle line must name the job the
+  # next prompt goes to - and it uses the spinner's own builder so the two
+  # cannot name different things.
+  describe 'the active job on the modeline (issue #548)' do
+    def foreground_reader(kind)
+      registry = JobRegistry.new
+      registry.add_job(kind: :main)
+      registry.foreground = registry.add_job(kind: kind, harness: harness_stub).id
+
+      described_class.new(ui: ui, registry:)
+    end
+
+    it 'names the foreground job when it is not the main one' do
+      allow(editor).to receive(:read_multiline).and_return(
+        editor_result('x', :submitted))
+
+      expect(ui).to receive(:puts).with(/\[MANUAL\] \[job 1 sub_agent\] > /)
+
+      foreground_reader(:sub_agent).read
+    end
   end
 
   it 'keeps a cancelled buffer as the draft and re-prompts' do
@@ -164,5 +186,19 @@ RSpec.describe PromptReader do
     expect(printed).to include(
       '  (edited with vim - draft kept; press the submit key to send)'
     )
+  end
+
+  # #548: the modeline's job half is the spinner's own builder, so an idle line
+  # and a live turn cannot name different things - and job 0 is named like every
+  # other job.
+  it 'names the active job with the spinner job tag builder itself' do
+    allow(editor).to receive(:read_multiline).and_return(
+      editor_result('x', :submitted))
+    reader = build_reader
+    expected = Poller.job_tag(reader.instance_variable_get(:@registry).foreground_job)
+
+    expect(ui).to receive(:puts).with(/#{Regexp.escape(expected)} > $/)
+
+    reader.read
   end
 end

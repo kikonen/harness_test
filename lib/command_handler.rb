@@ -18,6 +18,7 @@ require_relative "commands/ctx_command"
 require_relative "commands/jobs_command"
 require_relative "commands/save_command"
 require_relative "commands/reasoning_command"
+require_relative "commands/replay_command"
 require_relative "commands/sessions_command"
 require_relative "commands/tools_command"
 require_relative "commands/mcp_command"
@@ -59,6 +60,7 @@ class CommandHandler
     "jobs"          => Commands::JobsCommand,
     "save"          => Commands::SaveCommand,
     "reasoning"     => Commands::ReasoningCommand,
+    "replay"        => Commands::ReplayCommand,
     "sessions"      => Commands::SessionsCommand,
     "tools"         => Commands::ToolsCommand,
     "mcp"           => Commands::McpCommand,
@@ -82,7 +84,10 @@ class CommandHandler
     ui:,
     settings: nil,
     registry: nil,
-    system_saver: nil)
+    system_saver: nil,
+    harness_factory: nil,
+    session_id: nil
+  )
     @file_list = file_list
     # The run-wide posture/consent state (#286): posture commands read and
     # write it directly instead of routing through Harness.
@@ -101,6 +106,11 @@ class CommandHandler
     self.registry = registry
     # The run's single SystemSaver (#548), passed to every command built here.
     self.system_saver = system_saver
+    # The run's HarnessFactory and SYSTEM id (#548): a command that adds an
+    # agent to the run builds it through the factory, under the id the run
+    # owner alone knows. Passed to every command built here, like the registry.
+    @harness_factory = harness_factory
+    @session_id      = session_id
   end
 
   def exiting?
@@ -185,7 +195,9 @@ class CommandHandler
       help_renderer: @help_renderer,
       settings: @settings,
       registry:,
-      system_saver:)
+      system_saver:,
+      harness_factory: @harness_factory,
+      session_id: @session_id)
   end
 
   # issue #129: `! cmd` runs a shell command locally, bypassing the model.

@@ -61,6 +61,9 @@ class HarnessFactory
   # saved half (its chain, active model, param overrides), never the system
   # record - a system record fed to a job Harness would restore one agent's
   # conversation into every job.
+  # Public so the run owner can give a job that already exists (a rebuilt saved
+  # job) its agent, which is exactly what a layered resume has to do for every
+  # saved job - not only for the foreground one.
   def build_for(job, session_id:, resume_data: nil, base_file_list: nil)
     raise HarnessError, "no job to attach a harness to" if job.nil?
     raise HarnessError, "job #{job.id} already has a harness" if job.harness
@@ -71,6 +74,12 @@ class HarnessFactory
       session_id:,
       resume_data:,
       logger: @logger)
+    # A resumed job's model comes from its own saved half (Harness#apply_resume_state).
+    # A job built fresh - a /jobs add - seeds from settings alone, where a config
+    # DEFAULT model leaves active_model nil: without this the job's own name and the
+    # active_model it then saves would be nil, and a resume could not look that
+    # model up again. Harness seeds the same name when it seeds ModelConfig.
+    harness.model_config.active_model ||= @settings.active_model_name
     attach(harness, job)
     harness
   end

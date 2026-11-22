@@ -460,7 +460,12 @@ class Session
   # with (the current build_system_prompt), not the saved one, so a resumed
   # run follows the rules as they are now - not as they were at save time.
   def restore(data, file_list)
-    @created_at    = Time.parse(data[:created_at])
+    # A job's own saved half carries created_at; a half written before that key
+    # existed per job has none, and its start time is not recoverable - falling
+    # back to now costs one cosmetic /session line, whereas parsing nil crashed
+    # the whole resume.
+    created = data[:created_at]
+    @created_at = created ? Time.parse(created) : Time.now
     @session_id    = data[:session_id] if data[:session_id]
     @user_prompts  = data[:user_prompts] || 0
     @last_stats    = data[:last_stats]

@@ -239,11 +239,8 @@ RSpec.describe SessionLocator do
     end
   end
 
-  # issue #548 increment 3: the per-job read side. The foreground chain is already
-  # in resume_data, so job_restores delivers the OTHER jobs - each with its own
-  # status and shown tail - and a #207 session has no job tree to read.
   describe '#job_restores (issue #548 per-job restore)' do
-    it 'returns EVERY job with a saved dir, with its status and tail' do
+    it 'returns EVERY job with a saved dir, with its own session half, status and tail' do
       seed_system(sid_c, jobs: [0, 1, 2], statuses: { 1 => "pending", 2 => "finished" })
       File.write(locator.job_replay_file_path(sid_c, 1),
                  JSON.generate([{ type: 'response', origin: 'session_manager', content: 'shown' }]))
@@ -252,7 +249,7 @@ RSpec.describe SessionLocator do
 
       expect(restores.map { |r| r[:id] }).to eq([0, 1, 2])
       job1 = restores.find { |r| r[:id] == 1 }
-      expect(job1[:messages].first[:content]).to eq('job1')
+      expect(job1[:session][:messages].first[:content]).to eq('job1')
       expect(job1[:replay_tail].first[:content]).to eq('shown')
       # The status comes from the job's OWN record file (job.json), not from
       # system.json's index, which names the job rather than describing it.

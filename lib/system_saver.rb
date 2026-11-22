@@ -36,26 +36,11 @@ class SystemSaver
     @record.write_system_files(@locator, id, session_h)
   end
 
-  # The saved conversations of the jobs the system's own resume_data does not
-  # carry - every saved job except the foreground one (issue #548 increment 3).
-  # The saved system id is passed in: this object is built before the CLI has
-  # resolved one, and a resume reads the jobs of the session it resumed.
+  # Every job with a saved conversation dir: its own chain half, kind, status and
+  # shown tail. The saved system id is passed in: this object is built before the
+  # CLI has resolved one, and a resume reads the jobs of the session it resumed.
   def job_restores(saved_system_id)
     @locator.job_restores(saved_system_id)
-  end
-
-  # The FOREGROUND job's own saved conversation half (its chain + per-agent
-  # model/param state), read straight from jobs/<id>/session.json. resume_data
-  # no longer folds it in (#548); the system owner reads it here to rebuild the
-  # foreground job as its own agent. {} when the job has no saved conversation
-  # (its dir was dropped) so the caller falls back to a fresh main turn.
-  # resume_data carries the SYSTEM half; the job file carries the CONVERSATION
-  # half - disjoint keys composed here, not a locator-side foreground fold.
-  def resume_main(saved_system_id, job_id, system_record)
-    job_path = @locator.job_session_file_path(saved_system_id, job_id)
-    return system_record unless File.file?(job_path)
-
-    system_record.merge(@locator.read_job_session(saved_system_id, job_id))
   end
 
   # The saved shown tail of a job (its own replay.json), for the foreground
@@ -84,29 +69,34 @@ class SystemSaver
     # this - system.json carries the SYSTEM's access list and digest cache, and
     # each job Harness has its own SessionFileCache.
     #
-    # A main thread may not read a RUNNING job's messages (they are being mutated
-    # on its own thread; a lock would be needed, which we avoid - issue #548 F). A
-    # job's CONVERSATION is written here only when quiescent: a FINISHED job (its
-    # thread exited) or the FOREGROUND job (its turn was awaited/joined). A RUNNING
-    # non-foreground job persists ITSELF on its own thread - its periodic auto-save
-    # already wrote jobs/<id>/session.json, and Job#request_save makes it save again
-    # at its next safe point. The system half below records that job's job.json +
-    # replay.json for every job (registry data, no chain read).
-    fg = @registry.foreground_job
+    # Every job with an agent is written, whatever its status: a job that ran a
+    # turn and was never :done is still :pending, so gating on finished? left
+    # background chains unwritten and the resume with nothing to rebuild (#548).
+    # Marking such a job :finished so it would save is the wrong fix - Job#finish
+    # delivers its result to a live requester. A job with an empty chain is still
+    # written: its job.json and model state have to survive, and whether the run
+    # is worth saving at all is JobRegistry#any_job_has_session_state?'s question.
+    #
+    # THREADING: reading a job's messages from the main thread is safe only when
+    # no thread is mutating them, and a save point has none - the exit save runs
+    # after every job thread is joined, and a mid-run save of a RUNNING job goes
+    # through Job#request_save so that job writes its own jobs/<id>/session.json
+    # on its own thread.
     @registry.jobs.each do |job|
       harness = job.harness
-      next if harness.nil? || harness.session.empty?
-      next if !job.equal?(fg) && !job.finished?
+      next if harness.nil?
 
       harness.session_manager.job_id = job.id
       harness.session_manager.save_job_session(run_id)
     end
 
-    harness = fg&.harness
+    # The system half describes the system through its foreground job: the
+    # foreground carries the run's own FileList, so its to_h is where the system's
+    # access list, digest cache and workdir come from.
+    harness = @registry.foreground_job&.harness
     return run_id if harness.nil?
 
-    session_h = harness.session.to_h(harness.file_list)
-    write_system_files(run_id, session_h)
+    write_system_files(run_id, harness.session.to_h(harness.file_list))
     run_id
   end
 end

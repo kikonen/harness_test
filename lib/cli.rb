@@ -142,36 +142,15 @@ class CLI
       logger: SessionLogger.build(@locator.session_log_path(session_id)))
     # #548: resume is the SYSTEM's work, not a foreground special case folded
     # into one flat hash. A fresh run builds the main turn (job 0) as its own
-    # agent. A resumed run rebuilds the FOREGROUND job at its SAVED id with its
-    # own saved chain (so it matches jobs/<fg>/), restores the system state,
-    # then rebuilds the other jobs at their ids. Only the foreground job gets a
-    # full agent today (lib has no second agent yet), so a non-foreground job is
-    # stated as dropped - it has no agent to resume a conversation into.
+    # agent. A resumed run rebuilds EVERY job the saved system names, each at its
+    # saved id and with its OWN saved conversation, and only then sets the
+    # foreground - so a resumed run has the same agents it saved, and switching to
+    # one of them reaches a real agent with a real chain.
     saved_fg = resume_data ? resume_data[:foreground_job] : nil
-    @saved_jobs = resume_data ? Array(resume_data[:jobs]) : []
-    # The saved foreground dir intact? If the drop rule removed it the foreground
-    # chain is gone and the main turn starts fresh at job 0 (0 < any saved id).
-    main_id = saved_fg if saved_fg && File.file?(@locator.job_session_file_path(session_id, saved_fg))
-    main_data = main_id ? @system_saver.resume_main(session_id, main_id, resume_data) : resume_data
-    @harness_factory.add_harness_job(
-      kind: :main,
-      session_id:,
-      resume_data: main_data,
-      base_file_list: @file_list,
-      id: main_id)
-
     if resume_data
-      # A layered resume redraws the foreground job's OWN saved tail (its
-      # replay.json); a flat #207 session keeps its tail inline in the record.
-      if main_id
-        @registry.foreground = main_id
-        tail = @system_saver.replay_tail_of(session_id, main_id)
-        foreground_harness.logger.info "foreground job restored: ##{main_id}"
-      else
-        tail = resume_data[:replay_tail]
-      end
-      @registry.restore_replay_tail(tail)
-      report_dropped_jobs
+      restore_jobs(resume_data, saved_fg)
+    else
+      @harness_factory.add_harness_job(kind: :main, session_id:, base_file_list: @file_list)
     end
 
     @history  = HistoryManager.new(@file_list.workdir, session_id:)
@@ -182,7 +161,9 @@ class CLI
       file_list: @file_list,
       ui: @ui,
       settings: @settings,
-      system_saver: @system_saver)
+      system_saver: @system_saver,
+      harness_factory:,
+      session_id:)
 
     self
   end
@@ -515,6 +496,48 @@ class CLI
     foreground_harness.logger.info "dropped job ids: #{dropped.join(', ')}"
     ui.puts "  (jobs #{dropped.join(', ')} were dropped from this session - " \
             "their output is not resumed)"
+  end
+
+  # Every saved job becomes a live job again: its own id, its own agent, its own
+  # conversation (jobs/<id>/session.json) and its own shown tail (replay.json).
+  # The foreground is assigned LAST, from the saved id, because no job is
+  # foreground while the system is being rebuilt (doc/session_layers_design.md).
+  # A job whose conversation file is gone is not rebuilt at all - the drop rule
+  # removed it - and is reported rather than silently stubbed.
+  def restore_jobs(resume_data, saved_fg)
+    @saved_jobs = Array(resume_data[:jobs])
+    @system_saver.job_restores(session_id).each do |restore|
+      # A job's own saved half is its conversation plus its per-agent model and
+      # param state; the SYSTEM half (identity, postures, access grants, digest
+      # cache) belongs to the main turn alone - the run has ONE grant state and
+      # one log, and the main turn is the job the run already holds them on
+      # (@file_list). A saved job is rebuilt at its saved id so it matches the
+      # jobs/<id>/ dir its files live under.
+      main_turn = restore[:id].zero?
+      resume    = main_turn ? resume_data.merge(restore[:session]) : restore[:session]
+      job       = @harness_factory.add_harness_job(
+        kind: restore[:kind].to_sym,
+        session_id:,
+        resume_data: resume,
+        base_file_list: main_turn ? @file_list : nil,
+        id: restore[:id])
+      job.restore_status(restore[:status])
+    end
+
+    # A #207 flat session has no jobs/ tree, so the per-job read yields nothing
+    # and its inline conversation is the whole run: rebuild the main turn from it.
+    if @registry.jobs.empty?
+      @harness_factory.add_harness_job(
+        kind: :main, session_id:, resume_data:, base_file_list: @file_list)
+      @registry.restore_replay_tail(resume_data[:replay_tail])
+      return report_dropped_jobs
+    end
+
+    @registry.foreground = saved_fg if @registry.job(saved_fg)
+    @registry.restore_replay_tail(@system_saver.replay_tail_of(session_id, @registry.foreground))
+    foreground_harness.logger.info "jobs restored: #{@registry.jobs.map(&:id).join(', ')} " \
+                                   "(foreground ##{@registry.foreground})"
+    report_dropped_jobs
   end
 
   # issue #221 review (bug 2): one-line description of the shell consent
