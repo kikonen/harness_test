@@ -89,28 +89,48 @@ is ever spawned again. `ensure_starter!` returns `:existing` / `:seeded_locked` 
 is visible at startup instead of surfacing later as a mid-run LoadError.
 
 A bundler failure must never crash harness startup, so any raise in `lock_seeded?`
-### "The model manages it" - through bundler and shell, not through the file tools
-
-Measured on this box (Ruby 4.0, `x64-mingw-ucrt`): `Bundler.with_unbundled_env`
-removes `BUNDLE_GEMFILE`/`BUNDLE_BIN_PATH`/`RUBYOPT`, but a `run.command` shell is
-still a child of the harness process, so it may write into the sandbox - a plain
-`File.write(".harness/sandbox/written_by_shell.txt", ...)` from a model command
-succeeds, and every `bundle add`/`bundle install` a session has ever run here wrote
-its Gemfile and lock there. The block is the FILE TOOLS only: `SensitiveFiles`
-matches `.harness` against every path component, so `file.write`/`file.patch` on
-`.harness/sandbox/Gemfile` are refused whatever the posture, with no grant offered.
-
-That asymmetry is what the two changes above close. The starter is a repo file the
-owner can edit, so the default no longer needs the sandbox to be writable; and the
-floor means the model's own bundle edits are safe to keep, because a lost default
-comes back on the next launch. A model that wants gems the default does not carry
-still adds them the supported way - `bundle add <gem>` (with a version:
-`bundle add <gem> --version ">= 1.19"`; the bare positional form silently injects a
-garbage declaration) - and `bundle install`.
-
 collapses to false. Installing a gem the box lacks stays the model's own,
 consent-gated `bundle install` through `run.command` - the harness never runs a
 network install on the model's behalf.
+
+### What a launch actually does (measured, three launches in one workdir)
+
+```
+launch 1 (fresh workdir):  [INFO] ruby sandbox seeded and locked offline
+                           declared = csv json rexml logger racc base64 fiddle reline
+launch 2 and 3:            no sandbox line at all  (nothing missing: no write, no bundler)
+after a gem is added to config/sandbox_gemfile.example.rb and the run is relaunched:
+                           [INFO] ruby sandbox resynced with the default gems and re-locked
+                           declared = ... reline strscan
+```
+
+The resync is INVISIBLE on a healthy launch on purpose: `ensure_default_gems!` returns
+nil as soon as nothing is missing, and it runs no bundler in that case. It reports only
+what it changed. To see it, take a default gem out of the sandbox (or add one to the
+config template) and relaunch; the observable state is `declared_gem_names` versus
+`default_gem_names`.
+
+### `.harness/sandbox` is grantable - the second exemption inside `.harness/`
+
+`SensitiveFiles.sandbox_zone?` (modelled on `skills_zone?`) exempts the sandbox subtree
+in `FileList#sensitive?`: the `.harness` COMPONENT rule is lifted there, a `.env*` NAME
+still blocks, and `.harness` itself, `.harness/sandboxx`, `.harness/sandbox-backup/` and a
+resolved escape (`.harness/sandbox/../sessions`) stay blocked. Shared rule:
+`doc/sensitive_paths_design.md`.
+
+Before the exemption, "the model manages it" was only half true. Measured on this box
+(Ruby 4.0, `x64-mingw-ucrt`): `Bundler.with_unbundled_env` removes
+`BUNDLE_GEMFILE`/`BUNDLE_BIN_PATH`/`RUBYOPT`, but a `run.command` shell is still a child
+of the harness process, so a plain `File.write(".harness/sandbox/written_by_shell.txt", ...)`
+from a model command succeeded, and every `bundle add`/`bundle install` a session has ever
+run here wrote its Gemfile and lock - while `file.write`/`file.patch` on that same file
+were refused whatever the posture, with no grant offered. The model was told to edit the
+one path its own tools could not open.
+
+Two facts worth remembering when adding gems by hand: a versioned `bundle add` needs the
+flag - `bundle add <gem> --version ">= 1.19"`; the bare positional form silently injects
+a garbage declaration (`gem ">= 1.19", ">= 0"`). And a gem the box lacks stays the model's
+own consent-gated `bundle install`, never a harness network call.
 
 ## Why it stays gitignored (unlike skills)
 

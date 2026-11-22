@@ -1,10 +1,11 @@
-# The sensitive-path guard, and the two zones that exempt it
+# The sensitive-path guard, and the zones that exempt it
 
 What the guard is for and where it stops: why a nested `.git` inside
 `tmp/keep/<issue>/` is deletable (#321), and why `.harness/skills` is grantable
 while the rest of `.harness/` is not (#12, `doc/skills_design.md`), and why the
 owner's own space `local/` is a THIRD kind of region - grantable, but never
-covered by a posture (#274).
+covered by a posture (#274) - plus `.harness/sandbox`, the second grantable
+subtree of `.harness/` (#340, `doc/sandbox_gemfile_design.md`).
 
 ---
 
@@ -39,7 +40,9 @@ through it, so the zone rule below applies everywhere at once.
 ```ruby
 rel = relative_path(path)
 return false if SensitiveFiles.scratch_zone?(rel)
-return SensitiveFiles.env_named?(path) if SensitiveFiles.skills_zone?(rel)
+if SensitiveFiles.skills_zone?(rel) || SensitiveFiles.sandbox_zone?(rel)
+  return SensitiveFiles.env_named?(path)
+end
 SensitiveFiles.sensitive?(path)
 ```
 
@@ -48,6 +51,10 @@ SensitiveFiles.sensitive?(path)
 - `SensitiveFiles.scratch_zone?(rel)` - `tmp/scratch/<n>/` or `tmp/keep/<n>/`.
 - `SensitiveFiles.skills_zone?(rel)` - the project's own `.harness/skills` subtree
   (issue #12), where only a `.env*` NAME still blocks: `doc/skills_design.md`.
+- `SensitiveFiles.sandbox_zone?(rel)` - `.harness/sandbox`, the Ruby sandbox
+  (issue #340): the model manages that Gemfile with `bundle add`/`bundle install`,
+  which already write it from a shell, so the file tools must not refuse the one
+  path the model is told to edit. `doc/sandbox_gemfile_design.md`.
 - `SensitiveFiles.sensitive?` is split into `env_named?` / `state_dir?` so the skills
   branch can keep the NAME half of the rule while dropping the `.harness` component
   half.

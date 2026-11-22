@@ -341,6 +341,60 @@ RSpec.describe FileList do
     end
   end
 
+  # The Ruby sandbox (issue #340) is the second grantable subtree of .harness/: a
+  # model already writes that Gemfile with `bundle add`/`bundle install`, so the file
+  # tools must be able to follow the instruction to edit it. The rest of .harness/
+  # (sessions, logs, allowlists, memories) stays blocked, as does a .env* name.
+  describe 'the sandbox-zone exemption (issue #340)' do
+    it 'lets a grant cover the sandbox directory and its files' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        list.add_dir(SensitiveFiles::SANDBOX_DIR, :rw)
+
+        expect(list.sensitive?(SensitiveFiles::SANDBOX_DIR)).to be(false)
+        expect(list.readable?("#{SensitiveFiles::SANDBOX_DIR}/Gemfile")).to be(true)
+        expect(list.writable?("#{SensitiveFiles::SANDBOX_DIR}/Gemfile")).to be(true)
+        expect(list.add_file("#{SensitiveFiles::SANDBOX_DIR}/Gemfile", :r)).to eq(:added)
+      end
+    end
+
+    it 'lets a DELETE grant cover a sandbox file' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        list.add_file("#{SensitiveFiles::SANDBOX_DIR}/Gemfile.lock", :d)
+
+        expect(list.deletable?("#{SensitiveFiles::SANDBOX_DIR}/Gemfile.lock")).to be(true)
+      end
+    end
+
+    # The exemption is the sandbox directory only: .harness itself is still refused,
+    # and a resolved path that leaves the zone is refused too.
+    it 'keeps the rest of .harness/ blocked' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        expect(list.add_dir(SensitiveFiles::SANDBOX_DIR, :rw)).to eq(:added)
+        expect(list.sensitive?('.harness')).to be(true)
+        expect(list.add_dir('.harness', :rw)).to eq(:blocked)
+        expect(list.sensitive?('.harness/sessions/id/session.json')).to be(true)
+        expect(list.sensitive?("#{SensitiveFiles::SANDBOX_DIR}/../sessions/id/session.json")).to be(true)
+        expect(list.add_dir("#{SensitiveFiles::SANDBOX_DIR}/../sessions", :r)).to eq(:blocked)
+        expect(list.sensitive?('.harness/sandboxx/Gemfile')).to be(true)
+        expect(list.sensitive?('.harness/sandbox-backup/Gemfile')).to be(true)
+      end
+    end
+
+    it 'keeps a .env* name blocked inside the sandbox directory' do
+      Dir.mktmpdir do |dir|
+        list = described_class.new(workdir: dir)
+        list.add_dir(SensitiveFiles::SANDBOX_DIR, :rw)
+
+        expect(list.sensitive?("#{SensitiveFiles::SANDBOX_DIR}/.env")).to be(true)
+        expect(list.readable?("#{SensitiveFiles::SANDBOX_DIR}/.env")).to be(false)
+        expect(list.add_file("#{SensitiveFiles::SANDBOX_DIR}/.env", :r)).to eq(:blocked)
+      end
+    end
+  end
+
   # YOLO for file access (issue #274): when the user turns the posture on, a path
   # INSIDE the working directory is covered for read/write/delete without a dialog.
   # Three boundaries the posture must never cross: a sensitive path, the owner's own
