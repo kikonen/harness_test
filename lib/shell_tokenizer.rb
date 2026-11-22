@@ -4,55 +4,8 @@ require "strscan"
 require_relative "text_normalizer"
 
 # -- ShellTokenizer ---------------------------------------------------------
-#
-# A StringScanner-based tokenizer for a SAFE SUBSET of POSIX shell.
-#
-# It emits a flat token stream that ShellParser (a Racc grammar) consumes
-# to build an AST of pipelines and simple-commands. The tokenizer is NOT
-# responsible for syntax validation - it only classifies each lexeme.
-#
-# Token kinds (symbol values):
-#   :word       - a shell word: bare text, single-quoted, double-quoted,
-#                 or a mix (e.g. `foo"bar baz"`). The token's string value
-#                 preserves the original quoting so downstream code can
-#                 inspect it; ShellParser uses it verbatim for prefix
-#                 matching (quotes do not change what command runs).
-#   :pipe       - `|`
-#   :and        - `&&`
-#   :or         - `||`
-#   :semi       - `;`
-#   :pipe_and   - `|&`  (pipe with stderr)
-#   :danger     - any construct that must NEVER be auto-approved:
-#                   <, >, >> (file redirects - EXCEPT to /dev/null, which
-#                            only discards output and is safe, see below)
-#                   &>, &>> (combined stdout+stderr redirect; same
-#                            /dev/null exemption as above)
-#                   &        (background)
-#                   $        (substitution / variable expansion)
-#                   `        (command substitution)
-#                   (, )      (subshell / grouping)
-#                 The token's string value holds the offending lexeme so
-#                 error messages can name it.
-#
-# Design notes:
-#   * fd-to-fd redirects like `2>&1` are NOT dangerous - they only swap
-#     stderr/stdout within the same process. The tokenizer treats them as
-#     a single :word token (e.g. "2>&1") so that pipelines such as
-#     `bundle exec rspec 2>&1 | grep x` can be auto-approved.
-#   * Redirects TO /dev/null (`>/dev/null`, `2>/dev/null`, `>>/dev/null`)
-#     are NOT dangerous either - they only discard output, creating or
-#     modifying no file. The tokenizer treats them as a single :word token
-#     (e.g. ">/dev/null", "2>/dev/null") so such commands can be
-#     auto-approved. Any other redirect target is still :danger.
-#   * Combined stdout+stderr redirects (`&>`, `&>>`) follow the same rules:
-#     safe only when targeting /dev/null.
-#   * Operators inside quotes are literal characters, never separators.
-#   * Backslash-escaped operators outside quotes become part of the
-#     surrounding word (e.g. `echo a\|b` -> one word "a\|b").
-#   * The tokenizer is intentionally conservative: anything it cannot
-#     classify confidently is emitted as :danger, which ShellParser
-#     rejects. This errs on the safe side.
-#
+# A StringScanner-based tokenizer for a SAFE SUBSET of POSIX shell, emitting a
+# flat token stream for ShellParser; token kinds and design: doc/shell_tokenizer_design.md
 class ShellTokenizer
   # Characters that always produce a :danger token when seen outside quotes.
   DANGER_CHARS = "<>&$`()".freeze
@@ -72,16 +25,14 @@ class ShellTokenizer
   end
 
   def initialize(command)
-    # issue #257: the command is externally-sourced text (model-supplied or
-    # read from a file). Regex matching on byte-invalid UTF-8 raises
-    # ArgumentError, so normalize at this entry point.
+    # The command is externally-sourced text; regex matching on byte-invalid
+    # UTF-8 raises ArgumentError, so normalize at this entry point.
     @command  = TextNormalizer.normalize(command)
     @scanner  = StringScanner.new(@command)
     @tokens   = []
     @word_buf = +""
   end
 
-  # Run the tokenizer and return the token array.
   def tokens
     scan!
     flush_word
@@ -119,8 +70,8 @@ class ShellTokenizer
     end
   end
 
-  # Single-quoted: consume until closing '. Backslash has no special
-  # meaning inside single quotes (POSIX). Unterminated -> :danger.
+  # Single-quoted: consume until closing '. Backslash has no special meaning
+  # inside single quotes (POSIX). Unterminated -> :danger.
   def scan_single_quoted
     start = @scanner.pos
     @scanner.getch # opening '
@@ -170,17 +121,16 @@ class ShellTokenizer
     emit(:word, buf.join)
   end
 
-  # `&` can be: background (`&`) or and-list (`&&`).
-  # fd-to-fd redirects (`2>&1`) are handled at the `>` dispatch point
-  # (see scan_gt), since `>` comes first in the stream.
+  # `&` can be: background (`&`) or and-list (`&&`). fd-to-fd redirects
+  # (`2>&1`) are handled at the `>` dispatch point (see scan_gt).
   def scan_ampersand
     if @scanner.check("&&")
       flush_word
       @scanner.skip("&&")
       emit(:and, "&&")
     elsif !word_buf_ends_with_digit? && @scanner.check("&>")
-      # Combined stdout+stderr redirect (bash/zsh &> operator). Treated
-      # like a file redirect: safe only when targeting /dev/null.
+      # Combined stdout+stderr redirect (&> operator). Treated like a file
+      # redirect: safe only when targeting /dev/null.
       if (dn = scan_devnull_redirect("&>"))
         emit(:word, dn)
       else
@@ -211,13 +161,11 @@ class ShellTokenizer
     end
   end
 
-  # `>` dispatch: either a file redirect (danger) or part of a fd-to-fd
-  # redirect (`2>&1`) or a redirect to /dev/null. The latter two are safe
-  # (no hidden execution, no file created/modified) and become one word.
+  # `>` dispatch: a file redirect (danger), or a safe fd-to-fd redirect
+  # (`2>&1`) or redirect to /dev/null, which become one word.
   def scan_gt
-    # Check for fd-to-fd redirect: digit + `>&` + optional digit.
+    # fd-to-fd redirect: digit + `>&` + optional digit, e.g. "2" + ">&1" -> "2>&1".
     if @scanner.check(">&") && word_buf_ends_with_digit?
-      # e.g. "2" + ">&1" -> word "2>&1".
       text = @word_buf.dup
       @word_buf.clear
       @scanner.skip(">&")
@@ -228,26 +176,23 @@ class ShellTokenizer
       end
       emit(:word, text)
     else
-      # Redirect to /dev/null: safe (only discards output, creates or
-      # modifies no file) - becomes one word token, gluing any preceding
-      # fd digit (e.g. "2" + ">/dev/null" -> "2>/dev/null").
+      # Redirect to /dev/null is safe (discards output only), gluing any
+      # preceding fd digit (e.g. "2" + ">/dev/null" -> "2>/dev/null").
       if (dn = scan_devnull_redirect(">"))
         emit(:word, dn)
       else
-        # Any other file redirect: danger.
         flush_word
         emit(:danger, scan_redirect)
       end
     end
   end
 
-  # Match a /dev/null redirect for the given operator ('>' or '&>'),
-  # gluing any preceding word buffer (e.g. an fd digit). Returns the
-  # combined text when it matches (safe - output is only discarded), or
-  # nil leaving the scanner positioned so a danger-redirect scan can run.
+  # Match a /dev/null redirect for the given operator ('>' or '&>'), gluing any
+  # preceding word buffer (e.g. an fd digit). Returns the combined text when it
+  # matches, or nil leaving the scanner positioned for a danger-redirect scan.
   def scan_devnull_redirect(operator)
-    # '+': allow one or more of the operator's trailing '>' so both
-    # '>/dev/null' and '>>/dev/null' (and '&>', '&>>') match.
+    # '+': allow one or more trailing '>' so both '>/dev/null' and '>>/dev/null'
+    # (and '&>', '&>>') match.
     re = Regexp.new("#{Regexp.escape(operator[0..-2])}(>+)\\s*#{Regexp.escape(DEVNULL)}(?![\\w./-])")
     return unless @scanner.check(re)
 
@@ -257,8 +202,8 @@ class ShellTokenizer
     prefix + devnull
   end
 
-  # `<` or `>`: consume the full redirect lexeme (e.g. `>>`, `> file`)
-  # and return as a string for the :danger token.
+  # `<` or `>`: consume the full redirect lexeme (e.g. `>>`, `> file`) and
+  # return as a string for the :danger token.
   def scan_redirect
     buf = [@scanner.getch]
     if @scanner.check(buf.last) && buf.last == ">"
@@ -268,10 +213,9 @@ class ShellTokenizer
     buf.join
   end
 
-  # Consume an optional whitespace-separated redirect target and return it
-  # prefixed by a single space (e.g. " tmpfile"), or '' when the operator
-  # is immediately followed by whitespace/EOS. Lets danger-token labels name
-  # the whole construct ("&> build.log") instead of just the operator.
+  # Consume an optional whitespace-separated redirect target, prefixed by a
+  # single space (e.g. " tmpfile"), or '' when the operator is immediately
+  # followed by whitespace/EOS. Lets danger labels name the whole construct.
   def scan_target
     return "" unless @scanner.check(/\s*[^\s|;&<>$`()\n]/)
 
@@ -280,9 +224,8 @@ class ShellTokenizer
     " #{target}" if target
   end
 
-  # `&>` or `&>>`: consume the full combined-redirect lexeme (e.g. `&> log`)
-  # and return it as a string for the :danger token, so error/note messages
-  # name the whole construct rather than just `>`.
+  # `&>` or `&>>`: consume the full combined-redirect lexeme and return it for
+  # the :danger token, so messages name the whole construct rather than just `>`.
   def scan_combined_redirect
     buf = ["&"]
     @scanner.getch
@@ -323,8 +266,8 @@ class ShellTokenizer
   end
 
   # Bare word: consume until whitespace or a known operator/danger char.
-  # Characters are accumulated in @word_buf (NOT emitted yet) so that
-  # consecutive bare-word chunks and escaped-literals glue into one token.
+  # Characters accumulate in @word_buf (NOT emitted yet) so consecutive
+  # bare-word chunks and escaped-literals glue into one token.
   def scan_word
     while !@scanner.eos?
       ch = @scanner.peek(1)
@@ -335,9 +278,9 @@ class ShellTokenizer
       # Two-char operators we must not eat as word chars.
       break if @scanner.check("&&") || @scanner.check("||") || @scanner.check("|&")
 
-      # Backslash-escaped char outside quotes: the escaped char is a
-      # literal inside the current word (e.g. `a\|b` -> one word). A
-      # backslash before whitespace is a line-continuation: skip both.
+      # Backslash-escaped char outside quotes is a literal inside the current
+      # word (e.g. `a\|b` -> one word). A backslash before whitespace is a
+      # line-continuation: skip both.
       if ch == "\\"
         @scanner.getch
         break if @scanner.eos?

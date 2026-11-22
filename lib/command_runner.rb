@@ -11,83 +11,20 @@ require_relative "error_text"
 require_relative "ui/renderer"
 require_relative "output_budget"
 
-# Shared consent + execution logic for shell commands (issue #129).
-#
-# Used by both callers of this harness's shell execution:
-#   * Tools::RunCommandTool - LLM-driven, runs inside a Task thread. The
-#     confirmation dialog is routed through the task to the MAIN THREAD
-#     (ui: nil), status lines go over the task's event queue, and the formatted result
-#     string is returned to the model.
-#   * CommandHandler bang syntax (`! cmd`) - user-typed, runs on the main
-#     thread directly. The dialog is served in place (perform_direct on
-#     the console) and the output is printed verbatim by the caller.
-#
-# issue #224: MODEL SELF-CHECK (advisory only, opt-in via the
-# 'command_safety_check' config key). When the model requests an unapproved
-# command, the harness MAY have already asked the model itself (a forked
-# one-shot LLM call, one per batch - see Harness#precheck_batch_safety and
-# SafetyCheck) whether the command looks safe; the verdict is shown as a
-# "MODEL VERDICT (advisory):" note line in the confirmation dialog. It
-# NEVER auto-approves, never widens the allowlist, and never bypasses the
-# user's explicit Allow.
-#
-# CONSENT POSTURES (issue #221, the consent-fatigue fix): three levels of
-# how much manual approval a shell command needs. The user chooses the
-# posture (config initial value + the live /yolo switch); the model never
-# does.
-#   MANUAL        - default. Every unapproved command gets the dialog.
-#   AUTO-APPROVE  - issue #224: commands the model verdicts "safe:" skip it.
-#   YOLO          - /yolo: EVERY run.command call skips the dialog, no model
-#                   check at all (issue #238: the check costs an extra LLM
-#                   round trip and trashes the local KV cache). Every such run is
-#                   status-lined and logged, so nothing is invisible. The one
-#                   command YOLO does NOT auto-approve is a denylisted one: its
-#                   dialog is where the check runs under YOLO, verdict shown,
-#                   never acted on (issue #382).
-# In ALL postures - and even for a stored allowlist grant - a command
-# matching CommandAllowlist::DISASTER_PATTERNS (the well-known disasters:
-# rm -rf, format C:, sudo, forced push, curl|sh, ...) is refused
-# auto-approval and always reaches the dialog for a one-off explicit Allow.
-# The denylist is the floor under every posture.
-#
-# The ONE exception is the owner's own denylist-safe override (issue #389), armed
-# by the config key command_safety_auto_approve: denylist: a real model "safe:"
-# verdict may auto-approve a DENYLISTED match on the tool path. It fires only on
-# a "safe:" verdict and every override is logged. Design + the quote-hole
-# measurement: doc/denylist_safe_approve_design.md.
-#
-# SAFETY MODEL:
-#   - The FULL command string is displayed to the user before anything runs;
-#     explicit "Allow" required unless the prefix is in the list.
-#   - "Always allow <prefix>" saves a grant (issue #69, multi-select
-#     per-prefix issue #102). The list is SEPARATE per caller (issue #129):
-#     the tool writes .harness/allowed_commands.yml, bang syntax writes
-#     .harness/shell_commands.yml - one never auto-approves for the other.
-#   - Commands run under a timeout (default 60 s, cap 300 s) so a hung
-#     process can never block the session indefinitely (issue #202).
-#     The child runs in its OWN process group; on timeout the whole tree is
-#     killed (taskkill /T on Windows, SIGKILL to the pgroup elsewhere), so a
-#     hung command can never hold the harness' streams open again.
-#   - Output is truncated to a line limit (default 500, max 5000) AND to the
-#     result byte budget (OutputBudget, issue #551): a line count is not a size
-#     limit, and a tool result bigger than the context window is what makes the
-#     backend refuse the whole request - the bang path prints it as-is.
+# Consent + execution for shell commands, serving both the model tool path and
+# bang syntax. The denylist is the floor under every posture. Postures, the
+# model safety check and the execution guarantees: doc/consent_postures_design.md.
 class CommandRunner
   DEFAULT_TIMEOUT = 60    # seconds
   MAX_TIMEOUT     = 300   # hard cap
   DEFAULT_LIMIT   = 500   # output lines
   MAX_LIMIT       = 5000  # hard cap
-  # Tokens the outcome line keeps as the command's handle once some earlier
-  # line (an auto-approval line, or the denylist refusal line) has already
-  # printed the full command.
+  # Keep this many leading tokens as a command's handle once an earlier line
+  # already printed the full command.
   HANDLE_TOKENS   = 4
-  # Spawn flag that puts the child in its own (process) group so the
-  # timeout kill reaches the whole tree. The spelling is platform- and
-  # Ruby-version-dependent: :new_pgroup on Windows, :pgroup on POSIX
-  # (same effect: pgid == pid). See spawn_in_group.
+  # The child's own process group, so a timeout kill reaches the whole tree.
   PGROUP_SPAWN_KEY = Gem.win_platform? ? :new_pgroup : :pgroup
-  # Grace period after the kill before giving up on the wait: by then the
-  # whole tree is gone (or nearly), so the subsequent wait cannot hang.
+  # After the kill the tree is gone, so the following wait cannot hang.
   KILL_GRACE_SECONDS = 5
 
   TOOL_TITLE = "The model is requesting to run a shell command:\n" \
@@ -98,31 +35,13 @@ class CommandRunner
   LISTS = { tool: CommandAllowlist::TOOL_FILENAME,
             shell: CommandAllowlist::SHELL_FILENAME }.freeze
 
-  # Shown as a dialog note when no "Always allow" option is offered because
-  # the command contains constructs that can never be auto-approved.
-  # Normally replaced by a tailored note naming the specific unsafe
-  # construct (issue #102).
+  # Fallback when no tailored note names the specific unsafe construct.
   UNSAFETY_NOTE = "UNSAFE: contains shell constructs that cannot be auto-approved."
 
-  # label:     bracket used in status lines ('run.command' or 'shell')
-  # title_fmt: sprintf-style dialog title (TOOL_TITLE / BANG_TITLE)
-  # ui:        UI::Console for direct main-thread dialogs (nil = Task thread)
-  # list:      :tool (default) or :shell - selects the allowlist file
-  # force_confirm: true keeps the consent dialog even for a command whose
-  #   prefix is already allowlisted. Used by the `!` bang path while bang
-  #   confirmation is ON (settings.bang_requires_confirmation, the default
-  #   - issue #221). Setting that config key to false passes force_confirm:
-  #   false here, so a command the USER typed runs without a dialog (the
-  #   disaster denylist still applies: a user-typed rm -rf / is asked for).
-  # auto_approve_all: true skips the consent dialog for EVERY command of
-  #   this caller (the `!` bang path when the user turned bang confirmation
-  #   off, issue #221). The YOLO posture (Harness#yolo?, /yolo) is the same
-  #   idea for the model-driven tool path and is read live from the harness
-  #   instead of being passed here - see auto_approve_all?. In both cases
-  #   the disaster denylist still forces the dialog.
-  # harness:   optional Harness (any object with a lazy #logger accessor):
-  #            when given, FAILED commands are logged to the session's
-  #            harness.log so they leave a trace (issue #185). nil in specs.
+  # auto_approve_all skips the dialog for every command of this caller (bang
+  # path with confirmation off); the YOLO tool path is read live instead, see
+  # auto_approve_all?. The denylist always forces the dialog. harness logs
+  # failed commands to harness.log.
   def initialize(file_list, settings, label: "run.command", title_fmt: TOOL_TITLE,
                  ui: nil, list: :tool, harness: nil, auto_approve_all: false)
     @file_list = file_list
@@ -142,8 +61,7 @@ class CommandRunner
   # result string: "exit code: N (Xs)" + output section, or an
   # "error: ..." string on denial / timeout.
   def run(command, cwd: nil, timeout: DEFAULT_TIMEOUT, limit: DEFAULT_LIMIT)
-    # issue #257: the command is model-supplied text that can carry bytes
-    # invalid in UTF-8, which makes strip (and the tokenizer) raise.
+    # Model-supplied text can carry bytes that make strip (and the tokenizer) raise.
     command = TextNormalizer.normalize(command).strip
     return "error: 'command' must be a non-empty shell command" if command.empty?
 
@@ -159,27 +77,18 @@ class CommandRunner
     limit   = DEFAULT_LIMIT if limit <= 0
     limit   = [limit, MAX_LIMIT].min
 
-    # DENYLIST FLOOR (issue #221): a well-known disaster command is refused
-    # by EVERY auto-approval path - a stored prefix grant, the AUTO-APPROVE
-    # model verdict and YOLO alike. It always reaches the dialog below and
-    # can only run through an explicit one-off "Allow" (never a standing
-    # grant: the "Always allow" options are dropped for it too). Checked
-    # FIRST so no later shortcut can skip it.
+    # Checked first: no later auto-approval path (grant, verdict, YOLO) may skip
+    # the denylist, which always reaches a one-off dialog.
     disaster = CommandAllowlist.disaster?(command)
     full_shown = false
-    # safety_verdict_for is ONE-SHOT for a batch verdict (it deletes the cache
-    # entry on first read), so a verdict the override attempt below consumed must
-    # not be fetched again: the advisory note would be lost AND a single-command
-    # check would pay for a second forked LLM call.
+    # safety_verdict_for is one-shot (deletes the cache on first read), so a
+    # verdict the override consumed is not refetched: that would pay a second
+    # forked LLM call and drop the advisory note.
     verdict = nil
     verdict_computed = false
 
     if disaster
-      # DENYLIST-SAFE OVERRIDE (issue #389): a model "safe:" verdict may decide
-      # even a denylist match - but ONLY on the tool path (the bang path is
-      # consented by the human's typing) and ONLY on a real "safe:" verdict, so a
-      # "dangerous:"/missing verdict keeps the floor and disaster? DETECTION is
-      # never weakened. Design + the quote-hole measurement:
+      # Tool path only, real "safe:" verdict only - detection is never weakened.
       # doc/denylist_safe_approve_design.md.
       if denylist_safe_override? && @list == :tool
         verdict = safety_verdict_for(command)
@@ -193,37 +102,25 @@ class CommandRunner
       end
       status(:warn, "denylisted (auto-approval refused in every posture): #{command}")
       @harness&.logger&.warn "denylisted command needs an explicit Allow: #{command}"
-      # The refusal line above printed the full command BEFORE the dialog, so
-      # this run counts as already named, like an auto-approved one.
+      # The refusal already printed the full command, so this run counts as named.
       full_shown = true
     elsif @allowlist.allowed?(command)
       # Auto-approve when the command prefix is in the user's allowlist.
       status(:ok, "auto-approved (allowlist): #{command}")
       return execute(command, dir, shown, timeout, limit, full_shown: true)
     elsif auto_approve_all?
-      # YOLO POSTURE (issue #221) / bang consent off (@auto_approve_all): the
-      # command runs with no dialog and deliberately NO model safety check
-      # (issue #238). The status line + harness.log entry keep it auditable.
+      # No dialog and deliberately no model check; status + log keep it auditable.
       reason = yolo_active? ? "YOLO" : "bang consent off"
       status(:ok, "auto-approved (#{reason}): #{command}")
       log_auto_approved(command, reason)
       return execute(command, dir, shown, timeout, limit, full_shown: true)
     end
 
-    # issue #224: consume a pre-batched verdict when the harness ran one
-    # for this command, otherwise (single run.command call) run the check
-    # here. Advisory text only - consent proceeds exactly as before. A disaster
-    # command whose verdict the override already consumed is skipped so the note
-    # reuses it instead of refetching (verdict_computed).
+    # Advisory only; a verdict the override already consumed is not refetched.
     verdict = safety_verdict_for(command) unless verdict_computed
 
-    # issue #224 follow-up: AUTO-APPROVE MODE. When the mode is on (and
-    # the safety check produced a verdict), a command the model calls
-    # "safe:" runs WITHOUT the consent dialog. Anything else - a
-    # "dangerous:" verdict, or no verdict at all - still gets the dialog,
-    # so the model's own check is what decides. This never touches the
-    # allowlist (it is a per-run consent posture, not a stored grant).
-    # The denylist wins over the model's opinion (issue #221): a disaster
+    # AUTO-APPROVE mode: a model "safe:" verdict skips the dialog; "dangerous:"
+    # or no verdict still asks. It never touches the allowlist, and a disaster
     # command is never auto-approved just because the model called it safe.
     if !disaster && auto_approve_mode? && verdict
       if auto_approve_safe?(verdict)
@@ -233,41 +130,27 @@ class CommandRunner
       # dangerous -> fall through to the dialog with the verdict note.
     end
 
-    # Not in allowlist - ask the user. One "Always allow" option per
-    # candidate prefix length of each segment (issue #102); candidates
-    # already subsumed by a stored grant are filtered out up front so
-    # the dialog only shows prefixes that would actually change
-    # behaviour when saved (issue #94).
+    # Offer one "Always allow" per candidate prefix, filtered so only prefixes
+    # that would actually change behaviour when saved are shown. A denylisted
+    # command gets none: this is a one-off decision, not a standing grant.
     all_candidates = CommandAllowlist.extract_prefix_options(command)
-    # A denylisted command gets NO "Always allow" option: the dialog is a
-    # one-off decision about this exact invocation, not a standing grant.
     prefixes       = disaster ? [] : @allowlist.filter_uncovered(all_candidates)
     options        = [UI::Dialog::Option.new(title: "Allow", value: :allow)]
 
     prefixes.each do |p|
       options << UI::Dialog::Option.new(
         title: "Always allow '#{p}'",
-        # Unique per prefix so a multi-select answer maps back to the
-        # exact prefixes chosen (issue #102).
+        # A unique per-prefix value lets a multi-select answer map back exactly.
         value: { always_allow: p },
-        # Every offer states the scope it is saving at the moment it is chosen:
-        # the DIRECTORY glob is the broadest one (issue #417), a run-shaped
-        # prefix covers whatever follows it (issue #96). No offer is unlabeled.
+        # Each offer names the scope it saves; none is unlabeled.
         description: CommandAllowlist.grant_scope_note(p)
       )
     end
 
-    # The deterministic note (what the harness itself knows about the command),
-    # stated with its KIND so the console can color it - DENYLISTED is the hard
-    # floor, UNSAFE is a refusal that is not a disaster match (issue #388).
+    # The harness's own note, with its KIND so the console colors it. UNSAFE is
+    # only for a command that genuinely cannot be auto-approved (a named
+    # construct or a parse failure) - never inferred from "no candidate prefix".
     deterministic = nil
-    # UNSAFE only for a command that genuinely CANNOT be auto-approved: a
-    # dangerous shell construct (named, issue #102) or a parse failure. It is
-    # NOT inferred from "no candidate prefix", which used to accuse a plain
-    # path-shaped command ('bin/rspec' had no grantable prefix before
-    # issue #417) of containing unsafe constructs it does not have, and equally
-    # accused a safe command whose candidates were all filtered out because a
-    # stored grant already covers them.
     label  = CommandAllowlist.classify_unsafe(command)
     unsafe = label || parse_failed?(command)
     if unsafe
@@ -275,9 +158,8 @@ class CommandRunner
       deterministic = UI::Dialog::Note.new(text, kind: "warn")
     end
 
-    # DENYLIST note (issue #221) wins over the UNSAFETY line: the reason
-    # this one asks even in YOLO / AUTO-APPROVE / with a stored grant is the
-    # command itself, so name the matched construct.
+    # The denylist note wins over UNSAFETY: it asks even in YOLO/grant, so name
+    # the matched construct.
     if disaster
       deterministic = UI::Dialog::Note.new(
         "DENYLISTED: #{CommandAllowlist.disaster_label(command)} - " \
@@ -287,25 +169,18 @@ class CommandRunner
       )
     end
 
-    # issue #224: the model's own safety verdict (advisory) leads the note
-    # so it is seen first; the deterministic UNSAFETY / DENYLISTED line (when
-    # present) is kept after it. No verdict -> no verdict line. The verdict is
-    # colored by KIND (issue #388): a reassuring "safe:" line and a
-    # "dangerous:" one must not read the same.
+    # The advisory verdict leads; the deterministic line follows. Colored by kind
+    # so a "safe:" line and a "dangerous:" one read differently.
     notes = [verdict_note(verdict), deterministic].compact
 
     dialog = UI::Dialog.new(
       title: format(@title_fmt, command, shown, timeout),
       options:,
       note: notes,
-      # Multi-select lets the user save several prefixes in one line
-      # (e.g. "2 4") - issue #102. Only meaningful when there is at
-      # least one grantable prefix.
       multi_select: !prefixes.empty?
     )
-    # Route the dialog: within a Task thread use show(ui: nil) so the
-    # drain loop services it on the main thread (issue #40); on the
-    # main thread (bang syntax) serve it in place on the console.
+    # In a Task thread, show(ui: nil) routes the dialog to the drain loop's main
+    # thread; on the main thread (bang) serve it in place.
     choice = @ui ? dialog.perform_direct(ui: @ui) : dialog.show(ui: nil)
 
     result = handle_choice(choice)
@@ -321,18 +196,14 @@ class CommandRunner
 
   private
 
-  # A command the ShellParser cannot decompose into simple segments (a danger
-  # token or a syntax error): there is no prefix to grant for it. Distinct
-  # from "no candidate" - a plain command with no grantable prefix is NOT a
-  # parse failure (issue #417). Empty input is not a failure either.
+  # A command ShellParser cannot decompose. Distinct from "no candidate prefix":
+  # a plain command is not a parse failure.
   def parse_failed?(command)
     !command.empty? && CommandAllowlist.split_segments(command).empty?
   end
 
-  # Status line for this caller's label ("run.command" / "shell"). Within a
-  # Task thread it goes onto the event queue; on the main thread the runner
-  # renders the SAME UI::Renderer pattern itself, so a bang command looks like
-  # a tool one.
+  # In a Task thread it goes onto the event queue; on the main thread the runner
+  # renders the same pattern, so a bang command looks like a tool one.
   def status(verdict, msg)
     if defined?(Task) && Task.current
       Tool.push_status(label: @label, verdict:, message: msg)
@@ -342,38 +213,28 @@ class CommandRunner
     end
   end
 
-  # NOT memoized: the main thread has no turn boundary, so the palette is
-  # re-read per line and a /palette switch shows up in the next bang command.
+  # Not memoized: the main thread has no turn boundary, so a /palette switch
+  # shows up in the next bang command.
   def renderer
-    # The SINK decides color (#466): the shared rule lives in UI::Renderer.
     palette = UI::Renderer.palette_for(ui: @ui, settings: @settings)
     UI::Renderer.new(palette:)
   end
 
-  # Interpret the raw dialog answer. Returns a hash with :denied and
-  # :denial (the error string to return) when the user cancelled, and
-  # :saved (array of prefixes to persist) when one or more "Always
-  # allow" options were picked. A bare :allow - including one mixed
-  # into a multi-select line, which is contradictory - runs the command
-  # without saving anything.
+  # Returns :denied/:denial on cancel, or :saved (prefixes to persist). A bare
+  # :allow, even mixed into a multi-select line, runs without saving.
   def handle_choice(choice)
-    # A [:cancelled, 'reason'] pair means the user cancelled with a one-line reason.
+    # A [:cancelled, 'reason'] pair is a cancel with a one-line reason.
     if choice.is_a?(Array) && choice.size == 2 && choice[1].is_a?(String)
       return denial("user denied executing the command", note: choice[1]) \
              if choice[0] == UI::Dialog::CANCEL_VALUE
       return {}
     end
 
-    # Multi-select returns an array of values (e.g. [hash1, hash2]).
-    # Single selection returns the bare value.
     values = choice.is_a?(Array) ? choice : [choice]
     return denial("user denied executing the command") \
            if values.include?(UI::Dialog::CANCEL_VALUE)
 
-    # A mix of plain "Allow" with one or more grants is ambiguous: the
-    # user wants to run the command now, so we honor the Allow and save
-    # nothing (a bare grant selection saves those prefixes). Only
-    # hash-valued options carry a prefix to persist.
+    # Allowing alongside grants is ambiguous: honor the Allow, save nothing.
     if values.include?(:allow)
       return { saved: [] }
     end
@@ -383,11 +244,8 @@ class CommandRunner
     { saved: }
   end
 
-  # issue #224: the verdict for THIS command. Priority: a batch pre-check
-  # verdict cached on settings by the harness (Harness#precheck_batch_safety
-  # removes it after first use), else a single-command check right here
-  # (a lone run.command in its batch has no pre-check). Returns nil when
-  # the check is disabled or produced nothing.
+  # Prefer a batch pre-check verdict cached on settings, else check this command
+  # now. nil when the check is off or produced nothing.
   def safety_verdict_for(command)
     return nil unless @settings.command_safety_check == true
 
@@ -397,45 +255,29 @@ class CommandRunner
       return cached[command]
     end
 
-    # run_safety_check returns nil on failure (degrade: plain dialog).
+    # nil on failure: degrade to a plain dialog
     verdict = run_safety_check([command])
     verdict && verdict[command]
   end
 
-  # issue #224 follow-up: AUTO-APPROVE MODE (config-derived, no live toggle).
-  # ON only when the harness has BOTH the safety check enabled and the
-  # session's consent posture set to auto-approve (see
-  # SystemSettings#command_safety_auto_approve_effective?). The mode is read off
-  # the run-wide settings the runner already holds, not through a Harness
-  # delegator.
+  # ON only when the safety check is enabled AND the posture is auto-approve.
   def auto_approve_mode?
     !!@settings.command_safety_auto_approve_effective?
   end
 
-  # Issue #221: does THIS caller run without a consent dialog?
-  #   * the `!` bang path with bang confirmation disabled (@auto_approve_all,
-  #     passed by CommandHandler from settings.bang_requires_confirmation);
-  #   * the run.command tool path while the harness YOLO posture is on.
-  # The YOLO flag is re-read on EVERY command (not cached at construction)
-  # so a /yolo typed at the idle prompt, or flipped by a mid-turn steering
-  # note, applies to the very next command of a running tool loop too.
+  # Bang path with confirmation off, or the tool path while YOLO is on. YOLO is
+  # re-read every command so a mid-run /yolo applies to the next command.
   def auto_approve_all?
     @auto_approve_all || yolo_active?
   end
 
-  # The run-wide YOLO posture (SystemSettings#yolo?), read live off the settings
-  # the runner holds so a mid-run /yolo applies to the next command. YOLO covers
-  # ONLY the model-driven tool path (user decision for issue #221): the bang list
-  # is untouched by it, because there the human already typed the command - its
-  # consent is controlled by the separate 'bang_requires_confirmation' key.
+  # YOLO covers only the model-driven tool path; bang consent is a separate key.
   def yolo_active?
     @list == :tool && @settings.yolo? == true
   end
 
-  # Issue #221: an auto-approved-without-dialog run MUST leave a trace.
-  # The status line covers the console; this covers harness.log, so every
-  # command that ran under YOLO (or under bang consent off) is recoverable
-  # from the session log - including the posture that let it through.
+  # An auto-approved run must leave a trace; the status line covers the console,
+  # this covers harness.log.
   def log_auto_approved(command, reason)
     logger = @harness&.logger
     return unless logger
@@ -443,19 +285,13 @@ class CommandRunner
     logger.info "auto-approved (#{reason}): #{command}"
   end
 
-  # Issue #389: is the denylist-safe override armed? Unlike the YOLO posture it is
-  # NOT read live - the key is a config value that never changes mid-run, so a
-  # relaxed floor cannot appear or disappear inside one tool loop. Rationale:
-  # doc/denylist_safe_approve_design.md.
+  # A config value, not read live, so a relaxed floor cannot shift mid-loop.
   def denylist_safe_override?
     @settings.denylist_safe_approve?
   end
 
-  # An override approval is the most auditable event the runner can produce: a
-  # denylist match ran WITHOUT a dialog. The status line names the verdict that
-  # allowed it; this line makes the same fact recoverable from harness.log, with
-  # the option that armed it, so a session log can always answer "why did a
-  # denylisted command run?".
+  # A denylist match ran without a dialog; log the verdict and option so the
+  # session log answers "why did a denylisted command run?".
   def log_denylist_override(command, verdict)
     logger = @harness&.logger
     return unless logger
@@ -465,22 +301,14 @@ class CommandRunner
       "#{command}"
   end
 
-  # A verdict auto-approves when it is a non-empty line starting with
-  # "safe:" - the exact shape SafetyCheck hands back (its kind is normalized,
-  # and a line that is not a verdict never reaches here as a verdict at all).
-  # Anything else - "dangerous:", blank, or an unexpected shape - is NOT
-  # auto-approved and falls back to the consent dialog.
+  # Only a line starting with "safe:" auto-approves; anything else asks again.
   def auto_approve_safe?(verdict)
     verdict.to_s.strip.match?(/\Asafe:/)
   end
 
-  # One forked LLM call for the given commands. Returns {command =>
-  # verdict-or-nil}; nil on any error (a failed check must NEVER break the
-  # consent flow - the dialog just shows without a verdict).
+  # Returns {command => verdict-or-nil}; nil on any error - a failed check must
+  # never break the consent flow.
   def run_safety_check(commands)
-    # issue #224 follow-up: re-point the spinner so the wait is recognisable
-    # as the model safety check (only inside a Task; the bang path runs on
-    # the main thread where the dialog is served in place - no spinner).
     Task.emit(:spinner_detail, origin: :command_runner,
               content: { message: "Model safety check (1 command)" }) if Task.current
     results  = SafetyCheck.run(safety_client, session_chain, commands,
@@ -496,29 +324,18 @@ class CommandRunner
     nil
   end
 
-  # The active LLM client (owned by the harness; the runner has no client
-  # of its own). nil without a harness - no check possible then.
   def safety_client
     @safety_client ||= @harness&.client
   end
 
-  # nil when the harness cannot report one - a bang runner built without a
-  # harness has no tool definitions to mirror, and a missing payload is a
-  # cache miss, never a wrong verdict.
   def harness_tools
     @harness&.tools_payload
   end
 
-  # The live conversation chain to fork from (issue #208: the session IS
-  # the working chain). At dialog time it ends on the unresolved
-  # assistant tool_calls - SafetyCheck#truncate_for_check drops that.
   def session_chain
     @harness&.session&.messages
   end
 
-  # The model's own verdict as the FIRST note line (advisory label keeps
-  # it distinct from the deterministic UNSAFETY line, which stays second),
-  # colored by the verdict's own kind (issue #388). nil verdict -> no line.
   def verdict_note(verdict)
     return nil if verdict.nil?
 
@@ -526,9 +343,6 @@ class CommandRunner
                          kind: verdict_kind(verdict))
   end
 
-  # "safe:" and "dangerous:" must not read as the same line. The kind comes
-  # from SafetyCheck's own parser (it rebuilds it lowercase), so a plain
-  # prefix test is enough - and the AUTO-APPROVE rule uses the same shape.
   def verdict_kind(verdict)
     auto_approve_safe?(verdict) ? "safe" : "alert"
   end
@@ -543,20 +357,14 @@ class CommandRunner
       denial: Tool.denial_error("error: #{message}", note ? { note: } : nil) }
   end
 
-  # Runs the command (after any required confirmation) and formats the result.
-  # A run whose full command was already printed by an earlier line (an
-  # auto-approval line, or the denylist refusal line) names it by handle here;
-  # a plain dialog-approved run keeps the full text, because this line is its
-  # only trace.
+  # A run whose command was already printed earlier names it by handle; a plain
+  # dialog-approved run keeps the full text - this line is its only trace.
   def execute(command, dir, shown, timeout, limit, full_shown: false)
     name = full_shown ? command_handle(command) : command
     announce_run(command)
     started = Time.now
     output, shell_status = run_in_shell(command, dir, timeout)
-    # Symbol (not Process::Status) signals the timeout path.
     if shell_status == :timeout
-      # The tree was already killed by run_in_shell (issue #202); nothing
-      # more can hang here.
       status(:fail, "#{name} (timed out after #{timeout}s)")
       log_failure(command, "TIMED OUT after #{timeout}s", output)
       return "error: command timed out after #{timeout}s"
@@ -575,13 +383,9 @@ class CommandRunner
     format_result(command, code, elapsed, output, out)
   end
 
-  # Re-points the spinner for the run itself (issue #362). Waiting on the child
-  # process leaves the outbox quiet, so the drain loop animates - and the detail
-  # it would otherwise replay is the LLM request that already finished, so a
-  # 40-second run reads as if the model were still generating. Only the handle
-  # reaches the line: the spinner draws one line and a full command does not fit
-  # it. The handle's dropped-token marker is dropped HERE because the spinner
-  # appends its own "..." to every message, so the line carries ONE marker.
+  # A wait on the child leaves the outbox quiet, so the drain loop would replay
+  # the finished LLM request - a long run reads as if the model were still
+  # generating. Only the handle (no "...", the spinner adds its own) reaches it.
   def announce_run(command)
     task = defined?(Task) ? Task.current : nil
     return nil unless task
@@ -592,20 +396,14 @@ class CommandRunner
                     content: { message: "#{@label}: #{handle}", suffix: })
   end
 
-  # The dropped tail is marked " ...", so a handle can never be read as the
-  # whole command.
   def command_handle(command)
     tokens = command.split(/\s+/)
     head   = tokens.first(HANDLE_TOKENS)
     head.join(" ") + (tokens.size > head.size ? " ..." : "")
   end
 
-  # Builds the formatted result string. A FAILED command that produced no
-  # output at all leaves only the bare "exit code:" line - exactly the
-  # trace-less failure of issue #185 (e.g. a missing binary prints nothing
-  # on some platforms). Name it in the result so the model sees WHY there
-  # is no output, and log the full raw output to harness.log so the
-  # failure is always recoverable from the log.
+  # A failed command that produced no output names why, so the model sees it;
+  # the full raw output still goes to harness.log.
   def format_result(command, code, elapsed, stdout, out)
     msg = "exit code: #{code} (#{elapsed}s)\n"
     msg += "--- output ---\n#{out}\n" if out.strip != ""
@@ -616,11 +414,8 @@ class CommandRunner
     msg
   end
 
-  # issue #185: every FAILED command (non-zero exit or timeout) gets an
-  # entry in the session's harness.log with the command, its status and the
-  # full UNTRUNCATED output - so a failure always leaves a trace even when
-  # the returned result had none. Empty streams are labeled "(none)". No-op
-  # without a harness (specs construct the runner standalone).
+  # A failed command logs the full untruncated output so the failure always
+  # leaves a trace, even when the returned result had none.
   def log_failure(command, why, stdout = nil)
     logger = @harness&.logger
     return unless logger
@@ -632,49 +427,32 @@ class CommandRunner
     logger.warn "shell command failed:\n" + parts.join("\n")
   end
 
-  # Runs the command in a shell with the inherited bundler env stripped
-  # (Bundler.with_unbundled_env). The harness may have been started from a
-  # shell polluted by ANOTHER project's bundler setup (BUNDLE_GEMFILE,
-  # RUBYOPT=-rbundler/setup, GEM_HOME, ...); without this, any `bundle exec`
-  # in the command would resolve against the wrong Gemfile and fail with
-  # cryptic "can't find executable" errors. Stripped, `bundle exec` falls
-  # back to the CWD's Gemfile - which is what callers expect.
-  #
-  # Result shape: [combined_output, exit_code_or_:timeout]. The child's
-  # stderr is merged into stdout (2>&1) - one stream is enough for the LLM
-  # context path and halves the plumbing.
+  # Strips inherited bundler env: the harness may run from a shell polluted by
+  # another project's BUNDLE_GEMFILE, which would make `bundle exec` resolve
+  # against the wrong Gemfile. Result: [combined_output, exit_code_or_:timeout].
   def run_in_shell(command, dir, timeout)
     Bundler.with_unbundled_env do
       read_child_in_group(command, dir, timeout)
     end
   end
 
-  # Runs `command` in `sh -c` in its OWN process group and reads its output
-  # until it exits or `timeout` seconds pass. On timeout the whole process
-  # tree is killed and :timeout is returned, so this method ALWAYS returns -
-  # a hung command can never block the caller (issue #202: Open3.capture3 +
-  # Timeout.timeout only raised in the parent and abandoned the child, which
-  # then kept the harness' stdin/stdout open forever).
+  # Always returns: on timeout the whole tree is killed and :timeout returned, so
+  # a hung command can never block the caller (Open3+Timeout would abandon the
+  # child and leave its streams open).
   def read_child_in_group(command, dir, timeout)
     out_r, out_w = IO.pipe
     pid = spawn_in_group("sh", ["-c", command], dir, out_w)
     out_w.close
 
-    # issue #257: the accumulator is BINARY on purpose. Pipe chunks arrive
-    # tagged with Encoding.default_external (a Windows code page in practice)
-    # and are often byte-invalid; appending one to a UTF-8 accumulator either
-    # mutates it to BINARY (so later concatenation with the tool's own UTF-8
-    # literals raises Encoding::CompatibilityError) or raises outright. A
-    # fixed BINARY accumulator can never raise, and the whole result is
-    # normalized once at the end so multi-byte sequences split across chunk
-    # boundaries survive intact.
+    # BINARY on purpose: pipe chunks arrive byte-invalid under a Windows code
+    # page; a UTF-8 accumulator would raise or silently mutate. The result is
+    # normalized once at the end so sequences split across chunks survive.
     output = +"".dup.force_encoding(Encoding::BINARY)
     reader = Thread.new do
       Thread.current.report_on_exception = false
       loop { output << out_r.readpartial(64 * 1024).dup.force_encoding(Encoding::BINARY) }
     rescue EOFError, IOError
-      # EOF when the whole tree exits; out_r#close below unblocks a
-      # read stuck because a surviving grandchild still held the pipe.
+      # EOF when the tree exits; out_r#close unblocks a read a grandchild held.
     end
 
     waiter = Process.detach(pid)
@@ -691,18 +469,12 @@ class CommandRunner
 
     out_r.close # unblocks the reader if a grandchild kept the pipe open
     reader.join
-    # waiter has always been joined here (kill + grace join on timeout),
-    # so value never blocks.
-    # issue #257: the read boundary. Everything downstream (truncate, JSON
-    # for the session save, the console) sees valid UTF-8 from here on.
+    # Read boundary: everything downstream sees valid UTF-8 from here on.
     [TextNormalizer.normalize(output), timed_out ? :timeout : waiter.value]
   end
 
-  # `sh -c` in its own (process) group: the spawn flag key is
-  # platform/version-dependent (:new_pgroup on Windows, :pgroup on POSIX).
-  # If the running Ruby rejects it (older versions), retry plain: the
-  # timeout kill then reaches only the direct child - still no hang, but
-  # grandchild trees would survive.
+  # Retry plain if this Ruby rejects the group spawn flag: the timeout kill then
+  # reaches only the direct child (still no hang, but grandchildren survive).
   def spawn_in_group(cmd, args, dir, out_w)
     Process.spawn(cmd, *args, chdir: dir, in: File::NULL,
                   out: out_w, err: out_w, PGROUP_SPAWN_KEY => true)
@@ -712,13 +484,8 @@ class CommandRunner
     Process.spawn(cmd, *args, chdir: dir, in: File::NULL,
                   out: out_w, err: out_w)
   end
-  # Kills `pid` and EVERYTHING it spawned. Windows: taskkill /T /F walks the
-  # tree for us (no process groups to signal). POSIX: the child was spawned
-  # in its own pgroup (pgid == pid), so a group signal reaches every
-  # descendant. TERM first so well-behaved tools can clean up, KILL after
-  # a short grace - by timeout the command is already dead to the user,
-  # but an unkillable-in-TERM zombie grandchild would otherwise keep the
-  # output pipe open past the wait below.
+  # TERM first (tools can clean up), KILL after. Windows walks the tree via
+  # taskkill /T; POSIX signals the own pgroup so every descendant is reached.
   def kill_process_tree(pid)
     if Gem.win_platform?
       system("taskkill", "/T", "/F", "/PID", pid.to_s,
@@ -730,20 +497,14 @@ class CommandRunner
     end
   end
 
-  # Keep the first and last halves of `limit` lines with the dropped middle
-  # named. Returns [text, truncated?].
-  # A LINE count is not a size limit (issue #551): output with few newlines and
-  # huge lines passes the line gate whole and the tool result then overflows the
-  # context window, so OutputBudget bounds the same kept window in bytes too and
-  # clips a single grossly oversized line within itself.
+  # Head + tail, middle named. A line count is not a size limit, so OutputBudget
+  # also bounds the kept window in bytes. Returns [text, truncated?].
   def truncate(text, limit, bytes: output_result_bytes)
     budget = OutputBudget.fit(text, limit: bytes, limit_lines: limit)
     [budget.text + line_notice(budget), budget.truncated?]
   end
 
-  # The line-count half of the notice. OutputBudget owns the byte half; when
-  # whole lines were dropped the line count is named as well, because 'limit'
-  # is the knob for that half (issue #537: head AND tail, never head only).
+  # Names the dropped line count too; 'limit' is the knob for that half.
   def line_notice(budget)
     return "" if budget.lines_dropped.zero?
 

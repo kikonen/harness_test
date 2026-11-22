@@ -4,111 +4,27 @@ require_relative "editor"
 require_relative "text_wrap"
 require "tins"
 
-# -- UI::Dialog ---------------------------------------------------------------
-#
-# A generic user dialog (issue #74 / #13): a title (what it is about), a set
-# of options, and a standard "Cancel" option that is ALWAYS present. Second
-# primitive of the namespaced UI library; public API is unchanged from the
-# previous top-level Dialog.
-#
-# Each option has a title, an optional description, and a value. The
-# value of the selected option is returned to the caller; selecting the
-# standard cancel option (or dismissing with EOF) returns
-# CANCEL_VALUE.
-#
-# CHOICE INPUT (issue #72): the choice line is OPTION NUMBERS ONLY -
-# bare "1", several numbers in one line ("1 3" or "1,3") when the dialog
-# allows it, or the cancel number plus a one-line reason
-# ("5 no, and because X"). Single-select IS multi-select with one number:
-# any text on the choice line that is NOT "<cancel> <reason>" is stray
-# input (a paste accident) and re-prompts - it is NEVER a selection, a
-# note, or a cancel (issue #155). There are no per-option inline notes.
-#
-# CHOICE-LINE EDITING (issue #198 phase 2): on a TTY the single-line
-# choice read goes through UI::Editor (the same Reline editor the steering
-# note uses), so every in-turn stdin read shares ONE code path: Enter
-# submits the line, a bare Enter re-prompts (same as the blank-line skip),
-# Esc keeps what was typed as a draft prefilled on the next re-prompt - it
-# NEVER cancels (cancel is explicit, issue #155) - and Ctrl-D on an empty
-# line cancels the dialog like EOF. Non-tty streams take the plain gets()
-# path with exactly the same behavior as before this change (pipes in
-# specs, dumb terminals).
-# FREE TEXT (issue #198 phase 4): the "Additional details" block is
-# MULTILINE through the same shared editor - on a tty it is UI::Editor's
-# multiline read (Enter inserts a newline, the submit key commits the whole
-# block as ONE note, Esc keeps the buffer and re-asks, Ctrl-D cancels the
-# dialog); non-tty streams stay gets()-based (blank line finishes, EOF
-# cancels).
-#
-# A dialog can allow ADDITIONAL DETAILS: when free_text is enabled the
-# dialog gets an explicit numbered "Additional details" option (the
-# FREE_TEXT option), selectable ALONE, alongside other options, or
-# alongside Cancel ("2 3 4" = options 2+3 with a note; "5 4" = cancel
-# with a reason). Picking it enters a MULTI-LINE text block: type or
-# paste as many lines as you want, finish with a BLANK line; Ctrl-D (EOF)
-# cancels the whole dialog. An empty block re-prompts the choice. The
-# typed details ride along with the selection as [FREE_TEXT, text]
-# appended to the result, so possible return values are: the bare value,
-# an array of values (multi picks), [FREE_TEXT, text],
-# [value, [FREE_TEXT, text]], [:cancelled, 'reason'], or
-# [:cancelled, [FREE_TEXT, 'reason']].
-#
-# CANCEL IS ALWAYS EXPLICIT (issue #155): only picking the cancel option
-# (alone or in a selection), an attached "<cancel number> <note>" line, or
-# EOF decides a dialog by cancelling it.
-#
-# An out-of-range option number (e.g. "5" when only 1..4 exist) is
-# rejected with an explanatory line and the dialog re-prompts, so a
-# mistyped choice is never silently reinterpreted as something else
-# (issue #73). Dismissing with EOF still cancels.
-#
-# Single-thread I/O rule (issue #40): when called from within a Task
-# thread, `show` routes the entire dialog interaction through the task's
-# request/response protocol so that stdin/stdout are used only on the
-# main thread - and callers MUST pass nil for the ui then, since naming
-# $stdout/$stdin from a task thread would be direct global stream access
-# from the wrong thread. When no Task is active (tests, direct CLI
-# commands), an explicit ui: object (a UI::Console) is REQUIRED and used
-# directly.
-#
-#   dialog = UI::Dialog.new(
-#     title: 'Access requested (write access): lib/foo.rb',
-#     options: [
-#       UI::Dialog::Option.new(title: 'Allow this file only', value: :file_only),
-#       UI::Dialog::Option.new(title: 'Allow directory: lib/ (recursive)',
-#                              value: :dir_recursive,
-#                              description: 'covers every file under lib/')
-#     ]
-#   )
-#   choice = dialog.show                     # inside a Task thread: routed
-#   choice = dialog.show(ui: console)        # no task: direct I/O on it
-#     # => :file_only, or CANCEL_VALUE (or with details, e.g.
-#     #    [:cancelled, [UI::Dialog::FREE_TEXT, 'why not']])
+# A user dialog: title, options, and a standard always-present Cancel. The
+# choice line accepts option numbers only; note colours: doc/dialog_colors_design.md;
+# choice input, free text, and I/O routing: doc/dialog_design.md.
 module UI
   class Dialog
-    # Standard value returned when the user picks the cancel option (or
-    # dismisses the dialog with EOF).
+    # Returned when the user picks Cancel or dismisses the dialog with EOF.
     CANCEL_VALUE = :cancelled
 
-    # Sentinel marker for the free-text "additional details" answer. The
-    # typed details are returned as [FREE_TEXT, 'the typed text'], so
-    # callers can tell them apart from plain option values (which are
-    # returned as-is) and from a cancel one-line reason (a plain String).
+    # Marker for the free-text answer: returned as [FREE_TEXT, text], so callers
+    # can tell it apart from a plain option value or a cancel one-line reason.
     FREE_TEXT = :free_text
 
-    # Default title of the explicit "Additional details" option appended
-    # to free_text dialogs.
+    # Default label of the explicit "Additional details" option.
     FREE_TEXT_OPTION = "Additional details"
 
-    # WHAT a dialog note line IS (issue #388; roles and hues:
-    # doc/dialog_colors_design.md). The emitter states the kind - never a color,
-    # a palette or a renderer - and Console#paint turns the
-    # kind into a palette role. A console with no palette paints nothing.
-    #   context  - neutral background (a purpose line, an explanation).
-    #   warn     - a refusal that is not a disaster match (UNSAFE: a construct
-    #              that can never be auto-approved; a path outside the workdir).
-    #   alert    - the hard floor or a dangerous model verdict (DENYLISTED:).
-    #   safe     - a reassuring model verdict line (MODEL VERDICT ... safe:).
+    # WHAT a note line IS (roles/hues: doc/dialog_colors_design.md). The emitter
+    # states the kind, never a colour; Console#paint maps kind to a palette role.
+    #   context - neutral (a purpose or explanation line).
+    #   warn    - a refusal that is not a disaster match (UNSAFE, a path outside workdir).
+    #   alert   - the hard floor or a dangerous model verdict (DENYLISTED:).
+    #   safe    - a reassuring model verdict line.
     NOTE_KINDS = %w[context warn alert safe].freeze
 
     NOTE_ROLES = {
@@ -118,25 +34,20 @@ module UI
       "safe" => :dialog_safe
     }.freeze
 
-    # Line shape of a dialog: the head carries 2 spaces, the title body, the
-    # options and the choice prompt 13, a note 16 (a note reads as belonging
-    # to the title line above it).
+    # Line shape: head 2 spaces, title/options/choice prompt 13, note 16
+    # (so a note reads as belonging to the title line above it).
     HEAD_INDENT  = "  "
     TITLE_INDENT = "             "
     NOTE_INDENT  = "                "
 
-    # A dialog wraps its prose (title, notes, option titles and descriptions)
-    # to the SAME basis the plan/say markdown path uses (issue #476): a fixed
-    # PERCENTAGE of the detected terminal width, not a fixed column count: a
-    # wide terminal fills its room, a narrow one stays inside itself (no
-    # terminal-side mid-word hard-wrap). 80 mirrors AUTO_WIDTH_PERCENT in
-    # UI::MarkdownRenderer; the floor keeps a very narrow terminal readable.
-    # A line that already fits is printed verbatim.
+    # Prose wraps to the same basis as the plan/say markdown path: a fixed
+    # PERCENTAGE of the detected terminal width (80 mirrors AUTO_WIDTH_PERCENT),
+    # floored so a very narrow terminal stays readable. A fitting line is verbatim.
     DIALOG_WIDTH_PERCENT = 80
     MIN_DIALOG_WIDTH = 40
 
-    # One note line + its kind. A plain String note is kind context, so every
-    # existing caller (ui.dialog's free-form note, web.fetch) is unchanged.
+    # One note line + its kind. A plain String note is kind context, so existing
+    # callers are unchanged.
     Note = Struct.new(:text, :kind) do
       def initialize(text, kind: "context")
         raise ArgumentError,
@@ -146,7 +57,7 @@ module UI
         super(text.to_s, kind.to_s)
       end
 
-      # The palette role this kind maps to (issue #388).
+      # The palette role this kind maps to.
       def role
         NOTE_ROLES.fetch(kind)
       end
@@ -169,30 +80,17 @@ module UI
 
     attr_reader :title, :options, :notes
 
-    # title:   what the dialog is about (required, non-empty).
-    # options: non-empty array of Option; the standard cancel option is
-    #          appended automatically (and before it, when free_text is
-    #          enabled, the explicit "Additional details" option).
-    # note:    line(s) shown under the title (e.g. a warning, or an
-    #          explanation of why the dialog was asked). ONE String (rendered as
-    #          kind context), ONE Dialog::Note, or an Array of either - the
-    #          emitter states WHAT each line is via Note#kind (issue #388) and
-    #          never a color: the console's palette decides whether anything is
-    #          colored at all.
-    # free_text: let the user type their own answer by selecting the
-    #            explicit "Additional details" option; the typed text is
-    #            returned as [FREE_TEXT, text], alone or appended to the
-    #            selected values - including with Cancel.
-    # free_text_prompt: optional hint used as the label of the "Additional
-    #            details" option and shown when asking for the typed
-    #            answer.
-    # multi_select: allow picking several options at once (their numbers
-    #            in one line, e.g. "1 3"). Without it, a selection line
-    #            may name at most ONE regular option: "Additional details"
-    #            still counts alongside it ("option X but blaa blaa"),
-    #            but Cancel does not (Cancel + anything else re-prompts;
-    #            cancel is explicit). One pick returns the bare value;
-    #            two or more return an array of values.
+    # title:         what the dialog is about (required, non-empty).
+    # options:       non-empty array of Option; Cancel is appended automatically
+    #                (and, when free_text is on, the "Additional details" option first).
+    # note:          line(s) under the title: ONE String (kind context), ONE Note,
+    #                or an Array of either. The emitter states each line's kind, never a colour.
+    # free_text:     let the user pick "Additional details" and type an answer,
+    #                returned as [FREE_TEXT, text] alone or appended to the selection.
+    # free_text_prompt: optional hint used as that option's label and shown when asking.
+    # multi_select:  allow picking several options in one line ("1 3"). Without it,
+    #                at most one regular option may be picked, though "Additional
+    #                details" still counts alongside it; Cancel does not.
     def initialize(title:, options:, note: nil, free_text: false, free_text_prompt: nil,
                    multi_select: false, grant: false)
       raise ArgumentError, "dialog title must be a non-empty string" if title.to_s.strip.empty?
@@ -203,9 +101,8 @@ module UI
         raise ArgumentError, "every option must be a Dialog::Option" unless o.is_a?(Option)
       end
 
-      # A GRANT dialog can never be denied for a background job: denying the
-      # consent would stop the job from working at all, so the consent path
-      # stays live for it. Every other dialog kind is deniable (issue #286).
+      # A GRANT dialog can never be denied for a background job (denying it would
+      # stop the job working); every other dialog kind is deniable.
       @grant = grant ? true : false
 
       @title   = title.to_s.strip
@@ -214,8 +111,7 @@ module UI
       @free_text_prompt = free_text_prompt.to_s.strip.sub(/\Aor\s+/, "")
       options = options.dup
       if @free_text
-        # The explicit "Additional details" option: the hint (when given)
-        # IS the option's label, otherwise the generic default.
+        # The hint (when given) IS the option's label, otherwise the generic default.
         title = @free_text_prompt.empty? ? FREE_TEXT_OPTION : @free_text_prompt
         options << Option.new(title:, value: FREE_TEXT)
       end
@@ -224,41 +120,29 @@ module UI
       @multi_select = multi_select ? true : false
     end
 
-    # True when this dialog asks for a consent GRANT, which can never be
-    # denied for a background job (denying it would stop the job working).
+    # True when this dialog asks for a consent GRANT (never deniable for a job).
     def grant?
       @grant
     end
 
-    # Render the dialog and wait for the user's choice on stdin.
-    # Returns the VALUE of the selected option (bare for a single pick,
-    # an ARRAY for two or more picks), the typed details as
-    # [FREE_TEXT, text] when only "Additional details" was selected, or
-    # CANCEL_VALUE / [:cancelled, reason] when the user cancels. The
-    # details pair rides along with any selection - see the class docs
-    # for all possible shapes.
+    # Render the dialog and wait for a choice. Returns the selected value (bare for
+    # one pick, an array for several), [FREE_TEXT, text] when only "Additional
+    # details" was picked, or CANCEL_VALUE / [:cancelled, reason].
     #
-    # Single-thread I/O rule (issue #40): when called from within a Task
-    # thread (Thread.current[:harness_task] is set), this routes through
-    # the task's request/response protocol and the MAIN THREAD services
-    # the I/O with the task's injected console (Task.run owns it). In that
-    # case pass nil - a caller on a task thread must NOT name $stdout/
-    # $stdin at all, since that would be direct global stream access from
-    # the wrong thread. When no Task is active (CLI main thread, tests),
-    # the ui object is used DIRECTLY and must be exactly the console the
-    # caller wants to use - deliberately no defaults and no global lookup:
-    # a dialog never silently talks to some stream nobody passed in.
+    # From a Task thread this routes through the task protocol and the MAIN thread
+    # serves the I/O - pass nil there (naming $stdout/$stdin from a task thread is
+    # wrong-thread global stream access). With no Task, ui: must be an explicit
+    # console used directly: no defaults, no global lookup.
     def show(ui: nil)
-      # Guard keeps the load order independent: dialog can be loaded before
-      # task (they only meet at runtime on the main thread).
+      # Guard keeps load order independent: dialog can load before task; they only
+      # meet at runtime on the main thread.
       task = defined?(Task) ? Task.current : nil
 
       if task
         raise ArgumentError, "dialog routed through a Task: pass ui: nil" \
           unless ui.nil?
 
-        # Route through the main thread: post a request and block until
-        # the main thread processes the dialog and responds.
+        # Post a request and block until the main thread services the dialog.
         task.request(:dialog, dialog: self)
       else
         raise ArgumentError, "no Task active: show requires an explicit ui: console" \
@@ -268,19 +152,16 @@ module UI
       end
     end
 
-    # Perform the dialog I/O directly on the given console (the original
-    # implementation). Called either by `show` when no Task is active
-    # (the console's streams), or by the main thread when servicing a
-    # :dialog request from a task (the task's injected console, so output
-    # lands on the SAME stream the drain loop renders to - no default).
+    # Perform the dialog I/O directly on the given console - reached by show when no
+    # Task is active, and by the main thread when servicing a :dialog request (on the
+    # task's injected console, so output lands on the same stream the drain loop uses).
     def perform_direct(ui:)
       title_lines = @title.split("\n")
       ui.puts
-      # The head is chrome, the title is what the user must read (terminal's
-      # own color), and each note line carries the KIND its emitter stated
-      # (issue #388) - no caller names a color for any of them.
+      # The head is chrome, the title is in the terminal's own colour, and each note
+      # line carries the KIND its emitter stated - no caller names a colour.
       ui.puts dialog_head(ui, title_lines.first)
-      # A long title body re-wraps to the same percentage basis (issue #476).
+      # A long title body re-wraps to the same percentage basis.
       dialog_wrap(title_lines[1..].join("\n"), TITLE_INDENT).each { |line| ui.puts line }
 
       @notes.each { |note| paint_note(ui, note).each { |line| ui.puts line } }
@@ -295,34 +176,28 @@ module UI
 
       print_choice_prompt(ui)
 
-      # The choice is ONE line of option numbers (or a cancel number plus
-      # a one-line reason). On a tty the line comes from UI::Editor (see
-      # read_choice_line); on non-tty streams it is a plain gets() with
-      # the classic skip-blanks semantics, and only a real EOF dismisses
-      # the dialog without an answer.
+      # The choice is one line of option numbers (or a cancel number + reason). On a
+      # tty it comes from UI::Editor; otherwise a plain gets() that only dismisses on
+      # a real EOF.
       draft = nil
       loop do
         res = read_choice_line(ui, draft)
         # nil = non-tty stream EOF; :eof = Ctrl-D inside the tty editor.
         return CANCEL_VALUE if res.nil? || res[:status] == :eof
 
-        # Esc: keep what was typed as a draft for the next round - it is
-        # NEVER a cancel (issue #155: cancel is always explicit). Any other
-        # round resets it so a submitted line is parsed as typed, not
-        # shadowed by a stale draft.
+        # Esc keeps what was typed as a draft for the next round - never a cancel.
+        # Any other round resets it so a submitted line parses as typed, not shadowed.
         draft = res[:status] == :cancelled ? res[:text] : nil
         next if draft && !draft.to_s.strip.empty? # re-prompt with the prefill
 
         if res[:status] == :empty
-          # Bare Enter: stale input (an extra Enter while the prompt was
-          # sent) - re-prompt without touching the draft.
+          # Bare Enter: stale input - re-prompt without touching the draft.
           next
         end
 
-        # .to_s + empty skip: a nil/blank submitted line gets bare-Enter
-        # semantics (re-prompt) instead of crashing or parsing as an
-        # empty selection - the editor returns :empty for blanks, but
-        # stubs and odd streams deserve the same fallback.
+        # A nil/blank submitted line gets bare-Enter semantics (re-prompt) rather
+        # than parsing as an empty selection - the editor returns :empty for blanks,
+        # but stubs and odd streams deserve the same fallback.
         answer = res[:text].to_s.strip
         next if answer.empty?
         chosen = parse_choice_line(answer, ui)
@@ -335,11 +210,9 @@ module UI
 
     private
 
-    # A note is ONE line (a String = kind context), ONE Note, or an Array of
-    # either. Blank lines are dropped so a caller can pass a computed note with
-    # a nil part without the dialog printing empty indented lines. Array() is
-    # NOT used: a Struct answers #to_a, so it would splat a Note into its
-    # fields ("text", "kind").
+    # A note is ONE line (String = kind context), ONE Note, or an Array of either.
+    # Blank lines are dropped so a computed note with a nil part prints no empty lines.
+    # Array() is NOT used: a Struct answers #to_a and would splat a Note into its fields.
     def normalize_notes(note)
       return [] if note.nil?
 
@@ -356,31 +229,25 @@ module UI
       end
     end
 
-    # The dialog's first line: bracket + glyph as recessive chrome, the title
-    # text in the terminal's own color (issue #388).
+    # The first line: bracket + glyph as recessive chrome, title text in the
+    # terminal's own colour. The marker keeps its exact pre-colour bytes so a plain
+    # console still produces the dialog it always did.
     def dialog_head(ui, title_line)
-      # The marker part keeps the exact pre-#388 bytes (two spaces after the
-      # glyph): a plain console must still produce the dialog it always did.
       "#{paint(ui, :marker, "#{HEAD_INDENT}[dialog] ⚠  ")}#{title_line}"
     end
 
-    # A note line wrapped to the content width, each continuation carrying the
-    # note indent; the role is painted per rendered line so the palette covers
-    # every physical line, not just the first. A fitting note is one line - the
-    # exact pre-#476 bytes.
+    # A note wrapped to the content width; each continuation carries the note indent
+    # and the role is painted per rendered line (so the palette covers every physical
+    # line). A fitting note is one line - the exact pre-wrap bytes.
     def paint_note(ui, note)
       TextWrap.line(note.text, content_width(NOTE_INDENT)).map do |seg|
         "#{NOTE_INDENT}#{paint(ui, note.role, seg)}"
       end
     end
 
-    # The NUMBER is the anchor the choice line names, so it gets a visible hue of
-    # its own (not the marker gray: invisible in a list the eye scans for a
-    # number); the option's own words are content the user must read.
-    # A long option TITLE wraps too (issue #476): the first line keeps the
-    # painted number, continuation lines pad to align under the title text, so
-    # the option still reads as one entry. A fitting title is the old single
-    # line verbatim.
+    # The NUMBER is the anchor the choice line names, so it gets its own hue (not the
+    # marker gray) while the option's words stay readable content. A long title wraps:
+    # the first line keeps the painted number, continuations pad to align under it.
     def option_lines(ui, index, opt)
       number = "#{index + 1})"
       pad    = " " * (TITLE_INDENT.length + number.length + 1)
@@ -391,36 +258,31 @@ module UI
       out
     end
 
-    # Total wrap width: a fixed PERCENTAGE of the detected terminal, floored so
-    # a very narrow terminal is still readable. This is the same basis the
-    # plan/say markdown path uses (UI::MarkdownRenderer::AUTO_WIDTH_PERCENT).
+    # Total wrap width: a fixed percentage of the terminal, floored so a very narrow
+    # terminal stays readable. Same basis as UI::MarkdownRenderer::AUTO_WIDTH_PERCENT.
     def content_width(indent)
       cols  = (Tins::Terminal.columns rescue MIN_DIALOG_WIDTH)
       total = [(cols * DIALOG_WIDTH_PERCENT / 100.0).floor, MIN_DIALOG_WIDTH].max
       [total - indent.to_s.length, 1].max
     end
 
-    # Wrap a block to its indent's content width and prefix every line with the
-    # indent (descriptions; notes are painted per line in #paint_note).
+    # Wrap a block to its indent's content width, prefixing every line with the indent.
     def dialog_wrap(text, indent)
       TextWrap.line(text, content_width(indent)).map { |seg| "#{indent}#{seg}" }
     end
 
-    # A console answers #paint when it has a palette to paint with (issue #388);
-    # a duck-typed sink that only answers puts/print gets the plain text, so no
-    # dialog has to know which kind of console it was handed.
+    # A console answers #paint when it has a palette; a duck-typed sink that only
+    # answers puts/print gets plain text, so no dialog must know its console kind.
     def paint(ui, role, text)
       return text unless ui.respond_to?(:paint)
 
       ui.paint(role, text)
     end
 
-    # issue #198 phase 2: read one choice line. tty -> UI::Editor (Reline:
-    # Enter submits, bare Enter is :empty, Esc is :cancelled with the
-    # draft intact, Ctrl-D is :eof); non-tty -> gets() (nil => EOF, blank
-    # => :empty, otherwise :submitted). The `> ` line printed above is the
-    # editor's prompt on tty (Reline's PROMPT) and the plain-prompt
-    # marker elsewhere. Returns {text:, status:} or nil on EOF.
+    # Read one choice line. tty -> UI::Editor (Enter submits, bare Enter :empty,
+    # Esc :cancelled with the draft intact, Ctrl-D :eof); non-tty -> gets() (nil=EOF,
+    # blank=:empty, else :submitted). The "> " line is the editor prompt on tty, the
+    # plain-prompt marker elsewhere. Returns {text:, status:} or nil on EOF.
     def read_choice_line(ui, draft)
       stdin = ui.stdin
       return stdin.gets.then do |line|
@@ -437,23 +299,17 @@ module UI
         .then { |r| { text: r.text, status: r.status } }
     end
 
-    # True when the console's stdin IS the process's real terminal stdin -
-    # UI::Editor's Reline path attaches to $stdin, so a fake tty? stream in
-    # tests must stay on the dumb gets() path (issue #202 bug class).
+    # True when stdin IS the process's real terminal stdin - UI::Editor's Reline path
+    # attaches to $stdin, so a fake tty? stream in tests must stay on the gets() path.
     def tty_input?(ui)
       !ui.stdin.nil? && UI::Editor.is_real_tty_stdin?(ui.stdin)
     end
 
-    # Resolve one choice line to its selection or a noted cancel, or nil
-    # when the line was invalid (already re-prompted). Forms accepted:
-    #   * "<n>" / "<n> <n> ..." (spaces or commas) - option numbers; all
-    #     must be in range, and at most one regular option may be picked
-    #     in a non-multi-select dialog (option + "Additional details"
-    #     still works there).
-    #   * "<cancel n> <reason>" - cancel plus a one-line reason; the ONE
-    #     text-on-a-choice-line form (issue #79 denial feedback).
-    # Anything else is stray input (paste accident) - re-prompt, never
-    # select / note / cancel (issues #155 / #72).
+    # Resolve one choice line to its selection or a noted cancel, or nil when invalid
+    # (already re-prompted). Accepted forms: "<n>" / "<n> <n>" (space or comma) - all
+    # in range, at most one regular option unless multi-select; "<cancel n> <reason>" -
+    # the one text-on-a-choice-line form. Anything else is stray input: re-prompt,
+    # never select/note/cancel.
     def parse_choice_line(answer, ui)
       tokens = answer.split(/[,\s]+/).reject(&:empty?)
       if tokens.any? { |t| !t.match?(/\A\d+\z/) }
@@ -485,9 +341,8 @@ module UI
       end
     end
 
-    # The ONE text-on-a-choice-line form (issue #79 denial feedback): a
-    # cancel number followed by a one-line reason. Returns the noted
-    # cancel, or nil when the line is not in that shape (stray input).
+    # The one text-on-a-choice-line form: a cancel number plus a one-line reason.
+    # Returns the noted cancel, or nil when the line is not in that shape (stray input).
     def cancel_with_reason?(answer)
       m = answer.match(/\A(\d+)\s+(\D.*)\z/)
       return nil unless m
@@ -499,15 +354,12 @@ module UI
       [CANCEL_VALUE, m[2]]
     end
 
-    # Assemble the dialog result from a parsed selection:
-    #   * a noted cancel -> [:cancelled, 'reason'] (from parse) or
-    #     [:cancelled, [FREE_TEXT, 'reason']] (cancel + details below).
-    #   * plain cancel -> :cancelled.
-    #   * "Additional details" among the picks -> enter the multi-line
-    #     text block, then append [FREE_TEXT, text] to the other values
-    #     (the selections keep working - issue #72). An empty block
-    #     re-prompts; an EOF inside it cancels the whole dialog.
-    #   * one number -> the bare value; more -> array of values.
+    # Assemble the result from a parsed selection. A noted cancel rides straight
+    # through. Cancel anywhere in a selection cancels - except when "Additional
+    # details" is picked in the same line, where the typed reason block replaces the
+    # bare cancel. Details pick enters the text block then appends [FREE_TEXT, text]
+    # to the other values (empty block re-prompts, EOF cancels). One number -> bare
+    # value; more -> array.
     def finalize(chosen, ui)
       if chosen.is_a?(Array) && chosen.size == 2 &&
          chosen[0] == CANCEL_VALUE && chosen[1].is_a?(String)
@@ -515,10 +367,8 @@ module UI
       end
 
       values = chosen[:values]
-      # Cancel anywhere in the selection cancels the dialog (issue #155):
-      # a mixed "1 4" or a bare cancel both return plain :cancelled.
-      # Exception: details picked in the SAME line (e.g. "3 4") - the
-      # typed reason block replaces the bare cancel (issue #72).
+      # Cancel anywhere in the selection cancels, UNLESS details are picked in the
+      # same line - then the typed reason block replaces the bare cancel.
       if values.include?(CANCEL_VALUE) && !values.include?(FREE_TEXT)
         return CANCEL_VALUE
       end
@@ -526,13 +376,11 @@ module UI
       if values.include?(FREE_TEXT)
         detail = collect_details(ui)
         return nil_reprompt(ui) if detail.nil?
-        # EOF mid-block (Ctrl-D inside the text block) cancels the whole
-        # dialog - bare :cancelled, no details pair.
+        # EOF mid-block (Ctrl-D) cancels the whole dialog - bare :cancelled, no pair.
         return CANCEL_VALUE if detail == CANCEL_VALUE
 
         others = values.reject { |v| v == FREE_TEXT || v == CANCEL_VALUE }
-        # Cancel with nothing but details is the reason form:
-        # "4 3" -> [:cancelled, [FREE_TEXT, 'why']].
+        # Cancel with nothing but details is the reason form: "4 3" -> [:cancelled, [FREE_TEXT, 'why']].
         return [CANCEL_VALUE, detail] \
           if others.empty? && values.include?(CANCEL_VALUE)
 
@@ -542,14 +390,11 @@ module UI
       values.size == 1 ? values.first : values
     end
 
-    # Ask for the typed additional details after the user selected the
-    # "Additional details" option. TTY (issue #198 phase 4): one shared
-    # editor read - Enter inserts a newline (typed or pasted), the submit
-    # key commits the whole block as ONE note, Esc keeps the buffer as a
-    # draft and re-asks, Ctrl-D cancels the whole dialog. Non-tty: the
-    # classic gets() block (blank line finishes, EOF cancels). Returns
-    # [FREE_TEXT, text], nil when the block was empty (the dialog
-    # re-prompts), or CANCEL_VALUE on EOF.
+    # Ask for the typed details after the "Additional details" option. TTY: one shared
+    # editor read (Enter inserts a newline, the submit key commits the whole block as
+    # ONE note, Esc keeps the buffer and re-asks, Ctrl-D cancels). Non-tty: the classic
+    # gets() block (blank line finishes, EOF cancels). Returns [FREE_TEXT, text], nil on
+    # an empty block (re-prompt), or CANCEL_VALUE on EOF.
     def collect_details(ui)
       ui.puts
       hint = @free_text_prompt.empty? ? "type your answer" : @free_text_prompt
@@ -559,9 +404,7 @@ module UI
         loop do
           res = UI::Editor.new(ui.stdin).read_multiline(prefill: draft)
           return CANCEL_VALUE if res.status == :eof
-          # Esc: the buffer is the draft for the next round - it is never
-          # a cancel (issue #155). Ctrl+G (issue #298) is the same round-trip:
-          # what the editor wrote stays the draft, and is still not an answer.
+          # Esc and Ctrl+G both keep what the editor wrote as the draft - neither is an answer.
           if res.status == :edited
             draft = res.text.to_s
             ui.puts "             (#{res.note} - draft kept; submit key to finish)"
@@ -602,11 +445,8 @@ module UI
       nil
     end
 
-    # Print the "Choice:" prompt with the allowed input forms as a short
-    # list under it (one line each, only what THIS dialog allows) instead
-    # of one long run-on sentence. Shared by the first ask and the
-    # re-prompts after an invalid choice. ui is passed explicitly - there
-    # is deliberately no console default.
+    # Print the choice prompt with the input forms THIS dialog allows as a short list,
+    # shared by the first ask and re-prompts. ui is explicit - no console default.
     def print_choice_prompt(ui)
       forms = []
       if @multi_select
@@ -621,8 +461,7 @@ module UI
       ui.puts "             Choice (1..#{@options.size}):"
       forms.each { |f| ui.puts "               - #{f}" }
       if tty_input?(ui)
-        # issue #198 phase 2: the Reline editor owns the keyboard; its
-        # prompt ("> ") replaces this line as the input marker.
+        # The Reline editor owns the keyboard; its "> " prompt is the input marker.
         return
       end
 
@@ -630,9 +469,7 @@ module UI
       ui.flush
     end
 
-    # Reject an invalid answer (out-of-range option number or stray text)
-    # and ask again (issues #73 / #155). The user can still dismiss the
-    # dialog with EOF.
+    # Reject an invalid answer (out-of-range number or stray text) and ask again.
     def reprompt_invalid(number, ui)
       reprompt("invalid choice #{number} (valid: 1..#{@options.size})", ui)
       nil

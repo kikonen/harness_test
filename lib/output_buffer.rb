@@ -1,29 +1,23 @@
 # frozen_string_literal: true
 
 # Append-only structured record of everything shown to a user, split into the
-# two parts issue #286 needs: the TAIL is the durable history a renderer can
-# re-lay out, the HEAD is the live state of the streams that are still arriving.
-# Each retained job has its own buffer, held by the registry (the harness holds it
-# as a temporary home until then). Threading and ownership:
-# doc/output_buffer_design.md
+# TAIL (durable history a renderer re-lays out) and HEAD (live arriving streams).
+# Threading and ownership: doc/output_buffer_design.md
 
 class OutputBuffer
-  # One committed unit of output. A Data instance - IMMUTABLE BY CONSTRUCTION:
-  # no setters exist, so a renderer cannot mutate an entry after it has been
-  # handed out of the tail (type/origin are symbols; content is a string).
+  # One committed unit of output. IMMUTABLE BY CONSTRUCTION (no setters), so a
+  # renderer cannot mutate an entry after it has been handed out of the tail.
   Entry = Data.define(:type, :origin, :content) do
     def to_s
       "#{type}:#{origin} #{content}"
     end
 
-    # Data#to_h already exists (symbol-keyed members) - it doubles as the
-    # serialization form, so no override needed.
+    # Data#to_h doubles as the serialization form, so no override needed.
   end
 
   # A live stream: the CURRENT state of one head cell, replaced as it grows.
-  # Mutable on purpose - the head is the snapshot a renderer shows now, and a
-  # refresh must be able to read the whole stream at once instead of rebuilding
-  # it from a pile of chunks. Immutability holds for the tail only.
+  # Mutable on purpose - a refresh reads the whole stream at once. Immutability
+  # holds for the tail only.
   class HeadCell
     attr_reader :type, :origin, :mode, :version
 
@@ -38,8 +32,8 @@ class OutputBuffer
 
     attr_reader :content
 
-    # A stream cell GROWS (chunks append); a live-status cell is a RE-POINT and
-    # is replaced whole. Both mark the cell dirty so the poll sees the change.
+    # A stream cell GROWS (chunks append); a live-status cell is RE-POINTed
+    # whole. Both mark the cell dirty so the poll sees the change.
     def update(value)
       @content = mode == :append ? [content, value].compact.join("") : value
       @version += 1
@@ -60,28 +54,22 @@ class OutputBuffer
     end
   end
 
-  # Two independent limits on the tail (issue #286): how much of it is kept in
-  # memory for review, and how much is saved in the session. max_saved <=
-  # max_memory, so the window a save writes is always inside what memory holds.
+  # Two independent tail limits: max_memory bounds the RAM window, max_saved is
+  # the window a session save writes. max_saved <= max_memory.
   DEFAULT_MAX_MEMORY = 4_096
   DEFAULT_MAX_SAVED  = 30
 
-  # Types that live in the HEAD, never in the tail: they are the live region and
-  # are not part of the durable record a replay redraws.
+  # Types that live in the HEAD, never in the tail: the live region is not part
+  # of the durable record a replay redraws.
   HEAD_TYPES = %i[spinner_detail].freeze
 
-  # A head cell is grown by the caller: :append means the content arrives in
-  # chunks and the cell is the WHOLE stream so far, :replace means each write is
-  # a re-point of the live status. A call with no mode states a FINAL item and
-  # is committed to the tail - the head must never be the only copy of an answer.
+  # A head cell is grown by the caller: :append means content arrives in chunks
+  # (the cell is the whole stream so far), :replace means each write re-points
+  # the live status. A call with no mode is a FINAL item committed to the tail.
   HEAD_MODES = %i[append replace].freeze
 
-  # Two independent tail limits (issue #286): max_memory bounds how much of the
-  # tail lives in RAM, max_saved is the window a session save writes. Both can be
-  # configured per buffer (config 'output:' block). max_memory NEVER cuts a PENDING
-  # (unread) entry - the nothing-lost rule of the drain loop - so it gates the
-  # consumed-front trim, not a plain "keep last N". max_saved <= max_memory so the
-  # saved window is always inside what memory holds.
+  # max_memory NEVER cuts a PENDING (unread) entry - the nothing-lost rule of the
+  # drain loop - so it gates the consumed-front trim, not a plain "keep last N".
   def initialize(max_memory: DEFAULT_MAX_MEMORY, max_saved: DEFAULT_MAX_SAVED)
     @tail       = []
     @head       = {}
@@ -90,13 +78,11 @@ class OutputBuffer
     @max_saved  = max_saved
   end
 
-  # The two tail limits this buffer was built with.
   attr_reader :max_memory, :max_saved
 
-  # Append one item. A live update (mode: :append or :replace, or a type that is
-  # transient by nature) lands as a head cell - created, or grown in place if
-  # that stream already has one. Anything else is a committed tail entry, so the
-  # final content of a stream is always in the record and never only in the head.
+  # A live update (a HEAD_MODE or a HEAD_TYPE) lands as a head cell - created,
+  # or grown in place if that stream already has one. Anything else is a
+  # committed tail entry, so a stream's final content is never only in the head.
   def put(type:, origin:, content: nil, mode: nil)
     type   = type.to_sym
     mode   = mode&.to_sym
@@ -109,9 +95,8 @@ class OutputBuffer
     end
   end
 
-  # Convenience writer mirroring the old `puts` ergonomics: join any number of
-  # parts with a newline (like Kernel.puts) and store ONE line per part. The
-  # origin is passed as the first argument: `buffer.puts(:harness, 'a', 'b')` -
+  # Join any number of parts with a newline (like Kernel.puts), store ONE line
+  # per part. Origin is the first argument (`buffer.puts(:harness, 'a')`) -
   # Ruby forbids a keyword before a splat, so this stays positional.
   def puts(origin = :unknown, *parts)
     parts = [""] if parts.empty?
@@ -130,29 +115,23 @@ class OutputBuffer
     @tail.last(count)
   end
 
-  # The live half: one cell per STREAM, a stream being (origin, type). A single
-  # task can have several cells live at once - the spinner cell AND the LLM
-  # streamed-response cell, both from :session_manager - so the key is the pair,
-  # never the origin alone (which would collapse them into one cell). In
-  # first-seen order.
+  # The live half: one cell per STREAM, a stream being (origin, type). One task
+  # can hold several cells live at once (a spinner cell AND a streamed-response
+  # cell), so the key is the pair, never the origin alone.
   def head
     @head.values
   end
 
-  # The cell for one stream, keyed by (origin, type). A single head can hold
-  # several cells from the SAME origin at once - a response cell AND a spinner
-  # cell, both from :session_manager - because each (origin, type) stream is its
-  # own cell. The job is not a key field here: each job's cells live in the job's
-  # own buffer, so the job is supplied by WHICH buffer is read, not by a third key
-  # part (issue #286).
+  # The cell for one stream, keyed by (origin, type). The job is not a key field
+  # here: each job's cells live in the job's own buffer, so the job is supplied
+  # by WHICH buffer is read.
   def cell(origin, type)
     @head[head_key(origin, type)]
   end
 
   # Promote one live cell to the record as ONE immutable tail entry holding its
-  # final content, and remove it from the head. A stream that keeps going after
-  # a commit starts a new cell, so the head never holds both the history and the
-  # live view of the same stream. Keyed by (origin, type).
+  # final content, removing it from the head. A stream that keeps going starts a
+  # new cell, so the head never holds both history and live view of one stream.
   def commit(origin, type)
     live = @head[head_key(origin, type)]
     return nil if live.nil?
@@ -161,9 +140,9 @@ class OutputBuffer
     tail_entry(type: live.type, origin: live.origin, content: live.content)
   end
 
-  # Tail waterline read: the committed entries appended since the LAST call,
-  # advanced past them. A head cell cannot be read this way (a replaced cell is
-  # not an append), so the live half has its own poll - #dirty_head.
+  # Tail waterline read: committed entries appended since the LAST call, advanced
+  # past them. A head cell cannot be read this way, so the live half has its own
+  # poll - #dirty_head.
   def drain
     return [] if @read_index >= @tail.size
 
@@ -182,14 +161,12 @@ class OutputBuffer
   end
 
   # The most recently UPDATED head cell of a type - the live state a renderer
-  # shows when several streams of that type are live at once (a new wait
-  # announces itself instead of inheriting a finished wait's line).
+  # shows when several streams of that type are live at once.
   def latest_head(type)
     @head.values.select { |cell| cell.type == type.to_sym }.max_by(&:version)
   end
 
-  # True when a renderer has something new to show: pending tail entries, or a
-  # dirty head cell.
+  # True when a renderer has something new to show: pending tail entries, or a dirty head cell.
   def pending?
     @read_index < @tail.size || @head.values.any?(&:dirty?)
   end
@@ -199,17 +176,15 @@ class OutputBuffer
     @tail.size + @head.size
   end
 
-  # The last N replayable entries for the resume replay redraw and its saved
-  # tail. The head is never part of the record, so this is the tail as stored:
-  # trimming only drops the consumed FRONT, so the tail is always intact.
+  # The last N replayable entries for the resume replay redraw and saved tail.
+  # Trimming only drops the consumed FRONT, so the tail is always intact.
   def replay_tail(count = nil)
     tail(count)
   end
 
-  # Rehydrate saved entries (the JSON form of Entry#to_h: type/origin come back
-  # as strings, content as whatever it was) into the tail. Used only at resume,
-  # before the drain loop first runs - a saved record is committed history, so
-  # nothing of it is live.
+  # Rehydrate saved entries (the JSON form of Entry#to_h) into the tail. Used
+  # only at resume, before the drain loop first runs - a saved record is
+  # committed history, so nothing of it is live.
   def restore(entries)
     Array(entries).each do |h|
       next unless h.is_a?(Hash)
@@ -221,10 +196,9 @@ class OutputBuffer
     end
   end
 
-  # Keep only the last count TAIL entries - the run's durable record is a
-  # window, not the whole session. The read waterline is kept consistent: after
-  # dropping the front it resets to 0 so a later drain still sees what remains.
-  # The head is live state and is never windowed by this.
+  # Keep only the last count TAIL entries. After dropping the front the read
+  # waterline resets to 0 so a later drain still sees what remains. The head is
+  # live state and is never windowed by this.
   def keep_tail(count)
     return if @tail.size <= count
 
@@ -232,16 +206,14 @@ class OutputBuffer
     @read_index = 0
   end
 
-  # Enforce THIS buffer's own saved window on its tail (the max_saved it was
-  # built with). Called by the single main-thread writer right after a TAIL put,
-  # so the one record never grows past what a save writes. max_saved 0 (the
-  # disable) keeps nothing, so the record stays empty. The head is never windowed.
+  # Enforce this buffer's own max_saved on its tail. max_saved 0 (the disable)
+  # keeps nothing, so the record stays empty. The head is never windowed.
   def keep_window
     keep_tail(@max_saved)
   end
 
   # Drop EVERYTHING (consumed tail, pending tail and live head) and reset the
-  # waterline to zero. Intended for explicit "new surface" boundaries.
+  # waterline. Intended for explicit "new surface" boundaries.
   def clear
     @tail.clear
     @head.clear
@@ -268,21 +240,19 @@ class OutputBuffer
       mode:)
   end
 
-  # The head-cell key is the stream: (origin, type). The job is NOT a key field
-  # here - each job has its own buffer, so the job is supplied by WHICH buffer is
-  # read (issue #286).
+  # The head-cell key is the stream: (origin, type). The job is NOT a key field -
+  # each job has its own buffer, so the job is supplied by WHICH buffer is read.
   def head_key(origin, type)
     [normalize(origin), type.to_sym]
   end
 
-  # normalize(origin) -> keep symbols/symbols-able values stable and short so
-  # entries are easy to group by a renderer. nil becomes :unknown.
+  # Keep origins stable and short so entries are easy to group by a renderer. nil becomes :unknown.
   def normalize(origin)
     origin.nil? ? :unknown : origin.to_sym
   end
 
-  # Drop the consumed prefix when the waterline is far enough along that it
-  # no longer matters (it is at least half of what the tail holds).
+  # Drop the consumed prefix when the waterline is far enough along that it no
+  # longer matters (it is at least half of what the tail holds).
   def trim_prefix
     return if @read_index < @max_memory
     return if @read_index * 2 < @tail.size

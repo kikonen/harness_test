@@ -21,8 +21,8 @@ class JobRegistry
     tasks_kept: nil,
     settings: nil,
     # A resumed run must continue numbering where its saved system left off, or
-    # its next job reuses an id already on disk (#548). 0 = a fresh run. The CLI
-    # seeds it from the saved system.json's next_id.
+    # its next job reuses an id already on disk. 0 = a fresh run; the CLI seeds
+    # it from the saved system.json's next_id.
     next_id: 0
   )
     @max_memory = max_memory
@@ -37,11 +37,10 @@ class JobRegistry
     @settings = settings
   end
 
-  # Ids go in add order so the main turn, added first, is job #0 - the registry
-  # has no special case for it. A resumed run REBUILDS a saved job with an explicit
-  # id: (its saved id) so a job's live id matches the job dir its files live under
-  # (#548); next_id is then advanced past every used id so a new job never reuses
-  # one (#548 A).
+  # Ids go in add order so the main turn, added first, is job #0 - no special
+  # case for it. A resumed run REBUILDS a saved job with its saved id (so its
+  # live id matches the job dir its files live under); next_id is then advanced
+  # past every used id so a new job never reuses one.
   def add_job(
     kind:,
     dependencies: [],
@@ -92,8 +91,8 @@ class JobRegistry
   # The executor: the CLI asks the registry to run a job and awaits its result.
   # The drain loop stays the single main-thread writer of the job's buffer.
   def run(job:, ui:, input_path: nil, &block)
-    # The Harness is the job's (#286): a Harness lives INSIDE the job it drives,
-    # so the executor reads it off the job rather than taking it from the caller.
+    # The Harness is the job's: a Harness lives INSIDE the job it drives, so the
+    # executor reads it off the job rather than taking it from the caller.
     error, task = Task.run(
       harness: job.harness, ui:, registry: self, job:, input_path:, &block)
     [error, task, job.result]
@@ -171,9 +170,9 @@ class JobRegistry
     @foreground == id
   end
 
-  # issue #548: which saved job ids this registry can rebuild a live Job from -
-  # the ones it already has. A saved id naming nothing is a dropped job, and an
-  # edge naming it stays dangling. Main-safe: reads only, writes nothing.
+  # Which saved job ids this registry can rebuild a live Job from - the ones it
+  # already has. A saved id naming nothing is a dropped job, and an edge naming
+  # it stays dangling. Reads only, writes nothing.
   def resumable_job_ids(saved_entries)
     Array(saved_entries).filter_map do |entry|
       id = entry.is_a?(Hash) ? (entry[:id] || entry["id"]) : entry
@@ -189,36 +188,29 @@ class JobRegistry
     foreground_job&.buffer
   end
 
-  # -- Session-worthy (issue #548 increment 5) ------------------------------
-
-  # Does ANY retained job own session state worth saving? This is the honest
-  # cross-job question #548 wants in place of #188's foreground-emptiness test:
-  # a background/sub-agent job that did real work must count even when the
-  # foreground chain is empty. A job the run never drove (harness nil, OPEN
-  # QUESTION 5) owns no conversation, so it is not counted.
+  # Does ANY retained job own session state worth saving? A background/sub-agent
+  # job that did real work must count even when the foreground chain is empty. A
+  # job the run never drove (harness nil) owns no conversation, so it is not counted.
   def any_job_has_session_state?
     @jobs.any? { |job| job.harness && !job.harness.session.empty? }
   end
 
-  # -- Run record (issue #458 / #286) ---------------------------------------
+  # -- Run record -------------------------------------------------------------
   #
   # The run record is the FOREGROUND job's buffer, and the registry - not the
-  # per-LLM turn engine - is its owner. Main-thread only. The max_saved guard
-  # is the disable: resume_replay_entries 0 records nothing.
+  # per-LLM turn engine - is its owner. Main-thread only. max_saved 0 is the
+  # disable: records nothing.
 
-  # Record the user's own submitted line. It is a first-class ROLE (type
-  # :user, not plain :text) so UI::Renderer labels it 'user:' on the resume
-  # redraw - the both-sides record #146 asks for.
-  # job: whose own buffer carries the line - the foreground when not named. A
-  # caller that hands a prompt to a job it just switched to names that job, so the
-  # record lands in the buffer a resume redraws FOR that job.
+  # The user's own submitted line, recorded as a first-class ROLE (type :user)
+  # so the resume redraw labels it 'user:'. `job:` names whose buffer carries
+  # the line (the foreground when not named), so a prompt handed to a switched-to
+  # job lands in the buffer a resume redraws FOR that job.
   def record_user_prompt(text, job: nil)
     record_report(type: :user, origin: :user, content: text.to_s, job:)
   end
 
-  # Record a main-thread slash-command report so a resumed run redraws it
-  # (#474). A structured :list payload is stored AS the structure, not a
-  # pre-rendered line (issue #146).
+  # Record a main-thread slash-command report so a resumed run redraws it. A
+  # structured :list payload is stored AS the structure, not a pre-rendered line.
   def record_report_output(type:, origin:, content:, job: nil)
     record_report(type:, origin:, content:, job:)
   end
@@ -230,23 +222,19 @@ class JobRegistry
     Array(foreground_buffer&.replay_tail(@max_saved)).map(&:to_h)
   end
 
-  # issue #548 increment 4b: the saved tail of ANY retained job's buffer, not
-  # only the foreground one. The registry is the only writer of every job's
-  # buffer (the single-thread I/O rule), so reading a job's tail is main-safe
-  # for every job. A job id the registry does not retain has no tail.
+  # The saved tail of ANY retained job's buffer, not only the foreground one.
+  # The registry is the only writer of every job's buffer, so reading a job's
+  # tail is main-safe for every job. A job the registry does not retain has no tail.
   def replay_tail_for_job(job_id)
     return [] if @max_saved.zero?
 
     Array(job(job_id)&.buffer&.replay_tail(@max_saved)).map(&:to_h)
   end
 
-  # Seed ONE job's OWN record from its saved tail: the foreground one at resume
-  # (the startup banner redraws it) and the switched-to one on /jobs switch.
-  # `job:` names the job to seed, the foreground when absent; it lands in that
-  # job's buffer only while it holds nothing recorded, so the resume seed and a
-  # later switch to the same job cannot double the record. restore() normalizes
-  # the JSON's string type/origin back to symbols. A disabled window
-  # (max_saved 0) seeds nothing.
+  # Seed ONE job's OWN record from its saved tail: the foreground one at resume,
+  # the switched-to one on /jobs switch. It lands in that job's buffer only while
+  # it holds nothing recorded, so the resume seed and a later switch cannot double
+  # the record. restore() normalizes the JSON's string type/origin back to symbols.
   def restore_replay_tail(entries, job: nil)
     return if @max_saved.zero?
 
@@ -266,8 +254,8 @@ class JobRegistry
   end
 
   # Ask a retained job's own agent to persist its conversation at its next safe
-  # point (issue #548 F). The registry only reaches the job; the save happens on
-  # that job's own thread. A job with no agent (no LLM round) saves nothing.
+  # point. The registry only reaches the job; the save happens on that job's own
+  # thread. A job with no agent (no LLM round) saves nothing.
   def request_save(job_id)
     target = job(job_id)
     return nil if target.nil?
@@ -304,16 +292,16 @@ class JobRegistry
 
   private
 
-  # Write one entry into the foreground buffer and enforce the saved window -
+  # Write one entry into the named job's buffer and enforce the saved window -
   # the same pair every tail put through #record does.
   def record_report(type:, origin:, content:, job: nil)
     return if @max_saved.zero?
 
     target = job || foreground_job
-    # The buffer of the job named, written here because the caller is the main
-    # thread (the only writer of every job buffer). Not the event queue: nothing
-    # drains that queue once the turn that owns it has ended, so an entry posted
-    # from a command would never reach a buffer or a save.
+    # Written here because the caller is the main thread (the only writer of
+    # every job buffer). Not the event queue: nothing drains that queue once the
+    # turn that owns it has ended, so an entry posted from a command would never
+    # reach a buffer or a save.
     target&.buffer&.put(type:, origin:, content:)
     target&.buffer&.keep_window
   end

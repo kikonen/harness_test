@@ -13,19 +13,14 @@ require_relative "harness_config"
 # model switching, and persistence (save/resume/list).
 # Extracted from Harness to keep the LLM-call logic focused.
 class SessionManager
-  # issue #207: the session JSON lives INSIDE the session's own directory
-  # (.harness/sessions/<id>/session.json), alongside its log and history.
   SESSION_FILE = SessionLocator::SESSION_FILE
 
   RULES_FILE   = "harness.md"
 
-  # Minimum seconds between two auto-saves inside the same run_prompt cycle
-  # (de-dups the pre-send and post-turn saves when the round trip is fast).
+  # De-dups the pre-send and post-turn saves when the round trip is fast.
   AUTOSAVE_MIN_INTERVAL = 0.5
 
-  # issue #108: in-loop compaction instruction - mid-turn, there is no verbatim
-  # tail to carry detail, so the summary must be a complete hand-off of the
-  # work state (including tool results) for continuing the task in progress.
+  # Mid-turn there is no verbatim tail, so the summary carries the whole state.
   INLOOP_SUMMARY_INSTRUCTION = "Summarize the ENTIRE conversation and tool work above " \
     "(the work done, not the system rules you were given) as a " \
     "hand-off for continuing an in-progress task. Include: " \
@@ -44,22 +39,14 @@ class SessionManager
     @job_id = 0
   end
 
-  # The id of the job this Harness lives in (issue #548 increment 4b): a save
-  # writes this job's OWN jobs/<id>/session.json, so a background/sub-agent
-  # harness no longer writes into the foreground job's dir. The run's owner sets
-  # it when wiring a harness into a job; the main turn is job 0 (the default).
+  # A save writes this job's OWN jobs/<id>/session.json, never the foreground's.
+  # The run's owner sets it; the main turn is job 0 (the default).
   attr_accessor :job_id
 
-  # -- Prompt flow ---------------------------------------------------------
-
-  # Appends a new user prompt to the session and sends the chain to the LLM.
-  # If the request fails, the prompt stays in the session (pending) so it can
-  # be re-sent with #retry.
-  # The saver is the run owner's, passed down for every save this turn does.
+  # A failed request leaves the prompt pending so #retry can re-send it.
   def run_prompt(instruction)
-    # A new prompt is a new turn: a note left pending by a turn that ended
-    # abnormally must not ride along as a phantom mid-turn note (issue #430).
-    # /retry deliberately does NOT do this - it continues the same turn.
+    # A new prompt is a new turn: a note left by an aborted turn must not ride
+    # along as a phantom mid-turn note. /retry continues the same turn.
     @harness.discard_pending_user_note(:leftover)
 
     if check_rules_reload
@@ -69,9 +56,8 @@ class SessionManager
         content: "  [harness.md reloaded - project rules updated]")
     end
 
-    # Auto-compact BEFORE sending: it must never run after the response,
-    # where it would race with a pending dialog (ui.dialog / grant prompt)
-    # for stdin and swallow the user's answer as a cancel (issue #64).
+    # Auto-compact BEFORE sending: a post-response compaction would race a
+    # pending dialog for stdin and swallow the user's answer as a cancel.
     compact_if_due
 
     user_prompt = build_user_prompt(instruction)
@@ -85,8 +71,7 @@ class SessionManager
 
     @harness.session.add_user(user_prompt)
 
-    # issue #107: persist BEFORE sending so the in-flight prompt is on disk
-    # and can be /retry'd from a fresh process if this one dies mid-turn.
+    # Persist BEFORE sending so an in-flight prompt survives a mid-turn death.
     maybe_auto_save("pre-send")
     send_session
   end
@@ -97,12 +82,8 @@ class SessionManager
     msg =~ /context|num_ctx|max.*token|too many tokens|exceeds/i
   end
 
-  # Re-sends the current session chain (e.g. after a failed request).
-  # issue #208: requires a PENDING chain at the end - either a user prompt
-  # that never got an answer, or an interrupted tool round (the session is
-  # the working chain, so a turn killed mid-loop ends on a `tool` result or
-  # an assistant message with unanswered tool_calls). /retry resumes from
-  # exactly that point; the model sees every tool call and result it made.
+  # Resumes from the pending point the session ends on (unanswered prompt, or
+  # a tool round killed mid-loop).
   def retry
     unless @harness.session.pending?
       raise HarnessError,
@@ -139,17 +120,8 @@ class SessionManager
     send_session
   end
 
-  # -- Auto-save -----------------------------------------------------------
-
-  # issue #107: auto-save the session at every prompt boundary (before send
-  # and after a successful turn), so a crash / kill mid-session loses at most
-  # the in-flight LLM call rather than the whole conversation. Best-effort:
-  # a save failure never breaks the prompt flow (it only warns). Silent on
-  # success - these saves are routine bookkeeping, not a user action.
-  # De-duplicated within a fast round trip via AUTOSAVE_MIN_INTERVAL.
-  # A save with no saver saves NOTHING: writing a system half is the run owner's
-  # job, and a saver-less write would replace a real multi-job system.json with
-  # a degenerate one-job record.
+  # A save with no saver saves nothing: a saver-less write would replace a
+  # real multi-job system.json with a degenerate one-job record.
   def maybe_auto_save(tag)
     return unless @harness.settings.auto_save
     return if @harness.session.empty?
@@ -200,14 +172,9 @@ class SessionManager
     text.strip
   end
 
-  # Compact the session: ask the LLM to summarize the conversation, then
-  # replace the full message chain with the summary. This frees up context
-  # window space while preserving the essential information.
-  # The last N recent messages are retained verbatim after the summary.
   def compact_session
     before = @harness.session.messages.size
-    # issue #93: capture context BEFORE compaction so callers can show
-    # the token reduction (message count alone is misleading).
+    # Message count alone understates the token reduction.
     context_before = @harness.context_indicator
 
     if @harness.session.conversation_size < 4
@@ -215,7 +182,7 @@ class SessionManager
         "session too small to compact (need at least 4 conversation messages)"
     end
 
-    # The FULL chain, so the summary call is a prefix of the live prompt (#246).
+    # The FULL chain keeps the summary call a prefix of the live prompt.
     chain = @harness.session.messages
     end_instruction = "Summarize the entire CONVERSATION above (the work done, not the " \
       "system rules you were given) in a concise, structured format. " \
@@ -224,9 +191,7 @@ class SessionManager
       "unresolved issues, (5) important context needed to continue. " \
       "Do NOT call any tools - answer with text only. "
 
-    # issue #115 / #126: show the LIVE context usage next to the spinner -
-    # a callable suffix is re-evaluated every frame from the CURRENT chain,
-    # not the "before" snapshot (already visible above).
+    # A callable suffix re-evaluates the CURRENT chain every frame.
     Task.emit(
       :spinner_detail,
       origin: :session_manager,
@@ -240,18 +205,13 @@ class SessionManager
     after = @harness.session.messages.size
     retained = [after - 3, 0].max
 
-    # issue #139: dump exactly which messages survived the compaction so the
-    # retained window is inspectable from harness.log (message counts alone
-    # leave it a guess).
-    # issue #178: the full post-compaction chain - with only the tail dumped,
-    # the summary itself (the valuable part) was never in the log at all.
+    # Dump the whole post-compaction chain so the summary itself is inspectable.
     log_retained_window(@harness.session.messages)
 
     @harness.logger.info "session compacted: #{before} to #{after} messages " \
       "(summary: #{summary_text.length} chars, #{retained} recent retained)"
 
-    # issue #70: report the resulting context size so the user can verify
-    # that compaction freed space without burning tokens on a follow-up.
+    # Report the resulting context size without a follow-up request.
     {
       summary: summary_text,
       before:,
@@ -262,51 +222,26 @@ class SessionManager
     }
   end
 
-  # issue #108: in-loop compaction. Called at the top of each tool-loop
-  # iteration (from Harness#call_llm) when the LAST call's prompt_tokens have
-  # reached the auto-compact threshold: instead of letting the next request
-  # hit the server-side context limit mid-turn and abort the whole work, the
-  # full local working chain (which contains the mid-turn tool trail not yet
-  # in @harness.session) is summarized into a single hand-off summary.
-  #
-  # Design notes:
-  # - NO verbatim tail is retained: keeping only the last N messages would
-  #   drop the rest of the work trail, which is exactly what auto-save and
-  #   --continue (issue #107) exist to protect. The
-  #   summary therefore carries the whole chain's state.
-  # - The compacted chain is synced back into @harness.session IN PLACE and
-  #   immediately persisted, so a crash mid-loop resumes with the complete
-  #   (summarized) history, not a partial one.
-  # - issue #208: the working chain IS the session's, so there is no separate
-  #   local copy and no steering notes to carry over - a mid-turn note is
-  #   already a message in the chain being summarized.
-  # Returns true when compaction ran (the caller must drop any
-  # loop-specific state such as the 'loop_warning_injected' flag), false
-  # otherwise (not due yet, too small to compact, or the summary call
-  # failed - the turn then simply continues with the existing chain).
+  # Summarizes the full local working chain (mid-turn tool trail included) into
+  # one hand-off, with NO verbatim tail. The chain is synced back into the
+  # session in place and persisted immediately, so a crash mid-loop resumes with
+  # the complete summarized history. Returns true when compaction ran (the
+  # caller must then drop loop state such as loop_warning_injected).
   def check_inloop_compaction(messages, last_prompt_tokens)
     window  = @harness.model_config.num_ctx || LLMClient::NUM_CTX
     trigger = compact_trigger_tokens
 
-    # issue #151: the trigger depends on the context size - min of the
-    # %-threshold and window - reserved headroom for the summary call.
     return false if trigger.nil? || last_prompt_tokens.to_i < trigger
 
-    # Only compact when there is real work to summarize: a single short
-    # exchange never reaches the threshold anyway, but guard against an
-    # absurdly small window combined with a huge system prompt.
-    return false if messages.size - 1 < 4 # the guard counts conversation messages
+    # Guard an absurdly small window against a huge system prompt.
+    return false if messages.size - 1 < 4
 
-    # issue #151: report the effective trigger for THIS window (it depends
-    # on context size), not just the raw usage percentage.
     Task.emit(
       :compact,
       origin: :session_manager,
       content: "  [context at #{last_prompt_tokens}/#{window} tokens (trigger #{trigger}) - in-loop compaction...]")
 
-    # The spinner Harness left animating (this runs from inside
-    # Harness#call_llm) is re-pointed for the summary call's wait only: one
-    # :spinner_detail, no start/stop pair.
+    # Re-points the already-running spinner with one :spinner_detail.
     Task.emit(
       :spinner_detail,
       origin: :session_manager,
@@ -332,24 +267,14 @@ class SessionManager
           "Do not repeat steps that are already completed - pick up where it left off."
       }
     ]
-    before = messages.size # captured BEFORE the replace below
+    before = messages.size
 
-    # Sync back into the session (in place) and persist immediately, so a
-    # crash mid-loop resumes with the complete summarized history.
     @harness.session.messages.replace(new_chain)
     @harness.session.reset_stats
-
-    # issue #208: in production `messages` IS the session's array (the same
-    # object was mutated by call_llm); this line keeps the contract for a
-    # caller passing its own chain.
+    # In production `messages` IS the session's array; this covers a caller
+    # that passed its own chain.
     messages.replace(new_chain)
-
-    # issue #138: fold any pending ui.note facts (grants) into the new chain
-    # so they survive the compaction.
-    @harness.session.flush_notes
-
-    # issue #139: log the fresh post-compaction chain (no retained tail -
-    # see INLOOP_SUMMARY_INSTRUCTION).
+    @harness.session.flush_notes # pending notes must survive the compaction
     log_retained_window(messages)
 
     @harness.logger.info "in-loop compaction: #{before} -> #{messages.size} messages " \
@@ -357,9 +282,8 @@ class SessionManager
     maybe_auto_save("in-loop compact")
     true
   rescue StandardError => e
-    # Best-effort: a failed compaction must not abort an otherwise healthy
-    # turn - the next request will simply hit the server-side limit and the
-    # existing context-exceeded recovery path applies.
+    # A failed compaction must not abort a healthy turn: the next request
+    # hits the server-side limit and the context-exceeded path recovers.
     Task.emit(
       :warn,
       origin: :session_manager,
@@ -367,18 +291,8 @@ class SessionManager
     false
   end
 
-  # The spinner line for ONE outgoing LLM request. Harness#call_llm is its
-  # only caller, so each request re-announces its own wait and a re-point
-  # made earlier in the loop cannot outlive it.
-  #
-  # Issue #271 compacted the form: WHO the request goes to sits in
-  # parentheses after the verb, and only the API TYPE is named - the endpoint
-  # path #217 added was the longest part of the line and is already in the
-  # startup banner and printed by /model. A client with no backend (a stub)
-  # gets the model alone.
-  # The suffix is the harness's callable for THIS request: while an answer is
-  # streaming it shows the newest text of that answer, otherwise the live
-  # context estimate (see Harness#request_wait_suffix, issue #28).
+  # Only the API TYPE is named here: the endpoint path is already in the
+  # startup banner and printed by /model, and was the longest part of the line.
   def request_spinner_detail
     who = [@harness.model_config.active_profile_name.to_s.strip, api_type_label].reject(&:empty?)
     Task.emit(
@@ -390,18 +304,13 @@ class SessionManager
       })
   end
 
-  # Sends the session chain to the LLM and prints the response. Each request's
-  # spinner line belongs to #request_spinner_detail; only waits owned here
-  # re-point it.
   def send_session
     response = nil
     begin
       response = @harness.call_llm
     rescue LLMError => e
-      # The request may have been rejected because the context window was
-      # exceeded: compact and re-send once (the pending prompt is still in
-      # the session; issue #208 also leaves a mid-loop tool trail behind,
-      # which survives here too). Anything else re-raises for the caller.
+      # A context-exceeded rejection: compact and re-send once (the pending
+      # prompt and any mid-loop tool trail survive). Anything else re-raises.
       raise unless context_exceeded_error?(e.message) && @harness.session.conversation_size >= 4
 
       Task.emit(
@@ -426,44 +335,27 @@ class SessionManager
       response = @harness.call_llm
     end
 
-    # issue #131: the full reasoning and content of every response go to
-    # harness.log ALWAYS (not gated on --verbose): the log is the
-    # authoritative record of what the model said, independent of console
-    # output. Empty fields are labeled "(none)" to avoid blank sections.
+    # harness.log is the authoritative record, so this is never gated on --verbose.
     log_response(reasoning: response[:reasoning], content: response[:content])
 
     reason = [response[:reasoning]].map { |m| m.to_s.strip }.reject(&:empty?).first
     Task.emit(:plan, origin: :session_manager, content: reason) if reason
 
-    # ONE entry for the answer (issue #146): the "=" * 80 and "-" * 80 rules
-    # were two buffer entries whose only job was to frame a line the renderer
-    # can frame itself. The rules are gone; the model's text is the content.
     Task.emit(:response, origin: :session_manager, content: response[:content].to_s)
 
     @harness.emit_stats(response[:stats])
 
-    # issue #107: persist the completed turn. The pre-send save already
-    # captured the pending prompt; this snapshot makes sure the model's
-    # reply is on disk too, so a crash right after the response loses
-    # nothing (de-duplicated by AUTOSAVE_MIN_INTERVAL when the round trip
-    # was very fast).
+    # Persist the reply too, so a crash right after the response loses nothing.
     maybe_auto_save("post-turn")
   end
 
-  # Silent auto-compaction, run at the start of the NEXT prompt (see
-  # #run_prompt): when the context window is at/over the configured
-  # threshold, compact the session before sending. This is mandatory
-  # bookkeeping - no confirmation dialog. Runs best-effort: a failure here
-  # must never break the prompt flow, the next request will simply fail on
-  # the server side and the user can /compact manually.
+  # Best-effort: a failure here must not break the prompt flow.
   def compact_if_due
     return unless @harness.session.auto_compact_due?(
       @harness.model_config.num_ctx || LLMClient::NUM_CTX,
       @harness.compact_auto_threshold,
       reserved_tokens: @harness.compact_reserved_tokens)
 
-    # issue #151: report the effective trigger for THIS window (it depends
-    # on context size), not just the raw percentage.
     trigger = compact_trigger_tokens
     Task.emit(
       :compact,
@@ -490,16 +382,10 @@ class SessionManager
       content: "auto-compact failed: #{ErrorText.label(e)} - try /compact manually")
   end
 
-  # The effective auto-compact trigger for the active window (issue #151):
-  # min(threshold% of window, window - reserved headroom); nil when invalid.
   def compact_trigger_tokens
     @harness.compact_trigger_tokens
   end
 
-  # issue #131: log the full text of a response (reasoning + content) to
-  # harness.log unconditionally (see #send_session). Empty sections are
-  # labeled "(none)" so responses without reasoning don't leave blank
-  # "--- reasoning ---" blocks.
   def log_response(reasoning:, content:)
     @harness.logger.info "--- reasoning ---\n#{log_text_or_none(reasoning)}"
     @harness.logger.info "--- response ---\n#{log_text_or_none(content)}"
@@ -510,13 +396,8 @@ class SessionManager
     s.empty? ? "(none)" : text.to_s
   end
 
-  # issue #139 / #178: dump the messages that SURVIVED a compaction (the
-  # summary + retained tail, or the fresh in-loop chain) to harness.log.
-  # The system
-  # prompt is identical every compaction and would only be noise, so it is
-  # skipped. Content is logged IN FULL, no preview truncation: the summary
-  # is exactly what is being inspected here (issue #178), and these dumps
-  # are rare enough that harness.log size is a non-issue.
+  # The system prompt is identical every compaction, so it is skipped; content
+  # is logged in full because the summary is exactly what is being inspected.
   def log_retained_window(messages)
     lines = messages.reject { |m| m[:role] == "system" }.map do |m|
       %(#{m[:role]}:\n#{m[:content].to_s})
@@ -524,20 +405,16 @@ class SessionManager
     @harness.logger.info "retained after compaction:\n" + lines.join("\n")
   end
 
-  # -- Rules file (harness.md) ---------------------------------------------
-
   def build_system_prompt
     @harness.build_system_prompt
   end
 
-  # Current mtime of the rules file (nil if it doesn't exist).
   def current_rules_mtime
     path = File.join(@file_list.workdir, RULES_FILE)
     File.file?(path) ? File.mtime(path) : nil
   end
 
-  # Check whether harness.md has been modified since the last check.
-  # If so, rebuild the system prompt and update the session in-place.
+  # Rebuild the system prompt and update the session in-place when harness.md changed.
   def check_rules_reload
     mtime = current_rules_mtime
     return false if mtime == @rules_mtime
@@ -551,79 +428,57 @@ class SessionManager
 
   # -- Model management ----------------------------------------------------
 
-  # The profile this Harness' selection resolves to (nil only when the selection
-  # is nil and there is no config default). issue #449.
   def active_profile
     find_profile(@harness.model_config.active_profile_id)
   end
 
-  # True when the ACTIVE profile can be sent images: only one that declares
-  # 'vision: true' in the config. A run with no profile resolves to text-only.
   def vision?
     active_profile&.vision == true
   end
 
-  # The image inline budget in force for this run: the active profile's own
-  # 'mcp_images:' block, else the config-level one, else the built-in defaults
-  # (HarnessConfig#normalize_mcp_images fills every key).
+  # Active profile's mcp_images block, else config-level, else built-in defaults.
   def image_limits
     (active_profile&.mcp_images) ||
       @harness.model_config.mcp_image_limits ||
       HarnessConfig::MCP_IMAGE_LIMIT_DEFAULTS
   end
 
-  # The display name of the profile this Harness is on, or nil.
   def active_profile_name
     @harness.model_config.active_profile_name
   end
 
-  # Where the active backend actually sends its calls: the API type and the
-  # endpoint path it appends to the configured base URL, e.g.
-  # "openai /v1/chat/completions" or "ollama /api/chat". Shown by the UI
-  # (startup banner, /model, /models) so a /model switch between API types is
-  # visible without reading harness.log (issue #217). The spinner names only
-  # the API type (see #request_spinner_detail, issue #271).
   def target_display
     backend = @harness.client.backend
     "#{backend.api_type} #{backend.endpoint_path}"
   end
 
-  # Switch this Harness' connection to a configured profile by its profile_id.
   def switch_profile(profile_id)
     profile = find_profile(profile_id.to_s.strip)
     raise HarnessError, "no such profile '#{profile_id}' - list them with /models" if profile.nil?
 
-    # The spinner's recent tok/s rate (issue #285) was measured against the
-    # server being switched away from, so it no longer describes anything this
-    # run will do.
+    # The recent tok/s rate was measured against the server being left.
     @harness.forget_last_rate
 
     apply_profile(profile)
     profile
   end
 
-  # Find a configured profile by its id (nil when absent). The catalogue is
-  # run-wide static config (#286); which profile this Harness is on is live
-  # state owned here.
+  # The catalogue is run-wide static config; which profile this Harness is on
+  # is live state owned here.
   def find_profile(id)
     @harness.settings.find_profile(id)
   end
 
-  # Apply a model profile to this Harness' ModelConfig in place.
   def apply_profile(profile)
-    # The live per-connection values land in THIS Harness' ModelConfig, never
-    # in the system-wide settings a #286 sub-agent also shares. A profile with no
-    # 'mcp_images:' block says nothing, so ModelConfig#apply_profile leaves the
-    # seeded budget intact.
+    # Per-connection values land in THIS Harness' ModelConfig, never the
+    # settings a sub-agent shares.
     @harness.model_config.apply_profile(profile)
 
-    # issue #219: a profile change resets the parameter values above - re-
-    # apply any session-level overrides so they keep winning (a /model
-    # switch should not silently undo /param tweaks made this session).
+    # A profile change resets parameters; re-apply overrides so a /model
+    # switch does not silently undo /param tweaks made this session.
     param_overrides.restore!
   end
 
-  # Restore the profile a session was saved on.
   def restore_active_profile(id)
     return if id.nil?
 
@@ -639,13 +494,8 @@ class SessionManager
     apply_profile(match)
   end
 
-  # -- Session-level parameter overrides (issue #219) --------------------
-  #
-  # The override logic itself lives in ParamOverrides (issue #219) - it owns
-  # the adjustable-parameter set, value parsing, and the effective/default
-  # lookup. SessionManager only wires it in: a single instance shared with
-  # the /param and /model commands, re-applied after a profile change, and
-  # persisted/restored with the session.
+  # ParamOverrides owns the logic; this wires in one instance shared with the
+  # /param and /model commands and persisted with the session.
   def param_overrides
     @param_overrides ||= ParamOverrides.new(
       @harness.model_config,
@@ -654,26 +504,12 @@ class SessionManager
       })
   end
 
-  # -- Prompt building -----------------------------------------------------
-
   def build_user_prompt(instruction)
     parts = ["## Working Directory\n\n#{@file_list.workdir}"]
 
-    # issue #138: the full grant list is NO LONGER dumped into every prompt.
-    # It was redundant noise: static (so repeated verbatim each turn and on
-    # every /retry), out of sync after /clear, and irrelevant meta to the
-    # model - permissions are enforced by the tools anyway (an unauthorized
-    # attempt prompts the user, whose decision then lands in the chain).
-    # Task-relevant permission changes (a grant just made) reach the model
-    # as system notes via ui.note instead.
-
-    # issue #359: the planning expectation, stated to the MODEL every turn while
-    # the mode is on. This is the whole point of the mode: the USER already knows
-    # they are planning; the value is that the model knows too and holds back from
-    # editing. It lives HERE (rebuilt every turn) rather than in the system prompt
-    # so it survives both compaction paths and a rules re-read, and disappears the
-    # moment the mode is off. config/system_prompt.txt is never touched by a
-    # posture. Advisory: it states an expectation, it gates no tool.
+    # Stated to the MODEL every turn while on (rebuilt here, not in the system
+    # prompt, so it survives compaction and a rules re-read and vanishes when
+    # off). Advisory only - it states an expectation, it gates no tool.
     if @harness.plan?
       parts << "## Planning mode (advisory)\n\n" \
         "Planning mode is ON. Draft and iterate a plan with plan.add before " \
@@ -685,24 +521,14 @@ class SessionManager
     parts.join("\n\n")
   end
 
-  # -- Persistence ---------------------------------------------------------
-
-  # issue #548: a saved SYSTEM is a directory holding system.json (the system/world half)
-  # and jobs/<id>/ (each job's own files). The file a save writes - what the save
-  # log line and the UI report - is system.json, the system's entry point.
-  # issue #276: WHERE a session lives is SessionLocator's knowledge.
+  # WHERE a session lives is SessionLocator's knowledge.
   def session_file_path(id) = @locator.system_file_path(id)
 
-  # Save ONLY this job's own conversation file (issue #548 increment 4b), no
-  # system half. The system.json + per-job job.json/replay.json are written
-  # ONCE by the run owner (SystemSaver#save_run): system.json carries the
-  # SYSTEM's access list and digest cache, and every job Harness has its own
-  # SessionFileCache, so a per-job writer would replace the foreground's
-  # grants and digests with its own.
-  # run_id is the SESSION DIRECTORY key (the run's id), not this harness' own
-  # session id: a #286 sub-agent harness may mint its own uuid, and its chain
-  # must land under this run's jobs/<id>/, not a stray top-level session dir.
-  # It defaults to this harness' id only for a standalone (single-job) save.
+  # Saves only this job's own conversation file. system.json and the per-job
+  # job.json/replay.json are the run owner's (SystemSaver#save_run): a per-job
+  # writer would overwrite the foreground's grants and digests with its own.
+  # run_id is the run's session directory key, not this harness' own id (a
+  # sub-agent's chain must land under this run's jobs/<id>/).
   def save_job_session(run_id = nil)
     id        = run_id || @harness.session.session_id
     session_h = @harness.session.to_h(@file_list)
@@ -712,44 +538,30 @@ class SessionManager
 
   alias_method :save_session, :save_job_session
 
-  # Restore the profile a session was saved on. Harness#apply_resume_state calls
-  # it while building a resumed run (issue #276), so it cannot stay private.
-  # When the stored profile is no longer configured, report it and fall back to
-  # the config default profile.
   def restore_session_profile(id)
     restore_active_profile(id)
   rescue HarnessError => e
     Task.emit(:error, origin: :session_manager, content: e.message)
 
-    # No fallback without a real profile: apply the run's own resolved profile.
-    # A layered resume asks this once per saved job.
     profile = @harness.settings.active_profile
     apply_profile(profile) if profile
   end
 
   private
 
-  # Write a hash as JSON to a path (the two per-job files share this).
   def write_json(path, data)
     File.write(path, JSON.generate(data))
   end
 
-  # Write this job's own jobs/<job_id>/session.json (the conversation half).
   def write_own_job_session(id, session_h)
     FileUtils.mkdir_p(@locator.job_dir_path(id, job_id))
     write_json(@locator.job_session_file_path(id, job_id), job_session_json(session_h))
   end
 
-  # The foreground agent's own conversation half: its message chain (message 0
-  # implicit, exactly as Session#to_h stores @messages[1..]), its per-agent model
-  # state, and its parameter overrides (#219). It carries NO session_id - a job is
-  # named by its directory plus the id system.json records (DECIDED,
-  # doc/session_layers_design.md), so the run UUID is never duplicated in a job
-  # file: that is the drift bug Harness#initialize otherwise has to guard.
-  # version/created_at are in it because Session#restore reads them
-  # unconditionally: a job restored straight from its own file raised on
-  # Time.parse(nil) once only the foreground half was supplemented from system.json.
-  # active_profile_id is the SELECTION: a profile id, or nil when this run used its config default.
+  # Carries NO session_id: a job is named by its directory plus the id
+  # system.json records (doc/session_layers_design.md), so the run UUID is never
+  # duplicated in a job file. version/created_at are read unconditionally by
+  # Session#restore, so a job restored from its own file must supply them.
   def job_session_json(session_h)
     {
       version: session_h[:version],
@@ -762,8 +574,7 @@ class SessionManager
     }
   end
 
-  # The API type of the active backend ('openai' / 'ollama'); '' when the
-  # client has no backend (a stub).
+  # '' when the client has no backend (a stub).
   def api_type_label
     return "" unless @harness.client.respond_to?(:backend)
 
