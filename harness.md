@@ -50,7 +50,7 @@ Keep this in mind:
   delete it - a comment that merely restates code is fluff, and one that
   states a wrong mechanism (e.g. calling `val == true` "coercion") is worse
   than none. Issue numbers, bug numbers and design history do NOT belong in
-  method bodies - they belong in CHANGELOG, the issue and the commit message.
+  method bodies - they belong in CHANGELOG and the issue (commit messages stay brief).
   When the user flags a comment as useless, the ASSISTANT strips it (never
   the user) and audits the same file for the same pattern in the same pass.
 - Design documentation lives in `doc/<topic>.md`, not in a source-file header.
