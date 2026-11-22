@@ -176,4 +176,52 @@ RSpec.describe Commands::JobsCommand do
     end
 
   end
+
+  # The short form of a switch (the owner's request): a bare id as the first word
+  # is the job to make foreground, so switching takes /jobs 1 rather than
+  # /jobs switch 1. The words still win, so a word is never read as an id.
+  describe 'the bare-id short form' do
+    it 'switches to an id given without the switch word' do
+      registry = JobRegistry.new
+      registry.add_job(kind: :main)
+      other = registry.add_job(kind: :sub_agent, requested_by: registry.job(0))
+
+      out = run('1', registry)
+
+      expect(registry.foreground).to eq(other.id)
+      expect(out).to include('foreground job is now #1')
+    end
+
+    it 'accepts the id in the list form too (/jobs #1)' do
+      registry = JobRegistry.new
+      registry.add_job(kind: :main)
+      registry.add_job(kind: :sub_agent, requested_by: registry.job(0))
+
+      run('#1', registry)
+
+      expect(registry.foreground).to eq(1)
+    end
+
+    it 'names an id it does not retain instead of switching' do
+      registry = JobRegistry.new
+      registry.add_job(kind: :main)
+
+      out = run('99', registry)
+
+      expect(registry.foreground).to eq(0)
+      expect(out).to include('job #99 is not retained')
+    end
+
+    # A word is a word: /jobs bogus (and a bare /jobs) is still the list report,
+    # not a switch to a job nothing names.
+    it 'lists when the first word is not an id' do
+      registry = JobRegistry.new
+      registry.add_job(kind: :main)
+
+      out = run('bogus', registry)
+
+      expect(registry.foreground).to eq(0)
+      expect(out).to include('Jobs (foreground marked *)')
+    end
+  end
 end
