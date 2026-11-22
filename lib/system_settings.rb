@@ -44,7 +44,7 @@ class SystemSettings
     retry_count
     retry_delay
     max_memories
-    default_model
+    default_profile_id
     mcp_image_limits
     output_tail_memory
     output_tasks_kept
@@ -56,12 +56,12 @@ class SystemSettings
     protected_dirs
   ].freeze
 
-  # The model SELECTION: the active model PROFILE NAME the CLI chose with
-  # -m/--model (nil = use the config default). The name IS the model the
-  # harness asks the endpoint for - settings holds no separate wire id and no
-  # per-connection params; Harness keeps them in its own ModelConfig.
+  # The model SELECTION: the PROFILE ID the CLI chose with -m/--model
+  # (nil = use the config default profile). A profile id, never a model;
+  # settings holds no per-connection params - Harness keeps those in its own
+  # ModelConfig.
   SELECTION_KEYS = %i[
-    active_model
+    active_profile_id
   ].freeze
 
   STATIC_KEYS.each do |name|
@@ -107,11 +107,13 @@ class SystemSettings
     Array(@options[:model_profiles])
   end
 
-  # A configured profile by its name, or nil when absent. The catalogue is
+  # A configured profile by its id, or nil when absent. The catalogue is
   # run-wide; applying a profile to one agent's ModelConfig is that Harness'
-  # job, not a settings mutation.
-  def find_profile(name)
-    model_profiles.find { |p| p[:name] == name }
+  # job, not a settings mutation. A hand-built catalogue (specs, library users)
+  # may key a profile by name: alone - the same fallback HarnessConfig applies
+  # to a config that predates 'id:'.
+  def find_profile(id)
+    model_profiles.find { |p| (p[:id] || p[:name]) == id }
   end
 
   # The declared MCP servers (config 'mcp_servers:'), or nil when none. The
@@ -247,18 +249,29 @@ class SystemSettings
 
   # -- Model catalogue/selection helpers (live params live in ModelConfig) --
 
-  # The selected model PROFILE NAME: what -m/--model chose, or the config
-  # default when nothing was chosen (active_model nil). nil only when neither
-  # is set. Used by the catalogue display and to look up the profile Harness
-  # seeds its ModelConfig from.
-  def active_model_name
-    active_model || default_model
+  # The profile ID this RUN resolves to: what -m/--model chose, or the config
+  # default when nothing was chosen (active_profile_id nil). nil only when
+  # neither is set.
+  def resolved_profile_id
+    active_profile_id || default_profile_id
+  end
+
+  # Both names read the same @options hash this object owns (and, through it,
+  # what the CLI resolved), so they cannot disagree. resolved_* is the pair
+  # every consumer uses: the id to look a profile up with, the name to display.
+
+  # The display name of that profile (its own name: key, else its id). Display
+  # only: the spinner, the modeline and the startup banner show a name, never a
+  # bare id.
+  def resolved_profile_name
+    active_profile&.fetch(:name) || resolved_profile_id
   end
 
   # The profile the selection resolves to (nil when no model is selected or no
-  # profile matches). Harness reads its per-connection values from here.
+  # profile matches). Harness reads its per-connection values from here, and so
+  # does the display above: the two can never disagree.
   def active_profile
-    find_profile(active_model_name)
+    find_profile(resolved_profile_id)
   end
 
   # Restore the session-persisted postures a resumed run saved. Called with the

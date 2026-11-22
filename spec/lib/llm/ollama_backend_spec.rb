@@ -8,7 +8,7 @@ require 'llm/ollama_backend'
 RSpec.describe LLM::OllamaBackend do
   let(:logger) { Logger.new(File::NULL) }
   let(:options) do
-    { base_url: 'http://127.0.0.1:11434', active_model: 'test-model', api: 'ollama' }
+    { base_url: 'http://127.0.0.1:11434', active_profile_id: 'test-model', api: 'ollama' }
   end
   # ModelConfig holds the SAME hash, so the per-example options[:x] mutations
   # below are still read by the backend on the next request (#286).

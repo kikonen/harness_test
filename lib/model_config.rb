@@ -21,7 +21,8 @@ class ModelConfig
   # ParamOverrides read every request, so a /model switch takes effect without
   # rebuilding the client. Read AND written here.
   MODEL_KEYS = %i[
-    active_model
+    active_profile_id
+    active_profile_name
     base_url
     api
     token
@@ -68,25 +69,28 @@ class ModelConfig
 
   TRANSPORT_KEYS.each { |name| define_method(name) { @values[name] } }
 
-  # Seed a fresh connection from the run's settings: the selected model name
-  # and the global image budget come from settings; every endpoint/sampling
-  # value comes from the resolved PROFILE. settings carries no per-connection
-  # field to clone (issue #286) - -m only names a profile. A profile-less
-  # selection (-m with no models configured) keeps the raw id and leaves
-  # base_url nil: there is no built-in endpoint default. A hand-built hash
-  # (specs) still works via #new.
+  # Seed a fresh connection from the run's settings: the selection and the
+  # global image budget come from settings; every endpoint/sampling value comes
+  # from the resolved PROFILE. settings carries no per-connection field to clone
+  # (issue #286) - -m only names a profile. A profile-less selection (-m with no
+  # profiles configured) keeps the raw id as the profile id and leaves base_url
+  # nil: there is no built-in endpoint default. A hand-built hash (specs) still
+  # works via #new.
   def self.from_settings(settings)
     values = {
-      active_model: settings.active_model,
+      active_profile_id: settings.active_profile_id,
       mcp_image_limits: settings.mcp_image_limits
     }
     apply_seed_profile(values, settings.active_profile)
+    write_profile_name(values, settings)
     new(values.merge(TRANSPORT_KEYS.to_h { |k| [k, settings.public_send(k)] }))
   end
 
   # Seed the profile-declared per-connection values into a fresh values hash.
-  # Mirrors #apply_profile but starts from empty, and leaves active_model as
-  # the selection already resolved it (nil when the config default is active).
+  # Mirrors #apply_profile but starts from empty, and leaves the live id as the
+  # SELECTION settings carries (nil when the run used the config default): the
+  # id saved with a session is then a real choice, so a later change of the
+  # default still reaches that session.
   def self.apply_seed_profile(values, profile)
     return if profile.nil?
 
@@ -107,15 +111,19 @@ class ModelConfig
     values[:mcp_image_limits] = profile[:mcp_images] if profile[:mcp_images]
   end
 
+  # A profile from the run-wide catalogue carries its normalized :id; a hash
+  # built by hand (a spec) may key it by name: alone.
+  def self.profile_id(profile)
+    profile[:id] || profile[:name]
+  end
+
+  def self.profile_name(profile)
+    profile[:name] || profile[:id]
+  end
+
   # Specs and non-CLI builders pass the raw values hash directly.
   def initialize(values)
     @values = values
-  end
-
-  # The model THIS connection is using, or nil. Live state: a /model switch
-  # writes active_model on this object.
-  def active_model_name
-    active_model
   end
 
   # Apply a resolved profile's parameters in place, leaving keys the profile
@@ -138,9 +146,19 @@ class ModelConfig
     @values[:min_p]            = profile[:min_p]
     @values[:presence_penalty] = profile[:presence_penalty]
     @values[:repeat_penalty]   = profile[:repeat_penalty]
-    @values[:active_model]     = profile[:name]
+    @values[:active_profile_id]   = ModelConfig.profile_id(profile)
+    @values[:active_profile_name] = ModelConfig.profile_name(profile)
     @values[:vision]           = profile[:vision] == true
     @values[:mcp_image_limits] = profile[:mcp_images] if profile[:mcp_images]
+  end
+
+  # The display name of the seeded profile: the profile's own name, else the id
+  # settings resolved (a profile-less run -m has no profile at all). The id is
+  # NOT touched here: it is the selection, and only a switch writes it.
+  def self.write_profile_name(values, settings)
+    profile = settings.active_profile
+    values[:active_profile_name] =
+      profile ? profile_name(profile) : settings.resolved_profile_id
   end
 
   # The effective value of an adjustable parameter, or nil when unset (the

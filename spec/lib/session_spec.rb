@@ -321,7 +321,7 @@ RSpec.describe Session do
       session.add_user('one')
       session.add_assistant('two')
       session.messages << { role: 'assistant', content: nil,
-                            tool_calls: [{ id: 't1', function: { name: 'x' } }] }
+                            tool_calls: [{ id: 't1', function: { name: 'x', id: 'x' } }] }
       session.messages << { role: 'tool', tool_call_id: 't1', content: 'r1' }
       session.add_assistant('three')
 

@@ -79,7 +79,7 @@ RSpec.describe SystemSaver do
         saved_system(dir, id, saved_registry)
         File.write(locator.job_session_file_path(id, 0),
                    JSON.generate({ messages: [{ role: 'user', content: 'main chain' }],
-                                   active_model: 'x' }))
+                                   active_profile_id: 'x' }))
 
         saver = described_class.new(locator, JobRegistry.new)
         # The job half comes back through job_restores; the system half stays in
@@ -87,7 +87,7 @@ RSpec.describe SystemSaver do
         restore = saver.job_restores(id).first
         expect(restore[:id]).to eq(0)
         expect(restore[:session][:messages].first[:content]).to eq('main chain')
-        expect(restore[:session][:active_model]).to eq('x')
+        expect(restore[:session][:active_profile_id]).to eq('x')
         expect(locator.read_system(id)[:session_id]).to eq(id)
         # The saved shown tail is read straight from the job's replay file.
         File.write(locator.job_replay_file_path(id, 0),

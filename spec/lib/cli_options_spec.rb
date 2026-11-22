@@ -223,7 +223,7 @@ RSpec.describe CLIOptions do
   describe 'model requirement' do
     it 'raises when neither -m nor a default model is set (and not listing)' do
       expect {
-        resolve(['-d', workdir, '-c', write_config('no-model.yml', "default_model: \n")])
+        resolve(['-d', workdir, '-c', write_config('no-model.yml', "default_profile_id: \n")])
       }.to raise_error(HarnessError, /-m \/ --model is required/)
     end
 
@@ -239,7 +239,7 @@ RSpec.describe CLIOptions do
   describe '--delete-session (issue #279)' do
     it 'records the id and does not require a model' do
       opts = resolve(['--delete-session', 'f7931611', '-d', workdir,
-                      '-c', write_config('del.yml', "default_model: \n")])
+                      '-c', write_config('del.yml', "default_profile_id: \n")])
       expect(opts[:delete_session]).to eq('f7931611')
     end
 
@@ -247,7 +247,7 @@ RSpec.describe CLIOptions do
       path  = write_config('models.yml', "models:\n  - name: a\n    url: http://host.test/v1\n")
       opts  = resolve(['--delete-session', 'id1', '-d', workdir, '-c', path])
       expect(opts[:delete_session]).to eq('id1')
-      expect(opts[:active_model]).to be_nil
+      expect(opts[:active_profile_id]).to be_nil
     end
   end
 end

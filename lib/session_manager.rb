@@ -80,7 +80,7 @@ class SessionManager
       @harness.logger.info "--- system ---\n#{@harness.session.system_prompt}"
       @harness.logger.info "--- user ---\n#{user_prompt}"
       model = @harness.model_config
-      @harness.logger.info "--- #{model.active_model} @ #{model.base_url} ---"
+      @harness.logger.info "--- #{model.active_profile_name} @ #{model.base_url} ---"
     end
 
     @harness.session.add_user(user_prompt)
@@ -380,7 +380,7 @@ class SessionManager
   # streaming it shows the newest text of that answer, otherwise the live
   # context estimate (see Harness#request_wait_suffix, issue #28).
   def request_spinner_detail
-    who = [@harness.model_config.active_model.to_s.strip, api_type_label].reject(&:empty?)
+    who = [@harness.model_config.active_profile_name.to_s.strip, api_type_label].reject(&:empty?)
     Task.emit(
       :spinner_detail,
       origin: :session_manager,
@@ -551,10 +551,10 @@ class SessionManager
 
   # -- Model management ----------------------------------------------------
 
-  # The profile the active model resolved to (nil when no profiles are
-  # configured, or the model was set by -m to a raw id). issue #449.
+  # The profile this Harness' selection resolves to (nil when no profiles are
+  # configured, or the selection is a raw -m id). issue #449.
   def active_profile
-    find_profile(active_model_name)
+    find_profile(@harness.model_config.active_profile_id)
   end
 
   # True when the ACTIVE model can be sent images: only a profile that declares
@@ -573,9 +573,9 @@ class SessionManager
       HarnessConfig::MCP_IMAGE_LIMIT_DEFAULTS
   end
 
-  # Name (or id) of the currently active model, or nil.
-  def active_model_name
-    @harness.model_config.active_model_name
+  # The display name of the profile this Harness is on, or nil.
+  def active_profile_name
+    @harness.model_config.active_profile_name
   end
 
   # Where the active backend actually sends its calls: the API type and the
@@ -589,10 +589,10 @@ class SessionManager
     "#{backend.api_type} #{backend.endpoint_path}"
   end
 
-  # Switch to a configured model profile by name (or raw model id).
-  def switch_model(name)
-    name = name.to_s.strip
-    raise HarnessError, "usage: /model <name>" if name.empty?
+  # Switch this Harness' connection to a configured profile by its id.
+  def switch_profile(id)
+    id = id.to_s.strip
+    raise HarnessError, "usage: /model <profile>" if id.empty?
 
     # The spinner's recent tok/s rate (issue #285) was measured against the
     # server being switched away from, so it no longer describes anything this
@@ -601,25 +601,26 @@ class SessionManager
 
     profiles = @harness.settings.model_profiles
     if profiles.empty?
-      # No catalogue to look the name up in: the run keeps the raw id as its
-      # model, and has no endpoint to send it to (#556).
-      @harness.model_config.active_model = name
-      return { name:, url: nil }
+      # No catalogue to look the id up in: the run keeps the raw id as its
+      # profile id, and has no endpoint to send it to (#556).
+      @harness.model_config.active_profile_id   = id
+      @harness.model_config.active_profile_name = id
+      return { id:, name: id, url: nil }
     end
 
-    match = find_profile(name)
+    match = find_profile(id)
     raise HarnessError,
-      "unknown model '#{name}'. Type /models to see the available models." unless match
+      "unknown profile '#{id}'. Type /models to see the available profiles." unless match
 
     apply_profile(match)
     match
   end
 
-  # Find a configured profile by its name or raw model id (nil when absent).
-  def find_profile(name)
-    # The catalogue is system-wide static config (#286); the active-model name
-    # that feeds it is runtime state owned here.
-    @harness.settings.find_profile(name)
+  # Find a configured profile by its id (nil when absent). The catalogue is
+  # run-wide static config (#286); which profile this Harness is on is live
+  # state owned here.
+  def find_profile(id)
+    @harness.settings.find_profile(id)
   end
 
   # Apply a model profile to this Harness' ModelConfig in place.
@@ -636,17 +637,17 @@ class SessionManager
     param_overrides.restore!
   end
 
-  # Restore the model saved in a session.
-  def restore_active_model(name)
-    return if name.nil?
+  # Restore the profile a session was saved on.
+  def restore_active_profile(id)
+    return if id.nil?
 
-    name = name.to_s.strip
-    return if name.empty?
+    id = id.to_s.strip
+    return if id.empty?
 
-    match = find_profile(name)
+    match = find_profile(id)
     unless match
       raise HarnessError,
-        "session's model '#{name}' is not configured anymore - reset to the default model"
+        "session's profile '#{id}' is not configured anymore - reset to the default profile"
     end
 
     apply_profile(match)
@@ -663,7 +664,7 @@ class SessionManager
     @param_overrides ||= ParamOverrides.new(
       @harness.model_config,
       profile: -> {
-        find_profile(active_model_name)
+        find_profile(@harness.model_config.active_profile_id)
       })
   end
 
@@ -725,16 +726,16 @@ class SessionManager
 
   alias_method :save_session, :save_job_session
 
-  # Restore the model a session was saved with. Harness#apply_resume_state
-  # calls it while building a resumed run (issue #276), so it cannot stay
-  # private. When the stored model is no longer configured, report it and
-  # fall back to the config default model.
-  def restore_session_model(name)
-    restore_active_model(name)
+  # Restore the profile a session was saved on. Harness#apply_resume_state calls
+  # it while building a resumed run (issue #276), so it cannot stay private.
+  # When the stored profile is no longer configured, report it and fall back to
+  # the config default profile.
+  def restore_session_profile(id)
+    restore_active_profile(id)
   rescue HarnessError => e
     Task.emit(:error, origin: :session_manager, content: e.message)
 
-    default = @harness.settings.default_model
+    default = @harness.settings.default_profile_id
     # Nothing left to fall back to is not a reason to abort the resume: the
     # Harness was already seeded from this run's own resolution (its config
     # default, or the raw -m id) and that model works. Raising here killed the
@@ -766,8 +767,8 @@ class SessionManager
   # version/created_at are in it because Session#restore reads them
   # unconditionally: a job restored straight from its own file raised on
   # Time.parse(nil) once only the foreground half was supplemented from system.json.
-  # active_model stays a profile NAME or nil: a profile-less run records nil,
-  # which apply_resume_state reads as "this run's own selection".
+  # active_profile_id is the SELECTION: a profile id, or nil when this run used
+  # its config default (a profile-less run records nil too).
   def job_session_json(session_h)
     {
       version: session_h[:version],
@@ -775,7 +776,7 @@ class SessionManager
       messages: session_h[:messages],
       user_prompts: session_h[:user_prompts],
       last_stats: session_h[:last_stats],
-      active_model: @harness.model_config.active_model,
+      active_profile_id: @harness.model_config.active_profile_id,
       param_overrides: param_overrides.to_h
     }
   end

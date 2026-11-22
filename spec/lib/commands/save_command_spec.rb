@@ -8,14 +8,14 @@ require 'job_registry'
 require 'commands/save_command'
 
 RSpec.describe Commands::SaveCommand do
-  # The harness double answers active_model_name like the real SessionManager
+  # The harness double answers active_profile_name like the real SessionManager
   # does, so a spec can prove resume_cli_string leaves the model OUT of the
   # command line even when a model is live.
-  def harness_with(id, path, active_model: 'qwen3:8b')
+  def harness_with(id, path, active_profile_id: 'qwen3:8b')
     sm = Object.new
     sm.define_singleton_method(:save_session) { id }
     sm.define_singleton_method(:session_file_path) { |session_id| path % session_id }
-    sm.define_singleton_method(:active_model_name) { active_model }
+    sm.define_singleton_method(:active_profile_name) { active_profile_id }
     h = Object.new
     h.define_singleton_method(:session_manager) { sm }
     sess = Object.new
@@ -53,7 +53,7 @@ RSpec.describe Commands::SaveCommand do
 
   describe 'resume_cli_string' do
     # No -m on purpose: a resumed run restores the session's OWN profile
-    # (SessionManager#restore_active_model), so naming a model here could only
+    # (SessionManager#restore_active_profile), so naming a model here could only
     # contradict it. bin/harness is the launcher the user actually types.
     it 'builds the command line as bin/harness --resume <id>, with no -m' do
       Dir.mktmpdir do |_dir|
@@ -79,7 +79,7 @@ RSpec.describe Commands::SaveCommand do
     it 'names no model even when the run switched to one' do
       Dir.mktmpdir do |_dir|
         registry = JobRegistry.new
-        registry.add_job(kind: :main, harness: harness_with('abc123', 'x', active_model: 'big'))
+        registry.add_job(kind: :main, harness: harness_with('abc123', 'x', active_profile_id: 'big'))
         cli = described_class.new(registry:,
                                   file_list: FileList.new([], workdir: Dir.pwd),
                                   ui: UI::Console.new(stdout: StringIO.new))

@@ -104,7 +104,8 @@ endpoint and token:
 
 ```yaml
 models:
-  - name: local
+  - id: local                # profile identity: selection key + wire value
+    # name: Local Qwen       # optional display label (defaults to the id)
     url: http://localhost:11434/v1
     # token: sk-...            # literal bearer token (visible in the file), or
                                # token: ${OPENAI_TOKEN} to keep the secret in the
@@ -114,7 +115,7 @@ models:
     top_p: 0.95
     # vision: false            # true = THIS model can be sent tool-result images
                                # (issue #449); absent/false = images are files only
-default_model: local
+default_profile_id: local
 compact:
   recent_messages: 6        # messages kept verbatim after /compact
   reserved_tokens: 8192     # absolute headroom (tokens) kept free before auto-compact
@@ -262,7 +263,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/tools` | List available tools |
 | `/mcp` | List the MCP servers this run declared: whether each connected, the tools each contributed, and any startup problem |
 | `/models` | Show configured models (default and active marked) |
-| `/model [name]` | Show or switch the active model |
+| `/model [id]` | Show or switch the active model (by profile id) |
 | `/param [key [value]]` | Show, override or reset a model parameter |
 | `/ctx` | Show context usage (tokens, %, headroom, auto-compact status) |
 | `/jobs [id]` | List every job on the registry's flat list with the foreground one marked; `/jobs <id>` (or `/jobs switch <id>`) makes another retained job foreground; `/jobs add` adds a sub-agent job with its own agent and makes it foreground |

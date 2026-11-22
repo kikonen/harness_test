@@ -5,14 +5,18 @@
 # config: a missing key is NOT sent to the API, so the server's own
 # default applies (issue #215).
 
-# One or more named model profiles. `url` is the API base - the harness
-# appends its path to it AS-IS (no rewriting). A profile has one identity: its
-# name is both the selection key and the model the endpoint is asked for.
-# Both keys below are required (issue #556).
+# One or more model profiles. `url` is the API base - the harness
+# appends its path to it AS-IS (no rewriting). A profile's identity is its
+# `id`: the selection key used by -m and stored in a saved session, and the
+# value sent to the endpoint. An optional `name` is a display label only
+# (defaults to the id) and may repeat across profiles; a config that predates
+# `id:` may key its entries with `name:` alone (issue #556). An id used by
+# more than one entry is refused at load.
 #   api: openai -> .../v1      e.g. http://localhost:11434/v1  (/chat/completions)
 #   api: ollama  -> server root, e.g. http://localhost:11434   (/api/chat)
 models:
-  - name: local            # model id AND selection key (used by -m / default_model)
+  - id: local              # profile identity: selection key + wire value (used by -m / default_profile_id)
+    # name: Local Qwen     # optional display label shown in /models and the spinner
     url: http://localhost:11434/v1
     api: openai            # endpoint type: openai (default) | ollama (issue #197)
     # token: sk-...        # optional bearer token. To keep the secret out of
@@ -47,8 +51,8 @@ models:
     #                      # be given - MCP, file.image or web.fetch alike).
     #                      # Absent = the global block decides.
 
-# Model used when -m is not given on the command line.
-default_model: local
+# Profile id used when -m is not given on the command line.
+default_profile_id: local
 
 # Session compaction (/compact).
 compact:

@@ -71,10 +71,10 @@ class PromptReader
   # (Poller.mode_badge), so consent and streaming cannot read differently in the
   # two places (the spinner only exists while the model works, not while idle).
   def render_modeline(harness)
-    model  = harness.session_manager.active_model_name
+    profile = harness.session_manager.active_profile_name
     effort = harness.session_manager.param_overrides.reasoning_effort_display
-    tags   = ["[#{model ? "#{model} (#{effort})" : effort}]"]
-    badge  = Poller.mode_badge(harness)
+    tags   = ["[#{profile ? "#{profile} (#{effort})" : effort}]"]
+    badge = Poller.mode_badge(harness)
     tags  << badge if badge
     prefix = "#{tags.join(' ')}#{job_tag} > "
     ctx = harness.context_indicator

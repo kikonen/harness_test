@@ -308,22 +308,53 @@ RSpec.describe HarnessConfig do
   # issue #556: a profile is the harness' whole description of a model, so the
   # two things a request needs - the name the endpoint is asked for and the
   # endpoint itself - are checked when the config is read, not when the first
-  # request is built. 'model:' used to be a second name for a profile; the
-  # profile's 'name:' IS the model now.
+  # request is built. 'model:' used to be a second name for a profile; a profile
+  # now has an id (what selects it) and a name (what displays it).
   describe 'model profile completeness (issue #556)' do
     it 'refuses a profile with no url' do
-      expect { described_class.new(models: [{ name: 'nohost' }]) }
+      expect { described_class.new(models: [{ name: 'nohost', id: 'nohost' }]) }
         .to raise_error(HarnessError, /model profile 'nohost' needs a 'url'/)
     end
 
-    it 'refuses a profile with no name' do
+    it 'refuses a profile with no id' do
       expect { described_class.new(models: [{ url: 'http://host.test/v1' }]) }
-        .to raise_error(HarnessError, /model profile needs a 'name'/)
+        .to raise_error(HarnessError, /model profile needs an 'id'/)
     end
 
-    it 'refuses a blank name (it is the id the endpoint is asked for)' do
+    # A blank name is a blank selection key: with no id either the entry
+    # identifies nothing.
+    it 'refuses a blank name when it is the only identity the entry carries' do
       expect { described_class.new(models: [{ name: '  ', url: 'http://host.test/v1' }]) }
-        .to raise_error(HarnessError, /model profile needs a 'name'/)
+        .to raise_error(HarnessError, /model profile needs an 'id'/)
+    end
+
+    # 'name:' alone is the pre-'id:' config shape: it keys the profile and labels it.
+    it "reads a name-only profile's name as its id" do
+      cfg = described_class.new(models: [{ name: 'old', url: 'http://host.test/v1' }])
+
+      expect(cfg.models.first[:id]).to eq('old')
+      expect(cfg.models.first[:name]).to eq('old')
+    end
+
+    # 'default_model:' is the historical key for the startup profile and is still read.
+    it "reads the legacy default_model key as the default profile id" do
+      cfg = described_class.new(
+        default_model: 'qwen', models: [{ id: 'qwen', url: 'http://host.test/v1' }]
+      )
+
+      expect(cfg.default_profile_id).to eq('qwen')
+      expect(cfg.resolve_profile(nil)[:id]).to eq('qwen')
+    end
+
+    # The id is what -m and a saved session resolve, so it may not be ambiguous.
+    # A name: is a display label and may repeat.
+    it 'refuses an id used by more than one profile' do
+      expect {
+        described_class.new(models: [
+          { id: 'strata', name: 'fast',  url: 'http://a:11434/v1' },
+          { id: 'strata', name: 'local', url: 'http://b:11434/v1' }
+        ])
+      }.to raise_error(HarnessError, /profile id 'strata' is used by more than one entry/)
     end
 
     it 'refuses a url that is not http(s) rather than failing inside the transport' do
@@ -612,7 +643,7 @@ RSpec.describe HarnessConfig do
     it 'raises when an entry has neither a command nor a url' do
       expect { described_class.new(mcp_servers: [{ command: 'npx' }]) }
         .to raise_error(HarnessError, /needs a 'name'/)
-      expect { described_class.new(mcp_servers: [{ name: 'fs' }]) }
+      expect { described_class.new(mcp_servers: [{ name: 'fs', id: 'fs' }]) }
         .to raise_error(HarnessError, /needs a 'name' and one of 'command' or 'url'/)
     end
 

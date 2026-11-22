@@ -23,11 +23,11 @@ RSpec.describe Mcp::Manager do
   end
 
   def server_entry(name: 'fs', command: 'ruby')
-    { name: name, command: command, args: [], env: {} }
+    { name: name, id: name, command: command, args: [], env: {} }
   end
 
   def http_server_entry(name: 'remote')
-    { name: name, url: 'https://example.com/mcp', headers: {} }
+    { name: name, id: name, url: 'https://example.com/mcp', headers: {} }
   end
 
   def build_manager(logger = instance_double('Logger'))

@@ -313,7 +313,7 @@ class CLI
 
     # issue #217: show WHERE calls go (API type + endpoint path + base url),
     # not just the base url - a profile switch can change the API type.
-    ui.puts "Model: #{foreground_harness.session_manager.active_model_name} " \
+    ui.puts "Model: #{foreground_harness.session_manager.active_profile_name} " \
             "(#{foreground_harness.session_manager.target_display} @ #{foreground_harness.model_config.base_url})"
     # issue #449: name the image posture, but only when the run can actually
     # receive one - MCP servers are the only source of tool-result images, so a
@@ -442,7 +442,7 @@ class CLI
   # (--resume is a startup option; there is no mid-run resume command).
   def resume_cli_string(id)
     # No -m: a resumed run restores the session's OWN model profile
-    # (SessionManager#restore_active_model), so naming one here would only let
+    # (SessionManager#restore_session_profile), so naming one here would only let
     # the printed line contradict the session it names.
     parts = ["bin/harness", "--resume #{id}"]
     parts << "-d #{@file_list.workdir}" unless @file_list.workdir == Dir.pwd

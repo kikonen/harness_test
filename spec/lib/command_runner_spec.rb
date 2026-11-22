@@ -412,7 +412,7 @@ RSpec.describe CommandRunner do
   def harness_with(client, chain)
     harness_double(client: client, logger: nil,
            session: double('session', messages: chain),
-           tools_payload: [{ type: 'function', function: { name: 'test.echo' } }])
+           tools_payload: [{ type: 'function', function: { name: 'test.echo', id: 'test.echo' } }])
   end
 
   # A chain ending on an unresolved assistant tool_calls - the shape the

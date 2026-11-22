@@ -52,7 +52,7 @@ RSpec.describe SessionLocator do
       FileUtils.mkdir_p(jdir)
       File.write(File.join(jdir, 'session.json'),
                  JSON.generate({ messages: [{ role: 'user', content: "job#{j}" }],
-                                 active_model: 'm', param_overrides: {} }))
+                                 active_profile_id: 'm', param_overrides: {} }))
       status = statuses.fetch(j, 'pending')
       File.write(File.join(jdir, 'job.json'),
                  JSON.generate({ id: j, kind: 'main', status: status, result: nil,

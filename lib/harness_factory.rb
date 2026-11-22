@@ -75,11 +75,12 @@ class HarnessFactory
       resume_data:,
       logger: @logger)
     # A resumed job's model comes from its own saved half (Harness#apply_resume_state).
-    # A job built fresh - a /jobs add - seeds from settings alone, where a config
-    # DEFAULT model leaves active_model nil: without this the job's own name and the
-    # active_model it then saves would be nil, and a resume could not look that
-    # model up again. Harness seeds the same name when it seeds ModelConfig.
-    harness.model_config.active_model ||= @settings.active_model_name
+    # A job built fresh - a /jobs add - seeds from settings alone, where using the
+    # config DEFAULT profile leaves the SELECTION nil: without this the job's own
+    # profile id and the selection it then saves would both be nil, and a resume
+    # could not look that profile up again.
+    harness.model_config.active_profile_id ||= @settings.resolved_profile_id
+    harness.model_config.active_profile_name ||= @settings.resolved_profile_name
     attach(harness, job)
     harness
   end
