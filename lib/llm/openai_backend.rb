@@ -47,7 +47,7 @@ module LLM
     end
 
     def build_body(messages, tools, stream: false)
-      body = { model: @config.active_profile_id, messages: }
+      body = { model: @config.model, messages: }
 
       # The OpenAI schema reads the flag at top level. Usage is NOT reported
       # on a streamed response unless asked for explicitly, and without it the

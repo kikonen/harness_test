@@ -321,6 +321,13 @@ RSpec.describe HarnessConfig do
         .to raise_error(HarnessError, /model profile needs an 'id'/)
     end
 
+    # A profile must name the model its endpoint answers for (#572); an id
+    # selects the profile and a name only displays it - neither is a model.
+    it 'refuses a profile with no model' do
+      expect { described_class.new(models: [{ id: 'noModel', url: 'http://host.test/v1' }]) }
+        .to raise_error(HarnessError, /model profile 'noModel' needs a 'model'/)
+    end
+
     # A blank name is a blank selection key: with no id either the entry
     # identifies nothing.
     it 'refuses a blank name when it is the only identity the entry carries' do
@@ -328,18 +335,22 @@ RSpec.describe HarnessConfig do
         .to raise_error(HarnessError, /model profile needs an 'id'/)
     end
 
-    # 'name:' alone is the pre-'id:' config shape: it keys the profile and labels it.
+    # 'name:' alone is the pre-'id:' config shape: it keys the profile. The model
+    # is still a separate required field.
     it "reads a name-only profile's name as its id" do
-      cfg = described_class.new(models: [{ name: 'old', url: 'http://host.test/v1' }])
+      cfg = described_class.new(
+        models: [{ name: 'old', url: 'http://host.test/v1', model: 'old-model' }]
+      )
 
       expect(cfg.models.first[:id]).to eq('old')
       expect(cfg.models.first[:name]).to eq('old')
+      expect(cfg.models.first[:model]).to eq('old-model')
     end
 
     # 'default_model:' is the historical key for the startup profile and is still read.
     it "reads the legacy default_model key as the default profile id" do
       cfg = described_class.new(
-        default_model: 'qwen', models: [{ id: 'qwen', url: 'http://host.test/v1' }]
+        default_model: 'qwen', models: [{ id: 'qwen', url: 'http://host.test/v1', model: 'qwen' }]
       )
 
       expect(cfg.default_profile_id).to eq('qwen')
@@ -351,38 +362,39 @@ RSpec.describe HarnessConfig do
     it 'refuses an id used by more than one profile' do
       expect {
         described_class.new(models: [
-          { id: 'strata', name: 'fast',  url: 'http://a:11434/v1' },
-          { id: 'strata', name: 'local', url: 'http://b:11434/v1' }
+          { id: 'strata', name: 'fast',  url: 'http://a:11434/v1', model: 'fast-m' },
+          { id: 'strata', name: 'local', url: 'http://b:11434/v1', model: 'local-m' }
         ])
       }.to raise_error(HarnessError, /profile id 'strata' is used by more than one entry/)
     end
 
     it 'refuses a url that is not http(s) rather than failing inside the transport' do
-      expect { described_class.new(models: [{ name: 'ws', url: 'ws://host.test/v1' }]) }
+      expect {
+        described_class.new(models: [{ name: 'ws', url: 'ws://host.test/v1', model: 'ws-m' }])
+      }
         .to raise_error(HarnessError, /model profile 'ws' url must start with/)
     end
 
-    it 'drops the retired model: key from the normalized profile' do
-      legacy = described_class.new(
-        models: [{ name: 'legacy', url: 'http://host.test/v1', model: 'other' }]
+    it 'reads the model: key as the profile model (#572)' do
+      profile = described_class.new(
+        models: [{ id: 'legacy', url: 'http://host.test/v1', model: 'other' }]
       ).models.first
 
-      expect(legacy).not_to have_key(:model)
-      expect(legacy[:name]).to eq('legacy')
+      expect(profile[:model]).to eq('other')
     end
   end
 
   describe 'model profile api key (issue #197)' do
     it 'reads the api key from a model profile' do
       cfg = described_class.new(models: [
-        { name: 'oll', url: 'http://localhost:11434', api: 'ollama' }
+        { name: 'oll', url: 'http://localhost:11434', model: 'oll-m', api: 'ollama' }
       ])
       expect(cfg.models.first[:api]).to eq('ollama')
     end
 
     it 'leaves api nil when the key is absent (client defaults to openai)' do
       cfg = described_class.new(models: [
-        { name: 'open', url: 'http://localhost:11434/v1' }
+        { name: 'open', url: 'http://localhost:11434/v1', model: 'open-m' }
       ])
       expect(cfg.models.first[:api]).to be_nil
     end
@@ -442,7 +454,7 @@ RSpec.describe HarnessConfig do
     end
 
     it 'reads a profile streaming key' do
-      cfg = described_class.new(models: [{ name: 'a', url: 'http://host.test/v1', streaming: true }])
+      cfg = described_class.new(models: [{ name: 'a', url: 'http://host.test/v1', model: 'a-m', streaming: true }])
 
       expect(cfg.models.first[:streaming]).to be(true)
     end
@@ -451,9 +463,9 @@ RSpec.describe HarnessConfig do
     # means "this profile opts out", so it overrides a global true.
     it 'leaves the profile key nil when absent, and false when set false' do
       cfg = described_class.new(models: [
-        { name: 'silent', url: 'http://host.test/v1' },
-        { name: 'off', url: 'http://host.test/v1', streaming: false },
-        { name: 'on', url: 'http://host.test/v1', streaming: true }
+        { name: 'silent', url: 'http://host.test/v1', model: 'silent-m' },
+        { name: 'off', url: 'http://host.test/v1', model: 'off-m', streaming: false },
+        { name: 'on', url: 'http://host.test/v1', model: 'on-m', streaming: true }
       ])
 
       expect(cfg.models.map { |m| m[:streaming] }).to eq([nil, false, true])
@@ -469,19 +481,19 @@ RSpec.describe HarnessConfig do
   # profile that does not say so is text-only.
   describe 'profile vision key (issue #449)' do
     it 'defaults a profile to not-declared (false, not nil)' do
-      cfg = described_class.new(models: [{ name: 'plain', url: 'http://host.test/v1' }])
+      cfg = described_class.new(models: [{ name: 'plain', url: 'http://host.test/v1', model: 'plain-m' }])
 
       expect(cfg.models.first[:vision]).to be(false)
     end
 
     it 'reads an explicit true' do
-      cfg = described_class.new(models: [{ name: 'v', url: 'http://host.test/v1', vision: true }])
+      cfg = described_class.new(models: [{ name: 'v', url: 'http://host.test/v1', model: 'v-m', vision: true }])
 
       expect(cfg.models.first[:vision]).to be(true)
     end
 
     it 'treats truthy junk as not declared (the same coercion as every posture)' do
-      cfg = described_class.new(models: [{ name: 'a', url: 'http://host.test/v1', vision: 'yes' }])
+      cfg = described_class.new(models: [{ name: 'a', url: 'http://host.test/v1', model: 'a-m', vision: 'yes' }])
 
       expect(cfg.models.first[:vision]).to be(false)
     end
@@ -543,8 +555,8 @@ RSpec.describe HarnessConfig do
       cfg = described_class.new(
         mcp_images: { inline_max_images: 9 },
         models: [
-          { name: 'inherited', url: 'http://host.test/v1' },
-          { name: 'small', url: 'http://host.test/v1', mcp_images: { inline_max_tokens: 2000 } }
+          { name: 'inherited', url: 'http://host.test/v1', model: 'inherited-m' },
+          { name: 'small', url: 'http://host.test/v1', model: 'small-m', mcp_images: { inline_max_tokens: 2000 } }
         ])
 
       expect(cfg.models.first[:mcp_images]).to be_nil
@@ -802,7 +814,7 @@ RSpec.describe HarnessConfig do
     end
 
     def profile_token(token)
-      described_class.new(models: [{ name: 'm', url: 'http://host.test/v1', token: token }]).models.first[:token]
+      described_class.new(models: [{ name: 'm', url: 'http://host.test/v1', model: 'm-m', token: token }]).models.first[:token]
     end
 
     it 'a plain token is untouched' do

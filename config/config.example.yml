@@ -7,16 +7,17 @@
 
 # One or more model profiles. `url` is the API base - the harness
 # appends its path to it AS-IS (no rewriting). A profile's identity is its
-# `id`: the selection key used by -m and stored in a saved session, and the
-# value sent to the endpoint. An optional `name` is a display label only
-# (defaults to the id) and may repeat across profiles; a config that predates
-# `id:` may key its entries with `name:` alone (issue #556). An id used by
-# more than one entry is refused at load.
+# `id`: the selection key used by -m and stored in a saved session. An optional
+# `name` is a display label only (defaults to the id) and may repeat across
+# profiles; a config that predates `id:` may key its entries with `name:` alone
+# (issue #556). An id used by more than one entry is refused at load. `model` is
+# the model the endpoint is asked for (#572): required, and never the id or name.
 #   api: openai -> .../v1      e.g. http://localhost:11434/v1  (/chat/completions)
 #   api: ollama  -> server root, e.g. http://localhost:11434   (/api/chat)
 models:
-  - id: local              # profile identity: selection key + wire value (used by -m / default_profile_id)
+  - id: local              # profile identity: selection key (used by -m / default_profile_id)
     # name: Local Qwen     # optional display label shown in /models and the spinner
+    model: qwen2.5-coder:7b  # the model this endpoint is asked for (#572)
     url: http://localhost:11434/v1
     api: openai            # endpoint type: openai (default) | ollama (issue #197)
     # token: sk-...        # optional bearer token. To keep the secret out of

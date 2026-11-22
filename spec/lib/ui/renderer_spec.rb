@@ -170,21 +170,6 @@ RSpec.describe UI::Renderer do
       )
     end
 
-    it 'renders an arrow table (entity -> target @ location + note)' do
-      payload = {
-        title: 'Configured models (1):',
-        kind: :arrow,
-        columns: %i[name model location note],
-        items: [{ name: 'qwen', model: 'qwen3:8b', location: 'http://x', note: ' (ollama)' }],
-        footer: [],
-        gap: false
-      }
-      expect(renderer.line(type: :list, content: payload)).to eq(
-        ['Configured models (1):',
-         '  qwen  ->  qwen3:8b @ http://x (ollama)'].join("\n")
-      )
-    end
-
     # The :kv kind: the flat `name - description` row the skills and memory
     # listings share. An optional :annotation rides the row verbatim (the memory
     # listing's " (N chars)" suffix is a FIELD, not a baked-in tail).
@@ -387,17 +372,17 @@ RSpec.describe UI::Renderer do
     end
 
     it 'is a loud diagnostic when the columns do not name a kind\'s required fields' do
-      # :arrow reads name/model/location; omitting location would drop a field.
-      out = renderer.line(type: :list, content: { kind: :arrow, columns: %i[name model], items: [] })
+      # :kv reads name/description; omitting description would drop a field.
+      out = renderer.line(type: :list, content: { kind: :kv, columns: %i[name], items: [] })
 
-      expect(out).to eq('  [list-fields:arrow] columns must name name, model, location')
+      expect(out).to eq('  [list-fields:kv] columns must name name, description')
     end
 
     it 'renders the same row whatever order the columns array lists (no positional read)' do
-      payload = { kind: :arrow, columns: %i[location name note model],
-                  items: [{ name: 'a', model: 'b', location: 'c', note: ' (x)' }] }
+      payload = { kind: :kv, columns: %i[annotation description name],
+                  items: [{ name: 'a', description: 'b', annotation: ' (x)' }] }
 
-      expect(renderer.line(type: :list, content: payload)).to eq('  a  ->  b @ c (x)')
+      expect(renderer.line(type: :list, content: payload)).to eq('  a - b (x)')
     end
 
     # The footer's indent is a LEVEL in the data, not baked leading spaces - the

@@ -81,6 +81,7 @@ class HarnessFactory
     # could not look that profile up again.
     harness.model_config.active_profile_id ||= @settings.resolved_profile_id
     harness.model_config.active_profile_name ||= @settings.resolved_profile_name
+    harness.model_config.model ||= @settings.active_profile&.[](:model)
     attach(harness, job)
     harness
   end

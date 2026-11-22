@@ -115,14 +115,12 @@ module UI
 
     # The item fields each :list kind's terminal row reads, BY NAME. The order is
     # the row template's own, not the columns array's, so a reordered columns
-    # list cannot scramble a row. :arrow also renders an optional trailing
-    # annotation (:note) and :kv render one (:annotation) straight from their
-    # template. An unknown kind, or columns that do not name a kind's
-    # required fields, is a loud diagnostic - never a garbled or field-dropping
-    # row (#146).
+    # list cannot scramble a row. :kv renders an optional trailing annotation
+    # (:annotation) straight from its template. An unknown kind, or columns that
+    # do not name a kind's required fields, is a loud diagnostic - never a
+    # garbled or field-dropping row (#146).
     LIST_KIND_FIELDS = {
       bullet: %i[value],
-      arrow: %i[name model location],
       kv: %i[name description],
       # :table needs no fixed field list: the payload's columns array IS the
       # schema (each column a named field). #table_lines builds a markdown table
@@ -403,16 +401,10 @@ module UI
     end
 
     # A row built from NAMED fields the item hash carries; the columns array's
-    # order never decides what a field is. :arrow appends an optional :note.
+    # order never decides what a field is.
     def row_for(kind, item)
       row = item.is_a?(Hash) ? item : {}
       case kind
-      when :arrow
-        name = row[:name].to_s
-        tgt  = row[:model].to_s
-        loc  = row[:location].to_s
-        note = row[:note].to_s
-        "#{INDENT}#{name}  ->  #{tgt} @ #{loc}#{note}"
       when :kv
         name = row[:name].to_s
         desc = row[:description].to_s

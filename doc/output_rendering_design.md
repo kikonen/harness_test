@@ -51,7 +51,7 @@ decoration that a renderer can produce itself.
 | `:kind` | the message after the kind | `  [LLM error] rate limited` (bracket names a kind, unpainted; #466) |
 | `:note` | ONE or MORE unwrapped paragraphs | each re-wrapped to the resolved width, indented (harness prose, unpainted; #470) |
 | `:body` | the RAW markdown of a stored file (a plan, a memory, a skill) | the render of that markdown (markers consumed); as stored when there is no palette; unpainted (the gem colors it); #474 |
-| `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, arrow `  a -> b @ c`, kv `  n - d`, table rendered as a markdown table via kramdown); footer indents from its LEVEL; unpainted; #474 |
+| `:list` | a structured payload `{ title:, kind:, columns:, items:, footer:, gap: }` | rows laid out from the FIELDS (bullet `  - v`, kv `  n - d`, table rendered as a markdown table via kramdown); footer indents from its LEVEL; unpainted; #474 |
 | `:system`, `:text`, `:stats`, `:compact` | unchanged | verbatim (see below) |
 | `:rule` | the rule line the emitter drew | content verbatim, painted with the palette `rule` role (see below) |
 | `:gap` | nothing | an empty line (the spacing between entries; unpainted; #474) |
@@ -219,9 +219,13 @@ draws the rows from those fields. A kind per report shape:
   was never byte-identical. A single-field list has no column alignment to
   preserve, so it is structure rather than an alignment block and converts; the
   `/mcp` names gained the dash the renderer owns.
-- `:arrow` `  name -> target @ location` - `/models`
 - `:kv` `  name - description` (+ optional `annotation`) - `/skills`
 - `:table` - `/sessions`, the `/param` and `/model` parameter listing, the
+  `/models` profile listing (one row per profile: name, id, url, api, flags -
+  the `:arrow` kind `/models` used read item[:name] on the left and
+  item[:model] as the arrow target, mixing a profile's display name up with
+  the id sent to the endpoint; `/models` was its only user and the kind is
+  GONE with it), the
   `/mcp` server report (one row per server: name, transport, target, status) and
   its tool listings, the `/tools` listing, `/session` (its field/value rows) and the
   `/palette` role groups (one row per role: group, role, code), and the numbered
@@ -268,8 +272,8 @@ The renderer owns the indent and the join glyphs, reproducing the old `@ui.puts`
 rows byte-for-byte (no terminal regression). UNPAINTED like `:note`: only the
 layout moves, so a colored or plain console prints identical bytes.
 
-A row's fields are read BY NAME (`LIST_KIND_FIELDS`: bullet `value`, arrow
-`name`/`model`/`location` plus an optional `note`), never by reading the `columns`
+A row's fields are read BY NAME (`LIST_KIND_FIELDS`: bullet `value`, kv
+`name`/`description` plus an optional `annotation`), never by reading the `columns`
 array by position - so a payload that lists its columns in a different order
 renders the same row. The `columns` array is only checked to confirm it NAMES the
 kind's required fields; an unknown kind or missing field is a loud diagnostic,

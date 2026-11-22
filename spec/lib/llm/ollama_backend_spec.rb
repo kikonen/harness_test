@@ -8,7 +8,12 @@ require 'llm/ollama_backend'
 RSpec.describe LLM::OllamaBackend do
   let(:logger) { Logger.new(File::NULL) }
   let(:options) do
-    { base_url: 'http://127.0.0.1:11434', active_profile_id: 'test-model', api: 'ollama' }
+    {
+      base_url: 'http://127.0.0.1:11434',
+      active_profile_id: 'test-model',
+      model: 'qwen2.5-coder:7b',
+      api: 'ollama'
+    }
   end
   # ModelConfig holds the SAME hash, so the per-example options[:x] mutations
   # below are still read by the backend on the next request (#286).
@@ -32,7 +37,7 @@ RSpec.describe LLM::OllamaBackend do
 
     it 'sends stream: false and model + messages' do
       b = body([{ role: 'user', content: 'hi' }])
-      expect(b[:model]).to eq('test-model')
+      expect(b[:model]).to eq('qwen2.5-coder:7b')
       expect(b[:messages]).to eq([{ role: 'user', content: 'hi' }])
       expect(b[:stream]).to be(false)
     end
