@@ -25,28 +25,20 @@ rescue HarnessError => e
 end
 
 def profile(label, hash)
-  report(label, ModelConfig.new(
-    active_model: label,
-    **HarnessConfig.new(models: [hash]).models.first
-  ))
+  report(label, ModelConfig.new(**HarnessConfig.new(models: [hash]).models.first))
 rescue HarnessError => e
   puts format("%-34s CONFIG ERROR (config read): %s", label, e.message)
 end
 
 # A run with no endpoint at all: the first prompt used to die as NoMethodError
 # in the task thread, on every retry, looking stuck rather than mis-configured.
-report("no url (raw -m id)", ModelConfig.new(active_model: "mymodel", api: "openai"))
+report("no url (raw -m id)", ModelConfig.new(api: "openai"))
 # A profile that declares no url is refused where the config is read.
 profile("profile with no url", { name: "nohost" })
-# A profile that names no model is refused for the same reason: the name IS the
-# model the endpoint is asked for.
-profile("profile with no name", { url: "http://host.test/v1" })
+# A profile is refused when it carries no model: (#572) or no id.
+profile("profile with no id", { url: "http://host.test/v1" })
+profile("profile with no model", { id: "noModel", url: "http://host.test/v1" })
 # A non-http scheme is a config error too, not a connect failure.
 profile("profile with a ws url", { name: "ws", url: "ws://host.test/v1" })
 # For contrast, the same call on a URI built from a configured url:
-report(
-  "url configured",
-  ModelConfig.new(
-    active_model: "m",
-    api: "openai",
-    base_url: "https://host.example/v1"))
+report("url configured", ModelConfig.new(api: "openai", base_url: "https://host.example/v1"))
