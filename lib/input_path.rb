@@ -53,9 +53,11 @@ class InputPath
   # Read one block: Enter inserts a newline, the submit key commits the whole
   # block. The caller passes its own draft as the prefill and decides what EOF
   # means for itself (the idle prompt quits, a running turn aborts).
-  def read(prefill: nil)
+  # `prompt:` labels THIS read only, so a caller that shares the path (the poll
+  # loop labeling a mid-turn read) cannot leave the idle prompt relabeled.
+  def read(prefill: nil, prompt: nil)
     @edit_state = true
-    result = editor.read_multiline(**prompt_kwargs, prefill:)
+    result = editor.read_multiline(**prompt_kwargs(prompt), prefill:)
     @edit_state = false
     result
   end
@@ -77,8 +79,9 @@ class InputPath
 
   private
 
-  def prompt_kwargs
-    @prompt.nil? ? {} : { prompt: @prompt }
+  def prompt_kwargs(override)
+    chosen = override.nil? ? @prompt : override
+    chosen.nil? ? {} : { prompt: chosen }
   end
 
   def resolved_registry
