@@ -42,7 +42,7 @@ module Commands
       end
 
       profile = foreground_harness.session_manager.switch_profile(name)
-      # The profile id is what the endpoint is asked for; the name is its label.
+      # The name is the profile's display label; its model: is what the endpoint gets asked for.
       id      = profile[:id]
       display = profile[:name] || id
       url     = profile[:url] || foreground_harness.model_config.base_url

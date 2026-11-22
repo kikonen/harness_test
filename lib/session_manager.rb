@@ -79,8 +79,8 @@ class SessionManager
     if @harness.settings.verbose
       @harness.logger.info "--- system ---\n#{@harness.session.system_prompt}"
       @harness.logger.info "--- user ---\n#{user_prompt}"
-      model = @harness.model_config
-      @harness.logger.info "--- #{model.active_profile_name} @ #{model.base_url} ---"
+      config = @harness.model_config
+      @harness.logger.info "--- #{config.active_profile_name} @ #{config.base_url} ---"
     end
 
     @harness.session.add_user(user_prompt)
