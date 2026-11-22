@@ -323,7 +323,7 @@ Design: `doc/web_fetch_design.md`)
 
 **Meta** - `tools.list`, `tools.search`, `time.now`, `ui.notify` (progress
 messages to your console), `ui.dialog` (ask the user a question and wait
-for the picked option), `ui.note` (one-line note in the model's own
+for the picked option), `session.note` (one-line note in the model's own
 context), `test.echo` (test-only)
 
 **Skills** - `skills.list` (the project's skills: name + one-line description),

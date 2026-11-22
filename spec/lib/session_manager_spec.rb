@@ -395,13 +395,13 @@ RSpec.describe SessionManager do
       allow(client).to receive(:chat).and_return({
         choices: [{ message: { content: 'REAL SUMMARY',
                               tool_calls: [{ id: 'x1',
-                                            function: { name: 'ui.note', arguments: '{}' } }] } }]
+                                            function: { name: 'session.note', arguments: '{}' } }] } }]
       })
 
       result = manager.compact_session
 
       expect(result[:summary]).to eq('REAL SUMMARY')
-      expect(log_io.string).to include('summary call returned tool calls (ui.note) - ignored')
+      expect(log_io.string).to include('summary call returned tool calls (session.note) - ignored')
     end
 
     it 'still reports the plain empty-summary error when no tool call came back' do

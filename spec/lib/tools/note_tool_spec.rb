@@ -6,10 +6,10 @@ require 'tools/note_tool'
 RSpec.describe Tools::NoteTool do
   subject(:tool) { described_class.new }
 
-  it 'has the ui.note name and a grant-focused description (issue #138)' do
-    expect(tool.name).to eq('ui.note')
+  it 'has the session.note name and a grant-focused description (issue #138)' do
+    expect(tool.name).to eq('session.note')
     expect(tool.description).to include('grant')
-    expect(tool.namespace).to eq('ui')
+    expect(tool.namespace).to eq('session')
   end
 
   it 'acknowledges a note' do

@@ -11,11 +11,13 @@ module Tools
   # the USER about the grant on the console; the MODEL records the fact in
   # its own context (the note stays in the tool call for the rest of the
   # session), so it costs tokens only when a grant actually occurred.
+  # Namespaced session.note (not ui.note): it is model-side state, never a
+  # UI message or a user instruction (issue #550).
   class NoteTool < Tool
     def initialize
       super(
-        name: "ui.note",
-        description: "Records a short note about the current task in your own context, to remember it for the rest of the session. Use it right after a file/dir access grant was made (the tool result says so), stating which path was granted for what mode (read / write / delete) and the granularity (file, dir only, recursive). Keep it to one factual line. Do NOT use it for anything else.",
+        name: "session.note",
+        description: "Records a short note about the current task in your own context, to remember it for the rest of the session. It is the model's own note, NOT a user instruction. Use it right after a file/dir access grant was made (the tool result says so), stating which path was granted for what mode (read / write / delete) and the granularity (file, dir only, recursive). Keep it to one factual line. Do NOT use it for anything else.",
         parameters: {
           type: "object",
           properties: {

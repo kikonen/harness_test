@@ -736,12 +736,12 @@ class Harness
 
   # Buffered so it survives the transient tool result and reaches the chain on commit.
   def record_note(tool_call, result)
-    return unless tool_call[:function][:name] == "ui.note"
+    return unless tool_call[:function][:name] == "session.note"
     return unless result.is_a?(String) && result.start_with?("ok: noted")
 
     args, parse_error = parse_tool_arguments(tool_call[:function][:arguments])
     if parse_error
-      logger.warn "ui.note arguments did not parse (#{parse_error}) - note not buffered"
+      logger.warn "session.note arguments did not parse (#{parse_error}) - note not buffered"
       return
     end
     @session.add_note(args["text"])

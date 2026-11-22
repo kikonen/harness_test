@@ -898,10 +898,10 @@ RSpec.describe Harness do
 
   describe '#record_note (issue #138)' do
     def note_call(text)
-      { id: 'c1', function: { name: 'ui.note', arguments: JSON.dump(text: text) } }
+      { id: 'c1', function: { name: 'session.note', arguments: JSON.dump(text: text) } }
     end
 
-    it 'buffers the note when a ui.note call succeeds' do
+    it 'buffers the note when a session.note call succeeds' do
       harness = build_harness
 
       harness.record_note(note_call('granted read on lib/'), 'ok: noted 19 chars')
@@ -919,7 +919,7 @@ RSpec.describe Harness do
       expect(harness.session.instance_variable_get(:@notes)).to be_nil
     end
 
-    it 'does not buffer anything when the ui.note call failed' do
+    it 'does not buffer anything when the session.note call failed' do
       harness = build_harness
 
       harness.record_note(note_call('should not appear'), 'error: empty note')
@@ -930,14 +930,14 @@ RSpec.describe Harness do
     it 'survives a malformed arguments payload without raising' do
       harness = build_harness
 
-      call = { id: 'c1', function: { name: 'ui.note', arguments: '{not json' } }
+      call = { id: 'c1', function: { name: 'session.note', arguments: '{not json' } }
 
       expect { harness.record_note(call, 'ok: noted 5 chars') }.not_to raise_error
       expect(harness.session.instance_variable_get(:@notes)).to be_nil
       # issue #345: the drop is now visible. It used to rescue to nothing, so a
-      # ui.note whose arguments never arrived was silently not buffered.
+      # session.note whose arguments never arrived was silently not buffered.
       expect(File.read(harness.session_log_path))
-        .to include('ui.note arguments did not parse')
+        .to include('session.note arguments did not parse')
     end
 
     it 'does not buffer anything when the result is not a string' do

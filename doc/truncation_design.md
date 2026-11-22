@@ -109,7 +109,7 @@ Three sites used to rescue straight to `{}`, which erases the difference between
 | --- | --- | --- |
 | `run_command_batch_commands` | `JSON.parse(...) rescue {}` - the command vanished, so a batch of two truncated `run.command` calls was safety pre-checked as ZERO commands | the command is skipped AND `logger.warn` names it |
 | `execute_tool_call` | `JSON.parse` raised into the generic `error: <msg>` rescue | the parse error is in the tool result and in `harness.log`, with the truncation branch above |
-| `record_note` | `rescue StandardError` to nothing - a `ui.note` whose arguments did not arrive was silently not buffered | the drop is logged, the turn still does not break |
+| `record_note` | `rescue StandardError` to nothing - a `session.note` whose arguments did not arrive was silently not buffered | the drop is logged, the turn still does not break |
 
 `record_note` keeps its outer `rescue StandardError`: a malformed note must
 never break a turn, and that is the point of the swallow - it is the *logging*
