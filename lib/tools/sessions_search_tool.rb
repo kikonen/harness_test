@@ -50,7 +50,7 @@ module Tools
 
       status(:info, "#{matches.size} session(s) match #{query.inspect}")
       header = "Sessions matching #{query.inspect} (#{matches.size}), " \
-        "newest first; resume one at startup with: ruby harness.rb --resume <id>:"
+        "newest first; resume one at startup with: `bin/harness --resume <id>`:"
       rows = matches.map do |m|
         detail = "  #{m[:id]}  saved #{m[:saved_at].strftime('%Y-%m-%d %H:%M:%S')}  " \
           "#{m[:messages]} messages, #{m[:hits]} hit(s)  [workdir: #{m[:workdir]}]"

@@ -131,9 +131,9 @@ module HelpTopics
           "command line that resumes it. Disable auto-save with --no-auto-save " \
           "or 'auto_save: false' in the config.",
         "/sessions lists saved sessions. Resume one by STARTING a new run: " \
-          "ruby harness.rb -m <model> --resume <id>, or --continue to pick up " \
-          "the newest saved session in this working directory. There is no " \
-          "in-run resume command.",
+          "`bin/harness --resume <id>`, or --continue to pick up the newest " \
+          "saved session in this working directory. There is no in-run resume " \
+          "command.",
         "What a resumed run restores: the conversation and access list, the model " \
           "profile and parameter overrides, the YOLO posture and the output " \
           "palette, and the streaming posture (/stream) the session was saved " \

@@ -8,9 +8,9 @@ require 'job_registry'
 require 'commands/save_command'
 
 RSpec.describe Commands::SaveCommand do
-  # resume_cli_string names the live active model PROFILE (-m names a profile,
-  # not a wire id), so the harness double answers active_model_name like the real
-  # SessionManager does.
+  # The harness double answers active_model_name like the real SessionManager
+  # does, so a spec can prove resume_cli_string leaves the model OUT of the
+  # command line even when a model is live.
   def harness_with(id, path, active_model: 'qwen3:8b')
     sm = Object.new
     sm.define_singleton_method(:save_session) { id }
@@ -52,7 +52,10 @@ RSpec.describe Commands::SaveCommand do
   end
 
   describe 'resume_cli_string' do
-    it 'builds the command line with the active model and --resume <id>' do
+    # No -m on purpose: a resumed run restores the session's OWN profile
+    # (SessionManager#restore_active_model), so naming a model here could only
+    # contradict it. bin/harness is the launcher the user actually types.
+    it 'builds the command line as bin/harness --resume <id>, with no -m' do
       Dir.mktmpdir do |_dir|
         registry = JobRegistry.new
         registry.add_job(kind: :main, harness: harness_with('abc123', 'x'))
@@ -61,8 +64,9 @@ RSpec.describe Commands::SaveCommand do
                                   ui: UI::Console.new(stdout: StringIO.new))
           .resume_cli_string('abc123')
 
-        expect(cli).to include('ruby harness.rb')
-        expect(cli).to include('-m qwen3:8b')
+        expect(cli).to start_with('bin/harness')
+        expect(cli).not_to include('ruby harness.rb')
+        expect(cli).not_to include('-m ')
         expect(cli).to include('--resume abc123')
         # No -d: the workdir IS Dir.pwd, so the plain command line already
         # resumes in the right place.
@@ -70,7 +74,9 @@ RSpec.describe Commands::SaveCommand do
       end
     end
 
-    it 'names the model the run switched to, not the original -m' do
+    # The old behaviour was to name the model the run SWITCHED to. The session
+    # carries that itself, so the printed line must not name any model.
+    it 'names no model even when the run switched to one' do
       Dir.mktmpdir do |_dir|
         registry = JobRegistry.new
         registry.add_job(kind: :main, harness: harness_with('abc123', 'x', active_model: 'big'))
@@ -79,7 +85,7 @@ RSpec.describe Commands::SaveCommand do
                                   ui: UI::Console.new(stdout: StringIO.new))
           .resume_cli_string('abc123')
 
-        expect(cli).to include('-m big')
+        expect(cli).to eq('bin/harness --resume abc123')
       end
     end
 

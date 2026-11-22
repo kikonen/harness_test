@@ -64,7 +64,9 @@ RSpec.describe Commands::SessionsCommand do
     # The jobs column is a per-job breakdown; a #207 flat session is the
     # degenerate one-job case (job 0), rendered as its own row.
     expect(split_table_row(row)).to eq([sid, '2026-01-01 10:00:00', '1', '1', 'job 0: 1', workdir])
-    expect(lines.last).to include('--resume <id>')
+    # The footer names the launcher the user actually types and no model: a
+    # resumed run restores its own model profile.
+    expect(lines.last).to include('`bin/harness --resume <id>`')
   end
 
   it 'names the sessions dir when nothing is saved' do

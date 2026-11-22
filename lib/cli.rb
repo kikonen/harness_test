@@ -441,9 +441,10 @@ class CLI
   # The command line that resumes a saved session in a NEW harness run
   # (--resume is a startup option; there is no mid-run resume command).
   def resume_cli_string(id)
-    # -m names the active model PROFILE; the live name (not the original -m)
-    # so a session switched with /model resumes on the profile it ended on.
-    parts = ["ruby harness.rb", "-m #{foreground_harness.session_manager.active_model_name}", "--resume #{id}"]
+    # No -m: a resumed run restores the session's OWN model profile
+    # (SessionManager#restore_active_model), so naming one here would only let
+    # the printed line contradict the session it names.
+    parts = ["bin/harness", "--resume #{id}"]
     parts << "-d #{@file_list.workdir}" unless @file_list.workdir == Dir.pwd
     parts.join(" ")
   end

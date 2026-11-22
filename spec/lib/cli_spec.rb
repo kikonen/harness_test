@@ -265,6 +265,27 @@ end
     end
   end
 
+  # issue #502: the line a user is told to run must be the line that works.
+  # bin/harness is the launcher (it sets BUNDLE_GEMFILE and loads .env); a bare
+  # `ruby harness.rb` does neither. No -m because a resumed run restores the
+  # session's OWN model profile, so naming one could only contradict it.
+  describe '#resume_cli_string (issue #502)' do
+    it 'names bin/harness and --resume, and no model' do
+      cli = build_cli
+      cli.setup
+      id = cli.foreground_harness.session.session_id
+
+      line = cli.send(:resume_cli_string, id)
+      expect(line).to start_with('bin/harness')
+      expect(line).not_to include('ruby harness.rb')
+      expect(line).not_to include('-m ')
+      expect(line).to include("--resume #{id}")
+      # The workdir IS this spec's Dir.mktmpdir, not Dir.pwd, so -d must appear:
+      # bin/harness resumes in the CALLER's cwd, so a different workdir needs it.
+      expect(line).to include("-d #{workdir}")
+    end
+  end
+
   # issue #282: the heavy construction lives in #setup. A resumed run is one
   # built at STARTUP under an id resolved from --resume/--continue (#276): the
   # id is settled BEFORE Harness.new, so its conversation is restored during
