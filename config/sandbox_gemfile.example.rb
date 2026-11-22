@@ -1,16 +1,15 @@
 # frozen_string_literal: true
 
-# The DEFAULT project Ruby sandbox (issue #340). Harness copies this file to
-# .harness/sandbox/Gemfile on a FRESH seed only - an existing sandbox is the
-# run's own and is never overwritten. That copy is plain text, so edit it here
-# to change what a new run starts with. Run scripts through it with:
+# Project Ruby sandbox (issue #340): run a script through it with
 #   BUNDLE_GEMFILE=.harness/sandbox/Gemfile bundle exec ruby script.rb
-# Add a gem on demand with `bundle add <gem>` (versioned: `bundle add <gem>
+# Add a gem with `bundle add <gem>` (versioned: `bundle add <gem>
 # --version ">= 1.19"`) and re-resolve with `bundle install`.
 #
-# A gem listed here must already be on the box or a fresh seed cannot offline-lock.
-# reline and fiddle are listed because they stopped being Ruby default gems, and
-# the whole list is what requiring lib/**.rb actually needs.
+# These gems must already be on the box or the bundle cannot offline-lock.
+# reline and fiddle are here because they stopped being Ruby default gems. A
+# script that requires anything under lib/ also reaches kramdown-ansi, tins and
+# nokogiri. The same text is both the repo default (copied on a FRESH seed only)
+# and this run's own sandbox, which the harness never overwrites.
 source "https://rubygems.org"
 
 gem "csv"
