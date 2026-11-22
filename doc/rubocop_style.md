@@ -5,8 +5,9 @@ and leaves the rest off. Read this before editing the config: a cop that looks
 "missing" was measured and rejected on purpose.
 
 Counts were measured with **RuboCop 1.92.0** (ruby 4.0.7 locally, CI pins
-ruby-4.0.1) over `lib/**`, `spec/**` and `harness.rb` at the state of the
-`feature/issue-302-rubocop` branch. They are a snapshot, not a live number.
+ruby 4.0 on ubuntu-latest, which only builds the latest patch of a series) over
+`lib/**`, `spec/**` and `harness.rb` at the state of the
+`feature/issue-302-rubocop` branch. Counts are a snapshot, not a live number.
 
 ---
 
@@ -35,13 +36,32 @@ example it describes, so a quote-style or brace-layout rule there buys nothing.
 Lint and Naming stay on everywhere: they catch actual mistakes (unused variable,
 duplicated branch, shadowed exception), not taste.
 
-## What the exclusion does NOT cover
+## Evidence scripts under `analysis/` are excluded too
 
-`spec/**/*` is the only excluded tree, so anything else that is ruby is held to
-the house rules - including the committed evidence scripts under `analysis/<n>/`
-(issue #347). A `repro.rb` there is ordinary project code: blank line after the
-magic comment, 90 columns, double quotes, the continuation shape below. CI runs
-`rubocop` over it, so a probe written like a scratch file fails the build.
+`analysis/<issue>/` holds the repro and measurement scripts an OPEN issue quotes:
+their job is to run from a fresh clone and print a number, and they live in
+`analysis/` precisely so they survive `tmp/` being gitignored
+(project rule; `doc/session_layers_design.md` and `doc/tool_output_budget_design.md`
+both point at one). Holding them to house style made CI fail: bare
+`bundle exec rubocop` inspected 329 files and reported 26 offenses, every one of
+them in `analysis/551/measure.rb` (StringLiterals 15, ArgumentAlignment 7,
+LineEndStringConcatenationIndentation 2, FirstArgumentIndentation 1,
+FirstMethodArgumentLineBreak 1) plus `Lint/ScriptPermission` on that same file.
+The four `repro.rb` scripts written the same week were already clean.
+`--format github` turns each offense into a `##[error]` annotation, so one fault
+showed up as 27 red errors on 26 source lines. Excluded, the run is 323 files
+and 0 offenses.
+
+The rule is about what a file is FOR, not about sloppiness: the four repros pass
+the cops untouched, so the exclusion is not a licence to write a mess.
+
+`Lint/ScriptPermission` is CI-only and its reason is the checkout, not the
+author: `core.fileMode = false` here, so the index records mode 100644 for every
+file under `analysis/` even though `measure.rb` is 755 on this disk, and the cop
+sees no script. A GitHub checkout restores the mode and the cop fires. So the
+one executable repro is the only one whose `#!/usr/bin/env ruby` line is honoured
+as anything - the other five run through `ruby <path>`, which is what each of
+their own headers says to type.
 
 ## Continuation style: configured, not disabled
 

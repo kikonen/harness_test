@@ -1,6 +1,6 @@
 # Development environments
 
-What each environment actually runs (measured 2026-10-17), and what the
+What each environment actually runs (measured 2026-11-22), and what the
 differences mean when reading a test result. This page does not replace
 README Setup.
 
@@ -17,23 +17,27 @@ number from a run should say which environment produced it.
 
 | Environment | Ruby | git |
 |---|---|---|
-| CI (`ubuntu-24.04`, 24.04.5) | 4.0.1 x86_64-linux | 2.55.0 |
+| CI (`ubuntu-26.04`) | 4.0.10 x86_64-linux | 2.56.1 |
 | Windows (MSYS2 / git-bash) | 4.0.7 x64-mingw-ucrt | 2.56.0.windows.2 |
 | WSL2 Ubuntu | 4.0.1 x86_64-linux | 2.43.0 |
 
-- CI pins Ruby in the workflow (`ruby-version: ruby-4.0.1`), because
-  ruby/setup-ruby does not resolve `file://` here. Bumping `.ruby-version`
-  means bumping the workflow in the same commit.
+- CI pins `ruby-version: '4.0'`, not a patch (issue #455): ubuntu-26.04 only
+  builds the latest patch of a series, so the old fixed `ruby-4.0.1` 404s on the
+  setup-ruby download. The runner therefore runs 4.0.10 while the baseline is
+  4.0.1 - CI is no longer a same-patch comparison, WSL2 is. Bumping
+  `.ruby-version` does not move CI until the workflow is edited; a CI-only
+  failure can now be patch-level.
 - Windows has no rbenv on PATH, so `bin/harness` and `bin/rspec` run the
   system Ruby (4.0.7) and the pinned baseline is not applied there.
-- WSL2 honors `.ruby-version` through rbenv, so its Ruby matches CI's.
+- WSL2 honors `.ruby-version` through rbenv, so its Ruby is exactly the
+  baseline 4.0.1 - the only environment that is.
 
 ## What the asymmetry means
 
-- The git versions differ in BOTH directions: CI's 2.55.0 is newer than
-  WSL's 2.43.0 and older than Windows' 2.56.0.windows.2. A failure that
-  shows only in CI is plausibly about CI's git rather than about the code,
-  so a green local run does not prove a CI-only failure bogus.
+- The git versions differ in both directions: CI's 2.56.1 is newer than
+  Windows' 2.56.0.windows.2 and much newer than WSL2's 2.43.0. A failure that
+  shows only in CI is plausibly about CI's git rather than about the code, so a
+  green local run does not prove a CI-only failure bogus.
 - Worked example (issue #292): `git_apply_tool_spec` failed in CI only, on a
   path the example never touched (`Errno::ENOENT .../objects/maintenance.lock`
   during `Dir.mktmpdir` teardown). It was not a phantom - `git commit` spawns
@@ -41,9 +45,10 @@ number from a run should say which environment produced it.
   that lock after the example has finished. Proven with `GIT_TRACE2`
   (50 maintenance children at baseline, 0 with the fix); not reproducible on
   Windows at all.
-- WSL2 is the local environment closest to CI (same Ruby, same OS family, a
-  lagging git), so a CI-only failure is reproduced there.
-- Windows is the farthest from CI (different Ruby, newest git). Its own
+- WSL2 is the local environment closest to CI (same OS family, a lagging git);
+  it matches the BASELINE patch, CI's 4.0.10 matches neither local Ruby, so a
+  CI-only failure is reproduced there first but a patch-level one in neither.
+- Windows is the farthest from CI (different Ruby, different git build). Its own
   quirks show up as pending examples rather than failures (symlink specs
   need developer mode).
 
