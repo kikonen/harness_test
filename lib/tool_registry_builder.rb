@@ -21,6 +21,7 @@ require_relative "tools/file_search_tool"
 require_relative "tools/file_patch_tool"
 require_relative "tools/file_copy_tool"
 require_relative "tools/file_info_tool"
+require_relative "tools/file_touch_tool"
 require_relative "tools/note_tool"
 require_relative "tools/dir_create_tool"
 require_relative "tools/dir_delete_tool"
@@ -97,6 +98,7 @@ class ToolRegistryBuilder
     registry.register(Tools::FileSearchTool.new(@file_list))
     registry.register(Tools::FilePatchTool.new(@file_list, @file_cache))
     registry.register(Tools::FileCopyTool.new(@file_list))
+    registry.register(Tools::FileTouchTool.new(@file_list, @file_cache))
     registry.register(Tools::FileInfoTool.new(@file_list))
     registry.register(Tools::DirCreateTool.new(@file_list))
     registry.register(
