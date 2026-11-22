@@ -60,7 +60,7 @@ Whether the model may be SENT images is a property of the ACTIVE model profile,
 declared in the config as `vision:` on a profile (issue #449). The harness never
 guesses that an unconfigured model can see:
 
-- no profiles configured (a raw `-m` id) -> text-only;
+- a run with no profile (nil selection + no config default) -> text-only;
 - a profile without `vision: true` -> text-only;
 - a profile with `vision: true` -> images may be inlined, within the budget.
 

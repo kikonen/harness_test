@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "ui/palette"
+require_relative "model_profile"
 
 # -- SystemSettings -------------------------------------------------------
 
@@ -104,16 +105,23 @@ class SystemSettings
 
   # All configured profiles (array of hashes), or [] when none.
   def model_profiles
-    Array(@options[:model_profiles])
+    # The catalogue is normalized to ModelProfile here (the one boundary raw
+    # profile hashes cross), so every consumer reads a strict value object
+    # instead of re-deriving fields from each other. HarnessConfig already hands
+    # ModelProfile objects; a hand-built catalogue (specs, library users) is
+    # normalized the same way.
+    @model_profiles ||= Array(@options[:model_profiles]).map do |entry|
+      next entry if entry.is_a?(ModelProfile)
+
+      ModelProfile.new(entry)
+    end
   end
 
   # A configured profile by its id, or nil when absent. The catalogue is
   # run-wide; applying a profile to one agent's ModelConfig is that Harness'
-  # job, not a settings mutation. A hand-built catalogue (specs, library users)
-  # may key a profile by name: alone - the same fallback HarnessConfig applies
-  # to a config that predates 'id:'.
+  # job, not a settings mutation.
   def find_profile(id)
-    model_profiles.find { |p| (p[:id] || p[:name]) == id }
+    model_profiles.find { |p| p.id == id }
   end
 
   # The declared MCP servers (config 'mcp_servers:'), or nil when none. The
@@ -264,7 +272,7 @@ class SystemSettings
   # only: the spinner, the modeline and the startup banner show a name, never a
   # bare id.
   def resolved_profile_name
-    active_profile&.fetch(:name) || resolved_profile_id
+    active_profile&.name || resolved_profile_id
   end
 
   # The profile the selection resolves to (nil when no model is selected or no

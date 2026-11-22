@@ -11,6 +11,19 @@ require 'harness'
 require 'session'
 require 'tools/dialog_tool'
 
+# A valid model profile for specs: a real profile needs an id, a model and an
+# http(s) url (issue #556/#572), so a fixture that only names a display label
+# is a config error. Builds one with a dummy endpoint, as a ModelProfile so it
+# is identical to the real config-resolved shape.
+module SpecModelProfile
+  def spec_profile(name, **extra)
+    ModelProfile.new(
+      { id: name, model: "#{name}-model", url: "http://#{name}.test/v1" }.merge(extra)
+    )
+  end
+end
+
+RSpec.configure { |config| config.include SpecModelProfile }
 # The terminal width specs wrap at. Specs assert exact WRAPPED text, so that
 # width must be a spec fact, never the machine's: Tins' last-resort answer is
 # this box's real terminal (176 here, something else in CI), so a wrapped spec
