@@ -465,6 +465,16 @@ to `max(existing job id)`; both, so an id is never reused. Job ids do not need t
 globally unique because containment namespaces them: "job 3" always means
 `<session-id>/job-3`.
 
+**The sweep is prune-at-save (issue #557).** `SystemSaver#save_run` ends with
+`prune_stale_job_dirs`: it removes any `jobs/<id>/` dir the index it just wrote
+does not name. The save is the single writer of the whole tree, so the fresh
+index is the enumeration of what the system owns - a dir it does not name is a
+job this system has dropped and no resume rebuilds (`job_restores` reads the
+index). The dirs are enumerated from DISK, not from the index, so a job the run
+holds - a resumed job rebuilt from disk even with no `session.json` - stays in
+`@jobs`, so its dir is in the fresh index and is never pruned. This is why the
+prune runs **after** `write_system_files`, never before it.
+
 ### One source per job fact: index vs job.json (issue #548 E)
 
 A job is described in two files - the `system.json` `jobs[]` **index** and the job's

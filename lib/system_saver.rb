@@ -121,6 +121,36 @@ class SystemSaver
     return run_id if harness.nil?
 
     write_system_files(run_id, harness.session.to_h(harness.file_list))
+    # Prune after the fresh index is written, so only dirs this save's index
+    # does not name are removed - a retained or resumed job's dir always survives.
+    prune_stale_job_dirs(run_id)
     run_id
+  end
+
+  # Prune saved job dirs the system.json index no longer names (issue #557):
+  # the retention rule and /jobs delete drop a job from @jobs, so the next save
+  # writes an index without it but leaves its jobs/<id>/ dir on disk. The save
+  # is the single writer of the whole tree (doc/session_layers_design.md), so
+  # the index it just wrote is the enumeration of what the system owns: a dir
+  # under jobs/ that index does not name is a job this system has formally
+  # dropped and no resume rebuilds (job_restores reads the index). Enumerate
+  # job dirs from DISK, not from the index: a job the run holds - a resumed job
+  # rebuilt from disk even with no session.json - stays in @jobs, so its dir is
+  # still in the fresh index and is never a prune candidate. A #207 flat session
+  # has no jobs/ tree and is left untouched.
+  def prune_stale_job_dirs(saved_system_id)
+    return unless @locator.system_dir?(saved_system_id)
+
+    index = Array(@locator.read_system(saved_system_id)[:jobs]).filter_map do |entry|
+      entry[:id] || entry["id"]
+    end
+    jobs_dir = File.join(@locator.sessions_dir, saved_system_id, SessionLocator::JOBS_DIR)
+    return unless File.directory?(jobs_dir)
+
+    Dir.glob(File.join(jobs_dir, "*")).each do |path|
+      next unless File.directory?(path)
+
+      FileUtils.rm_rf(path) unless index.include?(File.basename(path).to_i)
+    end
   end
 end

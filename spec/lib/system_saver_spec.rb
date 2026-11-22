@@ -268,4 +268,46 @@ RSpec.describe SystemSaver do
       end
     end
   end
+
+  # issue #557: prune_stale_job_dirs removes a jobs/<id>/ dir the system.json
+  # index no longer names - the stale dir a retention drop or a /jobs delete
+  # leaves behind. It runs as the last step of save_run, after the fresh index,
+  # so a job the registry still holds (a resumed job with no session.json) is
+  # never pruned: its dir is in the index this save just wrote.
+  describe 'prune_stale_job_dirs (issue #557)' do
+    def jobs_on_disk(dir, id)
+      Dir.glob(File.join(SessionLocator.new(dir).job_dir_path(id, ''), '*'))
+         .select { |d| File.directory?(d) }
+         .map { |d| File.basename(d).to_i }
+         .sort
+    end
+
+    it 'removes a dir whose job is no longer in the index, keeping index jobs' do
+      Dir.mktmpdir do |dir|
+        id = 'c5c5c5c5-0000-0000-0000-000000000000'
+        registry = JobRegistry.new
+        registry.add_job(kind: :main)
+        # Index names only job 0 (job 1 never made it in). Both dirs exist on
+        # disk: jobs/1/ is the stale one a drop left behind.
+        saved = JobRegistry.new
+        saved.add_job(kind: :main)
+        described_class.new(SessionLocator.new(dir), saved).write_system_files(
+          id, session_h(id, dir))
+        FileUtils.mkdir_p(SessionLocator.new(dir).job_dir_path(id, 0))
+        FileUtils.mkdir_p(SessionLocator.new(dir).job_dir_path(id, 1))
+        described_class.new(SessionLocator.new(dir), registry).prune_stale_job_dirs(id)
+        expect(jobs_on_disk(dir, id)).to eq([0])
+      end
+    end
+
+    it 'is a no-op for a #207 flat session (no jobs/ tree to prune)' do
+      Dir.mktmpdir do |dir|
+        id = 'd6d6d6d6-0000-0000-0000-000000000000'
+        locator = SessionLocator.new(dir)
+        FileUtils.mkdir_p(File.dirname(locator.session_file_path(id)))
+        File.write(locator.session_file_path(id), JSON.generate({ session_id: id, messages: [] }))
+        expect { described_class.new(locator, JobRegistry.new).prune_stale_job_dirs(id) }.not_to raise_error
+      end
+    end
+  end
 end
