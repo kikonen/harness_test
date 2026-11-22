@@ -290,15 +290,7 @@ class JobRegistry
     job
   end
 
-  # -- Removal (issue #558) -------------------------------------------------
-  #
-  # Take one job off the registry's live list. @jobs is what a save iterates to
-  # rebuild system.json (SystemRecord#jobs_for_save) and what resume reads to
-  # rebuild jobs, so once a job is off @jobs the NEXT save drops its index
-  # entry. The job dir (jobs/<id>/) is NOT touched here - removing a saved job
-  # dir is SystemSaver#remove_job's job, which unlinks the index entry before
-  # rm_rf (doc/session_layers_design.md "The drop rule"). A job still running or
-  # awaiting owes its thread a value: interrupt it (Job#interrupt) first.
+  # Take one job off @jobs; the disk half is SystemSaver#remove_job's.
   def remove_job(job)
     return nil if job.nil?
 

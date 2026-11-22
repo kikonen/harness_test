@@ -136,10 +136,7 @@ RSpec.describe SystemSaver do
       end
     end
 
-    # issue #558: remove_job unlinks the index entry then rm_rf's the job dir,
-    # so a system that has a saved job loses that job from both halves. The
-    # order is the point: the index is what a resume enumerates, so a job gone
-    # from it is gone even if the dir removal were interrupted.
+    # Index first: a resume enumerates it, so a job gone from it is gone.
     it 'remove_job drops the index entry and the job dir' do
       Dir.mktmpdir do |dir|
         id = 'b4b4b4b4-0000-0000-0000-000000000000'
@@ -269,11 +266,7 @@ RSpec.describe SystemSaver do
     end
   end
 
-  # issue #557: prune_stale_job_dirs removes a jobs/<id>/ dir the system.json
-  # index no longer names - the stale dir a retention drop or a /jobs delete
-  # leaves behind. It runs as the last step of save_run, after the fresh index,
-  # so a job the registry still holds (a resumed job with no session.json) is
-  # never pruned: its dir is in the index this save just wrote.
+  # A resumed job the registry still holds is in the fresh index, so never pruned.
   describe 'prune_stale_job_dirs (issue #557)' do
     def jobs_on_disk(dir, id)
       Dir.glob(File.join(SessionLocator.new(dir).job_dir_path(id, ''), '*'))

@@ -225,11 +225,8 @@ RSpec.describe Commands::JobsCommand do
     end
   end
 
-  # /jobs delete <id> (issue #558): the command resolves the target and reports;
-  # the registry owns the live list and SystemSaver owns the saved dir. These
-  # specs drive that through a real HarnessFactory + SystemSaver over a throwaway
-  # workdir, so the disk half (unlink index entry, then rm_rf the job dir) is
-  # exercised for real, not stubbed.
+  # /jobs delete <id> (#558): a real HarnessFactory + SystemSaver over a tmpdir,
+  # so the disk half is exercised for real, not stubbed.
   describe '/jobs delete' do
     before { allow_any_instance_of(SandboxGemfile).to receive(:lock_seeded?).and_return(true) }
 

@@ -154,11 +154,8 @@ class Job
     result
   end
 
-  # Answer a request this job still owes its thread (issue #558 delete of an
-  # awaiting job): an unanswered awaiting job leaves its thread blocked on a
-  # reply channel nobody will write to. Only a truly-awaiting job has an owed
-  # request, so only then is INTERRUPTED_ANSWER delivered (a deliver also
-  # clears the awaiting flag via respond).
+  # An awaiting job's thread is blocked on a reply nobody else will write, so
+  # the owed request is answered here.
   def interrupt
     respond(Job::INTERRUPTED_ANSWER) if awaiting?
   end

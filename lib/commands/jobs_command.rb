@@ -5,10 +5,7 @@ require_relative "../command"
 module Commands
   # /jobs - list the registry's jobs and mark the foreground one (issue #286),
   # switch which job is foreground, add a new agent, and delete one (issue #558).
-  # The registry owns the flat list and SystemSaver owns the saved job dir, so
-  # the command reports through UI::Renderer (issue #474) and delegates every
-  # removal - the row shape is the renderer's, the disk half is the saver's,
-  # never a fused string or an rm_rf built here.
+  # Removal is delegated: the registry owns the live list, SystemSaver the dir.
   class JobsCommand < Command
     HELP = CommandHelp.new(
       usage: "jobs",
@@ -125,15 +122,8 @@ module Commands
       show_registry(registry)
     end
 
-    # /jobs delete <id> (#558): remove a job from the run and from its saved
-    # system dir. The registry owns the live list and SystemSaver owns the
-    # disk, so this command only resolves the target and reports - it never
-    # edits @jobs or the filesystem itself. The command dispatches while the run
-    # is idle, so two cases decide the outcome: the FOREGROUND job is refused
-    # outright (a dropped id can never become foreground, so there is no defined
-    # hand-off for the job the run's own prompts go to), and any RUNNING job is
-    # refused too - a live task holds the main thread in its own drain loop, so
-    # the registry has no reachable handle to stop it from here.
+    # A running job is refused: a command dispatched while idle has no handle
+    # on a live task's thread to stop it.
     def delete(raw_id)
       shown = raw_id.to_s.strip
       return render_usage if shown.empty?
@@ -158,12 +148,8 @@ module Commands
       show_registry(registry)
     end
 
-    # A delete of an already-saved system must persist: the index unlink
-    # SystemSaver#remove_job did is only durable until the next save, and a run
-    # that deletes and then quits would rewrite system.json from the live
-    # registry anyway. When the system already has jobs on disk, save it now so
-    # the removed job is gone from system.json immediately. A job never yet
-    # saved leaves no system.json and needs no save.
+    # Re-save so a delete-then-quit run cannot rewrite the removed job back
+    # into system.json from the live registry.
     def re_save_running_system
       return if @session_id.nil?
       return unless system_saver.job_restores(@session_id).any?
