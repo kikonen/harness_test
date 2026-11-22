@@ -275,15 +275,14 @@ class Poller
     # the CommandHandler), so the old /yolo note-gesture special case is gone.
     task.harness.user_note_text = note
     ui = task.ui
-    # The ack and the note are two roles, not one baked string (the #466/#470
-    # theme). "[note] got it" is a bracketed ack the RENDERER owns; the note
-    # body is a :note paragraph the renderer wraps + indents, so a multi-line
-    # note no longer spills past the prompt. The buffer stores the RAW note as
-    # :note (not a baked :text line) so the resume replay redraws it wrapped too.
-    ack  = task.renderer.line(type: :kind, content: "got it", origin: "note")
-    body = task.renderer.line(type: :note, content: note)
-    ui.puts(ack)
-    ui.puts(body)
+    # ONE render call: the ack bracket and the note body are one block at the
+    # note width, the body's first line continuing the ack line. Two separate
+    # puts left the ack a short fixed line above a body at another width (#561).
+    # The buffer still stores the RAW note as :note, so a replay redraws it as a
+    # wrapped paragraph (no baked ack in the record).
+    line = task.renderer.line(type: :ack_note, content: note,
+                              origin: "note", ack: "got it")
+    ui.puts(line)
     task.buffer.put(type: :note, origin: :user_note, content: note)
   end
 

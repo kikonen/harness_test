@@ -47,6 +47,14 @@ module UI
     KIND = :kind
     ACK_TYPES = [ACK, KIND].freeze
 
+    # An ack whose body is a PARAGRAPH (a steering note: "[note] got it" plus the
+    # text the user typed). The renderer lays the ack and the body out as ONE
+    # block at the note width, the first wrapped line continuing the ack line -
+    # so the ack is not a short fixed line above a body at a different width
+    # (#561). UNPAINTED like NOTE. The buffer still stores the RAW paragraph as
+    # NOTE, so a replay redraws it as a plain paragraph.
+    ACK_NOTE = :ack_note
+
     # A paragraph of harness EXPLANATORY PROSE (a command report's body). The
     # emitter states ONE unwrapped paragraph with no leading indent; the renderer
     # owns the indent AND the wrap (#470 - #466's theme from the other side: the
@@ -203,7 +211,9 @@ module UI
 
     # origin: for a status type, the bracket label ("file.read", "access",
     # "run.command"). Ignored by every other type.
-    def line(type:, content:, origin: nil)
+    # ack: the badge word an :ack_note puts BEFORE its body ("got it"). Ignored
+    # by every other type.
+    def line(type:, content:, origin: nil, ack: nil)
       type = type.to_sym
       text = content.to_s
 
@@ -211,6 +221,7 @@ module UI
       return list_line(content) if type == LIST
 
       return status_line(type, text, origin) if STATUS_GLYPHS.key?(type)
+      return ack_note_line(text, origin, ack) if type == ACK_NOTE
       return ack_line(type, text, origin) if ACK_TYPES.include?(type)
       return boundary_line(type, text) if BOUNDARY_ROLES.include?(type)
       return note_line(text) if type == NOTE
@@ -226,6 +237,7 @@ module UI
       return true if STATUS_GLYPHS.key?(type)
       return true if ACK_TYPES.include?(type)
       return true if type == NOTE
+      return true if type == ACK_NOTE
       return true if type == LIST
       return true if type == BODY
       return true if type == GAP
@@ -243,6 +255,18 @@ module UI
       # :kind - the bracket names a KIND (origin), the message follows it.
       # [LLM error] message / [palette: default] (unchanged). Unpainted.
       "#{INDENT}[#{origin || badge}] #{badge}"
+    end
+
+    # An ack with a PARAGRAPH body (a steering note): the ack keeps its badge
+    # word and the body starts on the NEXT line at the same indent, so ack and
+    # body are one block laid out at the note width. Two separate puts had put
+    # the ack on a short fixed line above a body at another width (#561);
+    # folding the body onto the ack line instead swallows the badge word, since
+    # the wrapped body would start exactly where the badge sits.
+    # UNPAINTED like NOTE; the body wraps to note_width exactly as #note_line.
+    def ack_note_line(paragraph, origin, badge)
+      ack = "#{INDENT}[#{origin}] #{badge}"
+      ([ack] + note_line(paragraph).split("\n")).join("\n")
     end
 
     # A paragraph of harness prose: indent every wrapped line and re-wrap the

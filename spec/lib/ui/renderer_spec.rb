@@ -612,6 +612,36 @@ RSpec.describe UI::Renderer do
     end
   end
 
+  # issue #561: a steering note was emitted as TWO puts - a fixed-width :kind ack
+  # above a body wrapped to note_width - so ack and body were never one block.
+  # :ack_note renders them together, keeping the badge word and wrapping the body
+  # exactly as :note does (per typed line: a note can carry a code snippet, whose
+  # line breaks must survive).
+  describe '#line (:ack_note) - an ack with a paragraph body (issue #561)' do
+    it 'is one block: the ack line, then the body at the note indent' do
+      out = renderer.line(type: :ack_note, content: 'steer left',
+                          origin: 'note', ack: 'got it')
+
+      expect(out).to eq("  [note] got it\n  steer left")
+    end
+
+    it 'wraps a multi-line body the way :note wraps it' do
+      body = "line one\nline two"
+      out  = renderer.line(type: :ack_note, content: body, origin: 'note', ack: 'got it')
+      note = renderer.line(type: :note, content: body)
+
+      expect(out.split("\n")).to eq(['  [note] got it'] + note.split("\n"))
+    end
+
+    it 'is labeled and unpainted (only the wrap and the bracket move)' do
+      painted = described_class.new(palette: UI::Palette.fetch('default'))
+
+      expect(painted.labeled?(:ack_note)).to eq(true)
+      expect(painted.line(type: :ack_note, content: 'x', origin: 'note', ack: 'got it'))
+        .to eq("  [note] got it\n  x")
+    end
+  end
+
   # issue #474: a store body (plan / memory / skill) is RAW markdown. The emitter
   # states the role and the stored text; the renderer renders it, so the markers are
   # consumed by the render instead of printed - the three-copies bug the design doc
