@@ -14,8 +14,9 @@ module Commands
         "foreground one; 'switch <id>' makes another retained job foreground; " \
         "'add' gives the run a new agent",
       group: :session,
-      forms: ["jobs", "jobs switch <id>", "jobs add"],
+      forms: ["jobs", "jobs <id>", "jobs switch <id>", "jobs add"],
       form_notes: {
+        "jobs <id>" => "short form of 'switch <id>': /job 1 style switching",
         "jobs switch <id>" => "switch the foreground job to an id the registry retains",
         "jobs add [prompt]" => "add a sub-agent job built through the run's " \
           "HarnessFactory and make it foreground, so the next prompt goes to it"
@@ -30,9 +31,15 @@ module Commands
     def handle(args)
       return emit_role(:note, "No registry - nothing to list.") if registry.nil?
 
-      name, arg = args.to_s.strip.split(" ", 2)
+      # name is nil for empty args (split of "" is []), so every test below
+      # goes through to_s.
+      name, arg = args.to_s.strip.split(/\s+/, 2)
       return add(arg.to_s) if name == "add"
       return switch(registry, arg) if name == "switch"
+      # A bare id is the short form of a switch: /jobs 1 (or /jobs #1) reaches the
+      # job the next prompt should go to without the word. Checked AFTER the words
+      # so a word is never mistaken for an id.
+      return switch(registry, name) if name.to_s.match?(/\A#?\d+\z/)
 
       show_registry(registry)
     end

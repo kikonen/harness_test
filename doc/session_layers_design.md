@@ -557,6 +557,12 @@ The command's part is ownership, not construction:
 - a prompt typed with the form (`/jobs add <text>`, or `/jobs add sub_agent <text>`)
   is recorded into the new job's buffer, the way a normal prompt line is recorded.
 
+**Switching is the one thing a user does most, so it has a short form:** a bare id as
+the first word is the job to make foreground - `/jobs 1` (or `/jobs #1`, the id form
+the list itself prints) is `/jobs switch 1`. The words are matched first, so `/jobs
+add`, `/jobs switch 1` and a bare `/jobs` (the list) are unchanged, and a first word
+that is neither a word nor an id is the list, not a switch to nothing.
+
 `mid_turn_safe?` is false for `/jobs`: a mid-turn submit would have to hand that
 first prompt to the new agent on the MAIN thread, which is the nested-drain-loop
 refusal every LLM-driving command already gets (doc/unified_loop_design.md). The
