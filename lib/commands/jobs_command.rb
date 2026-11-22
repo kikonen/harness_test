@@ -69,6 +69,9 @@ module Commands
         return emit_role(:error, e.message.delete_prefix("error: "))
       end
 
+      # A job can only carry the record it owns: a saved tail is written per job,
+      # so handing the current job's tail to the job being switched to would move
+      # one job's history into another and then save it there.
       emit_role(:note, "foreground job is now ##{registry.foreground} (buffer is active)")
     end
 
@@ -98,12 +101,16 @@ module Commands
         kind: :sub_agent,
         session_id: @session_id,
         requested_by: registry.foreground_job)
+      # The line is recorded BEFORE this job is made foreground, named as its
+      # owner: the job being foregrounded is the one its saved tail is read from,
+      # so a record written while some other job was foreground would land in
+      # that other job's buffer and this job would save an empty one.
+      registry.record_user_prompt(prompt, job:) unless prompt.empty?
       registry.foreground = job.id
       note = "job ##{job.id} (#{job.kind}) added with its own agent; " \
         "foreground job is now ##{registry.foreground}"
       emit_role(:note, note)
       show_registry(registry)
-      registry.record_user_prompt(prompt, job:) unless prompt.empty?
     end
   end
 end

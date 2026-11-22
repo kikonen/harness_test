@@ -301,6 +301,14 @@ conversation. Then:
    job's own `replay.json` redraws the shown tail. Assigning it LAST is what lets
    step 2 rebuild every job: nothing is foreground while the system is being rebuilt.
 
+Step 2 also **seeds every job's buffer with its own `replay.json`**, not just the
+foreground one. The rule that makes this necessary: a save writes what a job's
+**buffer** holds, so a restored job whose tail was never read back has an empty
+buffer and writes an empty `replay.json` on this run's next save - which is how a
+job ended up with a full conversation and `nothing recorded`. Only the foreground
+job's tail is *redrawn* in the startup banner (the one exchange the user last saw);
+every job's tail has to be **live**.
+
 A saved job whose `session.json` is gone (the drop rule removed it) is not rebuilt
 at all and is reported by `dropped_job_ids` - stated, not silently stubbed. A #207
 flat session has no `jobs/` tree, so it is rebuilt as the degenerate one-job case
@@ -589,6 +597,24 @@ lines`). A flattened table of entries would be a listing, not a replay: the valu
 that the line a user saw is the line they get back. `n` picks how many lines of the tail
 to show and is the first bare number before a selector word (`all 20` = 20 lines,
 `job 1` = job 1); the record itself stays capped by the saved window (`max_saved`).
+
+**Whose record a job carries** (the rule `/replay` depends on): a tail lands in the
+buffer of the job that **owns** it, and only there.
+
+- `record_user_prompt`/`record_report_output` take `job:` and write that job's own
+  buffer; `/jobs add` records the prompt it was given **before** making the new job
+  foreground, because the foreground at the moment of the write is what decides the
+  buffer - recording after the switch writes the new job's line into the **old**
+  job's record and leaves the new job with an empty one.
+- A resume seeds each restored job from **its own** `replay.json`; a job the user
+  later switches to already holds its record, so `/jobs switch` reads no file and
+  copies nothing. Moving the foreground job's tail into the job switched to would
+  relocate one job's history and then save it under the other id.
+- Seeding is guarded to a buffer that has recorded nothing yet, so the resume seed
+  and any later seed of the same id cannot double a record.
+
+So `nothing recorded` from `/replay` now means the run genuinely recorded nothing for
+that job, rather than that its record went missing on the way to disk.
 
 ## The log decision the layout forces: one system-wide `harness.log`
 

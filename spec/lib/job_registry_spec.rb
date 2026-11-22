@@ -560,6 +560,43 @@ RSpec.describe JobRegistry do
       expect(recorded(reg)).to be_empty
     end
 
+    # issue #548: a saved tail belongs to the job it was recorded for, so seeding
+    # names that job and lands in ITS buffer - not in whatever job happens to be
+    # foreground while the system is being rebuilt.
+    it 'seeds a named job own buffer, not the foreground one' do
+      reg = JobRegistry.new
+      main = reg.add_job(kind: :main)
+      sub  = reg.add_job(kind: :sub_agent, requested_by: main)
+      reg.restore_replay_tail(
+        [{ type: 'response', origin: 'session_manager', content: 'sub shown' }],
+        job: sub.id
+      )
+
+      expect(sub.buffer.replay_tail.map(&:content)).to eq(['sub shown'])
+      expect(main.buffer.replay_tail).to be_empty
+    end
+
+    # Seeding APPENDS, and a resumed job is reached twice (once by the resume
+    # pass, once by /jobs switch), so a tail lands only in a buffer that has
+    # nothing recorded yet - a second call must not double the record.
+    it 'seeds a job only once (the resume pass then a switch to it)' do
+      reg = JobRegistry.new
+      job = reg.add_job(kind: :main)
+      tail = [{ type: 'user', origin: 'user', content: 'do the thing' }]
+      reg.restore_replay_tail(tail, job: job.id)
+      reg.restore_replay_tail(tail, job: job.id)
+
+      expect(job.buffer.replay_tail.map(&:content)).to eq(['do the thing'])
+    end
+
+    it 'seeds nothing for an id the registry does not retain' do
+      reg = JobRegistry.new
+      reg.add_job(kind: :main)
+      reg.restore_replay_tail([{ type: 'user', origin: 'user', content: 'x' }], job: 99)
+
+      expect(reg.foreground_buffer.replay_tail).to be_empty
+    end
+
     # issue #474: a slash-command report is a structured :list entry (title/
     # columns/items), NOT a fused row string. The payload survives the save ->
     # resume round trip symbol-keyed so a resumed run redraws the structure.
