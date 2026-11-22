@@ -9,28 +9,15 @@ class SandboxGemfile
   DIR = ".harness/sandbox"
   GEMFILE_NAME = "Gemfile"
 
-  # A starter that is NOT empty on purpose: `bundle exec` isolates the load path
-  # to what the Gemfile declares, so an empty one silently breaks even csv/rexml/
-  # logger/racc/base64 (measured - only true-default json survives). These are the
-  # common format/stdlib-adjacent gems; anything else the model adds on demand.
-  STARTER_GEMFILE = <<~'GEMFILE'
-    # frozen_string_literal: true
-
-    # Project Ruby sandbox (issue #340). Run scripts with:
-    #   BUNDLE_GEMFILE=.harness/sandbox/Gemfile bundle exec ruby script.rb
-    # Add a gem you need with:  BUNDLE_GEMFILE=.harness/sandbox/Gemfile bundle install
-    # This pins versions so a script's result does not vary with the box's ambient
-    # gems. The harness seeded these and tried to write a lock for them offline;
-    # if one is missing (gem not on this box yet), run bundle install. Edit freely.
-    source "https://rubygems.org"
-
-    gem "csv"
-    gem "json"
-    gem "rexml"
-    gem "logger"
-    gem "racc"
-    gem "base64"
-  GEMFILE
+  # The starter lives in the repo (config/sandbox_gemfile.example.rb), not
+  # embedded here: it is the single source of what a fresh sandbox holds, so its
+  # gem list is editable like config/config.example.yml's is.
+  STARTER_TEMPLATE_FILE = File.expand_path(
+    "../config/sandbox_gemfile.example.rb", __dir__)
+  # A gem name as the bare `gem "name"` form bundler writes it; a version
+  # constraint after the name is deliberately NOT captured, so a model's own
+  # constraint counts as declaring that gem.
+  GEM_DECLARATION = /^\s*gem\s+"([a-z0-9_\-]+)"/
 
   def initialize(workdir)
     @workdir = workdir
@@ -53,17 +40,49 @@ class SandboxGemfile
     File.file?(gemfile_path)
   end
 
+  # The DEFAULT gem list (the template's names, in template order). Public
+  # because it is a floor worth stating: what a sandbox is supposed to hold.
+  def default_gem_names
+    Array(read_template&.scan(GEM_DECLARATION)).flatten.uniq
+  end
+
+  def declared_gem_names
+    return [] unless exist?
+
+    Array(File.read(gemfile_path).scan(GEM_DECLARATION)).flatten.uniq
+  end
+
   # Seed the starter ONLY when no Gemfile is there yet, so a model-managed one is
   # never overwritten, then try to make it a working bundle by locking it offline.
-  # Returns :existing (nothing touched), :seeded_locked or :seeded_unlocked so the
-  # caller can say whether the seed is ready to run. The lock attempt runs only on
-  # a FRESH seed - every later launch hits the early return and runs no bundler.
+  # Returns :seeded_locked, :seeded_unlocked or :seeded_unreadable so the caller
+  # can say whether the seed is ready to run. The lock attempt runs only on a
+  # fresh seed - every later launch goes to #ensure_default_gems!.
   def ensure_starter!
     return :existing if exist?
 
     FileUtils.mkdir_p(dir)
-    File.write(gemfile_path, STARTER_GEMFILE)
+    template = read_template
+    return :seeded_unreadable if template.nil?
+
+    File.write(gemfile_path, template)
     lock_seeded? ? :seeded_locked : :seeded_unlocked
+  end
+
+  # The default gem list is a FLOOR, not a starter-only snapshot: a sandbox the
+  # model rewrote (or a seed from an older default) must not lose a gem the
+  # default declares, or a script that needs it fails mid-run with a bare
+  # LoadError. Appends only what is missing, as a bare declaration so a version
+  # constraint the model wrote for that gem is never rewritten, then re-locks.
+  # nil means nothing was missing - the common case, and it runs no bundler.
+  def ensure_default_gems!
+    missing = default_gem_names - declared_gem_names
+    return nil if missing.empty?
+
+    File.open(gemfile_path, "a") do |f|
+      f.write("\n") unless File.read(gemfile_path).end_with?("\n")
+      missing.each { |name| f.write(%(gem "#{name}"\n)) }
+    end
+    lock_seeded? ? :resynced_locked : :resynced_unlocked
   end
 
   # Make the seeded Gemfile a real, resolvable bundle WITHOUT the network:
@@ -84,5 +103,13 @@ class SandboxGemfile
     end
   rescue StandardError
     false
+  end
+
+  private
+
+  def read_template
+    return nil unless File.file?(STARTER_TEMPLATE_FILE)
+
+    File.read(STARTER_TEMPLATE_FILE)
   end
 end

@@ -168,6 +168,19 @@ class Harness
     when :seeded_unlocked
       @logger.info "ruby sandbox seeded but the offline lock failed " \
                    "(a starter gem is absent on this box) - bundle install it"
+    when :seeded_unreadable
+      @logger.warn "ruby sandbox NOT seeded - the default Gemfile " \
+                   "#{SandboxGemfile::STARTER_TEMPLATE_FILE} is unreadable"
+    end
+    # The default gem list is a floor even for a sandbox this model has edited:
+    # a gem the starter declares that went missing mid-run would otherwise only
+    # surface as a LoadError in the middle of a script.
+    case @sandbox_gemfile.ensure_default_gems!
+    when :resynced_locked
+      @logger.info "ruby sandbox resynced with the default gems and re-locked"
+    when :resynced_unlocked
+      @logger.info "ruby sandbox resynced with the default gems but the offline " \
+                   "lock failed - bundle install it"
     end
 
     # The tool registry and the MCP machinery are built by ToolRegistryBuilder
