@@ -49,6 +49,8 @@ class Harness
   # What each endpoint reports: doc/truncation_design.md.
   FINISH_EXPECTED = %w[stop tool_calls].freeze
 
+  EMPTY_USAGE = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }.freeze
+
   HARNESS_DIR = ".harness"
 
   SESSION_LOG_FILE = SessionLocator::SESSION_LOG_FILE
@@ -593,7 +595,10 @@ class Harness
     loop_warning_injected = false
     loop_hard_break = false
     text_call_retried = false
-    total_usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+    total_usage = EMPTY_USAGE.dup
+
+    # Iterations whose request came back: the loop counter runs ahead of it.
+    answered = 0
 
     # One ImageDelivery per turn: its inline budget is turn-scoped (issue #449).
     # Tool results that carried images append base64 to the WORKING chain only
@@ -605,7 +610,6 @@ class Harness
     # carries the history, so summing over counts.
     last_prompt_tokens = 0
     last_performance   = nil
-    start_time = Time.now
 
     max_iters = max_tool_iterations
     loop do
@@ -644,6 +648,8 @@ class Harness
       # in-loop compaction) cannot outlive it.
       @session_manager.request_spinner_detail
 
+      # Before the request leaves: an aborted turn needs to know which one died.
+      open_turn_stats(iteration:, answered:, usage: total_usage)
       data    = request_chain(messages, tools)
       message = data[:choices][0][:message]
 
@@ -680,6 +686,7 @@ class Harness
         total_usage[:total_tokens]      += data[:usage][:total_tokens]      || 0
         last_prompt_tokens              = data[:usage][:prompt_tokens].to_i
       end
+      answered = iteration
 
       # #285: this request's rate is now the RECENT one the spinner can show
       # during the next request's prefill (or in buffered mode). It is taken
@@ -788,14 +795,9 @@ class Harness
         next
       end
 
-      elapsed = (Time.now - start_time).round(2)
-      stats = {
-        elapsed_seconds: elapsed,
-        iterations:      iteration,
-        usage:           total_usage,
-        prompt_tokens:   last_prompt_tokens,
-        performance:     last_performance
-      }
+      stats = close_turn_stats(iteration:, usage: total_usage,
+                               prompt_tokens: last_prompt_tokens,
+                               performance: last_performance)
 
       @session.add_assistant(message[:content])
       @session.flush_notes
@@ -874,25 +876,49 @@ class Harness
     # A malformed note must never break the turn.
   end
 
+  # The summary line of this job's turn when it aborted before committing (#567),
+  # nil when the job owes none.
+  def aborted_turn_stats_line(job_id)
+    snapshot = aborted_turn_stats
+    return nil if snapshot.nil? || snapshot[:job_id] != job_id
+
+    stats_line(snapshot)
+  end
+
   def emit_stats(stats)
-    return unless stats
+    line = stats_line(stats)
+    return nil if line.nil?
+
+    Task.emit(:stats, origin: :harness, content: line)
+  end
+
+  # An aborted turn (#567) reports answered-over-sent iterations only: a token or
+  # performance figure would describe requests that never returned.
+  def stats_line(stats)
+    return nil if stats.nil?
 
     elapsed = stats[:elapsed_seconds]
-    iters   = stats[:iterations]
     usage   = stats[:usage]
+    aborted = stats[:pending_iteration]
+    iters   = stats[:iterations]
+    iteration_part =
+      if aborted
+        "🔄 #{iters} of #{aborted} iterations answered"
+      else
+        "🔄 #{iters} iteration#{'s' if iters != 1}"
+      end
 
-    parts = ["⏱ #{format_elapsed(elapsed)}"]
-    parts << "🔄 #{iters} iteration#{'s' if iters != 1}"
-    if usage && usage[:total_tokens] > 0
+    parts = ["⏱ #{format_elapsed(elapsed)}", iteration_part]
+    unless aborted
       parts << "📊 #{usage[:prompt_tokens]}→#{usage[:completion_tokens]} tokens (#{usage[:total_tokens]} total)"
+      perf = LLM::UsageStats.performance_parts(stats[:performance])
+      parts << "⚡ #{perf.join(' | ')}" unless perf.empty?
     end
-    perf = LLM::UsageStats.performance_parts(stats[:performance])
-    parts << "⚡ #{perf.join(' | ')}" unless perf.empty?
 
     ctx = context_indicator
     parts << ctx if ctx
 
-    Task.emit(:stats, origin: :harness, content: "  [#{parts.join(' | ')}]")
+    "  [#{parts.join(' | ')}]"
   end
 
   def format_elapsed(seconds)
@@ -1048,6 +1074,41 @@ class Harness
   end
 
   private
+
+  # -- Turn measurements (issue #567) ---------------------------------------
+  def open_turn_stats(iteration:, answered:, usage:)
+    @turn_stats = {
+      job_id: @session_manager.job_id,
+      started_at: Time.now,
+      iterations: answered,
+      pending_iteration: iteration,
+      usage: usage.dup
+    }
+  end
+
+  def close_turn_stats(iteration:, usage:, prompt_tokens:, performance:)
+    open = @turn_stats
+    closed = { **open, iterations: iteration, usage: }
+    closed.delete(:pending_iteration)
+    closed[:prompt_tokens] = prompt_tokens
+    closed[:performance] = performance
+    closed[:committed] = true
+    @turn_stats = closed
+  end
+
+  # An elapsed-time-only line over a turn that answered nothing reads as a whole
+  # turn's duration, so a turn with no answered request reports nothing.
+  def aborted_turn_stats
+    open = @turn_stats
+    return nil if open.nil? || open[:committed]
+    return nil if @session_manager.job_id != open[:job_id]
+    return nil if open[:iterations].to_i.zero?
+
+    open.merge(
+      elapsed_seconds: (Time.now - open[:started_at]).round(2),
+      usage: open[:usage].dup
+    )
+  end
 
   # One LLM request. The streaming posture applies to THIS request only, so a
   # streamed turn publishes its live tail for the spinner. The preview is

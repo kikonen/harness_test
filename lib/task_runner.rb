@@ -37,6 +37,10 @@ module TaskRunner
     job ||= registry.foreground_job
     error, _task, result = registry.run(job:, ui:, **input_kwargs) { |_t| yield }
     emit_role(:kind, error, origin: "task error") if error
+    # The drain loop has ended by now, so this line is printed, not emitted: an
+    # event left on the run's queue would be read by the next turn (#567).
+    summary = job&.harness&.aborted_turn_stats_line(job.id)
+    ui.puts(summary) unless summary.nil?
     emit_role(:gap, "")
     result
   end
