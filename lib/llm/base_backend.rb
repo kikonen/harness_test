@@ -74,8 +74,22 @@ module LLM
 
     # -- Transport setup (shared by both paths) ------------------------------
 
+    # A relative URI is never a request target: URI() answers URI::Generic for
+    # a bare path, and only a scheme/host URI has #request_uri / #host. Without
+    # a base_url the first request used to die as NoMethodError inside
+    # build_request and the run looked stuck rather than mis-configured (#556).
     def build_uri
-      URI("#{base_url}#{endpoint_path}")
+      if base_url.nil? || base_url.strip.empty?
+        raise HarnessError,
+          "no endpoint configured for model '#{@config.active_model_name}' - " \
+            "a model needs a url (set 'url:' on its profile under 'models:')"
+      end
+
+      uri = URI("#{base_url}#{endpoint_path}")
+      raise HarnessError,
+        "model url '#{base_url}' is not a full endpoint (it needs http:// or https://)" unless uri.host
+
+      uri
     end
 
     # The request body is built ONCE: a retry re-sends the identical request.

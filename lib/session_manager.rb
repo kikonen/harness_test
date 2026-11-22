@@ -80,7 +80,7 @@ class SessionManager
       @harness.logger.info "--- system ---\n#{@harness.session.system_prompt}"
       @harness.logger.info "--- user ---\n#{user_prompt}"
       model = @harness.model_config
-      @harness.logger.info "--- #{model.model} @ #{model.base_url} ---"
+      @harness.logger.info "--- #{model.active_model} @ #{model.base_url} ---"
     end
 
     @harness.session.add_user(user_prompt)
@@ -380,7 +380,7 @@ class SessionManager
   # streaming it shows the newest text of that answer, otherwise the live
   # context estimate (see Harness#request_wait_suffix, issue #28).
   def request_spinner_detail
-    who = [@harness.model_config.model.to_s.strip, api_type_label].reject(&:empty?)
+    who = [@harness.model_config.active_model.to_s.strip, api_type_label].reject(&:empty?)
     Task.emit(
       :spinner_detail,
       origin: :session_manager,
@@ -601,9 +601,10 @@ class SessionManager
 
     profiles = @harness.settings.model_profiles
     if profiles.empty?
-      @harness.model_config.model        = name
+      # No catalogue to look the name up in: the run keeps the raw id as its
+      # model, and has no endpoint to send it to (#556).
       @harness.model_config.active_model = name
-      return { name:, model: name }
+      return { name:, url: nil }
     end
 
     match = find_profile(name)
@@ -765,8 +766,8 @@ class SessionManager
   # version/created_at are in it because Session#restore reads them
   # unconditionally: a job restored straight from its own file raised on
   # Time.parse(nil) once only the foreground half was supplemented from system.json.
-  # active_model stays a NAME or nil, never the raw wire id: a profile-less run
-  # records nil, which apply_resume_state reads as "this run's own selection".
+  # active_model stays a profile NAME or nil: a profile-less run records nil,
+  # which apply_resume_state reads as "this run's own selection".
   def job_session_json(session_h)
     {
       version: session_h[:version],

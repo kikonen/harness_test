@@ -117,7 +117,7 @@ RSpec.describe Harness do
     declared  = PER_CONNECTION_KEYS.select { |k| opts.key?(k) }
     return if declared.empty?
 
-    profile = { name: requested, model: requested }
+    profile = { name: requested }
     declared.each { |k| profile[k == :base_url ? :url : k] = opts[k] }
     opts[:model_profiles] = [profile]
     opts[:active_model]   = requested
@@ -455,7 +455,7 @@ RSpec.describe Harness do
       harness = build_harness(session_id: id, resume_data: data)
 
       expect(harness.session_manager.active_model_name).to eq('test-model')
-      expect(harness.model_config.model).to eq('test-model')
+      expect(harness.model_config.active_model).to eq('test-model')
       expect(harness.session.pending?).to be(false)
     end
 
@@ -470,11 +470,11 @@ RSpec.describe Harness do
       harness = build_harness(
         session_id: id,
         resume_data: data,
-        model_profiles: [{ name: 'other-model', model: 'other-model' }])
+        model_profiles: [{ name: 'other-model' }])
 
       # No selection and no default: this run has no model to resume onto, so it
       # keeps the raw seed it was built with instead of aborting the resume.
-      expect(harness.model_config.model).to be_nil
+      expect(harness.model_config.active_model).to be_nil
       expect(harness.model_config.base_url).to be_nil
     end
 
@@ -2794,8 +2794,8 @@ RSpec.describe Harness do
     # is about to do.
     it 'drops the recent rate when the model is switched' do
       h = build_harness(model_profiles: [
-        { name: 'one', model: 'qwen', num_ctx: 65_536 },
-        { name: 'two', model: 'llama', num_ctx: 32_768 }
+        { name: 'one', num_ctx: 65_536 },
+        { name: 'two', num_ctx: 32_768 }
       ])
       h.record_last_rate({ completion_tokens: 100, completion_tokens_per_second: 31.4 }, 4.0)
       expect(h.last_rate_segment).to eq('31.4 tok/s (last)')
@@ -3219,7 +3219,7 @@ RSpec.describe Harness, 'tool-result images (issue #449)' do
     # model_profiles is run-wide config (settings); active_model is live per-
     # connection state (#286), so a #286 settings carries only the catalogue and
     # the Harness seeds its ModelConfig from it at build time.
-    opts = { model_profiles: [{ name: 'v', model: 'vis', vision: true }],
+    opts = { model_profiles: [{ name: 'v', vision: true }],
              active_model: 'v' }.merge(options)
     h = build(opts)
     h

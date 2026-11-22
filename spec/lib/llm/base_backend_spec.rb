@@ -25,7 +25,7 @@ RSpec.describe LLM::BaseBackend do
     private
 
     def build_body(messages, _tools, stream: false)
-      { model: @config.model, messages: messages, stream: stream }
+      { model: @config.active_model, messages: messages, stream: stream }
     end
 
     # Returns the raw JSON so the usage of either wire shape is visible.
@@ -67,7 +67,7 @@ RSpec.describe LLM::BaseBackend do
   let(:options) do
     # retry_delay 0 keeps the retry spec fast; the attempt counter in the log
     # line is what is being checked, not the backoff.
-    { base_url: 'http://127.0.0.1:11434/v1', model: 'test-model', api: 'openai',
+    { base_url: 'http://127.0.0.1:11434/v1', active_model: 'test-model', api: 'openai',
       retry_count: 2, retry_delay: 0 }
   end
   let(:backend) { MinimalBackend.new(ModelConfig.new(options), logger) }
@@ -105,6 +105,33 @@ RSpec.describe LLM::BaseBackend do
       # line: nothing arrived to measure.
       expect(lines[1]).to include('network error (attempt 1/2)')
       expect(lines.grep(/RESP:/).size).to eq(1)
+    end
+  end
+
+  # issue #556: with no base_url the URI is a relative URI::Generic, which has
+  # never had #request_uri - the first prompt died as a NoMethodError in the
+  # task thread on every retry and the run looked stuck instead of
+  # mis-configured. The endpoint is checked where the request target is built.
+  describe 'endpoint guard (issue #556)' do
+    def with_base_url(value)
+      MinimalBackend.new(ModelConfig.new(options.merge(base_url: value)), logger)
+    end
+
+    it 'reports a missing url as a config error naming the model' do
+      expect { with_base_url(nil).chat([{ role: 'user', content: 'hi' }]) }
+        .to raise_error(HarnessError, /no endpoint configured for model 'test-model'/)
+    end
+
+    it 'reports a blank url the same way' do
+      expect { with_base_url('   ').chat([{ role: 'user', content: 'hi' }]) }
+        .to raise_error(HarnessError, /no endpoint configured for model 'test-model'/)
+    end
+
+    # Config catches a bad scheme on a profile; this is the backstop for a
+    # ModelConfig built by hand: a bare host has no host to connect to.
+    it 'refuses a url that parses without a host' do
+      expect { with_base_url('/v1').chat([{ role: 'user', content: 'hi' }]) }
+        .to raise_error(HarnessError, %r{is not a full endpoint \(it needs http:// or https://\)})
     end
   end
 

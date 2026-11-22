@@ -42,12 +42,14 @@ module Commands
       end
 
       profile = foreground_harness.session_manager.switch_model(name)
-      display = profile[:name] || profile[:model]
+      # A profile's name IS the model the harness asks the endpoint for, so the
+      # switch line states that name once plus the endpoint it now hits.
+      display = profile[:name]
       url     = profile[:url] || foreground_harness.model_config.base_url
       # issue #217: the API type can CHANGE with the profile - say it.
       emit_role(
         :note,
-        "Switched to model: #{display} (#{profile[:model]} @ #{url}) " \
+        "Switched to model: #{display} (#{display} @ #{url}) " \
         "-> #{foreground_harness.session_manager.target_display}")
       emit_params
     end

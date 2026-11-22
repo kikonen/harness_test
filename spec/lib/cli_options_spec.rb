@@ -244,7 +244,7 @@ RSpec.describe CLIOptions do
     end
 
     it 'does not resolve a model profile when set' do
-      path  = write_config('models.yml', "models:\n  - name: a\n    model: ma\n")
+      path  = write_config('models.yml', "models:\n  - name: a\n    url: http://host.test/v1\n")
       opts  = resolve(['--delete-session', 'id1', '-d', workdir, '-c', path])
       expect(opts[:delete_session]).to eq('id1')
       expect(opts[:active_model]).to be_nil

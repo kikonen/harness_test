@@ -106,7 +106,6 @@ endpoint and token:
 models:
   - name: local
     url: http://localhost:11434/v1
-    model: qwen2.5-coder:32b
     # token: sk-...            # literal bearer token (visible in the file), or
                                # token: ${OPENAI_TOKEN} to keep the secret in the
                                # ENV and out of the file (issue #422)

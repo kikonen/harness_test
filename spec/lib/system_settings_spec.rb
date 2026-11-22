@@ -172,13 +172,14 @@ RSpec.describe SystemSettings do
       expect(s.find_profile('anything')).to be_nil
     end
 
-    it 'finds a profile by its label or its raw model id' do
-      s = build(model_profiles: [{ name: 'local', model: 'qwen' }], default_model: 'local')
+    # A profile has ONE identity: its name is the model the harness asks for.
+    it 'finds a profile by its name' do
+      s = build(model_profiles: [{ name: 'local' }], default_model: 'local')
 
       expect(s.model_profiles.size).to eq(1)
       expect(s.default_model).to eq('local')
-      expect(s.find_profile('local')[:model]).to eq('qwen')
-      expect(s.find_profile('qwen')[:name]).to eq('local')
+      expect(s.find_profile('local')[:name]).to eq('local')
+      expect(s.find_profile('qwen')).to be_nil
     end
   end
 end

@@ -172,10 +172,8 @@ class CLIOptions
     default_key    = config.default_model
     using_default = profile && !explicit_model &&
       (default_key.nil? ||
-       profile[:name] == default_key ||
-       profile[:model] == default_key)
-    opts[:active_model] =
-      using_default ? nil : (profile ? (profile[:name] || profile[:model]) : opts[:model])
+       profile[:name] == default_key)
+    opts[:active_model] = using_default ? nil : (profile ? profile[:name] : opts[:model])
   end
 
   # The config-derived defaults. A CLI flag already in opts wins (each line
