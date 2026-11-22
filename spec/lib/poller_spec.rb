@@ -449,6 +449,21 @@ RSpec.describe Poller do
       io
     end
 
+    # issue #561: the mid-turn read shares the run's InputPath, whose prompt is
+    # the idle PROMPT - two spaces, a CONTINUATION marker that reads fine under
+    # a modeline ending ' > ' but is invisible with nothing above it. A lone
+    # dead-keypress opens the editor (the #473 raw hold), and with no label the
+    # turn just looked frozen. The read must state a visible prompt of its own.
+    it 'labels the mid-turn read so an opened editor is visible' do
+      task, editor = task_with_note_editor(text: 'a note', status: :submitted)
+
+      described_class.new(task).poll_for_note
+
+      expect(editor).to have_received(:read_multiline)
+        .with(prompt: Poller::NOTE_PROMPT, prefill: nil)
+      expect(Poller::NOTE_PROMPT).to include('>')
+    end
+
     it 'keeps the edited text as the note draft instead of committing it' do
       task, _editor = task_with_note_editor(
         text: 'draft from vim', status: :edited, note: 'edited with vim'
@@ -472,7 +487,9 @@ RSpec.describe Poller do
       described_class.new(task).poll_for_note
       described_class.new(task).poll_for_note
 
-      expect(editor).to have_received(:read_multiline).with(prefill: 'draft from vim')
+      expect(editor).to have_received(:read_multiline).with(
+        prefill: 'draft from vim', prompt: Poller::NOTE_PROMPT
+      )
       expect(note_harness.notes).to be_empty
     end
   end

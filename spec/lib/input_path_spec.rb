@@ -80,6 +80,20 @@ RSpec.describe InputPath do
 
       expect(editor).to have_received(:read_multiline).with(prompt: '  ', prefill: nil)
     end
+
+    # issue #561: the poll loop reuses the RUN's path for a mid-turn note, so a
+    # per-call label is the only way to label that read without relabeling the
+    # idle prompt for every later read.
+    it 'a per-call prompt labels that read only' do
+      allow(editor).to receive(:read_multiline)
+      path = build(prompt: '  ')
+
+      path.read(prompt: '> ')
+      path.read
+
+      expect(editor).to have_received(:read_multiline).with(prompt: '> ', prefill: nil)
+      expect(editor).to have_received(:read_multiline).with(prompt: '  ', prefill: nil)
+    end
   end
 
   describe 'routing one submitted block as ONE input event' do

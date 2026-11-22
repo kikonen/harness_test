@@ -11,6 +11,9 @@ require_relative "input_path"
 require_relative "ui/spinner"
 
 class Poller
+  # What the mid-turn read shows. See #poll_for_note.
+  NOTE_PROMPT = "> "
+
   # Constructed around the task whose events this loop drains. The task carries
   # the single sink (ui), the renderer, the note editor and the spinner storage;
   # the Poller is the only code that touches console, stdin and the spinner.
@@ -209,6 +212,11 @@ class Poller
     task = @task
     return unless task.note_editor && task.harness
 
+    # The run's SHARED path is reused (not rebuilt) because #commit_read reads
+    # its command_handler - dropping it would kill mid-turn /commands. Its idle
+    # prompt is a continuation marker (the modeline already prints ' > '); a
+    # mid-turn read has no modeline, so it is labeled per-read - an invisible
+    # one made an accidentally-opened editor look like a frozen turn (#561).
     path = task.input_path || InputPath.new(ui: task.ui, editor: task.note_editor)
     return unless path.pending?
 
@@ -216,7 +224,7 @@ class Poller
     # prompt starts on a clean line (the spinner resumes itself on the next
     # tick once the editor returns).
     task.clear_all_spinners
-    commit_read(path.read(prefill: task.note_draft))
+    commit_read(path.read(prefill: task.note_draft, prompt: NOTE_PROMPT))
   end
 
   # A submitted block commits as one input event; EOF aborts the running turn.
