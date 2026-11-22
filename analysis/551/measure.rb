@@ -3,18 +3,29 @@
 
 # Issue #551: OVERFLOW - a tool result becomes a message so large the backend
 # refuses the whole request ("request exceeds the context window ... requests are
-# never truncated"), not a cut-off answer. The cap counts LINES, never BYTES, so
+# never truncated"), not a cut-off answer. The cap counted LINES, never BYTES, so
 # output with few newlines and huge lines (base64 dumps, minified JSON, a
-# one-line blob) passes the gate intact. /compact cannot save the run either: the
-# summary request carries the same oversized chain, and Session#compact retains
+# one-line blob) passed the gate intact. /compact could not save the run either:
+# the summary request carries the same oversized chain, and Session#compact retains
 # the oversized message in its tail.
+#
+# HISTORICAL BASELINE, NOT A LIVE REPRO. This measures the line-only gates as
+# they were BEFORE the fix, so it still prints 'cut? false' for the huge-line
+# shapes - that is the point of it, and it must not be read as current
+# behaviour. Fixed on master by OutputBudget (lib/output_budget.rb): every tool
+# result is bounded in BYTES at the harness boundary (Harness#budget_tool_result)
+# with the full text spilled, and a grossly oversized single line is clipped
+# within itself. Same shapes through the live OutputBudget today: 1 line 4MB
+# 4_000_000 B -> 20_042 B (clipped), 500 x 20KB -> 40_098 B, 1000 x 4KB json
+# -> 44_195 B, all cut? true. Design: doc/tool_output_budget_design.md.
 #
 # Run from a fresh clone: ruby analysis/551/measure.rb
 
-# The truncators are copied rather than required, so this repro does not need the
-# harness' UI stack (reline is not in the sandbox Gemfile).
+# The old gates are copied rather than required (they no longer exist in lib/,
+# and the sandbox Gemfile has no reline for the UI stack).
 module LineGate
-  # Verbatim copy of CommandRunner#truncate (lib/command_runner.rb).
+  # CommandRunner#truncate AS IT WAS at measurement time; it now delegates to
+  # OutputBudget.fit and no longer matches this copy.
   def self.truncate(text, limit)
     lines = text.split("\n")
     return [text, false] if lines.size <= limit
