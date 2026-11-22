@@ -240,13 +240,20 @@ class JobRegistry
     Array(job(job_id)&.buffer&.replay_tail(@max_saved)).map(&:to_h)
   end
 
-  # A resumed run seeds its record from the saved tail so the startup banner
-  # can redraw the last topic. restore() normalizes the JSON's string
-  # type/origin back to symbols. A disabled window (max_saved 0) seeds nothing.
-  def restore_replay_tail(entries)
+  # Seed ONE job's OWN record from its saved tail: the foreground one at resume
+  # (the startup banner redraws it) and the switched-to one on /jobs switch.
+  # `job:` names the job to seed, the foreground when absent; it lands in that
+  # job's buffer only while it holds nothing recorded, so the resume seed and a
+  # later switch to the same job cannot double the record. restore() normalizes
+  # the JSON's string type/origin back to symbols. A disabled window
+  # (max_saved 0) seeds nothing.
+  def restore_replay_tail(entries, job: nil)
     return if @max_saved.zero?
 
-    foreground_buffer&.restore(entries)
+    target = job.nil? ? foreground_job : self.job(job)
+    return unless target&.buffer&.replay_tail&.empty?
+
+    target&.buffer&.restore(entries)
   end
 
   # -- Inbox routing ----------------------------------------------------------

@@ -522,6 +522,12 @@ class CLI
         base_file_list: main_turn ? @file_list : nil,
         id: restore[:id])
       job.restore_status(restore[:status])
+      # Seed EVERY retained job with its OWN shown tail, not just the foreground
+      # one: a save writes what a BUFFER holds, so a job whose tail was never
+      # read back saves an empty replay.json on this run's next save. Only the
+      # foreground job's tail is redrawn in the banner (below) - that is the one
+      # exchange the user last saw.
+      @registry.restore_replay_tail(restore[:replay_tail], job: job.id)
     end
 
     # A #207 flat session has no jobs/ tree, so the per-job read yields nothing

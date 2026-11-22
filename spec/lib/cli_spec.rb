@@ -399,6 +399,54 @@ end
       expect(tail.map { |e| [e.type, e.origin, e.content] })
         .to include([:user, :user, 'fix the parser'])
     end
+
+    # issue #548: a save writes what a job's BUFFER holds, so a background job
+    # whose saved tail was never read back would save an empty replay.json on the
+    # resumed run's next save - the shape that made /replay report "nothing
+    # recorded" for a job that had a record. Every retained job is seeded with
+    # its OWN tail at resume, and the round trip has to survive a re-save.
+    it 'round-trips a background job own replay tail through resume and re-save' do
+      saver = described_class.new(layered_options, ui)
+      saver.setup
+      id = saver.session_id
+      allow(ui).to receive(:puts)
+
+      main = saver.registry.job(0)
+      main.harness.session.add_user('main prompt')
+      main.harness.session.add_assistant('main reply')
+      sub = saver.harness_factory.add_harness_job(
+        kind: :sub_agent, session_id: id, requested_by: main)
+      sub.harness.session.add_user('sub prompt')
+      sub.harness.session.add_assistant('sub reply')
+      # Each line goes to the job that owns it, which is what a save records.
+      saver.registry.record_user_prompt('main line', job: main)
+      saver.registry.record_user_prompt('sub line', job: sub)
+      saver.system_saver.save_run(id)
+
+      locator = SessionLocator.new(workdir)
+      expect(
+        JSON.parse(File.read(locator.job_replay_file_path(id, 0))).map { |e| e['content'] }
+      ).to eq(['main line'])
+      expect(
+        JSON.parse(File.read(locator.job_replay_file_path(id, 1))).map { |e| e['content'] }
+      ).to eq(['sub line'])
+
+      resumed = described_class.new(layered_options.merge(resume: id), ui)
+      resumed.setup
+
+      expect(resumed.registry.jobs.map(&:id)).to eq([0, 1])
+      expect(resumed.registry.job(1).buffer.replay_tail.map(&:content)).to eq(['sub line'])
+
+      # The proof the seeding was real, not just present in memory: re-saving
+      # over the same id must not blank the background job's record.
+      resumed.system_saver.save_run(id)
+      expect(
+        JSON.parse(File.read(locator.job_replay_file_path(id, 1))).map { |e| e['content'] }
+      ).to eq(['sub line'])
+      expect(
+        JSON.parse(File.read(locator.job_replay_file_path(id, 0))).map { |e| e['content'] }
+      ).to eq(['main line'])
+    end
   end
 
   # A resumed run rebuilds EVERY job the saved system names - each at its saved

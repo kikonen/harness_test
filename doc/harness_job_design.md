@@ -46,7 +46,9 @@ The three targets:
   registry (from the settings' buffer limits), registers the main turn as job
   #0, seeds a resumed run's record (`restore_replay_tail`) and its foreground
   job (the #548 resume model sets `@registry.foreground` directly - the old
-  `restore_foreground` special case is gone), and injects the registry into
+  `restore_foreground` special case is gone), seeds EVERY restored job from its
+  own saved tail (`restore_replay_tail(job:)` - a save writes what a buffer
+  holds, so an unseeded job saves an empty tail), and injects the registry into
   `SessionManager` so `save_session` writes `foreground_job` and `replay_tail`
   from it. Harness holds ZERO registry references. Buffer rules:
   `doc/output_buffer_design.md`;
