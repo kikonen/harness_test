@@ -104,8 +104,9 @@ endpoint and token:
 
 ```yaml
 models:
-  - id: local                # profile identity: selection key + wire value
+  - id: local                # profile identity: selection key (-m, saved sessions)
     # name: Local Qwen       # optional display label (defaults to the id)
+    model: qwen2.5-coder:7b  # the model this endpoint is asked for (#572)
     url: http://localhost:11434/v1
     # token: sk-...            # literal bearer token (visible in the file), or
                                # token: ${OPENAI_TOKEN} to keep the secret in the

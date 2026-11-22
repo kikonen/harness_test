@@ -17,6 +17,17 @@ RSpec.describe Commands::ModelsCommand do
       model_profiles: profiles, active_profile_id: active, default_profile_id: default)
   end
 
+  # A run always has a palette (SystemSettings#output_palette is never nil), so
+  # the listing renders as kramdown's box table. Strip the ANSI runs, drop the
+  # rule rows, and split a `│ a │ b │` row into cells: the field boundaries
+  # survive as real delimiters (#474), so a column is read BY NAME via the
+  # header rather than from a fused row string. Cell text is exact: no cell here
+  # is wide enough for the gem to wrap it.
+  def table_rows(out)
+    out.gsub(/\e\[[0-9;]*m/, '').lines.map(&:chomp)
+       .grep(/\A\s*│/).map { |l| l.split('│', -1)[1..-2].map(&:strip) }
+  end
+
   def run_command(settings)
     io = StringIO.new
     described_class.new(file_list: nil,
@@ -25,38 +36,48 @@ RSpec.describe Commands::ModelsCommand do
     io.string
   end
 
-  it 'lists every profile with its model name, endpoint and API type' do
-    profiles = [{ name: 'qwen', url: 'http://a:11434/v1' },
-                { name: 'remote', url: 'https://b/v1', api: 'openai' }]
+  # The listing is a :table (#474): each fact is its own named column - name, id
+  # and the model sent to the endpoint (#572) never fused into one row.
+  it 'lists every profile as a table with name, id, model, endpoint and API columns' do
+    profiles = [{ name: 'qwen', url: 'http://a:11434/v1', model: 'qwen-model' },
+                { name: 'remote', url: 'https://b/v1', api: 'openai', model: 'remote-model' }]
     out = run_command(settings(profiles: profiles, active: 'qwen'))
+    rows = table_rows(out)
 
     expect(out).to include('Configured models (2):')
-    expect(out).to include('qwen  ->  qwen @ http://a:11434/v1 (openai)')
-    expect(out).to include('remote  ->  remote @ https://b/v1 (openai)')
+    expect(rows.first)
+      .to eq(%w[name id model url api flags])
+    expect(rows[1])
+      .to eq(['qwen', 'qwen', 'qwen-model', 'http://a:11434/v1', 'openai', 'active'])
+    expect(rows[2])
+      .to eq(['remote', 'remote', 'remote-model', 'https://b/v1', 'openai', ''])
   end
 
   # issue #217: the API tag is the whole point - it says which endpoint shape a
-  # profile hits, and ollama is the one that honours num_ctx.
+  # profile hits, and ollama is the one that honours num_ctx. It is its own column.
   it 'tags an ollama profile as ollama' do
-    out = run_command(settings(profiles: [{ name: 'loc', api: 'ollama' }], active: 'loc'))
+    out = run_command(settings(
+      profiles: [{ name: 'loc', api: 'ollama', model: 'loc-model' }], active: 'loc'))
 
-    expect(out).to include('loc  ->  loc @ ')
-    expect(out).to include('(ollama)')
+    expect(table_rows(out)[1])
+      .to eq(['loc', 'loc', 'loc-model', '', 'ollama', 'active'])
   end
 
   it 'marks the default profile and the active one, together when both apply' do
     out = run_command(settings(
-      profiles: [{ name: 'qwen', id: 'qwen' }, { name: 'other', id: 'other' }],
+      profiles: [{ name: 'qwen', id: 'qwen', model: 'qwen-model' },
+                 { name: 'other', id: 'other', model: 'other-model' }],
       active: 'qwen', default: 'qwen'))
 
-    expect(out).to include('[default, active]')
-    other = out.lines.find { |l| l.include?('other') }
-    expect(other).to include('other  ->  other @')
-    expect(other).not_to include('[')
+    expect(table_rows(out)[1])
+      .to eq(['qwen', 'qwen', 'qwen-model', '', 'openai', 'default, active'])
+    expect(table_rows(out)[2])
+      .to eq(['other', 'other', 'other-model', '', 'openai', ''])
   end
 
   it 'ends with the switch hint naming the current model' do
-    out = run_command(settings(profiles: [{ name: 'qwen', id: 'qwen' }], active: 'qwen'))
+    out = run_command(settings(
+      profiles: [{ name: 'qwen', id: 'qwen', model: 'qwen-model' }], active: 'qwen'))
 
     expect(out).to include('Switch with: /model <id>   (current: qwen)')
   end
@@ -65,21 +86,24 @@ RSpec.describe Commands::ModelsCommand do
   # image could actually be sent to (and stays silent for one that cannot).
   it 'tags a vision profile and leaves a text profile untagged' do
     out = run_command(settings(
-      profiles: [{ name: 'eyes', vision: true },
-                 { name: 'plain', vision: false }],
+      profiles: [{ name: 'eyes', vision: true, model: 'eyes-model' },
+                 { name: 'plain', vision: false, model: 'plain-model' }],
       active: 'plain'))
 
-    expect(out.lines.find { |l| l.include?('eyes') }).to include('[vision]')
-    expect(out.lines.find { |l| l.include?('plain') }).not_to include('[vision]')
+    rows = table_rows(out)
+    expect(rows[1]).to eq(['eyes', 'eyes', 'eyes-model', '', 'openai', 'vision'])
+    expect(rows[2]).to eq(['plain', 'plain', 'plain-model', '', 'openai', 'active'])
   end
 
   # A profile with no url in a run that has other profiles lists with no
   # endpoint, not a fabricated default host.
   it 'lists a profile with no url without inventing an endpoint' do
-    out = run_command(settings(profiles: [{ name: 'qwen', id: 'qwen' }], active: 'qwen'))
+    out = run_command(settings(
+      profiles: [{ name: 'qwen', id: 'qwen', model: 'qwen-model' }], active: 'qwen'))
 
     expect(out).not_to include('localhost')
-    expect(out).to include('qwen  ->  qwen @ ')
+    expect(table_rows(out)[1])
+      .to eq(['qwen', 'qwen', 'qwen-model', '', 'openai', 'active'])
   end
 
   describe 'with no profiles configured' do

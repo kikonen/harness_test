@@ -32,32 +32,32 @@ module Commands
 
       default_id = @settings.default_profile_id
 
-      # issue #474: emit the listing as STRUCTURE (title + per-profile fields),
-      # not a fused row string, so the run record and a future remote sink carry
-      # the fields themselves. UI::Renderer#row_for draws the arrow row: a
-      # profile's id is what the endpoint is asked for, so the row reads
-      # `display name  ->  profile id @ url`. The note field is the tag + mark
-      # suffix exactly as the old line appended them.
+      # issue #474: the listing is STRUCTURE (title + per-profile fields). It is
+      # a :table, not the old :arrow row: that template read item[:name] as the
+      # left column and item[:model] as the arrow target, which mixed the
+      # profile's display name up with the id sent to the endpoint (#556
+      # vocabulary). Each fact is its own named column - the column names say
+      # what each cell is.
       items = profiles.map do |p|
         id = p[:id] || p[:name]
         display = p[:name] || id
         marks  = []
         marks << "default" if default_id && id == default_id
         marks << "active"  if id == current
-        suffix = marks.empty? ? "" : "   [#{marks.join(', ')}]"
         # issue #217: tag the API type so it is obvious which endpoint a
-        # profile hits (openai -> /v1-compatible, ollama -> native /api/chat).
-        api = p[:api] || "openai"
+        # profile hits (openai -> /v1-compatible, ollama -> native /api/chat);
         # issue #449: vision is a per-profile fact, so the listing says which
-        # models a tool-result image could actually be sent to.
-        url  = p[:url]
-        tags = p[:vision] ? " (#{api}) [vision]" : " (#{api})"
-        { name: display, model: id, location: url, note: "#{tags}#{suffix}" }
+        # models a tool-result image could actually be sent to. Both are their
+        # own cells of the flags column rather than a fused suffix on the row.
+        api = p[:api] || "openai"
+        flags = marks.dup
+        flags << "vision" if p[:vision]
+        { name: display, id:, model: p[:model], url: p[:url], api:, flags: flags.join(", ") }
       end
       emit_list(
         title: "Configured models (#{profiles.size}):",
-        kind: :arrow,
-        columns: %i[name model location note],
+        kind: :table,
+        columns: %i[name id model url api flags],
         items:,
         gap: true,
         footer: ["Switch with: /model <id>   (current: #{current})"],

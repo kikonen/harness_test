@@ -78,6 +78,7 @@ module LLM
     # a bare path, and only a scheme/host URI has #request_uri / #host. Without
     # a base_url the first request used to die as NoMethodError inside
     # build_request and the run looked stuck rather than mis-configured (#556).
+
     def build_uri
       if base_url.nil? || base_url.strip.empty?
         raise HarnessError,

@@ -8,7 +8,12 @@ require 'llm/openai_backend'
 RSpec.describe LLM::OpenAIBackend do
   let(:logger) { Logger.new(File::NULL) }
   let(:options) do
-    { base_url: 'http://127.0.0.1:11434', active_profile_id: 'test-model', api: 'openai' }
+    {
+      base_url: 'http://127.0.0.1:11434',
+      active_profile_id: 'test-model',
+      model: 'qwen2.5-coder:7b',
+      api: 'openai'
+    }
   end
   let(:backend) { described_class.new(ModelConfig.new(options), logger) }
 
@@ -35,7 +40,7 @@ RSpec.describe LLM::OpenAIBackend do
 
     it 'includes model and messages' do
       b = body([{ role: 'user', content: 'hi' }])
-      expect(b[:model]).to eq('test-model')
+      expect(b[:model]).to eq('qwen2.5-coder:7b')
       expect(b[:messages]).to eq([{ role: 'user', content: 'hi' }])
     end
 

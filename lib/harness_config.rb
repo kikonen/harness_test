@@ -465,21 +465,21 @@ class HarnessConfig
 
   private
 
-  # An id is semi-unique: it is what a selection and a saved session resolve,
-  # so one id resolving to two entries is refused at load - a duplicate makes
-  # -m and a resumed run silently ambiguous. A name: is a display label and
-  # may repeat.
+  # model: is required and never derived from an id or name; an id must be unique
+  # or a selection and a resumed run are silently ambiguous.
   def normalize_models(list)
     entries = list.map do |m|
       raise HarnessError, "each entry in 'models' must be a mapping" unless m.is_a?(Hash)
 
-      id   = require_profile_id(m)
-      url  = require_http_url("model profile '#{id}'", nonblank(m[:url]))
+      id    = require_profile_id(m)
+      url   = require_http_url("model profile '#{id}'", nonblank(m[:url]))
+      model = require_model_name("model profile '#{id}'", m)
 
       {
         id:,
         name: nonblank(m[:name]) || id,
         url:,
+        model:,
         api:              nonblank(m[:api]),
         token:            expand_env(nonblank(m[:token]), "a model token"),
         num_ctx:          int_or_nil(m[:num_ctx]),
@@ -580,6 +580,14 @@ class HarnessConfig
     raise HarnessError, "an mcp_servers entry needs a 'name'" if name.nil?
 
     name
+  end
+
+  # model: (#572) is required and never derived from an id or name.
+  def require_model_name(label, profile)
+    model = nonblank(profile[:model])
+    return model unless model.nil?
+
+    raise HarnessError, "#{label} needs a 'model' (a model name, not a profile id)"
   end
 
   # A profile's id selects it; a config that predates 'id:' keys its entries

@@ -23,6 +23,7 @@ class ModelConfig
   MODEL_KEYS = %i[
     active_profile_id
     active_profile_name
+    model
     base_url
     api
     token
@@ -77,12 +78,13 @@ class ModelConfig
   # nil: there is no built-in endpoint default. A hand-built hash (specs) still
   # works via #new.
   def self.from_settings(settings)
+    profile = settings.active_profile
     values = {
       active_profile_id: settings.active_profile_id,
+      active_profile_name: profile ? profile_name(profile) : settings.resolved_profile_id,
       mcp_image_limits: settings.mcp_image_limits
     }
-    apply_seed_profile(values, settings.active_profile)
-    write_profile_name(values, settings)
+    apply_seed_profile(values, profile)
     new(values.merge(TRANSPORT_KEYS.to_h { |k| [k, settings.public_send(k)] }))
   end
 
@@ -107,6 +109,7 @@ class ModelConfig
     values[:min_p]            = profile[:min_p]
     values[:presence_penalty] = profile[:presence_penalty]
     values[:repeat_penalty]   = profile[:repeat_penalty]
+    values[:model]            = profile[:model]
     values[:vision]           = profile[:vision] == true
     values[:mcp_image_limits] = profile[:mcp_images] if profile[:mcp_images]
   end
@@ -148,17 +151,9 @@ class ModelConfig
     @values[:repeat_penalty]   = profile[:repeat_penalty]
     @values[:active_profile_id]   = ModelConfig.profile_id(profile)
     @values[:active_profile_name] = ModelConfig.profile_name(profile)
+    @values[:model]               = profile[:model]
     @values[:vision]           = profile[:vision] == true
     @values[:mcp_image_limits] = profile[:mcp_images] if profile[:mcp_images]
-  end
-
-  # The display name of the seeded profile: the profile's own name, else the id
-  # settings resolved (a profile-less run -m has no profile at all). The id is
-  # NOT touched here: it is the selection, and only a switch writes it.
-  def self.write_profile_name(values, settings)
-    profile = settings.active_profile
-    values[:active_profile_name] =
-      profile ? profile_name(profile) : settings.resolved_profile_id
   end
 
   # The effective value of an adjustable parameter, or nil when unset (the

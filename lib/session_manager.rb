@@ -605,6 +605,7 @@ class SessionManager
       # profile id, and has no endpoint to send it to (#556).
       @harness.model_config.active_profile_id   = id
       @harness.model_config.active_profile_name = id
+      @harness.model_config.model               = id
       return { id:, name: id, url: nil }
     end
 
