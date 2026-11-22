@@ -1,8 +1,8 @@
 # Session persistence layers: harness-session vs run (system) session (issue #548)
 
 Design notes for splitting session persistence along the ownership seam #286 has
-already established. This is a DESIGN document only; no code is written for #548
-yet. It states the conflation, the evidence in today's code, the proposed two-layer
+already established. The layout is implemented; `/jobs delete` (issue #558) is now
+written too. It states the conflation, the evidence in today's code, the two-layer
 shape, the file layout the owner has chosen (dir per job), the log decision that
 layout forces, the increments, and the decisions still open. Issue #548 stays OPEN
 until the layout is implemented.
@@ -573,6 +573,37 @@ non-foreground job, so an added agent runs only while it IS the foreground one -
 background agent has no scheduler pulling its inbox. G ships the ownership seam and
 the plumbing; a concurrent drain loop over several jobs is the next step, and the
 same seam is what it will use.
+
+### Removing a job from a run: `/jobs delete <id>` (issue #558)
+
+`/jobs add` had no matching "away": a mistaken agent or a sub-agent that went off
+track stayed in the run, in the saved system, and in every resume of it. The **drop
+rule** above already defines the disk half; `/jobs delete` makes it user-facing and
+it composes with the automatic retention drop.
+
+Ownership is the same as `add`: the command resolves the target and reports; the
+**registry** owns the live list (`remove_job` takes the job off `@jobs`, which a save
+enumerates to rebuild `system.json`), and **SystemSaver** owns the disk (`remove_job`
+unlinks the `system.json` `jobs:` entry, then `FileUtils.rm_rf`'s the `jobs/<id>/`
+dir - unlink first, so a crash leaves a recoverable orphan dir, not a dangling id).
+When the system already has jobs on disk the command re-saves so `system.json` no
+longer names the removed job; a job never yet saved has no system.json and needs none.
+
+**The foreground job cannot be deleted.** A dropped id can never become foreground
+(`JobRegistry#foreground=` raises for an id the registry does not hold), so there is
+no defined hand-off for the job the run's own prompts go to - `retain` refuses to drop
+the foreground for the same reason.
+
+**Interrupting is foreground-only, and that is the honest limit.** The drain loop is
+the main thread: while a **foreground** job's turn is live, the main thread is inside
+that turn's `Poller#run` loop and a `/jobs delete` cannot dispatch - the only
+main-thread interrupt for a live turn is Ctrl+C (`Poller` -> `task.stop`). A job's
+live `Task` is built by `Task.run` on a path no registry field holds, so there is no
+handle to stop a running job from an idle command either: delete refuses a running job
+rather than abandoning its thread. A job merely *awaiting* a dialog answer owes its
+thread a value, so `Job#interrupt` delivers `Job::INTERRUPTED_ANSWER` before removal.
+A concurrent drain loop over several jobs (the same next step `add` names) is what
+would give the registry a per-job task handle and let a running job be interrupted.
 
 ### Which job a run is talking to: the job tag on every wait line
 

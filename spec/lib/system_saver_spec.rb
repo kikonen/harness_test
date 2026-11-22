@@ -135,6 +135,47 @@ RSpec.describe SystemSaver do
         expect(saver.dropped_job_ids('f3f3f3f3-0000-0000-0000-000000000000')).to eq([])
       end
     end
+
+    # issue #558: remove_job unlinks the index entry then rm_rf's the job dir,
+    # so a system that has a saved job loses that job from both halves. The
+    # order is the point: the index is what a resume enumerates, so a job gone
+    # from it is gone even if the dir removal were interrupted.
+    it 'remove_job drops the index entry and the job dir' do
+      Dir.mktmpdir do |dir|
+        id = 'b4b4b4b4-0000-0000-0000-000000000000'
+        locator = SessionLocator.new(dir)
+        saved_registry = JobRegistry.new
+        main = saved_registry.add_job(kind: :main)
+        child = saved_registry.add_job(kind: :sub_agent, requested_by: main)
+        child.finish('answer')
+        saved_registry.foreground = main.id
+        saved_system(dir, id, saved_registry)
+        File.write(locator.job_session_file_path(id, 1), JSON.generate({ messages: [] }))
+
+        live = JobRegistry.new
+        live.add_job(kind: :main)
+        live.add_job(kind: :sub_agent, requested_by: live.job(0))
+        live.foreground = live.job(0).id
+        saver = described_class.new(locator, live)
+
+        expect(saver.remove_job(id, 1)).to eq(1)
+
+        expect(File.directory?(locator.job_dir_path(id, 1))).to be(false)
+        expect(locator.read_system(id)[:jobs].map { |j| j[:id] }).to eq([0])
+        expect(live.job(1)).to be_nil
+        expect(live.job(0)).not_to be_nil
+      end
+    end
+
+    it 'remove_job of a never-saved job just drops it from the live registry' do
+      registry = JobRegistry.new
+      registry.add_job(kind: :main)
+      child = registry.add_job(kind: :sub_agent, requested_by: registry.job(0))
+      saver = described_class.new(SessionLocator.new('no-such-dir'), registry)
+
+      expect(saver.remove_job('no-such-id', child.id)).to eq(child.id)
+      expect(registry.job(child.id)).to be_nil
+    end
   end
 
   # The single-job save a SessionManager-less harness still produces: the job's
