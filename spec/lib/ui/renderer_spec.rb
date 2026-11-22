@@ -445,6 +445,37 @@ RSpec.describe UI::Renderer do
     end
   end
 
+  # issue #561: #width took its terminal from UI::Width.columns_for (the SINK
+  # only). A redirected or closed stdout raises on #winsize, columns_for answers
+  # nil, and UI::Width#resolve with a nil terminal RETURNS THE FALLBACK - so
+  # RULE_FALLBACK_WIDTH (80) became the rendered width and the 80% rule was never
+  # applied, on a 176-column terminal. #width must consult the terminal itself.
+  describe '#width (issue #561: the terminal, not the fallback)' do
+    # A sink that cannot answer its own width: the real-world shape of a run
+    # whose stdout is not a detectable console.
+    def blind_console
+      io = Object.new
+      def io.winsize
+        raise Errno::EBADF
+      end
+      UI::Console.new(stdout: io)
+    end
+
+    it 'takes 80% of the terminal when the sink cannot report its width' do
+      allow(UI::Width).to receive(:terminal_columns).and_return(176)
+      r = described_class.new(ui: blind_console)
+
+      expect(r.width).to eq(120) # 80% of 176 = 140, capped at MAX_PARAGRAPH_WIDTH
+      expect(r.note_width).to eq(118)
+    end
+
+    it 'uses RULE_FALLBACK_WIDTH only when no terminal can be detected at all' do
+      allow(UI::Width).to receive(:terminal_columns).and_return(nil)
+
+      expect(described_class.new.width).to eq(described_class::RULE_FALLBACK_WIDTH)
+    end
+  end
+
   # The table-width basis (issue #106) is a CONTENT knob: the boundary chrome
   # stays the fixed RULE_WIDTH whatever it says.
   describe 'markdown_max_width does not move the boundary chrome (issue #106)' do
@@ -587,16 +618,22 @@ RSpec.describe UI::Renderer do
     end
 
     it 're-wraps a long paragraph and indents every continuation line' do
-      out = renderer.line(type: :note,
-                          content: 'Responses are buffered: the whole answer arrives before it is printed (the full retry policy applies).')
+      # An explicit max_width makes the shape width-independent: a paragraph
+      # pinned against the developer's own terminal would pass here and fail in
+      # CI (or on a 176-column box), because the resolved width is the SINK's.
+      narrow = described_class.new(markdown_max_width: 60)
+      out = narrow.line(
+        type: :note,
+        content: 'Responses are buffered: the whole answer arrives before it is ' \
+                 'printed (the full retry policy applies).'
+      )
       lines = out.split("\n")
 
       expect(lines).to eq(
-        ['  Responses are buffered: the whole answer arrives before it is printed (the',
-         '  full retry policy applies).']
+        ['  Responses are buffered: the whole answer arrives before it',
+         '  is printed (the full retry policy applies).']
       )
-      # No rendered line exceeds the fixed RULE_WIDTH whatever the terminal is.
-      expect(lines).to all(satisfy { |l| l.length <= described_class::RULE_WIDTH })
+      expect(lines).to all(satisfy { |l| l.length <= 60 })
     end
 
     it 'gives a word wider than the wrap its own line (never split mid-word)' do
