@@ -199,7 +199,12 @@ module UI
     def width
       UI::Width.resolve(
         value: @markdown_max_width,
-        terminal: UI::Width.columns_for(@ui),
+        # terminal_columns, not columns_for: the sink alone often cannot answer
+        # (a redirected or closed stdout raises on #winsize), and columns_for has
+        # no terminal of its own - with a nil terminal UI::Width#resolve returns
+        # the fallback, so RULE_FALLBACK_WIDTH became the WIDTH instead of 80% of
+        # the real terminal (issue #561).
+        terminal: UI::Width.terminal_columns(@ui),
         fallback: RULE_FALLBACK_WIDTH)
     end
 
