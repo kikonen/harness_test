@@ -500,6 +500,33 @@ RSpec.describe JobRegistry do
       )
     end
 
+    # job: names whose own buffer carries the record. A foreground job is written
+    # directly; a job outside it goes through the event path so its entry keeps
+    # its own job id in the shared queue instead of landing in the foreground
+    # record the user is looking at.
+    it 'records into the named job own buffer' do
+      reg = JobRegistry.new
+      main = reg.add_job(kind: :main)
+      sub  = reg.add_job(kind: :sub_agent, requested_by: main)
+      reg.record_user_prompt('to the sub-agent', job: sub)
+
+      expect(sub.buffer.tail.map(&:content)).to include('to the sub-agent')
+      expect(main.buffer.tail.map(&:content)).to be_empty
+      expect(reg.replay_tail_for_job(sub.id)).to eq(
+        [{ type: :user, origin: :user, content: 'to the sub-agent' }]
+      )
+    end
+
+    it 'caps a named job buffer at its own max_saved window' do
+      reg = JobRegistry.new(max_saved: 1)
+      main = reg.add_job(kind: :main)
+      sub  = reg.add_job(kind: :sub_agent, requested_by: main)
+      reg.record_user_prompt('first', job: sub)
+      reg.record_user_prompt('second', job: sub)
+
+      expect(reg.replay_tail_for_job(sub.id).map { |e| e[:content] }).to eq(['second'])
+    end
+
     it 'records nothing when max_saved is 0 (the disable)' do
       reg = JobRegistry.new(max_saved: 0)
       reg.add_job(kind: :main)

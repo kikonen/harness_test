@@ -16,6 +16,8 @@ require 'system_saver'
 # not own, and the SAME object is the read side a resume restores job state
 # through. The layered WRITE shapes are covered in system_record_spec.rb, the
 # whole-run save in cli_spec.rb.
+JOB_RUN_ID = 'a9a9a9a9-0000-0000-0000-000000000000'
+
 RSpec.describe SystemSaver do
   def harness_double(settings)
     Object.new.tap do |h|
@@ -66,7 +68,7 @@ RSpec.describe SystemSaver do
         id, session_h(id, dir))
     end
 
-    it 'composes the system half with the foreground job chain (resume_main)' do
+    it "reads each job's own half back, with the system half kept separate" do
       Dir.mktmpdir do |dir|
         id = 'c0c0c0c0-0000-0000-0000-000000000000'
         locator = SessionLocator.new(dir)
@@ -80,13 +82,13 @@ RSpec.describe SystemSaver do
                                    active_model: 'x' }))
 
         saver = described_class.new(locator, JobRegistry.new)
-        system_record = locator.read_session(id)
-        merged = saver.resume_main(id, 0, system_record)
-
-        # System half keys survive AND the job's conversation + model land.
-        expect(merged[:session_id]).to eq(id)
-        expect(merged[:messages].first[:content]).to eq('main chain')
-        expect(merged[:active_model]).to eq('x')
+        # The job half comes back through job_restores; the system half stays in
+        # read_system. Nothing folds one into the other (#548).
+        restore = saver.job_restores(id).first
+        expect(restore[:id]).to eq(0)
+        expect(restore[:session][:messages].first[:content]).to eq('main chain')
+        expect(restore[:session][:active_model]).to eq('x')
+        expect(locator.read_system(id)[:session_id]).to eq(id)
         # The saved shown tail is read straight from the job's replay file.
         File.write(locator.job_replay_file_path(id, 0),
                    JSON.generate([{ type: 'response', origin: 'session_manager', content: 'main shown' }]))
@@ -172,6 +174,56 @@ RSpec.describe SystemSaver do
         # A registry-less record records the default posture, exactly as a session
         # saved before the key existed records nothing.
         expect(system_data['yolo']).to be(false)
+      end
+    end
+  end
+
+  # The chain half of a save: every job with an agent is written, whatever its
+  # status. Gating on finished? left every background chain unwritten (a job that
+  # ran a turn and was never :done is still :pending), and a resume then had no
+  # chain to rebuild - only the foreground job came back.
+  describe 'save_run writes every job chain (issue #548)' do
+    # A job agent bare enough to save: the real Session + SessionManager pair,
+    # which is all save_run reads off a job harness.
+    def job_harness(dir, session, manager)
+      Object.new.tap do |h|
+        h.define_singleton_method(:session) { session }
+        h.define_singleton_method(:file_list) { FileList.new([], workdir: dir) }
+        h.define_singleton_method(:session_manager) { manager }
+        h.define_singleton_method(:model_config) { ModelConfig.new({}) }
+        h.define_singleton_method(:settings) { SystemSettings.from_options({}) }
+        h.define_singleton_method(:mcp_connected_summary) { [] }
+        h.define_singleton_method(:output_palette) { UI::Palette.fetch(nil) }
+        h.define_singleton_method(:yolo?) { false }
+        h.define_singleton_method(:stream?) { false }
+        h.define_singleton_method(:markdown?) { false }
+      end
+    end
+
+    def job_agent(dir, content)
+      session = Session.new('sys', session_id: JOB_RUN_ID,
+                            file_cache: SessionFileCache.new)
+      session.add_user(content)
+      file_list = FileList.new([], workdir: dir)
+      manager   = SessionManager.new(job_harness(dir, session, nil), file_list)
+      job_harness(dir, session, manager)
+    end
+
+    it 'writes a pending background job chain (not only the foreground one)' do
+      Dir.mktmpdir do |dir|
+        locator  = SessionLocator.new(dir)
+        registry = JobRegistry.new
+        main     = registry.add_job(kind: :main)
+        sub      = registry.add_job(kind: :sub_agent, requested_by: main)
+        sub.attach_harness(job_agent(dir, 'sub-agent chain'))
+        expect(sub.finished?).to be(false)
+
+        described_class.new(locator, registry).save_run(JOB_RUN_ID)
+
+        path = locator.job_session_file_path(JOB_RUN_ID, sub.id)
+        expect(File.file?(path)).to be(true)
+        chain = JSON.parse(File.read(path), symbolize_names: true)[:messages]
+        expect(chain.map { |m| m[:content] }).to include('sub-agent chain')
       end
     end
   end

@@ -401,11 +401,9 @@ end
     end
   end
 
-  # issue #548 increment 3: a resumed run restores each saved job's own status and
-  # shown tail onto the job it has under that id, and states the ids it cannot
-  # restore (a job the retention rule dropped). The resumed run here has rebuilt
-  # only job 0 (nothing in lib/ creates a non-main job yet), so a saved second job
-  # is exactly the dropped case.
+  # A resumed run rebuilds EVERY job the saved system names - each at its saved
+  # id, with its own agent and its own conversation - and states only the ids it
+  # genuinely cannot (a job whose dir the retention rule dropped).
   describe 'per-job resume restore (issue #548)' do
     let(:layered_options) do
       options.merge(model_profiles: [{ name: 'test-model', model: 'test-model' }])
@@ -417,15 +415,18 @@ end
       File.write(locator.system_file_path(id), JSON.generate({
         session_id: id, workdir:, next_id: job_ids.max + 1, foreground_job: foreground,
         created_at: Time.now.iso8601,
-        jobs: job_ids.map { |j| { id: j, kind: 'main', status: 'finished', messages: 1,
-                                  dir: "jobs/#{j}" } }
+        jobs: job_ids.map { |j| { id: j, kind: j.zero? ? 'main' : 'sub_agent',
+                                  status: 'finished', messages: 1, dir: "jobs/#{j}" } }
       }))
       job_ids.each do |j|
         FileUtils.mkdir_p(locator.job_dir_path(id, j))
         File.write(locator.job_session_file_path(id, j),
-                   JSON.generate({ messages: [{ role: 'user', content: "job#{j} prompt" }] }))
+                   JSON.generate({ session_id: id,
+                                   created_at: Time.now.iso8601,
+                                   messages: [{ role: 'user', content: "job#{j} prompt" }] }))
         File.write(locator.job_file_path(id, j),
-                   JSON.generate({ id: j, kind: 'main', status: 'finished', result: nil,
+                   JSON.generate({ id: j, kind: j.zero? ? 'main' : 'sub_agent',
+                                   status: 'finished', result: nil,
                                    requested_by: nil, dependencies: [] }))
         File.write(locator.job_replay_file_path(id, j),
                    JSON.generate([{ type: 'response', origin: 'session_manager',
@@ -433,23 +434,25 @@ end
       end
     end
 
-    it 'restores the job this run has and states the one it does not' do
+    it 'rebuilds every saved job, each with its own agent and chain' do
       id = 'a1a1a1a1-1111-2222-3333-444444444444'
       seed_layered_system(id, [0, 1])
-      # setup prints nothing itself; the dropped-job line is the only output here.
-      expect(ui).to receive(:puts)
-        .with(a_string_matching(/jobs 1 were dropped from this session/))
       allow(ui).to receive(:puts)
 
       cli = described_class.new(layered_options.merge(resume: id), ui)
       cli.setup
 
-      expect(cli.registry.jobs.map(&:id)).to eq([0])
-      expect(cli.saved_jobs.map { |j| j[:id] }).to eq([0, 1])
-      # Job 0 is the main turn this run rebuilt (and the foreground), so nothing
-      # was restored onto it; job 1 has no live Job under its id.
-      expect(cli.registry.job(1)).to be_nil
-      expect(cli.registry.job(0).status).to eq(:pending)
+      expect(cli.registry.jobs.map(&:id)).to eq([0, 1])
+      expect(cli.registry.foreground).to eq(0)
+      expect(cli.registry.job(1).kind).to eq(:sub_agent)
+      expect(cli.registry.job(1).status).to eq(:finished)
+      # A restored job has its OWN agent holding its OWN saved conversation, so
+      # switching to it reaches a real agent rather than an empty job.
+      child = cli.registry.job(1).harness
+      expect(child).to be_a(Harness)
+      expect(child).not_to be(cli.foreground_harness)
+      expect(child.session_manager.job_id).to eq(1)
+      expect(child.session.messages.map { |m| m[:content] }).to include('job1 prompt')
     end
 
     # #548 C: the foreground job is rebuilt at its SAVED id (not always 0), with
@@ -464,7 +467,7 @@ end
 
       # The main turn this run drives IS job 2 (the saved foreground), not job 0.
       expect(cli.registry.foreground).to eq(2)
-      expect(cli.registry.jobs.map(&:id)).to eq([2])
+      expect(cli.registry.jobs.map(&:id)).to eq([0, 1, 2])
       expect(cli.registry.job(2).harness).to be(cli.foreground_harness)
       contents = cli.foreground_harness.session.messages.map { |m| m[:content] }
       expect(contents).to include('job2 prompt')
@@ -473,8 +476,6 @@ end
       # next_id is seeded from the saved record, so a new job lands after every
       # saved id (3 here: saved max was 2).
       expect(cli.registry.add_job(kind: :sub_agent).id).to eq(3)
-      # Jobs 0 and 1 have saved dirs but no agent to rebuild them into, so they
-      # are stated as dropped, not rebuilt empty.
       expect(cli.saved_jobs.map { |j| j[:id] }).to eq([0, 1, 2])
     end
 

@@ -57,13 +57,17 @@ The three targets:
   reference (nil until it is driven); `JobRegistry#add_job` takes a `harness:`
   and its `#run` reads it off the job (`Task.run(harness: job.harness)`) rather
   than from the caller. The CLI builds the Harness, attaches it to the main job
-  (`@registry.add_job(kind: :main, harness:)`) and keeps no `@harness` ivar; it
-  reaches it through `CLI#foreground_harness` = `@registry&.foreground_job&.harness`.
+  through `HarnessFactory#add_harness_job(kind: :main, base_file_list:)` and keeps
+  no `@harness` ivar; it reaches it through `CLI#foreground_harness` =
+  `@registry&.foreground_job&.harness`.
   A command reaches it the same way (`Command#foreground_harness` =
   `registry&.foreground_job&.harness`); a command constructor takes NO `harness:`
   and there is no `attr_reader :harness` on a command. Naming it after the job it
   reads off (foreground_harness) is deliberate: a later background/sub-agent
-  harness reads the same way off its own job.
+  harness reads the same way off its own job. The factory and the SYSTEM id are
+  now handed down the same way a command already receives the registry
+  (`CommandHandler#build_command`), which is what `/jobs add` uses to add a
+  second agent through the SAME builder the main turn used.
 
 - **FS-backed stores (memories/plans/skills) -> the tools/commands.** Each is a
   stateless reader over its on-disk dir, so it is not Harness's own state.

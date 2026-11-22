@@ -443,6 +443,41 @@ RSpec.describe Harness do
       expect(harness.session.messages.first[:content]).to include('rule added after the save')
     end
 
+    # A saved session naming a model this run's config no longer has is a stale
+    # name, not a broken run: the run already resolved its own model from its own
+    # config, and the resume keeps it. Raising here aborted the whole resume over
+    # one stale key - and a layered resume (issue #548) asks once per saved job.
+    it 'resumes on the run model when the saved model is no longer configured' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(id)
+      data = saved_data(id).merge(active_model: 'gone-model')
+
+      harness = build_harness(session_id: id, resume_data: data)
+
+      expect(harness.session_manager.active_model_name).to eq('test-model')
+      expect(harness.model_config.model).to eq('test-model')
+      expect(harness.session.pending?).to be(false)
+    end
+
+    # A profile-less run (-m as a raw id) has no default to fall back to either.
+    # Aborting here was the owner's crash: a config with models configured but no
+    # default_model, resuming a session whose saved name is gone.
+    it 'resumes on the raw model of a profile-less run over an unknown saved name' do
+      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
+      seed_saved_session(id)
+      data = saved_data(id).merge(active_model: 'gone-model')
+
+      harness = build_harness(
+        session_id: id,
+        resume_data: data,
+        model_profiles: [{ name: 'other-model', model: 'other-model' }])
+
+      # No selection and no default: this run has no model to resume onto, so it
+      # keeps the raw seed it was built with instead of aborting the resume.
+      expect(harness.model_config.model).to be_nil
+      expect(harness.model_config.base_url).to be_nil
+    end
+
     # A session saved BEFORE streaming existed has no key at all: that is not
     # an error, it is the buffered default.
     it 'treats a session with no streaming key as buffered' do

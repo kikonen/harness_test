@@ -238,6 +238,24 @@ and writes the system record over the registry it holds; the CLI (`auto_save_ses
 harness with no run - it writes the same two files and, because it has no registry,
 records default postures (the same shape as a session saved before a key existed).
 
+**Which jobs a save writes: every job with an agent, whatever its status.** A status
+is a registry fact, not a statement about the chain: a job that ran a turn and was
+never `:done` is still `:pending`, so gating the write on `finished?` left every
+background chain unwritten - the index and `job.json` named the job, its
+`session.json` did not exist, and the resume had nothing to rebuild it from. Only the
+foreground job's chain survived. Forcing such a job to `:finished` so it would save
+is the other wrong fix: `Job#finish` **delivers its result to a live requester**, so a
+restored job marked finished would answer a requester this run never made. The
+threading rule stays as it was - a main thread may not read a RUNNING job's messages -
+and a save point has no running thread: the exit save runs after every job thread is
+joined, and a mid-run save of a running job goes through `Job#request_save` so that
+job writes its own file on its own thread.
+
+The system half is still described through the **foreground** job, because that job
+carries the run's own `FileList`: its `to_h` is where `access`, the digest cache and
+the workdir come from. A foreground id that names no retained job has no system half
+to write.
+
 ### How a run gets its main harness: the factory, from the first job on
 
 `CLI#setup` no longer builds `Harness.new` and hand-attaches it to a pre-made
@@ -267,19 +285,26 @@ conversation. Then:
    at its **saved** id (its live id matches the `jobs/<id>/` dir its files live
    under). next_id stays past every id in use, so a new job never reuses one on
    disk (#548 A).
-2. **Rebuild the foreground at its saved id.** The CLI reads the foreground job's
-   own `session.json` (`SystemSaver#resume_main` composes the system half + the
-   job's conversation half) and builds it as an agent via the factory with that
-   `id:`, so a resumed run whose saved foreground was job 2 drives job 2 - not a
-   re-numbered job 0.
+2. **Rebuild EVERY saved job, not just the foreground one.** `job_restores` yields
+   each job's own half (`session:`, the whole `jobs/<id>/session.json`, plus kind,
+   status and its `replay.json` tail) and the CLI builds one agent per job through
+   the factory with that saved `id:`. A job's half must therefore be **self-
+   sufficient**: `version` and `created_at` are in it, because only the foreground
+   job's half used to be supplemented from `system.json` at resume and a non-main
+   job restored straight from its own file raised `Time.parse(nil)`. A pre-fix
+   session file that has no `created_at` resumes anyway - `Session#restore` falls
+   back to now, since the cost is one cosmetic `/session` line and not a crash.
+   `SystemSaver#resume_main` (the foreground fold) is gone: the system half is no
+   longer merged into any job.
 3. **Then set the foreground.** `@registry.foreground = <saved fg>` (a plain
    assignment; the old `restore_foreground` special case is gone) and the foreground
-   job's own `replay.json` redraws the shown tail.
+   job's own `replay.json` redraws the shown tail. Assigning it LAST is what lets
+   step 2 rebuild every job: nothing is foreground while the system is being rebuilt.
 
-A non-foreground job that still has a saved dir has no agent to rebuild a
-conversation into (lib builds only one agent per run today), so it stays a
-**dropped** job - stated, not silently rebuilt empty. `job_restores` no longer
-excludes the foreground job: on restore no job is foreground yet.
+A saved job whose `session.json` is gone (the drop rule removed it) is not rebuilt
+at all and is reported by `dropped_job_ids` - stated, not silently stubbed. A #207
+flat session has no `jobs/` tree, so it is rebuilt as the degenerate one-job case
+from its own inline conversation.
 
 ### MCP when a run has several jobs: one manager per run, shared (DECIDED)
 
@@ -505,6 +530,65 @@ This also fixed a latent write bug: the job record was previously *derived from 
 index entry* (`entry.reject(...)`), so making the index metadata-only would have
 silently dropped the per-job detail from `job.json`. The record is now built from the
 live job, independent of the index.
+
+### Adding an agent to a run: `/jobs add` (issue #548 G)
+
+The seam this whole layout exists for: a SECOND agent joins the run through the
+SAME call the first agent used. `HarnessFactory#add_harness_job` is the only
+builder of a job's Harness, so `/jobs add` cannot invent a second path - it passes
+along the run owner's factory and the SYSTEM id (the id a job's directory is named
+under), which is why `CommandHandler` and `Command` now carry both, the way they
+already carry the registry and the saver.
+
+The command's part is ownership, not construction:
+
+- the **factory** builds the job and its agent (`kind: :sub_agent`, `requested_by`
+  = the job that was foreground), with a FileList of its own over the run workdir;
+- the **registry** marks it foreground, which is what makes it drivable - the idle
+  prompt dispatch sends the next prompt to `registry.foreground_job`;
+- a prompt typed with the form (`/jobs add <text>`, or `/jobs add sub_agent <text>`)
+  is recorded into the new job's buffer, the way a normal prompt line is recorded.
+
+`mid_turn_safe?` is false for `/jobs`: a mid-turn submit would have to hand that
+first prompt to the new agent on the MAIN thread, which is the nested-drain-loop
+refusal every LLM-driving command already gets (doc/unified_loop_design.md). The
+agent waits for the run to be idle.
+
+**Honest limit (what G is NOT yet):** there is no poll loop that drives a
+non-foreground job, so an added agent runs only while it IS the foreground one - a
+background agent has no scheduler pulling its inbox. G ships the ownership seam and
+the plumbing; a concurrent drain loop over several jobs is the next step, and the
+same seam is what it will use.
+
+### Which job a run is talking to: the job tag on every wait line
+
+A run that has several jobs cannot be read from the spinner alone: two jobs can be
+waiting at the same moment and the console says only "Sending (model)". The tag is
+`Poller.job_tag(job)` -> `[job <id> <kind>]`, and it is on **every** line that names
+a job - the spinner badge (`Poller.turn_badge`) and the modeline
+(`PromptReader#job_tag`, the same builder) - so a prompt line reads
+`[model] [MANUAL] [job 0 main] > `.
+
+**The main turn is tagged too.** Leaving job 0 untagged while tagging the others reads
+as "no job is active" rather than "job 0 is active", and the whole point of the tag is
+that a run with one job and a run with four look like the same kind of thing. The badge
+is therefore never nil for a run with a job.
+
+### `/replay`: the same record a resume redraws, shown without leaving the run
+
+`/replay [n] [job <id>|all]` prints the tail of what the run RECORDED - the entries
+`print_resume_replay` redraws at startup - so a user can see the record of the job they
+are in, or of every job, without restarting. It reads through the registry
+(`replay_tail_for_job`), never a saved file: what it shows is what the next resume would
+show for that job.
+
+The rendering is the startup replay's shape on purpose - one `UI::Renderer#line` per
+entry between two `RULE_WIDTH` rules, with the same roles and palette, and a header that
+names which job it is (`Replay [job 0 main] FOREGROUND (main, pending): 3 of 3 recorded
+lines`). A flattened table of entries would be a listing, not a replay: the value is
+that the line a user saw is the line they get back. `n` picks how many lines of the tail
+to show and is the first bare number before a selector word (`all 20` = 20 lines,
+`job 1` = job 1); the record itself stays capped by the saved window (`max_saved`).
 
 ## The log decision the layout forces: one system-wide `harness.log`
 

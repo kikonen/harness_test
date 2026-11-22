@@ -97,7 +97,7 @@ RSpec.describe Commands::HelpCommand do
       expect(out).not_to include('Always allow')
       # Measured at this registry, no palette (the raw markdown, one row per
       # command): the table is shorter than the aligned block it replaced.
-      expect(out.lines.size).to eq(61)
+      expect(out.lines.size).to eq(62)
     end
 
     it 'labels each group the help entry files the command under' do

@@ -68,17 +68,51 @@ RSpec.describe Poller do
       described_class.new(task).ensure_spinner_running
 
       expect(task.visible_spinner.badge).to respond_to(:call)
-      expect(task.visible_spinner.badge.call).to eq('[AUTO-APPROVE]')
+      expect(task.visible_spinner.badge.call).to eq('[job 0 main] [AUTO-APPROVE]')
     end
 
     it 'installs no badge when there is no harness at all (unit-test harness)' do
       task = spec_task
       task.ui = UI::Console.new(stdout: StringIO.new)
-      task.harness = nil # #286: a badge is built from a harness or not at all
+      task.harness = nil # the job half of the badge needs no harness
 
       described_class.new(task).ensure_spinner_running
 
-      expect(task.visible_spinner.badge).to be_nil
+      # The job half exists on its own: a badge names which job is working even
+      # with no harness and no posture tag.
+      expect(task.visible_spinner.badge.call).to eq('[job 0 main]')
+    end
+
+    # #548: the spinner line must say WHICH job is working once a run has more
+    # than one agent. The badge carries it ahead of the posture tags.
+    describe 'the job half of the badge (issue #548)' do
+      def job_task(kind)
+        registry = JobRegistry.new
+        job      = registry.add_job(kind: kind)
+        Task.new(registry:, job:) { nil }
+      end
+
+      it 'names a non-main job the turn belongs to' do
+        task = job_task(:sub_agent)
+        task.ui = UI::Console.new(stdout: StringIO.new)
+        described_class.new(task).ensure_spinner_running
+
+        expect(task.visible_spinner.badge.call).to eq('[job 0 sub_agent]')
+      end
+
+      it 'names the job and the posture on the same badge' do
+        task = job_task(:command)
+        task.ui = UI::Console.new(stdout: StringIO.new)
+        task.harness = mode_harness('YOLO')
+
+        expect(described_class.turn_badge(task:, harness: task.harness))
+          .to eq('[job 0 command] [YOLO]')
+      end
+
+      it 'names the main job too (every job reads the same way)' do
+        expect(described_class.job_tag(JobRegistry.new.add_job(kind: :main)))
+          .to eq('[job 0 main]')
+      end
     end
 
     it 'mode_badge is nil when the label is nil (safety check off)' do
@@ -152,7 +186,7 @@ RSpec.describe Poller do
 
       described_class.new(task).ensure_spinner_running
 
-      expect(task.visible_spinner.badge.call).to eq('[PLAN]')
+      expect(task.visible_spinner.badge.call).to eq('[job 0 main] [PLAN]')
     end
 
     it 'installs a badge when the harness only exposes the stream label' do
@@ -168,7 +202,7 @@ RSpec.describe Poller do
 
       described_class.new(task).ensure_spinner_running
 
-      expect(task.visible_spinner.badge.call).to eq('[STREAM]')
+      expect(task.visible_spinner.badge.call).to eq('[job 0 main] [STREAM]')
     end
 
     # A live callable: a /stream toggle mid-turn shows on the very next frame.
@@ -190,8 +224,8 @@ RSpec.describe Poller do
       stream = true
       after = task.visible_spinner.badge.call
 
-      expect(before).to eq('[MANUAL]')
-      expect(after).to eq('[MANUAL] [STREAM]')
+      expect(before).to eq('[job 0 main] [MANUAL]')
+      expect(after).to eq('[job 0 main] [MANUAL] [STREAM]')
     end
 
     it 'does not replace an already running spinner' do
@@ -247,7 +281,7 @@ RSpec.describe Poller do
       expect(task.elapsed_label).to be_nil
       described_class.new(task).ensure_spinner_running
       expect(task.visible_spinner.frame_line)
-        .to eq("#{UI::Spinner::FRAMES[0]} Working...")
+        .to eq("#{UI::Spinner::FRAMES[0]} Working... [job 0 main]")
     end
   end
 

@@ -734,13 +734,13 @@ class SessionManager
     Task.emit(:error, origin: :session_manager, content: e.message)
 
     default = @harness.settings.default_model
-    raise HarnessError,
-      "#{e.message} - and no default model is configured either" unless default
+    # Nothing left to fall back to is not a reason to abort the resume: the
+    # Harness was already seeded from this run's own resolution (its config
+    # default, or the raw -m id) and that model works. Raising here killed the
+    # whole run over a stale saved name, and a layered resume asks once per job.
+    return if default.nil? || find_profile(default).nil?
 
-    profile = find_profile(default)
-    raise HarnessError, "default model '#{default}' not found in config" unless profile
-
-    apply_profile(profile)
+    apply_profile(find_profile(default))
   end
 
   private
@@ -762,8 +762,15 @@ class SessionManager
   # named by its directory plus the id system.json records (DECIDED,
   # doc/session_layers_design.md), so the run UUID is never duplicated in a job
   # file: that is the drift bug Harness#initialize otherwise has to guard.
+  # version/created_at are in it because Session#restore reads them
+  # unconditionally: a job restored straight from its own file raised on
+  # Time.parse(nil) once only the foreground half was supplemented from system.json.
+  # active_model stays a NAME or nil, never the raw wire id: a profile-less run
+  # records nil, which apply_resume_state reads as "this run's own selection".
   def job_session_json(session_h)
     {
+      version: session_h[:version],
+      created_at: session_h[:created_at],
       messages: session_h[:messages],
       user_prompts: session_h[:user_prompts],
       last_stats: session_h[:last_stats],

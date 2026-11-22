@@ -266,7 +266,8 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/model [name]` | Show or switch the active model |
 | `/param [key [value]]` | Show, override or reset a model parameter |
 | `/ctx` | Show context usage (tokens, %, headroom, auto-compact status) |
-| `/jobs` | List every job on the registry's flat list with the foreground one marked; `/jobs switch <id>` makes another retained job foreground |
+| `/jobs` | List every job on the registry's flat list with the foreground one marked; `/jobs switch <id>` makes another retained job foreground; `/jobs add` adds a sub-agent job with its own agent and makes it foreground |
+| `/replay [n] [job <id>\|all]` | Print the last recorded lines of the run (the tail a resume redraws) - n lines, one job's own tail, or every retained job's |
 | `/reasoning` | Show the reasoning text of the last response |
 | `/skills [name]` | List the project's skills (`.harness/skills/`), or print one skill's body |
 | `/memory [name|N]` | List the project's memories (`.harness/memories/`), or print one note's body by name or number |
@@ -393,10 +394,14 @@ context), `test.echo` (test-only)
   names the form that revokes each list it shows.
 - Every NON-default posture is labeled so you can see what a run will do
   before you type anything: the startup banner ("Command consent: MANUAL -
-  ..."), the prompt line ("[model (effort)] [MANUAL] [STREAM] >") and the
-  spinner line. The prompt and the spinner build those tags from ONE builder
-  (`Task.mode_badge`), so a posture cannot read differently in the two places
-  (issue #387). The spinner line also carries the turn's elapsed time after
+  ..."), the prompt line ("[model (effort)] [MANUAL] [STREAM] [job 0 main] >")
+  and the spinner line. The prompt and the spinner build those tags from ONE
+  builder (`Task.mode_badge`), so a posture cannot read differently in the two
+  places (issue #387). The JOB you are talking to is tagged too, on both lines,
+  from one builder (`Poller.job_tag`) - `[job <id> <kind>]`, the main turn
+  included, so a run with several jobs never leaves you guessing which one a
+  wait line belongs to (issue #548). The spinner line also carries the turn's
+  elapsed time after
   the glyph and the posture badge at its end
   ("⠼ 12s Sending (model / api type)...
   🧠 12% (160K) [YOLO]") - and while a request is in flight, a tokens/second

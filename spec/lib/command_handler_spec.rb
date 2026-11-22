@@ -262,6 +262,13 @@ RSpec.describe CommandHandler do
       expect(stdout.string).to include('/retry is not available while a turn is running')
     end
 
+    it 'refuses /jobs add while a turn runs (its prompt would drive an LLM round)' do
+      stdout = StringIO.new
+      mid_handler(stdout).run_mid_turn('/jobs add')
+
+      expect(stdout.string).to include('/jobs is not available while a turn is running')
+    end
+
     it 'refuses a run-ending command (exit) while a turn runs' do
       stdout = StringIO.new
       mid_handler(stdout).run_mid_turn('/exit')
@@ -274,6 +281,30 @@ RSpec.describe CommandHandler do
       mid_handler(stdout).run_mid_turn('/xyzzy')
 
       expect(stdout.string).to include('Unknown command: /xyzzy')
+    end
+  end
+
+  # #548: the factory and the SYSTEM id belong to the run owner, and a command
+  # that adds an agent builds through them, so build_command must hand both down
+  # the way it hands the registry.
+  describe 'the factory and system id passed to built commands (issue #548)' do
+    it 'gives a built command the run harness_factory and session_id' do
+      seen   = {}
+      probe  = Class.new(Commands::JobsCommand) do
+        def handle(_args)
+          @seen[:factory] = @harness_factory
+          @seen[:session] = @session_id
+        end
+      end
+      handler = make_handler(Dir.mktmpdir, UI::Console.new(stdout: StringIO.new))
+      factory = Struct.new(:tag).new('factory')
+      handler.instance_variable_set(:@harness_factory, factory)
+      handler.instance_variable_set(:@session_id, 'sess-1')
+
+      handler.send(:build_command, probe).tap { |c| c.instance_variable_set(:@seen, seen) }.handle('')
+
+      expect(seen[:factory]).to be(factory)
+      expect(seen[:session]).to eq('sess-1')
     end
   end
 end

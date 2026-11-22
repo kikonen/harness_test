@@ -269,7 +269,6 @@ class SessionLocator
       next if job_id.nil?
       next unless File.file?(job_session_file_path(id, job_id))
 
-      chain = parse_json(job_session_file_path(id, job_id)) || {}
       # Status and kind come from the job's OWN record (job.json is what a save
       # writes them into); the index entry names the job, the record describes it.
       record_data = parse_json(job_file_path(id, job_id)) || {}
@@ -277,7 +276,7 @@ class SessionLocator
         id: job_id,
         kind: record_data[:kind] || entry[:kind],
         status: record_data[:status] || entry[:status],
-        messages: Array(chain[:messages]),
+        session: parse_json(job_session_file_path(id, job_id)) || {},
         replay_tail: Array(parse_json(job_replay_file_path(id, job_id)))
       }
     end

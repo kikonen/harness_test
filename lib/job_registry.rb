@@ -209,19 +209,18 @@ class JobRegistry
   # Record the user's own submitted line. It is a first-class ROLE (type
   # :user, not plain :text) so UI::Renderer labels it 'user:' on the resume
   # redraw - the both-sides record #146 asks for.
-  def record_user_prompt(text)
-    return if @max_saved.zero?
-
-    record_report(type: :user, origin: :user, content: text.to_s)
+  # job: whose own buffer carries the line - the foreground when not named. A
+  # caller that hands a prompt to a job it just switched to names that job, so the
+  # record lands in the buffer a resume redraws FOR that job.
+  def record_user_prompt(text, job: nil)
+    record_report(type: :user, origin: :user, content: text.to_s, job:)
   end
 
   # Record a main-thread slash-command report so a resumed run redraws it
   # (#474). A structured :list payload is stored AS the structure, not a
   # pre-rendered line (issue #146).
-  def record_report_output(type:, origin:, content:)
-    return if @max_saved.zero?
-
-    record_report(type:, origin:, content:)
+  def record_report_output(type:, origin:, content:, job: nil)
+    record_report(type:, origin:, content:, job:)
   end
 
   # The saved form of the tail (Entry#to_h hashes) for the session JSON.
@@ -292,8 +291,15 @@ class JobRegistry
 
   # Write one entry into the foreground buffer and enforce the saved window -
   # the same pair every tail put through #record does.
-  def record_report(type:, origin:, content:)
-    foreground_buffer&.put(type:, origin:, content:)
-    foreground_buffer&.keep_window
+  def record_report(type:, origin:, content:, job: nil)
+    return if @max_saved.zero?
+
+    target = job || foreground_job
+    # The buffer of the job named, written here because the caller is the main
+    # thread (the only writer of every job buffer). Not the event queue: nothing
+    # drains that queue once the turn that owns it has ended, so an entry posted
+    # from a command would never reach a buffer or a save.
+    target&.buffer&.put(type:, origin:, content:)
+    target&.buffer&.keep_window
   end
 end
