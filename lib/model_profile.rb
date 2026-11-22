@@ -53,7 +53,7 @@ class ModelProfile
     @vision     = entry[:vision] == true
     @streaming  = bool_or_nil(entry[:streaming])
     @mcp_images = entry[:mcp_images].is_a?(Hash) ? entry[:mcp_images] : nil
-    @sampling   = SAMPLING_KEYS.to_h { |key| [key, number_or_nil(key, entry[key])] }
+    @sampling   = SAMPLING_KEYS.to_h { |key| [key, entry[key]] }
   end
 
   # Role-pure predicates: each role (id/model/url) answers for itself, so no
