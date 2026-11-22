@@ -601,8 +601,8 @@ class SessionManager
 
     profiles = @harness.settings.model_profiles
     if profiles.empty?
-      # No catalogue to look the id up in: the run keeps the raw id as its
-      # profile id, and has no endpoint to send it to (#556).
+      # A raw id typed with no profiles configured: it names the model directly
+      # (no profile to take a model: from) and has no endpoint to send it to (#556).
       @harness.model_config.active_profile_id   = id
       @harness.model_config.active_profile_name = id
       @harness.model_config.model               = id
