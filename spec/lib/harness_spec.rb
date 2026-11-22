@@ -2732,7 +2732,9 @@ RSpec.describe Harness do
       expect(h.sandbox_gemfile.gemfile_path).to eq(
         File.join(workdir, '.harness', 'sandbox', 'Gemfile'))
       expect(h.sandbox_gemfile.exist?).to be true
-      expect(File.read(h.sandbox_gemfile.gemfile_path)).to eq(SandboxGemfile::STARTER_GEMFILE)
+      # The seed is a COPY of the repo template, not text baked into the source.
+      expect(File.read(h.sandbox_gemfile.gemfile_path))
+        .to eq(File.read(SandboxGemfile::STARTER_TEMPLATE_FILE))
     end
 
     # A fresh seed's outcome is logged, so a seed that could NOT lock (a gem
@@ -2755,14 +2757,18 @@ RSpec.describe Harness do
     end
 
     # A model-managed Gemfile is never re-locked or overwritten on a later launch:
-    # ensure_starter! early-returns :existing, so no bundler runs and no second
-    # seed line appears.
+    # ensure_starter! early-returns :existing, so no seed line appears. The floor
+    # resync is the one addition it makes - here the model's own single-quote
+    # style is what survives, unchanged, above the appended defaults.
     it 'leaves an existing sandbox untouched on a later launch' do
       FileUtils.mkdir_p(File.join(workdir, '.harness', 'sandbox'))
       File.write(File.join(workdir, '.harness', 'sandbox', 'Gemfile'), "gem 'mine'\n")
 
       h = build_harness
-      expect(File.read(h.sandbox_gemfile.gemfile_path)).to eq("gem 'mine'\n")
+      text = File.read(h.sandbox_gemfile.gemfile_path)
+      expect(text).to start_with("gem 'mine'\n")
+      expect(text).to include("gem 'mine'")
+      expect(text.scan(/gem 'mine'/).size).to eq(1)
       expect(File.read(h.session_log_path)).not_to include('ruby sandbox seeded')
     end
   end

@@ -51,9 +51,20 @@ RSpec.describe SandboxGemfile do
         text = File.read(s.gemfile_path)
 
         expect(text).to include('source "https://rubygems.org"')
-        %w[csv json rexml logger racc base64].each do |name|
+        %w[csv json rexml logger racc base64 fiddle reline].each do |name|
           expect(text).to match(/gem "#{name}"/)
         end
+      end
+    end
+
+    # The starter lives in the repo (config/), so its gem list is editable like
+    # config/config.example.yml's is - nothing is embedded in the source.
+    it 'is a copy of the repo template file' do
+      Dir.mktmpdir do |dir|
+        s = sandbox_in(dir)
+        s.ensure_starter!
+
+        expect(File.read(s.gemfile_path)).to eq(File.read(described_class::STARTER_TEMPLATE_FILE))
       end
     end
 
@@ -91,6 +102,70 @@ RSpec.describe SandboxGemfile do
 
         expect(sandbox_in(dir).ensure_starter!).to eq(:existing)
         expect(File.read(sandbox_in(dir).gemfile_path)).to eq(managed)
+      end
+    end
+  end
+
+  describe '#ensure_default_gems! (the default list as a floor)' do
+    # A sandbox the model rewrote down to one gem must get the starter's gems back,
+    # or a script that needs one fails mid-run with a bare LoadError.
+    it 'appends the default gems a rewritten sandbox lost' do
+      Dir.mktmpdir do |dir|
+        s = sandbox_in(dir)
+        FileUtils.mkdir_p(s.dir)
+        File.write(s.gemfile_path, %(source "https://rubygems.org"\ngem "json"\n))
+        allow(s).to receive(:lock_seeded?).and_return(true)
+
+        expect(s.ensure_default_gems!).to eq(:resynced_locked)
+        text = File.read(s.gemfile_path)
+        expect(text).to include('gem "json"')
+        (s.default_gem_names - ['json']).each { |name| expect(text).to include(%(gem "#{name}")) }
+      end
+    end
+
+    # The common case: nothing is missing, so the file is not touched and no
+    # bundler runs.
+    it 'is a no-op (nil, no bundler) when every default gem is already declared' do
+      Dir.mktmpdir do |dir|
+        s = sandbox_in(dir)
+        s.ensure_starter!
+        before = File.read(s.gemfile_path)
+        expect(s).not_to receive(:lock_seeded?)
+
+        expect(s.ensure_default_gems!).to be_nil
+        expect(File.read(s.gemfile_path)).to eq(before)
+      end
+    end
+
+    # The model's own constraint for a gem must survive the resync: a gem named
+    # there is never re-added, and never rewritten.
+    it 'keeps a version constraint the model wrote for a default gem' do
+      Dir.mktmpdir do |dir|
+        s = sandbox_in(dir)
+        FileUtils.mkdir_p(s.dir)
+        File.write(
+          s.gemfile_path,
+          %(source "https://rubygems.org"\ngem "logger", ">= 1.7"\ngem "json"\n)
+        )
+        allow(s).to receive(:lock_seeded?).and_return(true)
+
+        s.ensure_default_gems!
+        text = File.read(s.gemfile_path)
+        expect(text).to include('gem "logger", ">= 1.7"')
+        expect(text.scan(/gem "logger"/).size).to eq(1)
+      end
+    end
+
+    # A missing lock must not be treated as a gem problem - and a resync that
+    # could not re-lock says so rather than leaving a silently unresolvable bundle.
+    it 'reports :resynced_unlocked when the re-lock failed' do
+      Dir.mktmpdir do |dir|
+        s = sandbox_in(dir)
+        FileUtils.mkdir_p(s.dir)
+        File.write(s.gemfile_path, %(source "https://rubygems.org"\ngem "json"\n))
+        allow(s).to receive(:lock_seeded?).and_return(false)
+
+        expect(s.ensure_default_gems!).to eq(:resynced_unlocked)
       end
     end
   end
