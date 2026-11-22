@@ -39,20 +39,18 @@ module Commands
       # vocabulary). Each fact is its own named column - the column names say
       # what each cell is.
       items = profiles.map do |p|
-        id = p[:id] || p[:name]
-        display = p[:name] || id
         marks  = []
-        marks << "default" if default_id && id == default_id
-        marks << "active"  if id == current
+        marks << "default" if default_id && p.id == default_id
+        marks << "active"  if p.id == current
         # issue #217: tag the API type so it is obvious which endpoint a
         # profile hits (openai -> /v1-compatible, ollama -> native /api/chat);
         # issue #449: vision is a per-profile fact, so the listing says which
         # models a tool-result image could actually be sent to. Both are their
         # own cells of the flags column rather than a fused suffix on the row.
-        api = p[:api] || "openai"
+        api = p.api || "openai"
         flags = marks.dup
-        flags << "vision" if p[:vision]
-        { name: display, id:, model: p[:model], url: p[:url], api:, flags: flags.join(", ") }
+        flags << "vision" if p.vision
+        { name: p.name, id: p.id, model: p.model, url: p.url, api:, flags: flags.join(", ") }
       end
       emit_list(
         title: "Configured models (#{profiles.size}):",

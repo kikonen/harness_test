@@ -551,24 +551,23 @@ class SessionManager
 
   # -- Model management ----------------------------------------------------
 
-  # The profile this Harness' selection resolves to (nil when no profiles are
-  # configured, or the selection is a raw -m id). issue #449.
+  # The profile this Harness' selection resolves to (nil only when the selection
+  # is nil and there is no config default). issue #449.
   def active_profile
     find_profile(@harness.model_config.active_profile_id)
   end
 
-  # True when the ACTIVE model can be sent images: only a profile that declares
-  # 'vision: true' in the config. No profiles configured = a raw model id the
-  # harness knows nothing about = text-only (the safe reading of an unknown).
+  # True when the ACTIVE profile can be sent images: only one that declares
+  # 'vision: true' in the config. A run with no profile resolves to text-only.
   def vision?
-    active_profile&.fetch(:vision, false) == true
+    active_profile&.vision == true
   end
 
   # The image inline budget in force for this run: the active profile's own
   # 'mcp_images:' block, else the config-level one, else the built-in defaults
   # (HarnessConfig#normalize_mcp_images fills every key).
   def image_limits
-    (active_profile&.dig(:mcp_images)) ||
+    (active_profile&.mcp_images) ||
       @harness.model_config.mcp_image_limits ||
       HarnessConfig::MCP_IMAGE_LIMIT_DEFAULTS
   end
@@ -589,32 +588,18 @@ class SessionManager
     "#{backend.api_type} #{backend.endpoint_path}"
   end
 
-  # Switch this Harness' connection to a configured profile by its id.
-  def switch_profile(id)
-    id = id.to_s.strip
-    raise HarnessError, "usage: /model <profile>" if id.empty?
+  # Switch this Harness' connection to a configured profile by its profile_id.
+  def switch_profile(profile_id)
+    profile = find_profile(profile_id.to_s.strip)
+    raise HarnessError, "no such profile '#{profile_id}' - list them with /models" if profile.nil?
 
     # The spinner's recent tok/s rate (issue #285) was measured against the
     # server being switched away from, so it no longer describes anything this
     # run will do.
     @harness.forget_last_rate
 
-    profiles = @harness.settings.model_profiles
-    if profiles.empty?
-      # A raw id typed with no profiles configured: it names the model directly
-      # (no profile to take a model: from) and has no endpoint to send it to (#556).
-      @harness.model_config.active_profile_id   = id
-      @harness.model_config.active_profile_name = id
-      @harness.model_config.model               = id
-      return { id:, name: id, url: nil }
-    end
-
-    match = find_profile(id)
-    raise HarnessError,
-      "unknown profile '#{id}'. Type /models to see the available profiles." unless match
-
-    apply_profile(match)
-    match
+    apply_profile(profile)
+    profile
   end
 
   # Find a configured profile by its id (nil when absent). The catalogue is
@@ -736,14 +721,10 @@ class SessionManager
   rescue HarnessError => e
     Task.emit(:error, origin: :session_manager, content: e.message)
 
-    default = @harness.settings.default_profile_id
-    # Nothing left to fall back to is not a reason to abort the resume: the
-    # Harness was already seeded from this run's own resolution (its config
-    # default, or the raw -m id) and that model works. Raising here killed the
-    # whole run over a stale saved name, and a layered resume asks once per job.
-    return if default.nil? || find_profile(default).nil?
-
-    apply_profile(find_profile(default))
+    # No fallback without a real profile: apply the run's own resolved profile.
+    # A layered resume asks this once per saved job.
+    profile = @harness.settings.active_profile
+    apply_profile(profile) if profile
   end
 
   private
@@ -768,8 +749,7 @@ class SessionManager
   # version/created_at are in it because Session#restore reads them
   # unconditionally: a job restored straight from its own file raised on
   # Time.parse(nil) once only the foreground half was supplemented from system.json.
-  # active_profile_id is the SELECTION: a profile id, or nil when this run used
-  # its config default (a profile-less run records nil too).
+  # active_profile_id is the SELECTION: a profile id, or nil when this run used its config default.
   def job_session_json(session_h)
     {
       version: session_h[:version],

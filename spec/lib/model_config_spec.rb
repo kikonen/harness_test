@@ -55,14 +55,13 @@ RSpec.describe ModelConfig do
       expect(config.base_url).to eq('http://host.test/v1')
     end
 
-    # A profile declaring no url says nothing about the endpoint: a switch that
-    # silently pointed at the previous model's server would send the new model
-    # to the wrong host.
-    it 'leaves the endpoint alone when the profile declares no url' do
+    # A switch takes the endpoint from the profile it switched to, not from the
+    # previous model's server (every profile carries its own url, #556).
+    it 'points the endpoint at the new profile url' do
       config = described_class.new({ base_url: 'http://first.test/v1' })
-      config.apply_profile({ id: 'second', model: 'second-model' })
+      config.apply_profile({ id: 'second', url: 'http://second.test/v1', model: 'second-model' })
 
-      expect(config.base_url).to eq('http://first.test/v1')
+      expect(config.base_url).to eq('http://second.test/v1')
       expect(config.active_profile_id).to eq('second')
       expect(config.model).to eq('second-model')
     end

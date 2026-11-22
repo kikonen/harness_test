@@ -30,13 +30,19 @@ RSpec.describe CLIOptions do
   describe 'web.fetch private-address key (issue #33)' do
     it 'is off when the config says nothing' do
       opts = resolve(['-m', 'test-model', '-d', workdir,
-                      '-c', write_config('fetch-config.yml', "model: test-model\n")])
+                      '-c', write_config('fetch-config.yml', "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\n")])
       expect(opts[:web_fetch_allow_private]).to be(false)
     end
 
     it 'is on when the config asks for it' do
       path = write_config('fetch-config.yml',
-                          "model: test-model\nweb_fetch_allow_private: true\n")
+                          "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\nweb_fetch_allow_private: true\n")
       opts = resolve(['-m', 'test-model', '-d', workdir, '-c', path])
       expect(opts[:web_fetch_allow_private]).to be(true)
     end
@@ -52,23 +58,35 @@ RSpec.describe CLIOptions do
     end
 
     it 'is off when the config says nothing' do
-      opts = resolve_config("model: test-model\n")
+      opts = resolve_config("models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\n")
       expect(opts[:command_safety_denylist_safe_approve]).to be(false)
     end
 
     it 'is on when the config asks for it' do
-      opts = resolve_config("model: test-model\ncommand_safety_denylist_safe_approve: true\n")
+      opts = resolve_config("models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\ncommand_safety_denylist_safe_approve: true\n")
       expect(opts[:command_safety_denylist_safe_approve]).to be(true)
     end
 
     it "maps the enum mode 'denylist' onto the two halves" do
-      opts = resolve_config("model: test-model\ncommand_safety_auto_approve: denylist\n")
+      opts = resolve_config("models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\ncommand_safety_auto_approve: denylist\n")
       expect(opts[:command_safety_auto_approve]).to be(false)
       expect(opts[:command_safety_denylist_safe_approve]).to be(true)
     end
 
     it "maps 'safe_denylist' onto both halves" do
-      opts = resolve_config("model: test-model\ncommand_safety_auto_approve: safe_denylist\n")
+      opts = resolve_config("models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\ncommand_safety_auto_approve: safe_denylist\n")
       expect(opts[:command_safety_auto_approve]).to be(true)
       expect(opts[:command_safety_denylist_safe_approve]).to be(true)
     end
@@ -79,18 +97,27 @@ RSpec.describe CLIOptions do
   describe 'markdown_max_width (issue #106)' do
     it 'is nil when neither the flag nor the config gives one' do
       opts = resolve(['-m', 'test-model', '-d', workdir,
-                      '-c', write_config('md-config.yml', "model: test-model\n")])
+                      '-c', write_config('md-config.yml', "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\n")])
       expect(opts[:markdown_max_width]).to be_nil
     end
 
     it 'reads the config key' do
-      path = write_config('md-config.yml', "model: test-model\nmarkdown_max_width: 120\n")
+      path = write_config('md-config.yml', "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\nmarkdown_max_width: 120\n")
       opts = resolve(['-m', 'test-model', '-d', workdir, '-c', path])
       expect(opts[:markdown_max_width]).to eq(120)
     end
 
     it 'the flag overrides the config key' do
-      path = write_config('md-config.yml', "model: test-model\nmarkdown_max_width: 120\n")
+      path = write_config('md-config.yml', "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\nmarkdown_max_width: 120\n")
       opts = resolve(['-m', 'test-model', '-d', workdir, '-c', path,
                       '--markdown-width', '90'])
       expect(opts[:markdown_max_width]).to eq(90)
@@ -100,7 +127,10 @@ RSpec.describe CLIOptions do
     # count of its own can lay out from), so it is stored as written.
     it 'accepts a percentage as the raw basis' do
       opts = resolve(['-m', 'test-model', '-d', workdir,
-                      '-c', write_config('md-config.yml', "model: test-model\n"),
+                      '-c', write_config('md-config.yml', "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\n"),
                       '--markdown-width', '85%'])
       expect(opts[:markdown_max_width]).to eq('85%')
     end
@@ -108,7 +138,10 @@ RSpec.describe CLIOptions do
     it 'a non-integer --markdown-width is a CLI error, not a silent nil' do
       expect {
         resolve(['-m', 'test-model', '-d', workdir,
-                 '-c', write_config('md-config.yml', "model: test-model\n"),
+                 '-c', write_config('md-config.yml', "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\n"),
                  '--markdown-width', 'wide'])
       }.to raise_error(HarnessError, /--markdown-width needs a column count or a percentage/)
     end
@@ -119,7 +152,10 @@ RSpec.describe CLIOptions do
   # path - with no --markdown flag and no config key, a run renders plain.
   describe 'markdown stays default off (issue #106)' do
     it 'is off when neither the flag nor the config asks for it' do
-      path = write_config('md-off.yml', "model: test-model\n")
+      path = write_config('md-off.yml', "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\n")
       opts = resolve(['-m', 'test-model', '-d', workdir, '-c', path])
       expect(opts[:markdown]).to be(false)
     end
@@ -131,13 +167,19 @@ RSpec.describe CLIOptions do
   describe 'mcp_servers (issue #48)' do
     it 'is empty when the config says nothing (no MCP code path runs)' do
       opts = resolve(['-m', 'test-model', '-d', workdir,
-                      '-c', write_config('mcp-config.yml', "model: test-model\n")])
+                      '-c', write_config('mcp-config.yml', "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\n")])
       expect(opts[:mcp_servers]).to eq([])
     end
 
     it 'carries the normalized entries from the config' do
       path = write_config('mcp-config.yml', <<~YAML)
-        model: test-model
+        models:
+          - id: test-model
+            url: http://host.test/v1
+            model: test-model
         mcp_servers:
           - name: fs
             command: ruby
@@ -156,12 +198,18 @@ RSpec.describe CLIOptions do
   describe 'protected_dirs (issue #385)' do
     it 'is nil when the config says nothing (FileList applies its default)' do
       opts = resolve(['-m', 'test-model', '-d', workdir,
-                      '-c', write_config('prot-config.yml', "model: test-model\n")])
+                      '-c', write_config('prot-config.yml', "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\n")])
       expect(opts[:protected_dirs]).to be_nil
     end
 
     it 'carries the configured list' do
-      path = write_config('prot-config.yml', "model: test-model\nprotected_dirs: [secrets, private]\n")
+      path = write_config('prot-config.yml', "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\nprotected_dirs: [secrets, private]\n")
       opts = resolve(['-m', 'test-model', '-d', workdir, '-c', path])
       expect(opts[:protected_dirs]).to eq(%w[secrets private])
     end
@@ -174,12 +222,18 @@ RSpec.describe CLIOptions do
   describe 'grant_workdir (issue #384)' do
     it 'is true when the config says nothing' do
       opts = resolve(['-m', 'test-model', '-d', workdir,
-                      '-c', write_config('gw-config.yml', "model: test-model\n")])
+                      '-c', write_config('gw-config.yml', "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\n")])
       expect(opts[:grant_workdir]).to be(true)
     end
 
     it 'carries an explicit false (the opt-out)' do
-      path = write_config('gw-config.yml', "model: test-model\ngrant_workdir: false\n")
+      path = write_config('gw-config.yml', "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\ngrant_workdir: false\n")
       opts = resolve(['-m', 'test-model', '-d', workdir, '-c', path])
       expect(opts[:grant_workdir]).to be(false)
     end
@@ -200,17 +254,26 @@ RSpec.describe CLIOptions do
     end
 
     it 'is nil when the config says nothing (Harness applies its default)' do
-      opts = resolve_config("model: test-model\n")
+      opts = resolve_config("models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\n")
       expect(opts[:resume_replay_entries]).to be_nil
     end
 
     it 'carries the configured count' do
-      opts = resolve_config("model: test-model\nresume:\n  replay_entries: 12\n")
+      opts = resolve_config("models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\nresume:\n  replay_entries: 12\n")
       expect(opts[:resume_replay_entries]).to eq(12)
     end
 
     it 'carries 0 as 0 (the disable), not as nil' do
-      opts = resolve_config("model: test-model\nresume:\n  replay_entries: 0\n")
+      opts = resolve_config("models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\nresume:\n  replay_entries: 0\n")
       expect(opts[:resume_replay_entries]).to eq(0)
     end
 
@@ -223,13 +286,16 @@ RSpec.describe CLIOptions do
   describe 'model requirement' do
     it 'raises when neither -m nor a default model is set (and not listing)' do
       expect {
-        resolve(['-d', workdir, '-c', write_config('no-model.yml', "default_profile_id: \n")])
-      }.to raise_error(HarnessError, /-m \/ --model is required/)
+        resolve(['-m', 'ghost', '-d', workdir, '-c', write_config('no-model.yml', "default_profile_id: \n")])
+      }.to raise_error(HarnessError, /no model profiles configured/)
     end
 
     it 'does not require a model for --list-sessions' do
       opts = resolve(['--list-sessions', '-d', workdir,
-                      '-c', write_config('list.yml', "model: test-model\n")])
+                      '-c', write_config('list.yml', "models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\n")])
       expect(opts[:list_sessions]).to be_truthy
     end
   end

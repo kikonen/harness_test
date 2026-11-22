@@ -73,15 +73,14 @@ class ModelConfig
   # Seed a fresh connection from the run's settings: the selection and the
   # global image budget come from settings; every endpoint/sampling value comes
   # from the resolved PROFILE. settings carries no per-connection field to clone
-  # (issue #286) - -m only names a profile. A profile-less selection (-m with no
-  # profiles configured) keeps the raw id as the profile id and leaves base_url
-  # nil: there is no built-in endpoint default. A hand-built hash (specs) still
-  # works via #new.
+  # (issue #286) - -m only names a profile; there is no profile-less raw-id run.
+  # A nil profile (nil selection + no config default) seeds nothing. A hand-built
+  # hash (specs) still works via #new.
   def self.from_settings(settings)
     profile = settings.active_profile
     values = {
       active_profile_id: settings.active_profile_id,
-      active_profile_name: profile ? profile_name(profile) : settings.resolved_profile_id,
+      active_profile_name: profile ? profile.name : settings.resolved_profile_id,
       mcp_image_limits: settings.mcp_image_limits
     }
     apply_seed_profile(values, profile)
@@ -96,7 +95,7 @@ class ModelConfig
   def self.apply_seed_profile(values, profile)
     return if profile.nil?
 
-    values[:base_url]         = profile[:url] if profile[:url]
+    values[:base_url]         = profile[:url]
     values[:api]              = profile[:api]
     values[:token]            = profile[:token]
     values[:num_ctx]          = profile[:num_ctx]
@@ -114,16 +113,6 @@ class ModelConfig
     values[:mcp_image_limits] = profile[:mcp_images] if profile[:mcp_images]
   end
 
-  # A profile from the run-wide catalogue carries its normalized :id; a hash
-  # built by hand (a spec) may key it by name: alone.
-  def self.profile_id(profile)
-    profile[:id] || profile[:name]
-  end
-
-  def self.profile_name(profile)
-    profile[:name] || profile[:id]
-  end
-
   # Specs and non-CLI builders pass the raw values hash directly.
   def initialize(values)
     @values = values
@@ -136,7 +125,7 @@ class ModelConfig
   # says nothing, so it must not clobber the seeded budget (apply_profile only
   # writes one the profile actually declares).
   def apply_profile(profile)
-    @values[:base_url]         = profile[:url] if profile[:url]
+    @values[:base_url]         = profile[:url]
     @values[:api]              = profile[:api]
     @values[:token]            = profile[:token]
     @values[:num_ctx]          = profile[:num_ctx]
@@ -149,8 +138,8 @@ class ModelConfig
     @values[:min_p]            = profile[:min_p]
     @values[:presence_penalty] = profile[:presence_penalty]
     @values[:repeat_penalty]   = profile[:repeat_penalty]
-    @values[:active_profile_id]   = ModelConfig.profile_id(profile)
-    @values[:active_profile_name] = ModelConfig.profile_name(profile)
+    @values[:active_profile_id]   = profile[:id]
+    @values[:active_profile_name] = profile[:name]
     @values[:model]               = profile[:model]
     @values[:vision]           = profile[:vision] == true
     @values[:mcp_image_limits] = profile[:mcp_images] if profile[:mcp_images]

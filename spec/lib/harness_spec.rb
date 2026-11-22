@@ -459,10 +459,10 @@ RSpec.describe Harness do
       expect(harness.session.pending?).to be(false)
     end
 
-    # A profile-less run (-m as a raw id) has no default to fall back to either.
-    # Aborting here was the owner's crash: a config with models configured but no
-    # default_profile_id, resuming a session whose saved name is gone.
-    it 'resumes on the raw model of a profile-less run over an unknown saved name' do
+    # A run with a configured profile but no default_profile_id, resuming a
+    # session whose saved id names no profile: it keeps its seeded model rather
+    # than aborting the resume (aborting over a stale name was the owner's crash).
+    it 'resumes on its seeded model when there is no default_profile_id and the saved id is unknown' do
       id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
       seed_saved_session(id)
       data = saved_data(id).merge(active_profile_id: 'gone-model')

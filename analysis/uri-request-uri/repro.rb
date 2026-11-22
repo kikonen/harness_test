@@ -34,11 +34,11 @@ end
 # in the task thread, on every retry, looking stuck rather than mis-configured.
 report("no url (raw -m id)", ModelConfig.new(api: "openai"))
 # A profile that declares no url is refused where the config is read.
-profile("profile with no url", { name: "nohost" })
+profile("profile with no url", { id: "nohost", model: "nohost-m" })
 # A profile is refused when it carries no model: (#572) or no id.
-profile("profile with no id", { url: "http://host.test/v1" })
+profile("profile with no id", { model: "m", url: "http://host.test/v1" })
 profile("profile with no model", { id: "noModel", url: "http://host.test/v1" })
 # A non-http scheme is a config error too, not a connect failure.
-profile("profile with a ws url", { name: "ws", url: "ws://host.test/v1" })
+profile("profile with a ws url", { id: "ws", model: "ws-m", url: "ws://host.test/v1" })
 # For contrast, the same call on a URI built from a configured url:
 report("url configured", ModelConfig.new(api: "openai", base_url: "https://host.example/v1"))

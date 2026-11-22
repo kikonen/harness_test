@@ -19,7 +19,12 @@ RSpec.describe Commands::ModelCommand do
     # issue #449: image support is a session_manager fact (the active profile's
     # 'vision:'), so /model reads it from there.
     sm.define_singleton_method(:vision?) { vision }
-    sm.define_singleton_method(:switch_profile) { |id| profiles.find { |p| (p[:id] || p[:name]) == id } }
+    sm.define_singleton_method(:switch_profile) do |id|
+      profile = profiles.find { |p| p[:id] == id }
+      raise HarnessError, "no such profile '#{id}'" if profile.nil?
+
+      profile
+    end
     po = Object.new
     po.define_singleton_method(:list_items) do
       [{ key: 'temperature', value: '0.7', annotation: '' }]
@@ -94,8 +99,8 @@ RSpec.describe Commands::ModelCommand do
 
   describe 'with a name (switch the model)' do
     it 'reports the profile it switched to' do
-      sm = session_manager([{ name: 'qwen', id: 'qwen' },
-                            { name: 'big', id: 'big', url: 'http://other:11434/v1' }],
+      sm = session_manager([spec_profile('qwen'),
+                            spec_profile('big', url: 'http://other:11434/v1')],
                            'qwen')
       out = run_command('big', manager: sm)
 
@@ -104,29 +109,28 @@ RSpec.describe Commands::ModelCommand do
       expect(out).to include('/v1/chat/completions')
     end
 
-    # A profile that declares no url of its own falls back to the run's base url,
-    # which is what keeps the line complete.
-    it 'falls back to the global base url for the endpoint' do
-      mgr = session_manager([{ name: 'bare', id: 'bare' }], 'qwen')
+    # A switch reports the profile's OWN endpoint - a configured profile always
+    # carries a url, so there is no fallback to the run's base url to display.
+    it 'reports the profile endpoint it switched to' do
+      mgr = session_manager([spec_profile('bare', url: 'http://bare:11434/v1')], 'qwen')
       out = run_command('bare', manager: mgr)
 
-      expect(out).to include('Switched to model: bare (bare @ http://srv:11434/v1)')
+      expect(out).to include('Switched to model: bare (bare @ http://bare:11434/v1)')
     end
 
     it 'prints the parameter table after a switch too' do
-      sm = session_manager([{ name: 'qwen', id: 'qwen' },
-                            { name: 'big', id: 'big' }], 'qwen')
+      sm = session_manager([spec_profile('qwen'), spec_profile('big')], 'qwen')
       row = run_command('big', manager: sm).lines.map(&:chomp).find { |l| l.include?('temperature') }
 
       expect(row).to include('temperature')
       expect(row).to include('0.7')
     end
 
-    # An unknown id finds no profile: switch_profile returns nil and the command
-    # must fail loudly rather than print an empty line.
+    # An unknown id names no profile: switch_profile raises rather than let the
+    # command print an empty line.
     it 'raises when the id matches no profile' do
       expect { run_command('ghost', manager: session_manager([{ name: 'qwen', id: 'qwen' }], 'qwen')) }
-        .to raise_error(NoMethodError)
+        .to raise_error(HarnessError, /no such profile/)
     end
   end
 

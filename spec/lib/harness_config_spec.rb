@@ -312,7 +312,7 @@ RSpec.describe HarnessConfig do
   # now has an id (what selects it) and a name (what displays it).
   describe 'model profile completeness (issue #556)' do
     it 'refuses a profile with no url' do
-      expect { described_class.new(models: [{ name: 'nohost', id: 'nohost' }]) }
+      expect { described_class.new(models: [{ id: 'nohost', model: 'nohost-m' }]) }
         .to raise_error(HarnessError, /model profile 'nohost' needs a 'url'/)
     end
 

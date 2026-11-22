@@ -43,9 +43,9 @@ module Commands
 
       profile = foreground_harness.session_manager.switch_profile(name)
       # The name is the profile's display label; its model: is what the endpoint gets asked for.
-      id      = profile[:id]
-      display = profile[:name] || id
-      url     = profile[:url] || foreground_harness.model_config.base_url
+      id      = profile.id
+      display = profile.name
+      url     = profile.url
       # issue #217: the API type can CHANGE with the profile - say it.
       emit_role(
         :note,

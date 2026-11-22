@@ -231,8 +231,8 @@ profile declares `vision: true` is ADDITIONALLY sent the pixels inline, but only
 within the `mcp_images:` budget (the key governs every tool-result image, not
 MCP alone): base64 costs 4/3 the file size, and one large render measured
 ~410K tokens - more than six times a 65 536-token context window. A profile
-without `vision:` (and a raw `-m` id with no profiles configured) is text-only:
-the harness never guesses a model can see images. `/model` names which posture
+without `vision:` (and a run that resolves to no profile) is text-only: the harness
+never guesses a model can see images. `/model` names which posture
 the active model has. Design: `doc/mcp_images_design.md` (issue #449, extended
 by #451).
 

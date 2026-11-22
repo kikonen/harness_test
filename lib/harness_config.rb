@@ -5,6 +5,8 @@ require "fileutils"
 
 require_relative "harness_error"
 require_relative "image_store"
+require_relative "model_profile"
+require_relative "config_scalar"
 
 # -- HarnessConfig --------------------------------------------------------
 #
@@ -20,6 +22,8 @@ require_relative "image_store"
 # server's own default applies (issue #215).
 #
 class HarnessConfig
+  include ConfigScalar
+
   HARNESS_DIR = ".harness"
 
   # issue #260: the user home is the default place for configuration - a repo
@@ -51,14 +55,6 @@ class HarnessConfig
     "safe_denylist" => { approve: true,  denylist: true }
   }.freeze
 
-  # issue #422: a ${VAR} reference in a config string value is replaced by the
-  # ENV of that name, so a bearer token / MCP credential lives ONLY in the
-  # environment and never in config.yml (opening or screen-capturing the file
-  # cannot leak it). Strict identifier regex on purpose: a name that is not a
-  # legal identifier stays literal, and the lookup is a plain ENV read - never
-  # eval / ERB, so a config value can never run code.
-  ENV_REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/
-
   # Tool-result image inline budget (issue #449): the built-in the harness
   # enforces when neither the config nor a profile names one. A profile may
   # override it (#normalize_models); a run with no vision profile simply never
@@ -78,6 +74,9 @@ class HarnessConfig
     # 'default_profile_id' names what it is: the profile a new run uses.
     # 'default_model:' is the historical key and is still read.
     @default_profile_id = nonblank(data[:default_profile_id]) || nonblank(data[:default_model])
+    raise HarnessError, "'default_profile_id' must name a configured model profile" if
+      @default_profile_id && @models.none? { |m| m[:id] == @default_profile_id }
+
     @system_prompt_file = nonblank(data[:system_prompt_file])
     @auto_save = data[:auto_save].nil? ? true : data[:auto_save]
     @command_safety_check = data[:command_safety_check] == true
@@ -252,61 +251,38 @@ class HarnessConfig
     raise HarnessError, "invalid config file #{path}: #{e.message}"
   end
 
-  # True when at least one model profile is configured.
   def models_configured?
     !@models.empty?
   end
 
-  # Whether the session is auto-saved at every prompt boundary (default true).
   def auto_save_enabled
     @auto_save == true
   end
 
-  # Opt-in double-Enter submit for the multiline editor (issue #198):
-  # Enter on an empty last line submits the buffer. Default false - plain
-  # Enter always inserts a newline.
   def double_enter_submit_enabled
     @double_enter_submit == true
   end
 
-  # issue #224: opt-in model self-check for unapproved shell commands -
-  # an advisory verdict in the consent dialog, never an auto-approval.
   def command_safety_check_enabled
     @command_safety_check == true
   end
 
-  # issue #224 follow-up: the initial command consent posture for the
-  # safety check (MANUAL or AUTO-APPROVE; config-derived for the whole run).
-  # Only meaningful with command_safety_check on.
   def command_safety_auto_approve_enabled
     @command_safety_auto_approve == true
   end
 
-  # issue #389: the denylist half of command_safety_auto_approve (the 'denylist' /
-  # 'safe_denylist' modes). Config-derived for the whole run: no live toggle.
-  # Meaningless unless command_safety_check is on (no check, no verdict).
   def command_safety_denylist_safe_approve_enabled
     @command_safety_denylist_safe_approve == true
   end
 
-  # issue #221: initial YOLO posture for shell consent (issue #221). Off by
-  # default: consent removal is always the user's explicit choice. During a
-  # session it is toggled with /yolo and persisted with the session.
   def yolo_enabled?
     @yolo == true
   end
 
-  # issue #221: whether the `! cmd` bang syntax keeps its confirmation
-  # dialog. Defaults to true (the historic behavior). False means a
-  # user-typed bang command runs without asking - the disaster denylist
-  # still gates it.
   def bang_requires_confirmation?
     @bang_requires_confirmation != false
   end
 
-  # issue #33: may web.fetch connect to a private / loopback / CGNAT address?
-  # Default OFF. It lifts the PRIVATE tier of AddressGuard only - link-local
-  # (the cloud metadata range) and multicast stay refused whatever this says.
   def web_fetch_allow_private?
     @web_fetch_allow_private == true
   end
@@ -347,8 +323,6 @@ class HarnessConfig
     @markdown_max_width
   end
 
-  # External MCP servers to connect at startup (issue #48). An empty array when
-  # none are configured - the MCP code path then never runs.
   def mcp_servers
     @mcp_servers
   end
@@ -441,19 +415,18 @@ class HarnessConfig
     @retry[:delay]
   end
 
-  # Resolve the selected model profile. selection is the value of -m (a profile
-  # id) or nil. Returns a normalized profile { id:, name:, url:, token:, ... }
-  # when profiles are configured, or nil when none are (so the caller can fall
-  # back to treating -m as a raw model id).
+  # Resolve the selected model profile: selection is the value of -m (a profile
+  # id) or nil (the config default). Raises unless a configured profile matches -
+  # there is no raw-id fallback: a model is selected from 'models:' only.
   def resolve_profile(selection)
-    return nil unless models_configured?
+    return nil if selection.nil? && @default_profile_id.nil?
 
     key = nonblank(selection) || @default_profile_id
-    raise HarnessError, "no model selected and no default_profile_id configured" if key.nil?
+    raise HarnessError, "no model profiles configured to select one from" if @models.empty?
 
     match = @models.find { |m| m[:id] == key }
     raise HarnessError,
-      "unknown model '#{key}'. Available: #{@models.map { |m| m[:id] }.join(', ')}" unless match
+      "unknown profile '#{key}'. Available: #{@models.map { |m| m[:id] }.join(', ')}" unless match
 
     match
   end
@@ -465,49 +438,23 @@ class HarnessConfig
 
   private
 
-  # model: is required and never derived from an id or name; an id must be unique
-  # or a selection and a resumed run are silently ambiguous.
+  # Each entry becomes a ModelProfile (which validates its own fields); the only
+  # cross-entry rule HarnessConfig enforces is that ids are unique - a duplicate
+  # makes a selection and a resumed run silently ambiguous.
   def normalize_models(list)
-    entries = list.map do |m|
-      raise HarnessError, "each entry in 'models' must be a mapping" unless m.is_a?(Hash)
+    profiles = list.map { |entry| ModelProfile.new(entry) }
+    # Each profile answers its own validity; a config error names the profile.
+    profiles.each(&:valid!)
+    # A profile that declares an mcp_images: block owns a full budget (the same
+    # defaults fill a half-typed block as the global key uses).
+    profiles.each { |p| p.normalize_image_limits(MCP_IMAGE_LIMIT_DEFAULTS) }
 
-      id    = require_profile_id(m)
-      url   = require_http_url("model profile '#{id}'", nonblank(m[:url]))
-      model = require_model_name("model profile '#{id}'", m)
-
-      {
-        id:,
-        name: nonblank(m[:name]) || id,
-        url:,
-        model:,
-        api:              nonblank(m[:api]),
-        token:            expand_env(nonblank(m[:token]), "a model token"),
-        num_ctx:          int_or_nil(m[:num_ctx]),
-        max_tokens:       int_or_nil(m[:max_tokens]),
-        num_predict:      int_or_nil(m[:num_predict]),
-        reasoning_effort: nonblank(m[:reasoning_effort]),
-        temperature:      float_or_nil(m[:temperature]),
-        top_p:            float_or_nil(m[:top_p]),
-        top_k:            int_or_nil(m[:top_k]),
-        min_p:            float_or_nil(m[:min_p]),
-        presence_penalty: float_or_nil(m[:presence_penalty]),
-        repeat_penalty:   float_or_nil(m[:repeat_penalty]),
-        streaming:        bool_or_nil(m[:streaming]),
-        vision:           m[:vision] == true,
-        # Tri-state like 'streaming': nil = this profile says nothing, so the
-        # global 'mcp_images' block decides; a block overrides it entirely.
-        # Filling the defaults here would shadow the global block for every
-        # profile that left the key out.
-        mcp_images:       m[:mcp_images].is_a?(Hash) ? normalize_mcp_images(m[:mcp_images]) : nil
-      }
-    end
-
-    duplicate = entries.map { |e| e[:id] }.tally.find { |_, count| count > 1 }&.first
+    duplicate = profiles.map(&:id).tally.find { |_, count| count > 1 }&.first
     raise HarnessError,
       "model profile id '#{duplicate}' is used by more than one entry " \
         "(an id selects exactly one profile)" if duplicate
 
-    entries
+    profiles
   end
 
   # Normalize each mcp_servers entry. A server needs a name (the tool namespace)
@@ -547,32 +494,15 @@ class HarnessConfig
       else
         {
           name:,
-          url: require_http_url("mcp_servers entry '#{name}'", url),
+          url: ConfigScalar.require_http_url("mcp_servers entry '#{name}'", url),
           headers: stringified(entry[:headers])
         }
       end
     end
   end
 
-  # The tool-result image limits (issue #449), as a hash of three integers.
-  # An absent key, a non-mapping, or an individual absent key all fall back to
-  # the built-in default - the limits are a budget the harness enforces, so a
-  # half-typed block must not silently mean "no budget".
   def normalize_mcp_images(val)
-    val = {} unless val.is_a?(Hash)
-
-    MCP_IMAGE_LIMIT_DEFAULTS.to_h do |key, fallback|
-      value = val[key]
-      [key, value.nil? ? fallback : positive_int!(value)]
-    end
-  end
-
-  # A limit is a budget: 0 or a negative value is not "no budget", it is a typo.
-  def positive_int!(val)
-    n = int_or_nil(val)
-    raise HarnessError, "an mcp_images limit must be a positive integer, got: #{val.inspect}" unless n&.positive?
-
-    n
+    ConfigScalar.normalize_mcp_images(val, MCP_IMAGE_LIMIT_DEFAULTS)
   end
 
   def require_name(entry)
@@ -580,36 +510,6 @@ class HarnessConfig
     raise HarnessError, "an mcp_servers entry needs a 'name'" if name.nil?
 
     name
-  end
-
-  # model: (#572) is required and never derived from an id or name.
-  def require_model_name(label, profile)
-    model = nonblank(profile[:model])
-    return model unless model.nil?
-
-    raise HarnessError, "#{label} needs a 'model' (a model name, not a profile id)"
-  end
-
-  # A profile's id selects it; a config that predates 'id:' keys its entries
-  # with 'name:', so name is read as the id when id is absent.
-  def require_profile_id(profile)
-    id = nonblank(profile[:id]) || nonblank(profile[:name])
-    return id unless id.nil?
-
-    raise HarnessError,
-      "model profile needs an 'id' (it identifies the profile) - got #{profile.inspect}"
-  end
-
-  # Both outbound transports speak HTTP(S): a bad scheme fails deep inside
-  # connect and reads as a broken server rather than a bad config. label names
-  # the config entry the value came from.
-  def require_http_url(label, url)
-    raise HarnessError, "#{label} needs a 'url' (there is no built-in endpoint default)" if url.nil?
-
-    return url if url.start_with?("http://", "https://")
-
-    raise HarnessError,
-      "#{label} url must start with http:// or https:// (got: #{url})"
   end
 
   # A non-Hash is treated as empty (the shape today's env handling already uses);
@@ -621,70 +521,12 @@ class HarnessConfig
     val.transform_keys(&:to_s).transform_values { |v| expand_env(v.to_s, "an mcp_servers value") }
   end
 
-  # issue #422: replace every ${NAME} in a config string with the ENV of that
-  # name. A missing reference is a config error (naming the var), not a silent
-  # empty: an unset bearer token / MCP credential that quietly became "" would
-  # only fail later as an opaque auth error. A value with no ${NAME} is returned
-  # unchanged, so plain config values (and values with a bare $) are untouched.
-  # The lookup is ENV[name] - never eval/ERB - so a config value cannot run code.
-  def expand_env(val, label)
-    return val unless val.is_a?(String) && ENV_REF.match?(val)
-
-    val.gsub(ENV_REF) do
-      name = Regexp.last_match(1)
-      unless ENV.key?(name)
-        raise HarnessError,
-          "#{label} references \${#{name}} but #{name} is not set in the environment"
-      end
-      ENV[name]
-    end
-  end
-
   # Normalize each protected_dirs entry to a workdir-relative dir. A blank entry
   # is dropped (it would match nothing useful); a trailing slash is trimmed so a
   # config 'local/' still matches the exact-prefix shape FileList applies
   # (rel == dir || rel.start_with?("#{dir}/")).
   def normalize_protected_dirs(list)
     list.map { |entry| nonblank(entry)&.sub(%r{/\z}, "") }.compact
-  end
-
-  # A string is "present" when it is non-nil and not blank.
-  def nonblank(val)
-    val = val.to_s.strip
-    val.empty? ? nil : val
-  end
-
-  def int_or_nil(val)
-    return nil if val.nil?
-
-    Integer(val)
-  rescue ArgumentError, TypeError
-    raise HarnessError, "expected an integer, got: #{val.inspect}"
-  end
-
-  def width_or_nil(val)
-    return nil if val.nil?
-
-    text = val.to_s
-    return text if text.match?(/\A\d+%\z/)
-
-    int_or_nil(val)
-  end
-
-  def float_or_nil(val)
-    return nil if val.nil?
-
-    Float(val)
-  rescue ArgumentError, TypeError
-    raise HarnessError, "expected a number, got: #{val.inspect}"
-  end
-
-  # A tri-state flag: true, false, or nil for "not configured" (so a profile
-  # can leave the decision to the global key instead of overriding it).
-  def bool_or_nil(val)
-    return nil if val.nil?
-
-    val == true
   end
 
   # command_safety_auto_approve accepts the enum or a legacy boolean. An

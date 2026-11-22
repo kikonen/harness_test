@@ -31,11 +31,14 @@ models:
   endpoint answers for (#572). It is never the id or the name; only the profile
   knows which model its server answers for.
 
-Backward compatibility: a config that predates `id:` keys its entries with `name:`
-alone - `require_profile_id` and `SystemSettings#find_profile` fall back to `name`
-for the id, and `default_model:` is still read as the startup profile. `model:` is
-a required key, so a name-only config still needs it; no value is ever inferred
-from an id or a name.
+The normalized profile is a `ModelProfile` value object (`lib/model_profile.rb`),
+not a scattered hash: it owns the id/name/model/url roles and answers its own
+validity through `#valid?` / `#valid!`, so no consumer re-derives one role from
+another. Backward compatibility: a config that predates `id:` keys its entries
+with `name:` alone - `ModelProfile` reads `name` as the id when `id` is absent,
+and `default_model:` is still read as the startup profile. `model:` is a required
+key, so a name-only config still needs it; no value is ever inferred from an id
+or a name.
 
 ## The bug #556 fell into
 
@@ -58,7 +61,7 @@ split into id + name. Issue #572 then settled the wire value: the profile's own
 
 | Fact | Owner | Notes |
 | --- | --- | --- |
-| the catalogue (`models:`) | `HarnessConfig` -> `SystemSettings#model_profiles` | run-wide, fixed config, shared by every agent (#286); each entry normalized to carry `id:`, `name:` and `model:` |
+| the catalogue (`models:`) | `HarnessConfig` -> `SystemSettings#model_profiles` | run-wide, fixed config, shared by every agent (#286); each entry normalized to a `ModelProfile` |
 | the selection (`-m`, nil = config default) | `CLIOptions#apply_profile_tracking` -> `SystemSettings#active_profile_id` | `nil` means "whatever the default profile is", so a session outlives a changed default |
 | the live connection (profile id, display name, model, endpoint, sampling) | `ModelConfig#active_profile_id`, `#active_profile_name`, `#model`, `#base_url`, ... | per Harness (#286): a `/model` switch must not flip every agent at once |
 | the request body's `model:` field | `LLM::OpenAIBackend#build_body`, `LLM::OllamaBackend#build_body` | reads `@config.model`, the profile's `model:` |
@@ -71,23 +74,26 @@ disagree.
 `ModelConfig` is *live state*: `from_settings` seeds the id from the selection
 (nil when the config default is active - that nil is what a session saves, so a
 later change of the default reaches the resumed session), and seeds `model:` from
-the resolved profile. A profile-less run (`-m <raw id>` with no profiles) has no
-profile to seed from and no endpoint to send to; `HarnessFactory` writes the
-resolved default profile's id, name and model into a fresh job's `ModelConfig`.
+the resolved profile. There is no profile-less raw-id run: a model is selected
+from a configured profile only, so `-m`/`default_profile_id` with no `models:` is
+a startup config error. `HarnessFactory` writes the resolved default profile's id,
+name and model into a fresh job's `ModelConfig`.
 
 ## What is checked, and where
 
-1. **Reading the config** (`HarnessConfig#normalize_models`): a profile must have
-   an `id` (or a `name:` that predates ids), a `model`, and a `url`; the url must
-   be `http(s)`; no two entries may share an id. Each failure is a `HarnessError`
-   at startup. `require_http_url` is shared with `mcp_servers` and takes the
-   entry's label, so both transports report which entry was bad.
+1. **Reading the config** (`HarnessConfig#normalize_models`): each entry becomes a
+   `ModelProfile`, which validates its own `id`/`model`/`url` (url must be `http(s)`)
+   through `#valid!`; `HarnessConfig` then enforces the one cross-entry rule - no
+   two profiles share an id - and that `default_profile_id` names a configured
+   profile. Each failure is a `HarnessError` at startup. The scalar coercions
+   (`nonblank`, int/float/bool coercion, `require_http_url`, `${ENV}` expansion)
+   live in `ConfigScalar` (`lib/config_scalar.rb`), shared with `mcp_servers`.
 2. **Building the request** (`LLM::BaseBackend#build_uri`): a `ModelConfig` can
-   still be built by hand (a profile-less `-m <raw id>`, a spec), so the transport
-   re-checks only the endpoint - no `base_url` names the profile and says which key
-   is missing; a url with no host says it is not a full endpoint. A missing model
-   is never re-guessed: the config already refused it. Either endpoint failure is a
-   `HarnessError`, which `CLI` prints as `Error: ...` instead of a task-thread crash.
+   still be built by hand (a spec), so the transport re-checks only the endpoint -
+   no `base_url` names the profile and says which key is missing; a url with no
+   host says it is not a full endpoint. A missing model is never re-guessed: the
+   config already refused it. Either endpoint failure is a `HarnessError`, which
+   `CLI` prints as `Error: ...` instead of a task-thread crash.
 
 `doc/harness_job_design.md` covers who owns the model state (#286); this file
 covers what a profile's id, name and model mean and where a missing endpoint is

@@ -148,13 +148,12 @@ class CLIOptions
     end
   end
 
-  # Resolve the selected model profile from the config. When no profiles are
-  # configured, -m is treated as a raw model id (backward compatible).
+  # Resolve the selected model profile from the config. A model is selected
+  # from configured profiles only: no profiles is a config error at resolve.
   def resolve_profile(opts, config)
     # --list-sessions and --delete-session act on saved sessions without ever
     # contacting a model, so they skip profile resolution entirely.
     return nil if opts[:list_sessions] || opts[:delete_session]
-    return nil unless config.models_configured?
 
     config.resolve_profile(opts[:model])
   end
@@ -172,8 +171,7 @@ class CLIOptions
     using_default = profile && !explicit_model &&
       (default_key.nil? ||
        profile[:id] == default_key)
-    opts[:active_profile_id] =
-      using_default ? nil : (profile ? profile[:id] : opts[:model])
+    opts[:active_profile_id] = (using_default || profile.nil?) ? nil : profile[:id]
   end
 
   # The config-derived defaults. A CLI flag already in opts wins (each line
@@ -313,9 +311,8 @@ class CLIOptions
   # (resolve_profile resolved that profile above). list/delete need no model.
   def validate!(opts, config)
     return if opts[:list_sessions] || opts[:delete_session]
-    return if opts[:model] || config.default_profile_id
+    return if config.models_configured?
 
-    raise HarnessError,
-      "-m / --model is required (or set default_profile_id in the config)"
+    raise HarnessError, "no model profiles configured - select one from 'models:'"
   end
 end
