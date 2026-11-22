@@ -21,7 +21,6 @@ class ModelConfig
   # ParamOverrides read every request, so a /model switch takes effect without
   # rebuilding the client. Read AND written here.
   MODEL_KEYS = %i[
-    model
     active_model
     base_url
     api
@@ -70,15 +69,14 @@ class ModelConfig
   TRANSPORT_KEYS.each { |name| define_method(name) { @values[name] } }
 
   # Seed a fresh connection from the run's settings: the selected model name
-  # and the global image budget come from settings; the wire model id and every
-  # endpoint/sampling value come from the resolved PROFILE. settings carries no
-  # wire id or per-connection field to clone (issue #286) - -m only names a
-  # profile. A profile-less selection (-m with no models configured) keeps the
-  # raw id as the wire model and leaves base_url nil: there is no built-in
-  # endpoint default. A hand-built hash (specs) still works via #new.
+  # and the global image budget come from settings; every endpoint/sampling
+  # value comes from the resolved PROFILE. settings carries no per-connection
+  # field to clone (issue #286) - -m only names a profile. A profile-less
+  # selection (-m with no models configured) keeps the raw id and leaves
+  # base_url nil: there is no built-in endpoint default. A hand-built hash
+  # (specs) still works via #new.
   def self.from_settings(settings)
     values = {
-      model: settings.selected_model_id,
       active_model: settings.active_model,
       mcp_image_limits: settings.mcp_image_limits
     }
@@ -114,10 +112,10 @@ class ModelConfig
     @values = values
   end
 
-  # Name (or id) of the model THIS connection is using, or nil. Live state:
-  # a /model switch writes active_model / model on this object.
+  # The model THIS connection is using, or nil. Live state: a /model switch
+  # writes active_model on this object.
   def active_model_name
-    active_model || model
+    active_model
   end
 
   # Apply a resolved profile's parameters in place, leaving keys the profile
@@ -129,7 +127,6 @@ class ModelConfig
   def apply_profile(profile)
     @values[:base_url]         = profile[:url] if profile[:url]
     @values[:api]              = profile[:api]
-    @values[:model]            = profile[:model]
     @values[:token]            = profile[:token]
     @values[:num_ctx]          = profile[:num_ctx]
     @values[:max_tokens]       = profile[:max_tokens]
@@ -141,7 +138,7 @@ class ModelConfig
     @values[:min_p]            = profile[:min_p]
     @values[:presence_penalty] = profile[:presence_penalty]
     @values[:repeat_penalty]   = profile[:repeat_penalty]
-    @values[:active_model]     = profile[:name] || profile[:model]
+    @values[:active_model]     = profile[:name]
     @values[:vision]           = profile[:vision] == true
     @values[:mcp_image_limits] = profile[:mcp_images] if profile[:mcp_images]
   end

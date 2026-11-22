@@ -57,10 +57,9 @@ class SystemSettings
   ].freeze
 
   # The model SELECTION: the active model PROFILE NAME the CLI chose with
-  # -m/--model (nil = use the config default). The CLI arg names a profile, not
-  # the id sent to the REST API - that id is the profile's own :model. settings
-  # holds no wire id and no per-connection params; Harness looks them up from
-  # the profile this selects and keeps them in its own ModelConfig.
+  # -m/--model (nil = use the config default). The name IS the model the
+  # harness asks the endpoint for - settings holds no separate wire id and no
+  # per-connection params; Harness keeps them in its own ModelConfig.
   SELECTION_KEYS = %i[
     active_model
   ].freeze
@@ -108,11 +107,11 @@ class SystemSettings
     Array(@options[:model_profiles])
   end
 
-  # A configured profile by its label (:name) or raw model id (:model), or nil
-  # when absent. The catalogue is run-wide; applying a profile to one agent's
-  # ModelConfig is that Harness' job, not a settings mutation.
+  # A configured profile by its name, or nil when absent. The catalogue is
+  # run-wide; applying a profile to one agent's ModelConfig is that Harness'
+  # job, not a settings mutation.
   def find_profile(name)
-    model_profiles.find { |p| p[:name] == name || p[:model] == name }
+    model_profiles.find { |p| p[:name] == name }
   end
 
   # The declared MCP servers (config 'mcp_servers:'), or nil when none. The
@@ -260,13 +259,6 @@ class SystemSettings
   # profile matches). Harness reads its per-connection values from here.
   def active_profile
     find_profile(active_model_name)
-  end
-
-  # The wire model id of the active profile, or the raw -m id when no profile
-  # is configured. ModelConfig#model sends this to the REST API.
-  def selected_model_id
-    profile = active_profile
-    profile ? profile[:model] : active_model
   end
 
   # Restore the session-persisted postures a resumed run saved. Called with the

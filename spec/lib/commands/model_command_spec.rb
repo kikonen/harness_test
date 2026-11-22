@@ -40,7 +40,7 @@ RSpec.describe Commands::ModelCommand do
   end
 
   def run_command(args = '', manager: nil, vision: false)
-    manager ||= session_manager([{ name: 'qwen', model: 'qwen3:8b' }], 'qwen', vision: vision)
+    manager ||= session_manager([{ name: 'qwen' }], 'qwen', vision: vision)
     stdout = StringIO.new
     # #286: the command reaches the Harness through the foreground job's harness,
     # so the spec builds a registry whose main job carries the double.
@@ -94,29 +94,28 @@ RSpec.describe Commands::ModelCommand do
 
   describe 'with a name (switch the model)' do
     it 'reports the profile it switched to' do
-      sm = session_manager([{ name: 'qwen', model: 'qwen3:8b' },
-                            { name: 'big', model: 'llama3:70b', url: 'http://other:11434/v1' }],
+      sm = session_manager([{ name: 'qwen' },
+                            { name: 'big', url: 'http://other:11434/v1' }],
                            'qwen')
       out = run_command('big', manager: sm)
 
       expect(out).to include('Switched to model: big')
-      expect(out).to include('llama3:70b')
       expect(out).to include('http://other:11434/v1') # the profile's own url wins
       expect(out).to include('/v1/chat/completions')
     end
 
-    # A profile may key its label under :model only, and its url under the
-    # global default - both fallbacks are what make the line complete.
-    it 'falls back to :model for the name and to the global base url for the endpoint' do
-      mgr = session_manager([{ name: 'bare', model: 'bare-model' }], 'qwen')
+    # A profile that declares no url of its own falls back to the run's base url,
+    # which is what keeps the line complete.
+    it 'falls back to the global base url for the endpoint' do
+      mgr = session_manager([{ name: 'bare' }], 'qwen')
       out = run_command('bare', manager: mgr)
 
-      expect(out).to include('Switched to model: bare (bare-model @ http://srv:11434/v1)')
+      expect(out).to include('Switched to model: bare (bare @ http://srv:11434/v1)')
     end
 
     it 'prints the parameter table after a switch too' do
-      sm = session_manager([{ name: 'qwen', model: 'qwen3:8b' },
-                            { name: 'big', model: 'llama3:70b' }], 'qwen')
+      sm = session_manager([{ name: 'qwen' },
+                            { name: 'big' }], 'qwen')
       row = run_command('big', manager: sm).lines.map(&:chomp).find { |l| l.include?('temperature') }
 
       expect(row).to include('temperature')

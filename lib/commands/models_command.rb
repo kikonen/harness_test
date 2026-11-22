@@ -34,13 +34,13 @@ module Commands
 
       # issue #474: emit the listing as STRUCTURE (title + per-profile fields),
       # not a fused row string, so the run record and a future remote sink carry
-      # the fields themselves. UI::Renderer#arrow_row reproduces the old
-      # `  name -> model @ url` line byte-for-byte. The note field is the tag +
-      # mark suffix exactly as the old line appended them.
+      # the fields themselves. UI::Renderer#row_for draws the arrow row; the
+      # note field is the tag + mark suffix exactly as the old line appended
+      # them. A profile's name IS the model, so :name feeds both name and model.
       items = profiles.map do |p|
-        name   = p[:name] || p[:model]
+        name   = p[:name]
         marks  = []
-        marks << "default" if default_name && (name == default_name || p[:model] == default_name)
+        marks << "default" if default_name && name == default_name
         marks << "active"  if name == current
         suffix = marks.empty? ? "" : "   [#{marks.join(', ')}]"
         # issue #217: tag the API type so it is obvious which endpoint a
@@ -50,7 +50,7 @@ module Commands
         # models a tool-result image could actually be sent to.
         url  = p[:url]
         tags = p[:vision] ? " (#{api}) [vision]" : " (#{api})"
-        { name:, model: p[:model], location: url, note: "#{tags}#{suffix}" }
+        { name:, model: name, location: url, note: "#{tags}#{suffix}" }
       end
       emit_list(
         title: "Configured models (#{profiles.size}):",

@@ -168,7 +168,7 @@ RSpec.describe HarnessFactory do
       factory  = factory_with(registry:, options: {
         system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE,
         default_model: 'cfg-model',
-        model_profiles: [{ name: 'cfg-model', model: 'cfg-model' }] })
+        model_profiles: [{ name: 'cfg-model' }] })
       job = factory.add_harness_job(kind: :sub_agent, session_id: SESSION_ID)
 
       expect(job.harness.model_config.active_model).to eq('cfg-model')

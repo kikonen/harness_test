@@ -440,17 +440,17 @@ class HarnessConfig
   end
 
   # Resolve the active model profile. selection is the value of -m (or nil).
-  # Returns a normalized hash { name:, url:, model:, token:, num_ctx:, ... }
-  # when model profiles are configured, or nil when none are (so the caller
-  # can fall back to treating -m as a raw model id).
+  # Returns a normalized hash { name:, url:, token:, num_ctx:, ... } when model
+  # profiles are configured, or nil when none are (so the caller can fall back
+  # to treating -m as a raw model id).
   def resolve_model(selection)
     return nil unless models_configured?
 
     key = nonblank(selection) || @default_model
     raise HarnessError, "no model selected and no default_model configured" if key.nil?
 
-    match = @models.find { |m| m[:name] == key || m[:model] == key }
-    raise HarnessError, "unknown model '#{key}'. Available: #{@models.map { |m| m[:name] || m[:model] }.join(', ')}" unless match
+    match = @models.find { |m| m[:name] == key }
+    raise HarnessError, "unknown model '#{key}'. Available: #{@models.map { |m| m[:name] }.join(', ')}" unless match
 
     match
   end
@@ -466,11 +466,13 @@ class HarnessConfig
     list.map do |m|
       raise HarnessError, "each entry in 'models' must be a mapping" unless m.is_a?(Hash)
 
+      name = require_model_name(m)
+      url  = require_http_url("model profile '#{name}'", nonblank(m[:url]))
+
       {
-        name:             nonblank(m[:name]),
-        url:              nonblank(m[:url]),
+        name:,
+        url:,
         api:              nonblank(m[:api]),
-        model:            nonblank(m[:model]),
         token:            expand_env(nonblank(m[:token]), "a model token"),
         num_ctx:          int_or_nil(m[:num_ctx]),
         max_tokens:       int_or_nil(m[:max_tokens]),
@@ -530,7 +532,7 @@ class HarnessConfig
       else
         {
           name:,
-          url: require_http_url(name, url),
+          url: require_http_url("mcp_servers entry '#{name}'", url),
           headers: stringified(entry[:headers])
         }
       end
@@ -565,13 +567,27 @@ class HarnessConfig
     name
   end
 
-  # The MCP HTTP transport speaks HTTP(S) - any other scheme would fail deep
-  # inside connect and surface as a broken server rather than a bad config.
-  def require_http_url(name, url)
+  # A profile's :name is both the selection key and the id the endpoint is
+  # asked for, so an entry without one describes nothing.
+  def require_model_name(profile)
+    name = nonblank(profile[:name])
+    return name unless name.nil?
+
+    raise HarnessError,
+      "model profile needs a 'name' (the name is the model the harness asks " \
+        "for) - got #{profile.inspect}"
+  end
+
+  # Both outbound transports speak HTTP(S): a bad scheme fails deep inside
+  # connect and reads as a broken server rather than a bad config. label names
+  # the config entry the value came from.
+  def require_http_url(label, url)
+    raise HarnessError, "#{label} needs a 'url' (there is no built-in endpoint default)" if url.nil?
+
     return url if url.start_with?("http://", "https://")
 
     raise HarnessError,
-      "mcp_servers entry '#{name}' url must start with http:// or https:// (got: #{url})"
+      "#{label} url must start with http:// or https:// (got: #{url})"
   end
 
   # A non-Hash is treated as empty (the shape today's env handling already uses);

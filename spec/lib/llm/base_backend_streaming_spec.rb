@@ -19,7 +19,7 @@ class StreamingBackend < LLM::BaseBackend
   private
 
   def build_body(messages, _tools, stream: false)
-    { model: @config.model, messages: messages, stream: stream }
+    { model: @config.active_model, messages: messages, stream: stream }
   end
 
   def parse_response(json) = json
@@ -98,7 +98,7 @@ RSpec.describe "BaseBackend streaming" do
   let(:log)    { StringIO.new }
   let(:logger) { Logger.new(log) }
   let(:options) do
-    { base_url: 'http://127.0.0.1', model: 'test-model', api: 'openai',
+    { base_url: 'http://127.0.0.1', active_model: 'test-model', api: 'openai',
       retry_count: 2, retry_delay: 0 }
   end
 

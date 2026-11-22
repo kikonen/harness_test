@@ -203,7 +203,7 @@ RSpec.describe SessionManager do
     # verb and only the API TYPE is named (the endpoint path stays in
     # target_display for /model, /models and the startup banner).
     it 'emits exactly one spinner_detail with the model and the api type' do
-      harness.model_config.model = 'qwen2.5-coder:32b'
+      harness.model_config.active_model = 'qwen2.5-coder:32b'
 
       events = emitted_details
 
@@ -215,14 +215,14 @@ RSpec.describe SessionManager do
     end
 
     it 'names the api type only when the client reports a backend' do
-      harness.model_config.model = 'raw-model'
+      harness.model_config.active_model = 'raw-model'
       harness.client = Class.new { def chat(*) = nil; }.new
 
       expect(emitted_details.first[:content][:message]).to eq('Sending (raw-model)')
     end
 
     it 'still emits a bare Sending line when no model is configured' do
-      harness.model_config.model = nil
+      harness.model_config.active_model = nil
 
       expect(emitted_details.first[:content][:message])
         .to eq('Sending (openai)')
@@ -813,7 +813,7 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
       auto_save: false,
       reasoning_effort: 'medium',
       model_profiles: [
-        { name: 'local', model: 'qwen', reasoning_effort: 'medium', num_ctx: 65_536 }
+        { name: 'local', reasoning_effort: 'medium', num_ctx: 65_536 }
       ],
       active_model: 'local'
     }
@@ -1410,7 +1410,7 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
   it 'is text-only for a profile that did not declare vision' do
     mgr = manager_with(
       model: 'qwen', active_model: 'local',
-      model_profiles: [{ name: 'local', model: 'qwen', vision: false }])
+      model_profiles: [{ name: 'local', vision: false }])
 
     expect(mgr.vision?).to be(false)
   end
@@ -1418,7 +1418,7 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
   it 'reports vision for the active profile that declared it' do
     mgr = manager_with(
       model: 'vision', active_model: 'v',
-      model_profiles: [{ name: 'v', model: 'vis', vision: true }])
+      model_profiles: [{ name: 'v', vision: true }])
 
     expect(mgr.vision?).to be(true)
   end
@@ -1438,7 +1438,7 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
     mgr = manager_with(
       model: 'vis', active_model: 'v',
       mcp_image_limits: { inline_max_bytes: 500, inline_max_images: 2, inline_max_tokens: 100 },
-      model_profiles: [{ name: 'v', model: 'vis', vision: true, mcp_images: nil }])
+      model_profiles: [{ name: 'v', vision: true, mcp_images: nil }])
 
     expect(mgr.image_limits).to eq(
       inline_max_bytes: 500, inline_max_images: 2, inline_max_tokens: 100)
@@ -1446,7 +1446,7 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
 
   it 'falls back to the built-in defaults when neither names a budget' do
     mgr = manager_with(model: 'vis', active_model: 'v',
-                       model_profiles: [{ name: 'v', model: 'vis', vision: true }])
+                       model_profiles: [{ name: 'v', vision: true }])
 
     expect(mgr.image_limits).to eq(HarnessConfig::MCP_IMAGE_LIMIT_DEFAULTS)
   end
@@ -1456,7 +1456,7 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
   it 'apply_profile propagates vision and the image budget' do
     mgr = manager_with(model: 'qwen', active_model: 'plain',
                        model_profiles: [
-                         { name: 'plain', model: 'qwen' },
+                         { name: 'plain' },
                          { name: 'eyes', model: 'vis', vision: true,
                            mcp_images: { inline_max_images: 3 } }])
     target = mgr.send(:find_profile, 'eyes')
@@ -1478,8 +1478,8 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
       model: 'qwen', active_model: 'plain',
       mcp_image_limits: global,
       model_profiles: [
-        { name: 'plain', model: 'qwen' },
-        { name: 'strata', model: 'strata', vision: true, mcp_images: nil }])
+        { name: 'plain' },
+        { name: 'strata', vision: true, mcp_images: nil }])
     target = mgr.send(:find_profile, 'strata')
     mgr.send(:apply_profile, target)
 

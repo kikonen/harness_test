@@ -10,7 +10,7 @@ RSpec.describe LLMClient do
 
   # LLMClient reads its per-connection live state from a ModelConfig (#286).
   def client_with(options = {})
-    base  = { base_url: 'http://127.0.0.1:11434', model: 'test-model' }
+    base  = { base_url: 'http://127.0.0.1:11434', active_model: 'test-model' }
     described_class.new(ModelConfig.new(base.merge(options)), logger)
   end
 
@@ -29,7 +29,7 @@ RSpec.describe LLMClient do
 
     it 'rebuilds the backend when options[:api] changes (a /model switch)' do
       config = ModelConfig.new(
-        { base_url: 'http://127.0.0.1:11434', model: 'test-model' })
+        { base_url: 'http://127.0.0.1:11434', active_model: 'test-model' })
       client  = described_class.new(config, logger)
       expect(client.backend).to be_a(LLM::OpenAIBackend)
 
@@ -52,7 +52,7 @@ RSpec.describe LLMClient do
   # the console - before the fix only --verbose logged response bodies at
   # all, and a failed request logged nothing.
   describe 'error logging' do
-    let(:options) { { base_url: 'http://127.0.0.1:11434', model: 'test-model' } }
+    let(:options) { { base_url: 'http://127.0.0.1:11434', active_model: 'test-model' } }
     let(:client)  { described_class.new(ModelConfig.new(options), logger) }
 
     def stub_error!(code, body)
@@ -93,7 +93,7 @@ RSpec.describe LLMClient do
   # sections (SessionManager#log_response) are always logged. These specs lock
   # in that split so the log stays followable without the flag.
   describe 'raw response logging' do
-    let(:options) { { base_url: 'http://127.0.0.1:11434', model: 'test-model' } }
+    let(:options) { { base_url: 'http://127.0.0.1:11434', active_model: 'test-model' } }
     let(:client)  { described_class.new(ModelConfig.new(options), logger) }
     let(:resp_body) do
       JSON.generate(choices: [{ message: { role: 'assistant', content: 'hi' } }])

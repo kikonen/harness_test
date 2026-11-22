@@ -371,7 +371,7 @@ end
   # restore_session_model, unrelated to this round-trip).
   describe 'layered save/resume round-trip (issue #548)' do
     let(:layered_options) do
-      options.merge(model_profiles: [{ name: 'test-model', model: 'test-model' }])
+      options.merge(model_profiles: [{ name: 'test-model' }])
     end
 
     it 'resumes the conversation and replay tail a layered save wrote' do
@@ -475,7 +475,7 @@ end
   # genuinely cannot (a job whose dir the retention rule dropped).
   describe 'per-job resume restore (issue #548)' do
     let(:layered_options) do
-      options.merge(model_profiles: [{ name: 'test-model', model: 'test-model' }])
+      options.merge(model_profiles: [{ name: 'test-model' }])
     end
 
     def seed_layered_system(id, job_ids, foreground: 0)
@@ -644,8 +644,7 @@ end
       allow(Mcp::ServerConnection).to receive(:new).and_return(fake_connection)
       cli = described_class.new(
         mcp_options(active_model: 'sees',
-                    model_profiles: [{ name: 'sees', model: 'vision-model',
-                                       vision: true }]), ui)
+                    model_profiles: [{ name: 'sees', vision: true }]), ui)
       stub_prompt_reader
 
       expect(ui).to receive(:puts)
