@@ -13,7 +13,10 @@ require 'commands/retry_command'
 # harness double rides on a real registry's main job.
 RSpec.describe Commands::RetryCommand do
   let(:session_manager) { double('session_manager', retry: nil) }
-  let(:harness) { double('harness', session_manager: session_manager) }
+  let(:harness) do
+    double('harness', session_manager: session_manager,
+                     aborted_turn_stats_line: nil)
+  end
   let(:io) { StringIO.new }
   let(:ui) { UI::Console.new(stdout: io) }
 

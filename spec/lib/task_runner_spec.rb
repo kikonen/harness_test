@@ -12,7 +12,8 @@ RSpec.describe TaskRunner do
   # Minimal test double that includes TaskRunner and exposes harness/ui.
   let(:io) { StringIO.new }
   let(:ui) { UI::Console.new(stdout: io) }
-  let(:harness) { double('harness') }
+  # run_on_task asks it for an aborted turn's summary line (#567): nil = nothing.
+  let(:harness) { instance_double(Harness, aborted_turn_stats_line: nil) }
 
   # #286: every TaskRunner host is built by the run with its registry, and
   # #run_on_task AWAITs a job there (the harness reaches the Task via the job).
@@ -64,7 +65,8 @@ RSpec.describe TaskRunner do
       registry = JobRegistry.new
       host.registry = registry
       host.ui = ui
-      [host, registry, registry.add_job(kind: :main, harness: Object.new)]
+      job_harness = double('harness', aborted_turn_stats_line: nil)
+      [host, registry, registry.add_job(kind: :main, harness: job_harness)]
     end
 
     it 'runs the foreground job through the registry and returns its result' do
@@ -104,6 +106,35 @@ RSpec.describe TaskRunner do
     # run_on_task's own leading and trailing blank lines are unchanged; only the
     # middle line now comes from the renderer.
     expect(io.string).to eq("\n  [task error] boom\n\n")
+  end
+
+  # issue #567: the harness decides whether an aborted turn owes a summary line;
+  # this emitter prints it after the error line.
+  describe 'the aborted turn summary line (issue #567)' do
+    it 'prints the line the harness reports for the job that ran the turn' do
+      setup_host
+      line = '  [⏱ 1.2s | 🔄 1 of 2 iterations answered]'
+      allow(Task).to receive(:current).and_return(nil)
+      allow(harness).to receive(:aborted_turn_stats_line)
+        .with(main_job.id).and_return(line)
+      allow(registry).to receive(:run) { ['boom', nil, nil] }
+
+      host.do_thing
+
+      expect(io.string).to eq(
+        "\n  [task error] boom\n#{line}\n\n"
+      )
+    end
+
+    it 'prints nothing when the harness reports no line' do
+      setup_host
+      allow(Task).to receive(:current).and_return(nil)
+      allow(registry).to receive(:run) { ['boom', nil, nil] }
+
+      host.do_thing
+
+      expect(io.string).to eq("\n  [task error] boom\n\n")
+    end
   end
 
   # The same role routed the normal way: with a task active the error travels as an

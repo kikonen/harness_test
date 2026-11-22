@@ -103,6 +103,30 @@ resume still reports the last measured turn.
   tok/s | ctx`) - the `⚡` part is absent when nothing was measured.
 - `/session` last-request line, same fragments.
 
+## The stats line of an ABORTED turn (issue #567)
+
+A turn killed mid-loop (a stream lost, a tool that raised) used to end on a bare
+`[task error]` line: no elapsed time, no idea how many rounds completed. The
+measurements are now published as harness state as the turn runs
+(`Harness#open_turn_stats` before each request leaves, closed by
+`#close_turn_stats` when the answer commits), so `#aborted_turn_stats_line` can
+answer for the job that ran the turn after it stopped.
+
+Two rules keep the line honest:
+
+- it names the iterations that ANSWERED out of the ones SENT
+  (`🔄 2 of 3 iterations answered`) - the loop counter runs ahead of the requests
+  that returned, so a request that dies mid-stream is a counted one that never
+  came back, not an unstarted turn.
+- it carries NO `📊` and no `⚡` segment. `total_usage` and the performance
+  snapshot describe requests that returned; attributing them to the turn that
+  aborted would report a token bill the aborted request never paid. `⏱` and `🧠`
+  stay because they describe the turn itself.
+
+A turn that answered NO request reports nothing: an elapsed time alone over a
+turn that got no answer reads as a whole turn's duration. A turn that committed
+already printed its own line and never gets a second one.
+
 ## What #285 (tok/s in the spinner) reads
 
 Issue #285 asks for a live rate on the spinner. A spinner cannot wait for these

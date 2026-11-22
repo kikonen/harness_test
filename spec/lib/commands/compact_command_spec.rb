@@ -34,6 +34,9 @@ RSpec.describe Commands::CompactCommand do
     Class.new do
       attr_accessor :session, :session_manager
 
+      # task_runner.rb asks a job's harness for an aborted turn's line (#567).
+      def aborted_turn_stats_line(_job_id) = nil
+
       def initialize(session, manager)
         @session         = session
         @session_manager = manager

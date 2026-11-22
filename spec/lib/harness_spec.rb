@@ -1602,6 +1602,64 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #567: a turn that dies mid-loop still reports what it did.
+  describe '#aborted_turn_stats_line (issue #567)' do
+    def echo_round
+      { content: nil,
+        tool_calls: [{ id: 'call_1', function: { name: 'test.echo', arguments: '{"text":"hi"}' } }] }
+    end
+
+    def turn_on_job(h, id)
+      h.session_manager.job_id = id
+    end
+
+    it 'reports the iterations that answered and the request that never came back' do
+      h = build_harness_with_responses([echo_round, :fail], num_ctx: 65_536)
+      turn_on_job(h, 0)
+      expect { h.session_manager.run_prompt('go') }.to raise_error(LLMError)
+
+      line = h.aborted_turn_stats_line(0)
+
+      expect(line).to include('1 of 2 iterations answered')
+      expect(line).to include('⏱')
+    end
+
+    it 'reports nothing when no request of the turn ever answered' do
+      h = build_harness_with_responses([:fail], num_ctx: 65_536)
+      turn_on_job(h, 0)
+      expect { h.session_manager.run_prompt('go') }.to raise_error(LLMError)
+
+      expect(h.aborted_turn_stats_line(0)).to be_nil
+    end
+
+    it 'reports nothing for a committed turn (it already printed its own line)' do
+      h = build_harness_with_responses([{ content: 'all good' }], num_ctx: 65_536)
+      h.session_manager.run_prompt('go')
+
+      expect(h.aborted_turn_stats_line(0)).to be_nil
+    end
+
+    it "does not carry the previous turn's numbers into the next one" do
+      h = build_harness_with_responses([echo_round, :fail], num_ctx: 65_536)
+      turn_on_job(h, 0)
+      expect { h.session_manager.run_prompt('first') }.to raise_error(LLMError)
+      expect(h.aborted_turn_stats_line(0)).to include('1 of 2 iterations answered')
+
+      h.session_manager.run_prompt('second')
+
+      expect(h.aborted_turn_stats_line(0)).to be_nil
+    end
+
+    it 'reports nothing when the open turn belongs to another job' do
+      h = build_harness_with_responses([echo_round, :fail], num_ctx: 65_536)
+      turn_on_job(h, 1)
+      expect { h.session_manager.run_prompt('go') }.to raise_error(LLMError)
+
+      expect(h.aborted_turn_stats_line(0)).to be_nil
+      expect(h.aborted_turn_stats_line(1)).to include('1 of 2 iterations answered')
+    end
+  end
+
   # Issue #246: a prompt-prefix cache matches the rendered prompt from token 0,
   # and a chat template renders the tool definitions into it. So EVERY request
   # of a session - the live turn and each advisory fork - must carry the same
