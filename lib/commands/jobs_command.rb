@@ -4,22 +4,26 @@ require_relative "../command"
 
 module Commands
   # /jobs - list the registry's jobs and mark the foreground one (issue #286),
-  # switch which job is foreground, and add a new agent to the run. The registry
-  # owns the flat list, so the command reports it as data through UI::Renderer
-  # (issue #474): the row shape is the renderer's, not a fused string built here.
+  # switch which job is foreground, add a new agent, and delete one (issue #558).
+  # The registry owns the flat list and SystemSaver owns the saved job dir, so
+  # the command reports through UI::Renderer (issue #474) and delegates every
+  # removal - the row shape is the renderer's, the disk half is the saver's,
+  # never a fused string or an rm_rf built here.
   class JobsCommand < Command
     HELP = CommandHelp.new(
       usage: "jobs",
       summary: "List every job on the registry's flat list and mark the " \
         "foreground one; 'switch <id>' makes another retained job foreground; " \
-        "'add' gives the run a new agent",
+        "'add' gives the run a new agent; 'delete <id>' removes one",
       group: :session,
-      forms: ["jobs", "jobs <id>", "jobs switch <id>", "jobs add"],
+      forms: ["jobs", "jobs <id>", "jobs switch <id>", "jobs add", "jobs delete <id>"],
       form_notes: {
         "jobs <id>" => "short form of 'switch <id>': /job 1 style switching",
         "jobs switch <id>" => "switch the foreground job to an id the registry retains",
         "jobs add [prompt]" => "add a sub-agent job built through the run's " \
-          "HarnessFactory and make it foreground, so the next prompt goes to it"
+          "HarnessFactory and make it foreground, so the next prompt goes to it",
+        "jobs delete <id>" => "remove a job from the run and its saved dir; the " \
+          "foreground job cannot be deleted, a running job cannot be interrupted here"
       },
       see_also: %w[help session])
 
@@ -35,6 +39,7 @@ module Commands
       # goes through to_s.
       name, arg = args.to_s.strip.split(/\s+/, 2)
       return add(arg.to_s) if name == "add"
+      return delete(arg) if name == "delete"
       return switch(registry, arg) if name == "switch"
       # A bare id is the short form of a switch: /jobs 1 (or /jobs #1) reaches the
       # job the next prompt should go to without the word. Checked AFTER the words
@@ -118,6 +123,56 @@ module Commands
         "foreground job is now ##{registry.foreground}"
       emit_role(:note, note)
       show_registry(registry)
+    end
+
+    # /jobs delete <id> (#558): remove a job from the run and from its saved
+    # system dir. The registry owns the live list and SystemSaver owns the
+    # disk, so this command only resolves the target and reports - it never
+    # edits @jobs or the filesystem itself. The command dispatches while the run
+    # is idle, so two cases decide the outcome: the FOREGROUND job is refused
+    # outright (a dropped id can never become foreground, so there is no defined
+    # hand-off for the job the run's own prompts go to), and any RUNNING job is
+    # refused too - a live task holds the main thread in its own drain loop, so
+    # the registry has no reachable handle to stop it from here.
+    def delete(raw_id)
+      shown = raw_id.to_s.strip
+      return render_usage if shown.empty?
+
+      id = shown.delete("#").to_i
+      target = registry.job(id)
+      return emit_role(:error, "job ##{id} is not retained") if target.nil?
+      if registry.foreground?(id)
+        return emit_role(:error, "cannot delete the foreground job ##{id}")
+      end
+      if target.running?
+        return emit_role(:error, "job ##{id} is running; it cannot be interrupted here")
+      end
+      if @session_id.nil? || system_saver.nil?
+        return emit_role(:error, "No system id - a job is named by its directory.")
+      end
+
+      target.interrupt
+      removed = system_saver.remove_job(@session_id, id)
+      re_save_running_system
+      emit_role(:note, "job ##{removed} (#{target.kind}) deleted from the run")
+      show_registry(registry)
+    end
+
+    # A delete of an already-saved system must persist: the index unlink
+    # SystemSaver#remove_job did is only durable until the next save, and a run
+    # that deletes and then quits would rewrite system.json from the live
+    # registry anyway. When the system already has jobs on disk, save it now so
+    # the removed job is gone from system.json immediately. A job never yet
+    # saved leaves no system.json and needs no save.
+    def re_save_running_system
+      return if @session_id.nil?
+      return unless system_saver.job_restores(@session_id).any?
+
+      begin
+        system_saver.save_run(@session_id)
+      rescue StandardError => e
+        emit_role(:warn, "job removed but the system re-save failed (#{e.message})")
+      end
     end
   end
 end

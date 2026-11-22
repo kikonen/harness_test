@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "json"
+require "fileutils"
 require_relative "system_record"
 
 # Writes a whole layered system once - each job's conversation, system.json and
@@ -58,6 +60,28 @@ class SystemSaver
     job_restores(saved_system_id).map { |restore| restore[:id] }.reject do |job_id|
       @registry&.job(job_id)
     end
+  end
+
+  # Remove ONE job from a saved system (issue #558): unlink its index entry
+  # from system.json, then remove its jobs/<id>/ dir. The order is the point
+  # (doc/session_layers_design.md "The drop rule"): unlink the index entry
+  # FIRST so a crash between the two leaves an orphan directory (recoverable)
+  # rather than a dangling id that a resume tries to rebuild. Only a SYSTEM dir
+  # is touched; a #207 flat session has no jobs index. A system with no saved
+  # files yet (a job never saved) just drops from the live registry.
+  def remove_job(saved_system_id, job_id)
+    path = @locator.system_file_path(saved_system_id)
+    if File.file?(path)
+      system = JSON.parse(File.read(path), symbolize_names: true)
+      system[:jobs] = Array(system[:jobs]).reject do |entry|
+        (entry[:id] || entry["id"]) == job_id
+      end
+      File.write(path, JSON.generate(system))
+    end
+
+    FileUtils.rm_rf(@locator.job_dir_path(saved_system_id, job_id))
+    registry&.remove_job(registry&.job(job_id))
+    job_id
   end
 
   # The system half is written on every call, even when no job chain is

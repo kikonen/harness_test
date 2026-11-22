@@ -224,4 +224,84 @@ RSpec.describe Commands::JobsCommand do
       expect(out).to include('Jobs (foreground marked *)')
     end
   end
+
+  # /jobs delete <id> (issue #558): the command resolves the target and reports;
+  # the registry owns the live list and SystemSaver owns the saved dir. These
+  # specs drive that through a real HarnessFactory + SystemSaver over a throwaway
+  # workdir, so the disk half (unlink index entry, then rm_rf the job dir) is
+  # exercised for real, not stubbed.
+  describe '/jobs delete' do
+    before { allow_any_instance_of(SandboxGemfile).to receive(:lock_seeded?).and_return(true) }
+
+    # A run with two saved jobs (main #0 foreground + sub_agent #1) written to a
+    # tmpdir, plus the command wired with the real saver/factory/session id.
+    def delete_run(saved:)
+      workdir  = Dir.mktmpdir('jobs-delete-spec')
+      registry = JobRegistry.new
+      factory  = HarnessFactory.new(
+        registry:,
+        locator: SessionLocator.new(workdir),
+        settings: SystemSettings.from_options({}),
+        file_list: FileList.new([], workdir: workdir),
+        system_saver: SystemSaver.new(SessionLocator.new(workdir), registry),
+        logger: nil)
+      main  = factory.add_harness_job(kind: :main, session_id: NAME_RUN_ID)
+      child = factory.add_harness_job(kind: :sub_agent, session_id: NAME_RUN_ID,
+                                      requested_by: main)
+      saver = SystemSaver.new(SessionLocator.new(workdir), registry)
+      registry.foreground = main.id
+      saver.save_run(NAME_RUN_ID) if saved
+      io = StringIO.new
+      command = described_class.new(
+        registry:, file_list: nil, ui: UI::Console.new(stdout: io),
+        system_saver: saver, harness_factory: factory, session_id: NAME_RUN_ID)
+      [command, io, registry, child, workdir, saver]
+    end
+
+    it 'deletes a finished non-foreground job from disk and the registry' do
+      command, io, registry, child, workdir = delete_run(saved: true)
+      child.finish('done')
+      dir = SessionLocator.new(workdir).job_dir_path(NAME_RUN_ID, child.id)
+      expect(File.directory?(dir)).to be(true)
+
+      command.handle("delete #{child.id}")
+
+      expect(registry.job(child.id)).to be_nil
+      expect(File.directory?(dir)).to be(false)
+      system_data = JSON.parse(
+        File.read(SessionLocator.new(workdir).system_file_path(NAME_RUN_ID)), symbolize_names: true)
+      expect(system_data[:jobs].map { |j| j[:id] }).to eq([0])
+      expect(registry.foreground).to eq(0)
+      expect(io.string).to include("job ##{child.id} (sub_agent) deleted from the run")
+      FileUtils.remove_entry(workdir)
+    end
+
+    it 'refuses to delete the foreground job' do
+      command, io, registry, _child = delete_run(saved: true)
+
+      command.handle('delete 0')
+
+      expect(registry.job(0)).not_to be_nil
+      expect(registry.foreground).to eq(0)
+      expect(io.string).to include('cannot delete the foreground job #0')
+    end
+
+    it 'refuses to delete a running non-foreground job' do
+      command, io, registry, child = delete_run(saved: false)
+      child.mark_running
+
+      command.handle("delete #{child.id}")
+
+      expect(registry.job(child.id)).not_to be_nil
+      expect(io.string).to include('is running; it cannot be interrupted here')
+    end
+
+    it 'reports usage for a delete with no id' do
+      command, io, _registry, _child = delete_run(saved: false)
+
+      command.handle('delete')
+
+      expect(io.string).to include('jobs delete <id>')
+    end
+  end
 end

@@ -267,7 +267,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/model [id]` | Show or switch the active model (by profile id) |
 | `/param [key [value]]` | Show, override or reset a model parameter |
 | `/ctx` | Show context usage (tokens, %, headroom, auto-compact status) |
-| `/jobs [id]` | List every job on the registry's flat list with the foreground one marked; `/jobs <id>` (or `/jobs switch <id>`) makes another retained job foreground; `/jobs add` adds a sub-agent job with its own agent and makes it foreground |
+| `/jobs [id]` | List every job on the registry's flat list with the foreground one marked; `/jobs <id>` (or `/jobs switch <id>`) makes another retained job foreground; `/jobs add` adds a sub-agent job with its own agent and makes it foreground; `/jobs delete <id>` removes a job from the run and its saved dir (the foreground job cannot be deleted) |
 | `/replay [n] [job <id>\|all]` | Print the last recorded lines of the run (the tail a resume redraws) - n lines, one job's own tail, or every retained job's |
 | `/reasoning` | Show the reasoning text of the last response |
 | `/skills [name]` | List the project's skills (`.harness/skills/`), or print one skill's body |
