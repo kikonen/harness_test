@@ -30,7 +30,9 @@ module Commands
 
     # Build the CLI command to resume this session in a new harness run.
     def resume_cli_string(id)
-      parts = ["ruby harness.rb", "-m #{foreground_harness.session_manager.active_model_name}", "--resume #{id}"]
+      # Same rule as CLI#resume_cli_string: bin/harness is what the user runs,
+      # and the resumed run restores its own model profile, so no -m.
+      parts = ["bin/harness", "--resume #{id}"]
       parts << "-d #{@file_list.workdir}" unless @file_list.workdir == Dir.pwd
       parts.join(" ")
     end

@@ -26,7 +26,7 @@ module Commands
         return
       end
 
-      footer_text = "Resume one in a new run: ruby harness.rb -m <model> --resume <id>"
+      footer_text = "Resume one in a new run: `bin/harness --resume <id>`"
       emit_list(
         title: "Saved sessions (#{sessions.size}):",
         kind: :table,
