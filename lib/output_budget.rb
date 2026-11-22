@@ -11,7 +11,7 @@
 # a single oversized line is clipped within itself: that is the shape no
 # line-shaped rule can catch.
 module OutputBudget
-  DEFAULT_RESULT_BYTES = 48_000
+  DEFAULT_RESULT_BYTES = 100_000
   # A line is clipped only when it is grossly oversized - an ordinary diff or
   # log line must survive intact. It stays BELOW DEFAULT_RESULT_BYTES on
   # purpose: a huge SINGLE-line file (minified JSON, a one-line blob) read whole
