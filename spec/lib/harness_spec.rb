@@ -695,21 +695,33 @@ RSpec.describe Harness do
     end
 
     it 'emits the step number, a digest of the reasoning and the tools called' do
-      harness.send(:emit_step, 3, message)
+      harness.send(:emit_step, message)
       lines = drained_lines
 
       # Content is the ROLE the emitter stated; the pattern ('step ',
       # 'plan:  ') belongs to UI::Renderer, so it is asserted here on the
       # rendered line (spec/lib/ui/renderer_spec.rb covers the labels).
-      expect(lines).to include(3)
+      expect(lines).to include(1)
       expect(lines).to include('First I will inspect the spinner, then run the specs.')
       expect(lines).to include('file.read, run.command')
+    end
+
+    # issue #577: the step number is a job-wide monotonic counter, not the
+    # per-call_llm loop counter - repeated emit_step calls never repeat a number
+    # and never go backwards, so a turn that restarts cannot re-issue a step.
+    it 'numbers steps monotonically across repeated calls (issue #577)' do
+      numbers = 3.times.map do
+        harness.send(:emit_step, message)
+        drain_outbox(task).find { |m| m[:type] == :step_label }[:content]
+      end
+
+      expect(numbers).to eq([1, 2, 3])
     end
 
     it 'falls back to message content when there is no reasoning' do
       msg = { reasoning: nil, content: 'checking the test suite', tool_calls: [{ id: 'c1', function: { name: 'run.command', id: 'run.command' } }] }
 
-      harness.send(:emit_step, 2, msg)
+      harness.send(:emit_step, msg)
       lines = drained_lines
 
       expect(lines).to include('checking the test suite')
@@ -717,7 +729,7 @@ RSpec.describe Harness do
     end
 
     it 'emits the reasoning digest and the interstitial as distinct roles' do
-      harness.send(:emit_step, 3, message)
+      harness.send(:emit_step, message)
       rendered = drain_outbox(task).map { |m| UI::Renderer.new.line(type: m[:type], content: m[:content]) }
 
       expect(rendered).to include('plan:  First I will inspect the spinner, then run the specs.')
@@ -728,14 +740,14 @@ RSpec.describe Harness do
     it 'emits only the tool line when there is no reasoning text at all' do
       msg = { reasoning: nil, content: nil, tool_calls: [{ id: 'c1', function: { name: 'file.search', id: 'file.search' } }] }
 
-      harness.send(:emit_step, 4, msg)
+      harness.send(:emit_step, msg)
       lines = drained_lines
 
       expect(lines).to include('file.search')
     end
 
     it 'emits only the step roles - no spinner pause/resume (drain loop owns that)' do
-      harness.send(:emit_step, 1, message)
+      harness.send(:emit_step, message)
 
       types = drain_outbox(task).map { |m| m[:type] }
       expect(types - step_roles).to be_empty
@@ -747,7 +759,7 @@ RSpec.describe Harness do
       ENV['HARNESS_STEP_DISPLAY'] = 'off'
 
       begin
-        harness.send(:emit_step, 1, message)
+        harness.send(:emit_step, message)
 
         expect(drain_outbox(task)).to be_empty
       ensure
