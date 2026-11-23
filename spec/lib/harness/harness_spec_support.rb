@@ -21,6 +21,7 @@ module HarnessSpecSupport
   end
 
   let(:workdir) { Dir.mktmpdir('harness-spec') }
+  let(:locator) { SessionLocator.new(workdir) }
   after { FileUtils.remove_entry(workdir) if File.directory?(workdir) }
 
   # Every fresh seed would otherwise spawn a real `bundle lock` subprocess
@@ -82,11 +83,13 @@ module HarnessSpecSupport
     # resolved (issue #223); num_ctx fixed so context indicators are stable.
     opts = { system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE,
              num_ctx: 65_536 }.merge(options)
-    # session_id / resume_data are constructor keywords (issue #276: the id is
-    # settled before the Harness exists), not LLM options, so they are pulled
-    # out of the options hash and passed where they belong.
-    session_id  = opts.delete(:session_id)
+    # The run's owner settles the id and builds the logger before the Harness
+    # exists; a spec is that owner, so it settles both here and hands the
+    # Harness the locator that already names the run.
+    session_id  = opts.delete(:session_id) || SessionLocator.new(workdir).fresh_id
     resume_data = opts.delete(:resume_data)
+    run_locator = SessionLocator.new(workdir, session_id:)
+    logger      = opts.delete(:logger) || SessionLogger.build(run_locator.session_log_path)
     # Per-connection model values (num_ctx/base_url/api/...) belong to a model
     # PROFILE, not to settings (#286). A spec that pins them gets a single
     # profile declaring them, named for the model it asks for, so the Harness
@@ -99,7 +102,7 @@ module HarnessSpecSupport
     # Harness#apply_resume_state (SystemSettings#restore_persisted), so the saved
     # choice wins over the config (#221); the config-only flags stay as resolved.
     Harness.new(file_list, settings: SystemSettings.from_options(opts),
-                        session_id: session_id, resume_data: resume_data)
+                        locator: run_locator, logger:, resume_data:)
   end
 
   # The per-connection model values a spec pins, folded into one profile so the

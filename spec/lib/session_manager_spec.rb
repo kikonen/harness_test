@@ -14,6 +14,10 @@ require 'system_saver'
 require 'fileutils'
 require 'tmpdir'
 
+# The id a spec hands the run-owner save path. Session carries no id (the id is
+# the session directory name), so a spec naming one names it here.
+SESSION_ID = 'aaaaaaaa-0000-0000-0000-000000000000'
+
 # Regression coverage for issue #64: auto-compact must run BEFORE the LLM
 # call (at the start of the next prompt), never after the response, where it
 # would race with a pending dialog (ui.dialog / grant prompt) for stdin and
@@ -40,7 +44,7 @@ RSpec.describe SessionManager do
   # its outbox; specs that drive the real drain loop go through `Task.run`.
   let(:harness) do
     Class.new do
-      attr_accessor :session, :client, :history, :file_list, :session_manager
+      attr_accessor :session, :locator, :client, :history, :file_list, :session_manager
 
       # #286: the postures SessionManager#save_session reads live on the
       # harness' SystemSettings, so this stub's accessors forward to @settings
@@ -63,6 +67,7 @@ RSpec.describe SessionManager do
 
       def initialize(session, client)
         @session = session
+        @locator = SessionLocator.new(Dir.pwd, session_id: SESSION_ID)
         @client  = client
         @history = nil
         @logger  = Logger.new(File::NULL)
@@ -75,16 +80,16 @@ RSpec.describe SessionManager do
       attr_accessor :settings, :model_config, :logger
 
       def compact_recent_messages
-        Session::COMPACT_RECENT_MESSAGES
+        SystemSettings::DEFAULT_COMPACT_RECENT_MESSAGES
       end
 
       def compact_auto_threshold
-        Session::AUTO_COMPACT_THRESHOLD
+        SystemSettings::DEFAULT_COMPACT_AUTO_THRESHOLD
       end
 
       # issue #151: default reserved headroom (the stub mirrors Harness).
       def compact_reserved_tokens
-        Session::COMPACT_RESERVED_TOKENS
+        SystemSettings::DEFAULT_COMPACT_RESERVED_TOKENS
       end
 
       def compact_trigger_tokens
@@ -416,17 +421,17 @@ RSpec.describe SessionManager do
 # palette, mcp, the job map) - is produced by the run owner's save_run over a
 # registry carrying the system settings, never by a job SessionManager.
   # save_system wires this harness as job #0 and drives that single write.
-  def read_system_json(dir, id)
-    JSON.parse(File.read(SessionLocator.new(dir).system_file_path(id)))
+  def read_system_json(id)
+    JSON.parse(File.read(SessionLocator.new(Dir.pwd, session_id: id).system_file_path))
   end
 
-  def save_system(manager, file_list, dir, registry = nil)
+  def save_system(manager, file_list, registry = nil)
     registry ||= JobRegistry.new(settings: harness.settings)
     job = registry.add_job(kind: :main, harness: harness)
     registry.foreground = job.id
     harness.file_list = file_list
     harness.session_manager = manager
-    SystemSaver.new(SessionLocator.new(dir), registry).save_run(session.session_id)
+    SystemSaver.new(SessionLocator.new(Dir.pwd, session_id: SESSION_ID), registry).save_run
   end
 
   describe 'auto-save at prompt boundaries (issue #107)' do
@@ -458,10 +463,12 @@ RSpec.describe SessionManager do
     end
 
     it 'persists the session when auto_save is on and there is content' do
-      with_tmp_manager do |manager, _, dir|
+      with_tmp_manager do |manager, _, _|
         session.add_user('hello')
-        # Auto-save writes only this job's own conversation file (issue #548).
-        path = SessionLocator.new(dir).job_session_file_path(session.session_id, 0)
+        # Auto-save writes only this job's own conversation file (issue #548),
+        # under the harness locator's workdir (Dir.pwd), not the tmp dir.
+        path = SessionLocator.new(Dir.pwd, session_id: SESSION_ID).job_session_file_path(0)
+        FileUtils.rm_f(path)
         expect(manager).to receive(:save_session).and_call_original
         expect { manager.maybe_auto_save('test') }.to change { File.file?(path) }.from(false).to(true)
       end
@@ -507,8 +514,8 @@ RSpec.describe SessionManager do
         file_list = FileList.new([], workdir: dir)
         manager   = described_class.new(harness, file_list)
 
-        expect(manager.session_file_path(sid))
-          .to eq(File.join(dir, '.harness/sessions', sid, 'system.json'))
+        expect(manager.session_file_path)
+          .to eq(File.join(Dir.pwd, '.harness/sessions', SESSION_ID, 'system.json'))
       end
     end
 
@@ -518,12 +525,12 @@ RSpec.describe SessionManager do
         manager   = described_class.new(harness, file_list)
         session.add_user('hello')
 
-        expect(save_system(manager, file_list, dir)).to eq(session.session_id)
+        expect(save_system(manager, file_list)).to eq(SESSION_ID)
 
-        path = manager.session_file_path(session.session_id)
+        path = manager.session_file_path
         expect(File.file?(path)).to be true
         # The old layout's file must NOT appear next to the session dirs.
-        expect(File.exist?(File.join(dir, '.harness/sessions', "#{session.session_id}.json")))
+        expect(File.exist?(File.join(dir, '.harness/sessions', "{SESSION_ID}.json")))
           .to be false
       end
     end
@@ -539,8 +546,8 @@ RSpec.describe SessionManager do
       manager   = described_class.new(harness, file_list)
       harness.yolo = on
       session.add_user('hello')
-      save_system(manager, file_list, dir)
-      read_system_json(dir, session.session_id)
+      save_system(manager, file_list)
+      read_system_json(SESSION_ID)
     end
 
     it 'saves the posture as a plain boolean' do
@@ -564,8 +571,8 @@ RSpec.describe SessionManager do
         file_list = FileList.new([], workdir: dir)
         manager   = described_class.new(harness, file_list)
         session.add_user('hello')
-        save_system(manager, file_list, dir)
-        data = read_system_json(dir, session.session_id)
+        save_system(manager, file_list)
+        data = read_system_json(SESSION_ID)
 
         expect(data['output_palette']).to eq('default')
       end
@@ -584,8 +591,8 @@ RSpec.describe SessionManager do
       manager   = described_class.new(harness, file_list)
       harness.mcp_connected_summary = summary
       session.add_user('hello')
-      save_system(manager, file_list, dir)
-      read_system_json(dir, session.session_id)
+      save_system(manager, file_list)
+      read_system_json(SESSION_ID)
     end
 
     it 'saves each connected server with the tool names it contributed' do
@@ -613,10 +620,11 @@ RSpec.describe SessionManager do
   describe 'resume replay tail round trip (issue #458)' do
     def save_with_replay(dir, tail)
       harness_double = Class.new do
-        attr_reader :settings, :model_config, :logger, :session
+        attr_reader :settings, :model_config, :logger, :session, :locator
         attr_accessor :file_list, :session_manager
         def initialize(session)
           @session = session
+          @locator = SessionLocator.new(Dir.pwd, session_id: SESSION_ID)
           @logger  = Logger.new(File::NULL)
           @settings = SystemSettings.from_options({ auto_save: false })
           @model_config = ModelConfig.new({ num_ctx: 65_536 })
@@ -635,8 +643,8 @@ RSpec.describe SessionManager do
       harness_double.session_manager = manager
       registry.foreground_buffer.restore(tail)
       session.add_user('hello')
-      SystemSaver.new(SessionLocator.new(dir), registry).save_run(session.session_id)
-      JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
+      SystemSaver.new(SessionLocator.new(Dir.pwd, session_id: SESSION_ID), registry).save_run
+      JSON.parse(File.read(File.join(Dir.pwd, '.harness', 'sessions', SESSION_ID,
                                      'jobs', '0', 'replay.json')), symbolize_names: true)
     end
 
@@ -672,7 +680,7 @@ RSpec.describe SessionManager do
 
         mgr.save_session
 
-        job1 = File.join(dir, '.harness', 'sessions', session.session_id,
+        job1 = File.join(Dir.pwd, '.harness', 'sessions', SESSION_ID,
                          'jobs', '1', 'session.json')
         expect(File.file?(job1)).to be(true)
         data = JSON.parse(File.read(job1), symbolize_names: true)
@@ -680,17 +688,16 @@ RSpec.describe SessionManager do
       end
     end
 
-    it 'save_job_session keys on the RUN id, not the harness own session id' do
+    it 'save_job_session writes under the locator session id' do
       Dir.mktmpdir do |dir|
         file_list = FileList.new([], workdir: dir)
         mgr = described_class.new(harness, file_list)
         mgr.job_id = 2
         session.add_user('chain')
-        run_id = '11111111-2222-3333-4444-555555555555'
 
-        expect(mgr.save_job_session(run_id)).to eq(run_id)
+        mgr.save_job_session
 
-        path = File.join(dir, '.harness', 'sessions', run_id, 'jobs', '2', 'session.json')
+        path = File.join(Dir.pwd, '.harness', 'sessions', SESSION_ID, 'jobs', '2', 'session.json')
         expect(File.file?(path)).to be(true)
       end
     end
@@ -712,6 +719,9 @@ RSpec.describe SessionManager do
       double.define_singleton_method(:settings) { SystemSettings.from_options({ auto_save: false }) }
       double.define_singleton_method(:model_config) { ModelConfig.new({}) }
       double.define_singleton_method(:logger) { Logger.new(File::NULL) }
+      double.define_singleton_method(:locator) do
+        SessionLocator.new(Dir.pwd, session_id: SESSION_ID)
+      end
       double.define_singleton_method(:output_palette) { UI::Palette.fetch(nil) }
       double.define_singleton_method(:mcp_connected_summary) { [] }
       double.define_singleton_method(:yolo?) { false }
@@ -723,8 +733,8 @@ RSpec.describe SessionManager do
       registry.foreground_job.attach_harness(double)
       double.file_list = fl
       double.session_manager = manager
-      SystemSaver.new(SessionLocator.new(dir), registry).save_run(session.session_id)
-      JSON.parse(File.read(File.join(dir, '.harness', 'sessions', session.session_id,
+      SystemSaver.new(SessionLocator.new(Dir.pwd, session_id: SESSION_ID), registry).save_run
+      JSON.parse(File.read(File.join(Dir.pwd, '.harness', 'sessions', SESSION_ID,
                                      'system.json')), symbolize_names: true)
     end
 
@@ -750,8 +760,8 @@ RSpec.describe SessionManager do
       manager   = described_class.new(harness, file_list)
       harness.stream = on
       session.add_user('hello')
-      save_system(manager, file_list, dir)
-      read_system_json(dir, session.session_id)
+      save_system(manager, file_list)
+      read_system_json(SESSION_ID)
     end
 
     it 'saves the posture as a plain boolean' do
@@ -770,8 +780,8 @@ RSpec.describe SessionManager do
       manager   = described_class.new(harness, file_list)
       harness.markdown = on
       session.add_user('hello')
-      save_system(manager, file_list, dir)
-      read_system_json(dir, session.session_id)
+      save_system(manager, file_list)
+      read_system_json(SESSION_ID)
     end
 
     it 'saves the posture as a plain boolean' do
@@ -824,9 +834,10 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
   end
   let(:harness) do
     Class.new do
-      attr_accessor :session, :client, :history
+      attr_accessor :session, :locator, :client, :history
       def initialize(session, client, options)
         @session = session
+        @locator = SessionLocator.new(Dir.pwd, session_id: SESSION_ID)
         @client  = client
         @logger  = Logger.new(File::NULL)
         @history = nil
@@ -887,7 +898,7 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
 
       # param_overrides is the foreground agent's per-agent state, so it lives in
       # that agent's own job session.json (issue #548), not in system.json.
-      job_session = SessionLocator.new(dir).job_session_file_path(session.session_id, 0)
+      job_session = SessionLocator.new(Dir.pwd, session_id: SESSION_ID).job_session_file_path(0)
       data = JSON.parse(File.read(job_session))
       expect(data['param_overrides']).to include('reasoning_effort')
     end
@@ -907,10 +918,11 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
 
   let(:harness) do
     Class.new do
-      attr_accessor :session, :client
+      attr_accessor :session, :locator, :client
 
       def initialize(session, client)
         @session = session
+        @locator = SessionLocator.new(Dir.pwd, session_id: SESSION_ID)
         @client  = client
         @logger  = Logger.new(File::NULL)
         @settings = SystemSettings.from_options({ auto_save: false })
@@ -933,7 +945,7 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
       # issue #151: reserve larger than this tiny window -> percentage
       # trigger wins (880 tokens of the 1000 window).
       def compact_reserved_tokens
-        Session::COMPACT_RESERVED_TOKENS
+        SystemSettings::DEFAULT_COMPACT_RESERVED_TOKENS
       end
 
       def compact_trigger_tokens
@@ -1154,7 +1166,10 @@ end
 # authoritative record of what the model said. Empty sections are labeled
 # "(none)" instead of leaving blank "--- reasoning ---" blocks.
 RSpec.describe SessionManager, '#log_response (issue #131)' do
-  let(:harness) { double('harness', logger: Logger.new(File::NULL)) }
+  let(:harness) do
+    double('harness', logger: Logger.new(File::NULL),
+           locator: SessionLocator.new(Dir.pwd, session_id: SESSION_ID))
+  end
   let(:manager) { described_class.new(harness, FileList.new([], workdir: Dir.pwd)) }
 
   it 'logs the reasoning and content sections to harness.log' do
@@ -1188,7 +1203,8 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
       double('harness', session: session, client: client, logger: logger,
              settings: SystemSettings.from_options({ compact_recent: 2 }),
              tools_payload: nil,
-             context_indicator: 'ctx 1/65536 (0%)')
+             context_indicator: 'ctx 1/65536 (0%)',
+             locator: SessionLocator.new(Dir.pwd, session_id: SESSION_ID))
     end
     let(:manager) { described_class.new(harness, FileList.new([], workdir: Dir.pwd)) }
 
@@ -1217,7 +1233,8 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
       double('harness', session: session, client: client, logger: logger,
              model_config: model_config, settings: settings,
              compact_trigger_tokens: 1, compact_max_size: SessionManager::DEFAULT_COMPACT_SUMMARY_WORDS,
-             tools_payload: nil)
+             tools_payload: nil,
+             locator: SessionLocator.new(Dir.pwd, session_id: SESSION_ID))
     end
     let(:manager) { described_class.new(harness, FileList.new([], workdir: Dir.pwd)) }
 
@@ -1260,10 +1277,11 @@ RSpec.describe SessionManager, '#retry (issue #208)' do
   let(:sent_chains) { [] }
   let(:harness) do
     Class.new do
-      attr_reader :session, :client, :logger
+      attr_reader :session, :client, :logger, :locator
 
       def initialize(session, client, logger, sent_chains)
         @session = session
+        @locator = SessionLocator.new(Dir.pwd, session_id: SESSION_ID)
         @client  = client
         @logger  = logger
         @sent    = sent_chains
@@ -1277,11 +1295,11 @@ RSpec.describe SessionManager, '#retry (issue #208)' do
       def mcp_connected_summary = []
 
       def compact_auto_threshold
-        Session::AUTO_COMPACT_THRESHOLD
+        SystemSettings::DEFAULT_COMPACT_AUTO_THRESHOLD
       end
 
       def compact_reserved_tokens
-        Session::COMPACT_RESERVED_TOKENS
+        SystemSettings::DEFAULT_COMPACT_RESERVED_TOKENS
       end
 
       def call_llm
@@ -1389,9 +1407,10 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
 
   def manager_with(options)
     harness = Class.new do
-      attr_reader :options, :settings, :model_config, :logger, :session, :client, :history
+      attr_reader :options, :settings, :model_config, :logger, :session, :locator, :client, :history
       def initialize(session, client, options)
         @session = session
+        @locator = SessionLocator.new(Dir.pwd, session_id: SESSION_ID)
         @client  = client
         @options = options
         @settings = SystemSettings.from_options(options)

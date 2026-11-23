@@ -35,7 +35,7 @@ class SessionManager
   def initialize(harness, file_list)
     @harness     = harness
     @file_list   = file_list
-    @locator     = SessionLocator.new(file_list.workdir)
+    @locator     = harness.locator
     @rules_mtime = current_rules_mtime
     @last_autosave = 0
     @job_id = 0
@@ -524,18 +524,13 @@ class SessionManager
   end
 
   # WHERE a session lives is SessionLocator's knowledge.
-  def session_file_path(id) = @locator.system_file_path(id)
+  def session_file_path = @locator.system_file_path
 
   # Saves only this job's own conversation file. system.json and the per-job
   # job.json/replay.json are the run owner's (SystemSaver#save_run): a per-job
   # writer would overwrite the foreground's grants and digests with its own.
-  # run_id is the run's session directory key, not this harness' own id (a
-  # sub-agent's chain must land under this run's jobs/<id>/).
-  def save_job_session(run_id = nil)
-    id        = run_id || @harness.session.session_id
-    session_h = @harness.session.to_h(@file_list)
-    write_own_job_session(id, session_h)
-    id
+  def save_job_session
+    write_own_job_session(@harness.session.to_h(@file_list))
   end
 
   alias_method :save_session, :save_job_session
@@ -555,9 +550,9 @@ class SessionManager
     File.write(path, JSON.generate(data))
   end
 
-  def write_own_job_session(id, session_h)
-    FileUtils.mkdir_p(@locator.job_dir_path(id, job_id))
-    write_json(@locator.job_session_file_path(id, job_id), job_session_json(session_h))
+  def write_own_job_session(session_h)
+    FileUtils.mkdir_p(@locator.job_dir(job_id))
+    write_json(@locator.job_session_file_path(job_id), job_session_json(session_h))
   end
 
   # Carries NO session_id: a job is named by its directory plus the id

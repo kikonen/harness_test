@@ -121,10 +121,10 @@ end
       cli  = build_cli
       cli.setup
 
-      id   = cli.foreground_harness.session.session_id
+      id   = cli.foreground_harness.locator.session_id
 
       expect(session_dirs).to eq([id])
-      expect(File.file?(cli.foreground_harness.session_log_path)).to be true
+      expect(File.file?(cli.locator.session_log_path)).to be true
       expect(cli.history.history_file).to eq(
         File.join(workdir, '.harness', 'sessions', id, 'harness_history')
       )
@@ -137,13 +137,13 @@ end
       cli = described_class.new(options.merge(resume: saved[0, 8]), ui)
       cli.setup
 
-      id  = cli.foreground_harness.session.session_id
+      id  = cli.foreground_harness.locator.session_id
 
       expect(id).to eq(saved)
       # Issue #135's symptom: a second (throwaway) directory for the fresh
       # random id the run threw away. There is no longer a fresh id to throw.
       expect(session_dirs).to eq([saved])
-      expect(File.file?(cli.foreground_harness.session_log_path)).to be true
+      expect(File.file?(cli.locator.session_log_path)).to be true
       expect(cli.history.history_file).to eq(
         File.join(workdir, '.harness', 'sessions', saved, 'harness_history')
       )
@@ -160,13 +160,13 @@ end
       cli = described_class.new(options.merge(continue: true), ui)
       cli.setup
 
-      expect(cli.foreground_harness.session.session_id).to eq(newer)
+      expect(cli.foreground_harness.locator.session_id).to eq(newer)
       # Same single id for log, history and the session dir - and only the two
       # REAL sessions exist (no third one minted for this run).
       expect(session_dirs).to eq([older, newer])
-      expect(cli.foreground_harness.session_log_path)
+      expect(cli.locator.session_log_path)
         .to eq(File.join(workdir, '.harness', 'sessions', newer, 'harness.log'))
-      expect(File.file?(cli.foreground_harness.session_log_path)).to be true
+      expect(File.file?(cli.locator.session_log_path)).to be true
       expect(cli.history.history_file).to eq(
         File.join(workdir, '.harness', 'sessions', newer, 'harness_history')
       )
@@ -258,7 +258,7 @@ end
       cli = build_cli
       cli.setup
 
-      id  = cli.foreground_harness.session.session_id
+      id  = cli.foreground_harness.locator.session_id
 
       expect(cli.send(:startup_banner).send(:session_log_path_display))
         .to eq(File.join('.harness', 'sessions', id, 'harness.log'))
@@ -273,7 +273,7 @@ end
     it 'names bin/harness and --resume, and no model' do
       cli = build_cli
       cli.setup
-      id = cli.foreground_harness.session.session_id
+      id = cli.foreground_harness.locator.session_id
 
       line = cli.send(:resume_cli_string, id)
       expect(line).to start_with('bin/harness')
@@ -300,7 +300,7 @@ end
       cli = described_class.new(options.merge(resume: saved), ui)
       cli.setup
 
-      expect(cli.foreground_harness.session.session_id).to eq(saved)
+      expect(cli.foreground_harness.locator.session_id).to eq(saved)
       expect(cli.foreground_harness.session.messages.map { |m| m[:content] }).to include('earlier prompt')
       expect(cli.history.history_file).to eq(
         File.join(workdir, '.harness', 'sessions', saved, 'harness_history')
@@ -314,9 +314,9 @@ end
       cli = build_cli
       cli.setup
 
-      id  = cli.foreground_harness.session.session_id
+      id  = cli.foreground_harness.locator.session_id
 
-      expect(cli.foreground_harness.session.session_id).to eq(id)
+      expect(cli.foreground_harness.locator.session_id).to eq(id)
       expect(session_dirs).to eq([id])
     end
   end
@@ -377,32 +377,32 @@ end
     it 'resumes the conversation and replay tail a layered save wrote' do
       saver = described_class.new(layered_options, ui)
       saver.setup
-      id = saver.session_id
+      id = saver.locator.session_id
 
       saver.foreground_harness.session.add_user('earlier prompt')
       saver.foreground_harness.session.add_assistant('earlier reply')
       saver.registry.record_user_prompt('fix the parser')
       # The layered save is the run owner's single write (SystemSaver#save_run).
-      saver.system_saver.save_run(id)
+      saver.system_saver.save_run
 
-      locator = SessionLocator.new(workdir)
-      expect(File.file?(locator.system_file_path(id))).to be true
-      expect(File.file?(locator.job_session_file_path(id, 0))).to be true
-      expect(File.file?(locator.job_replay_file_path(id, 0))).to be true
-      expect(File.file?(locator.job_file_path(id, 0))).to be true
+      locator = SessionLocator.new(workdir, session_id: id)
+      expect(File.file?(locator.system_file_path)).to be true
+      expect(File.file?(locator.job_session_file_path(0))).to be true
+      expect(File.file?(locator.job_replay_file_path(0))).to be true
+      expect(File.file?(locator.job_file_path(0))).to be true
 
       # The conversation is NOT in system.json - it moved to the job's own file.
-      system_data = JSON.parse(File.read(locator.system_file_path(id)))
+      system_data = JSON.parse(File.read(locator.system_file_path))
       expect(system_data).not_to have_key('messages')
       expect(system_data['jobs'].map { |j| j['id'] }).to eq([0])
       # The system records each job's conversation size so /sessions can report a
       # per-job breakdown from metadata alone (SystemRecord#jobs_for_save).
       expect(system_data['jobs'].map { |j| j['messages'] }).to eq([2])
-      job_data = JSON.parse(File.read(locator.job_session_file_path(id, 0)))
+      job_data = JSON.parse(File.read(locator.job_session_file_path(0)))
       expect(job_data['messages'].map { |m| m['content'] }).to include('earlier prompt')
       # Each job also gets its own record next to its conversation: the job's
       # facts and edges as ids, with no run UUID and no conversation.
-      job_record = JSON.parse(File.read(locator.job_file_path(id, 0)))
+      job_record = JSON.parse(File.read(locator.job_file_path(0)))
       expect(job_record['id']).to eq(0)
       expect(job_record['kind']).to eq('main')
       expect(job_record).not_to have_key('messages')
@@ -411,7 +411,7 @@ end
       resumed = described_class.new(layered_options.merge(resume: id), ui)
       resumed.setup
 
-      expect(resumed.session_id).to eq(id)
+      expect(resumed.locator.session_id).to eq(id)
       contents = resumed.foreground_harness.session.messages.map { |m| m[:content] }
       expect(contents).to include('earlier prompt')
       expect(contents).to include('earlier reply')
@@ -429,27 +429,27 @@ end
     it 'round-trips a background job own replay tail through resume and re-save' do
       saver = described_class.new(layered_options, ui)
       saver.setup
-      id = saver.session_id
+      id = saver.locator.session_id
       allow(ui).to receive(:puts)
 
       main = saver.registry.job(0)
       main.harness.session.add_user('main prompt')
       main.harness.session.add_assistant('main reply')
       sub = saver.harness_factory.add_harness_job(
-        kind: :sub_agent, session_id: id, requested_by: main)
+        kind: :sub_agent, requested_by: main)
       sub.harness.session.add_user('sub prompt')
       sub.harness.session.add_assistant('sub reply')
       # Each line goes to the job that owns it, which is what a save records.
       saver.registry.record_user_prompt('main line', job: main)
       saver.registry.record_user_prompt('sub line', job: sub)
-      saver.system_saver.save_run(id)
+      saver.system_saver.save_run
 
-      locator = SessionLocator.new(workdir)
+      locator = SessionLocator.new(workdir, session_id: id)
       expect(
-        JSON.parse(File.read(locator.job_replay_file_path(id, 0))).map { |e| e['content'] }
+        JSON.parse(File.read(locator.job_replay_file_path(0))).map { |e| e['content'] }
       ).to eq(['main line'])
       expect(
-        JSON.parse(File.read(locator.job_replay_file_path(id, 1))).map { |e| e['content'] }
+        JSON.parse(File.read(locator.job_replay_file_path(1))).map { |e| e['content'] }
       ).to eq(['sub line'])
 
       resumed = described_class.new(layered_options.merge(resume: id), ui)
@@ -460,12 +460,12 @@ end
 
       # The proof the seeding was real, not just present in memory: re-saving
       # over the same id must not blank the background job's record.
-      resumed.system_saver.save_run(id)
+      resumed.system_saver.save_run
       expect(
-        JSON.parse(File.read(locator.job_replay_file_path(id, 1))).map { |e| e['content'] }
+        JSON.parse(File.read(locator.job_replay_file_path(1))).map { |e| e['content'] }
       ).to eq(['sub line'])
       expect(
-        JSON.parse(File.read(locator.job_replay_file_path(id, 0))).map { |e| e['content'] }
+        JSON.parse(File.read(locator.job_replay_file_path(0))).map { |e| e['content'] }
       ).to eq(['main line'])
     end
   end
@@ -479,25 +479,25 @@ end
     end
 
     def seed_layered_system(id, job_ids, foreground: 0)
-      locator = SessionLocator.new(workdir)
-      FileUtils.mkdir_p(File.dirname(locator.system_file_path(id)))
-      File.write(locator.system_file_path(id), JSON.generate({
+      locator = SessionLocator.new(workdir, session_id: id)
+      FileUtils.mkdir_p(File.dirname(locator.system_file_path))
+      File.write(locator.system_file_path, JSON.generate({
         session_id: id, workdir:, next_id: job_ids.max + 1, foreground_job: foreground,
         created_at: Time.now.iso8601,
         jobs: job_ids.map { |j| { id: j, kind: j.zero? ? 'main' : 'sub_agent',
                                   status: 'finished', messages: 1, dir: "jobs/#{j}" } }
       }))
       job_ids.each do |j|
-        FileUtils.mkdir_p(locator.job_dir_path(id, j))
-        File.write(locator.job_session_file_path(id, j),
+        FileUtils.mkdir_p(locator.job_dir(j))
+        File.write(locator.job_session_file_path(j),
                    JSON.generate({ session_id: id,
                                    created_at: Time.now.iso8601,
                                    messages: [{ role: 'user', content: "job#{j} prompt" }] }))
-        File.write(locator.job_file_path(id, j),
+        File.write(locator.job_file_path(j),
                    JSON.generate({ id: j, kind: j.zero? ? 'main' : 'sub_agent',
                                    status: 'finished', result: nil,
                                    requested_by: nil, dependencies: [] }))
-        File.write(locator.job_replay_file_path(id, j),
+        File.write(locator.job_replay_file_path(j),
                    JSON.generate([{ type: 'response', origin: 'session_manager',
                                     content: "job#{j} shown" }]))
       end
@@ -872,7 +872,7 @@ end
       cli = build_cli
       cli.setup
 
-      id  = cli.foreground_harness.session.session_id
+      id  = cli.foreground_harness.locator.session_id
       stub_prompt_reader
 
       expect(ui).to receive(:puts)
@@ -962,7 +962,7 @@ end
 
       expect { cli.run }.not_to raise_error
 
-      log = File.read(cli.foreground_harness.session_log_path)
+      log = File.read(cli.locator.session_log_path)
       expect(log).to include('auto-save failed: RuntimeError: save exploded')
       expect(log).to include('cli_spec.rb')
     end
@@ -987,7 +987,7 @@ end
       stub_prompt_reader
 
       cli.run
-      id = cli.foreground_harness.session.session_id
+      id = cli.foreground_harness.locator.session_id
 
       expect(File.file?(saved_run_entry(id))).to be(true)
     end
@@ -999,7 +999,7 @@ end
       stub_prompt_reader
 
       cli.run
-      id = cli.foreground_harness.session.session_id
+      id = cli.foreground_harness.locator.session_id
 
       # The session dir exists (the run wrote its harness.log under the id),
       # but no system.json was written for a run that changed nothing.
@@ -1016,7 +1016,7 @@ end
       stub_prompt_reader
 
       cli.run
-      id = cli.foreground_harness.session.session_id
+      id = cli.foreground_harness.locator.session_id
 
       expect(File.file?(saved_run_entry(id))).to be(true)
     end

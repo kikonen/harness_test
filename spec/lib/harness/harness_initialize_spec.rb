@@ -21,8 +21,8 @@ RSpec.describe Harness, 'startup and construction (issue #276)' do
       harness = build_harness(session_id: id)
       harness.logger.info('startup line')
 
-      expect(harness.session.session_id).to eq(id)
-      expect(File.read(harness.session_log_path)).to include('startup line')
+      expect(harness.locator.session_id).to eq(id)
+      expect(File.read(harness.locator.session_log_path)).to include('startup line')
       # Issue #123's throwaway-directory symptom is now structurally
       # impossible: there is no wrong id to log under.
       expect(saved_session_ids).to eq([id])
@@ -32,6 +32,23 @@ RSpec.describe Harness, 'startup and construction (issue #276)' do
       harness = build_harness(auto_save: false, verbose: false)
 
       expect(harness.client.backend.logger).to equal(harness.logger)
+    end
+
+    # The log path itself is SessionLocator's (spec/lib/session_locator_spec.rb);
+    # what construction owns is that the injected logger's file exists from
+    # #initialize on, with nothing asked for first (issue #276).
+    it 'writes the injected logger at its per-session path (issue #113)' do
+      harness = build_harness
+
+      expect(harness.logger).to be_a(Logger)
+      expect(File.file?(harness.locator.session_log_path)).to be true
+    end
+
+    it 'never writes the legacy shared .harness/harness.log' do
+      harness = build_harness
+      harness.logger.info('per-session only')
+
+      expect(File.exist?(File.join(workdir, Harness::HARNESS_DIR, 'harness.log'))).to be false
     end
 
     it 'logs the first request without any lazy path running' do
@@ -48,7 +65,7 @@ RSpec.describe Harness, 'startup and construction (issue #276)' do
         harness.client.chat([{ role: 'user', content: 'hi' }])
       }.to raise_error(LLMError)
 
-      log = File.read(harness.session_log_path)
+      log = File.read(harness.locator.session_log_path)
       expect(log).to include('REQ: POST').and include('attempt 1/')
     end
   end
@@ -94,14 +111,14 @@ RSpec.describe Harness, 'startup and construction (issue #276)' do
 
       harness = build_harness(session_id: id, resume_data: saved_data(id))
 
-      expect(harness.session.session_id).to eq(id)
+      expect(harness.locator.session_id).to eq(id)
       expect(harness.session.messages.map { |m| m[:content] }).to include('earlier')
       # The posture the session was saved with wins over the config initial
       # posture (#221 rule), and it is applied DURING construction - not by a
       # later resume call that would then need a logger rebind.
       expect(harness.settings.yolo?).to be(true)
       expect(harness.logger).to be_a(Logger)
-      expect(harness.session_log_path).to include(id)
+      expect(harness.locator.session_log_path).to include(id)
       # Only the resumed session's directory exists (issues #123 / #135).
       expect(saved_session_ids).to eq([id])
     end
@@ -249,19 +266,6 @@ RSpec.describe Harness, 'startup and construction (issue #276)' do
       expect(harness.settings.markdown?).to be(true)
       expect(harness.settings.output_palette.name).to eq('basic16')
       expect(harness.session.messages.map { |m| m[:role] }).to eq(['system'])
-    end
-
-    it 'refuses a session file whose stored id is not the one it lives under' do
-      id = 'f7931611-30b4-4b4b-aec6-f7083ef2942a'
-      seed_saved_session(id)
-      data = saved_data(id)
-      data[:session_id] = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
-
-      # The logger and the history file were already built under the settled
-      # id, so silently adopting the file's id would split this run's state
-      # across two session directories.
-      expect { build_harness(session_id: id, resume_data: data) }
-        .to raise_error(HarnessError, /says id a{8}-bbbb-cccc-dddd-eeeeeeeeeeee/)
     end
 
     # issue #405: the session file records WHICH MCP tools its conversation had

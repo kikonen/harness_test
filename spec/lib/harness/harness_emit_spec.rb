@@ -146,7 +146,7 @@ RSpec.describe Harness, 'emit and tool-execution display (issues #131, #40, #138
       # was dropped - the log line already carried the text, the console did not.
       expect(late.first[:content]).to include('use ruby instead')
       # The note itself is named, so the user knows which one the line refers to.
-      expect(File.read(harness.session_log_path))
+      expect(File.read(harness.locator.session_log_path))
         .to include('user mid-turn note discarded (late): use ruby instead')
     end
 
@@ -220,7 +220,7 @@ RSpec.describe Harness, 'emit and tool-execution display (issues #131, #40, #138
         expect(line).to include('left over from your previous turn')
         # issue #450: the leftover line names WHICH note too.
         expect(line).to include('stale steering')
-        expect(File.read(harness.session_log_path))
+        expect(File.read(harness.locator.session_log_path))
           .to include('user mid-turn note discarded (leftover): stale steering')
       end
     end

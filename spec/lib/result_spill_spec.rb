@@ -15,12 +15,12 @@ RSpec.describe ResultSpill do
   after { FileUtils.remove_entry(@workdir) if @workdir && File.directory?(@workdir) }
 
   def spill(session_id, job_id: 0)
-    described_class.new(SessionLocator.new(workdir), session_id, job_id:)
+    described_class.new(SessionLocator.new(workdir, session_id:), job_id:)
   end
 
   it 'writes the full text under the job dir and reports a workdir-relative path' do
     path = spill('sess-1').write('run.command', 2, 'full 10 MB output')
-    job  = SessionLocator.new(workdir).job_dir_path('sess-1', 0)
+    job  = SessionLocator.new(workdir, session_id: 'sess-1').job_dir(0)
 
     expect(path).to eq(File.join('.harness', 'sessions', 'sess-1', 'jobs', '0',
                                  'results', 'run.command-2.txt'))
@@ -29,14 +29,9 @@ RSpec.describe ResultSpill do
 
   it 'files each job result in that job OWN dir' do
     spill('sess-1', job_id: 3).write('run.command', 1, 'child output')
-    job = SessionLocator.new(workdir).job_dir_path('sess-1', 3)
+    job = SessionLocator.new(workdir, session_id: 'sess-1').job_dir(3)
 
     expect(File.read(File.join(job, 'results', 'run.command-1.txt'))).to eq('child output')
-  end
-
-  it 'refuses to write when the run has no session id yet' do
-    expect(spill(nil).write('run.command', 1, 'x')).to be_nil
-    expect(spill('').write('run.command', 1, 'x')).to be_nil
   end
 
   it 'reduces a tool name to one safe segment (no path escape through a name)' do
@@ -48,7 +43,7 @@ RSpec.describe ResultSpill do
 
   it 'never clobbers an earlier spill of the same tool and sequence' do
     spill('sess-1').write('run.command', 1, 'first')
-    path = described_class.new(SessionLocator.new(workdir), 'sess-1')
+    path = described_class.new(SessionLocator.new(workdir, session_id: 'sess-1'))
                .write('run.command', 2, 'second')
 
     expect(File.read(File.join(workdir, path))).to eq('second')

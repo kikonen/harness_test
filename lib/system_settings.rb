@@ -2,7 +2,6 @@
 
 require_relative "ui/palette"
 require_relative "model_profile"
-require_relative "session"
 
 # -- SystemSettings -------------------------------------------------------
 # Typed view + behavior layer over the resolved CLI options hash it OWNS;
@@ -16,6 +15,13 @@ class SystemSettings
   # a harness.md turn can read these values as-is.
   DEFAULT_MAX_TOOL_ITERATIONS = 200
   DEFAULT_COMPACT_MAX_SIZE    = 500
+  # Verbatim tail retained after a summary so exact file contents survive.
+  DEFAULT_COMPACT_RECENT_MESSAGES = 6
+  # 100 or higher disables auto-compaction.
+  DEFAULT_COMPACT_AUTO_THRESHOLD  = 88
+  # Absolute headroom keeps the same room for the summary call regardless
+  # of window size; a percentage would shrink it on small windows.
+  DEFAULT_COMPACT_RESERVED_TOKENS = 8192
 
   # Config read once and never rewritten: the run's owner (CLI) and Harness
   # access these by name; nothing else needs them.
@@ -94,17 +100,17 @@ class SystemSettings
 
   def compact_recent_messages
     value = @options[:compact_recent]
-    value.nil? ? Session::COMPACT_RECENT_MESSAGES : value.to_i
+    value.nil? ? DEFAULT_COMPACT_RECENT_MESSAGES : value.to_i
   end
 
   def compact_auto_threshold
     value = @options[:compact_auto_threshold]
-    value.nil? ? Session::AUTO_COMPACT_THRESHOLD : value.to_i
+    value.nil? ? DEFAULT_COMPACT_AUTO_THRESHOLD : value.to_i
   end
 
   def compact_reserved_tokens
     value = @options[:compact_reserved]
-    value.nil? ? Session::COMPACT_RESERVED_TOKENS : value.to_i
+    value.nil? ? DEFAULT_COMPACT_RESERVED_TOKENS : value.to_i
   end
 
   def compact_max_size

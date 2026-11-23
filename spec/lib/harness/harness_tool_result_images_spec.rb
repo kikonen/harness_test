@@ -13,10 +13,12 @@ RSpec.describe ToolCallRunner, 'tool-result images (issue #449)' do
     file_list = FileList.new([], workdir: workdir)
     opts = { system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE,
              num_ctx: 65_536 }.merge(options)
-    session_id  = opts.delete(:session_id)
+    session_id  = opts.delete(:session_id) || SessionLocator.new(workdir).fresh_id
     resume_data = opts.delete(:resume_data)
+    run_locator = SessionLocator.new(workdir, session_id:)
+    logger      = SessionLogger.build(run_locator.session_log_path)
     Harness.new(file_list, settings: SystemSettings.from_options(opts),
-                session_id: session_id, resume_data: resume_data)
+                locator: run_locator, logger:, resume_data:)
   end
 
   def image(bytes: 'x' * 100, mime: 'image/png')
@@ -40,14 +42,15 @@ RSpec.describe ToolCallRunner, 'tool-result images (issue #449)' do
   it 'the blob dir is keyed by the session id under the content store' do
     h = build(session_id: 'sess-77')
 
-    expect(h.image_content_dir('sess-77')).to eq('.harness/content/sess-77')
+    expect(h.locator.image_content_dir(ImageStore::DEFAULT_DIR))
+      .to eq('.harness/content/sess-77')
     expect(h.image_store.relative_dir).to eq('.harness/content/sess-77')
   end
 
   it 'honours a configured content dir' do
     h = build(mcp_images_dir: 'build/images', session_id: 's')
 
-    expect(h.image_content_dir('s')).to eq('build/images/s')
+    expect(h.locator.image_content_dir('build/images')).to eq('build/images/s')
   end
 
   it 'a vision profile gets an inline payload beside the text' do
@@ -66,7 +69,7 @@ RSpec.describe ToolCallRunner, 'tool-result images (issue #449)' do
                                             h.image_delivery, h.tool_call_ports)
 
     expect(msg).not_to have_key(:images)
-    expect(msg[:content]).to include("stored as .harness/content/#{h.session.session_id}/blender_shot_1.png")
+    expect(msg[:content]).to include("stored as .harness/content/#{h.locator.session_id}/blender_shot_1.png")
     expect(msg[:content]).to include('reach it with the shell')
   end
 

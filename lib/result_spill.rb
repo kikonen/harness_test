@@ -25,9 +25,8 @@ class ResultSpill
 
   SPILL_DIR = "results"
 
-  def initialize(locator, session_id, job_id: 0, dir: SPILL_DIR)
+  def initialize(locator, job_id: 0, dir: SPILL_DIR)
     @locator    = locator
-    @session_id = session_id
     @job_id     = job_id
     @dir        = dir
   end
@@ -35,12 +34,9 @@ class ResultSpill
   attr_reader :job_id
 
   # Writes `text` under the job's results dir and returns the working-dir-relative
-  # path. Returns nil when there is no session id to file under (a run that has
-  # not resolved one, or a tool used standalone).
+  # path.
   def write(tool_name, seq, text)
-    return nil if @session_id.nil? || @session_id.to_s.empty?
-
-    dir  = File.join(@locator.job_dir_path(@session_id, @job_id), @dir)
+    dir  = File.join(@locator.job_dir(@job_id), @dir)
     name = "#{safe_name(tool_name)}-#{seq}.txt"
     path = File.join(dir, name)
     FileUtils.mkdir_p(dir)
@@ -62,7 +58,7 @@ class ResultSpill
   private
 
   def prefix
-    @locator.relative_path(@locator.job_dir_path(@session_id, @job_id)) + "/#{@dir}"
+    @locator.relative_path(@locator.job_dir(@job_id)) + "/#{@dir}"
   end
 
   def safe_name(tool_name)

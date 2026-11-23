@@ -26,7 +26,7 @@ class CLI
   attr_reader :settings,
     :registry,
     :file_list,
-    :session_id,
+    :locator,
     :commands,
     :system_saver,
     :harness_factory,
@@ -57,6 +57,7 @@ class CLI
       palette: -> { @settings.output_palette })
 
     @file_list = build_file_list
+    # Built here so the argument-only modes below have one before any id is resolved.
     @locator = SessionLocator.new(@settings.workdir)
   end
 
@@ -86,10 +87,10 @@ class CLI
 
     @setup_done = true
 
-    @session_id ||= @locator.resolve_id(
+    @locator.session_id = @locator.resolve_id(
       resume: @resume,
       newest: !!@continue)
-    resume_data = resumed_run? ? @locator.read_session(session_id) : nil
+    resume_data = resumed_run? ? @locator.read_session : nil
 
     # SystemSettings (resolved in #initialize) is handed to the Harness, which
     # delegates to it. The four session-persisted postures are applied over it for a
@@ -126,7 +127,7 @@ class CLI
       settings: @settings,
       file_list: @file_list,
       system_saver: @system_saver,
-      logger: SessionLogger.build(@locator.session_log_path(session_id)))
+      logger: SessionLogger.build(@locator.session_log_path))
     # Resume is the system's work, not a foreground special case. A fresh run builds
     # the main turn (job 0) as its own agent. A resumed run rebuilds every job the
     # saved system names, each at its saved id with its own conversation, and only
@@ -135,10 +136,10 @@ class CLI
     if resume_data
       restore_jobs(resume_data, saved_fg)
     else
-      @harness_factory.add_harness_job(kind: :main, session_id:, base_file_list: @file_list)
+      @harness_factory.add_harness_job(kind: :main, base_file_list: @file_list)
     end
 
-    @history  = HistoryManager.new(@file_list.workdir, session_id:)
+    @history  = HistoryManager.new(@file_list.workdir, session_id: @locator.session_id)
     foreground_harness.history = @history
 
     @commands = CommandHandler.new(
@@ -148,7 +149,7 @@ class CLI
       settings: @settings,
       system_saver: @system_saver,
       harness_factory:,
-      session_id:)
+      locator: @locator)
 
     self
   end
@@ -270,7 +271,7 @@ class CLI
     id = auto_save_session(settings_only_change)
     ui.puts "Goodbye."
     if id
-      ui.puts "Session saved as #{id} (#{foreground_harness.session_manager.session_file_path(id)})."
+      ui.puts "Session saved as #{id} (#{@locator.relative_path(@locator.system_file_path)})."
       ui.puts "Resume it later with: #{resume_cli_string(id)}"
     end
     0
@@ -283,7 +284,8 @@ class CLI
   def startup_banner
     StartupBanner.new(
       ui: @ui, settings: @settings, file_list: @file_list,
-      harness: foreground_harness, registry: @registry, resumed: resumed_run?)
+      harness: foreground_harness, registry: @registry, resumed: resumed_run?,
+      locator: @locator)
   end
 
   # Each run owns its grant list: a startup --resume run builds it the same way as a
@@ -337,7 +339,7 @@ class CLI
   # retention rule (or nothing rebuilt it here). Name those ids: a resumed run silently
   # having fewer jobs reads as broken (doc/session_layers_design.md, the drop rule).
   def report_dropped_jobs
-    dropped = @system_saver.dropped_job_ids(session_id)
+    dropped = @system_saver.dropped_job_ids
     return if dropped.empty?
 
     foreground_harness.logger.info "dropped job ids: #{dropped.join(', ')}"
@@ -352,7 +354,7 @@ class CLI
   # and is reported rather than silently stubbed.
   def restore_jobs(resume_data, saved_fg)
     @saved_jobs = Array(resume_data[:jobs])
-    @system_saver.job_restores(session_id).each do |restore|
+    @system_saver.job_restores.each do |restore|
       # A job's own saved half is its conversation plus its per-agent model/param state;
       # the system half (identity, postures, grants, digest cache) belongs to the main
       # turn alone - the run has ONE grant state and log, on the job it already holds
@@ -362,7 +364,6 @@ class CLI
       resume    = main_turn ? resume_data.merge(restore[:session]) : restore[:session]
       job       = @harness_factory.add_harness_job(
         kind: restore[:kind].to_sym,
-        session_id:,
         resume_data: resume,
         base_file_list: main_turn ? @file_list : nil,
         id: restore[:id])
@@ -378,13 +379,13 @@ class CLI
     # conversation is the whole run: rebuild the main turn from it.
     if @registry.jobs.empty?
       @harness_factory.add_harness_job(
-        kind: :main, session_id:, resume_data:, base_file_list: @file_list)
+        kind: :main, resume_data:, base_file_list: @file_list)
       @registry.restore_replay_tail(resume_data[:replay_tail])
       return report_dropped_jobs
     end
 
     @registry.foreground = saved_fg if @registry.job(saved_fg)
-    @registry.restore_replay_tail(@system_saver.replay_tail_of(session_id, @registry.foreground))
+    @registry.restore_replay_tail(@system_saver.replay_tail_of(@registry.foreground))
     foreground_harness.logger.info "jobs restored: #{@registry.jobs.map(&:id).join(', ')} " \
                                    "(foreground ##{@registry.foreground})"
     report_dropped_jobs
@@ -400,7 +401,7 @@ class CLI
     # The SystemSaver (the system's owner-built object) writes every job's conversation
     # plus system.json + per-job replay.json in one call. At exit every job thread is
     # joined, so each chain is quiescent and main may read it.
-    @system_saver.save_run(session_id)
+    @system_saver.save_run
   rescue StandardError => e
     foreground_harness.logger.error ErrorText.detailed(e, "auto-save failed")
     ui.puts "  [warning] could not auto-save session: #{e.message}"

@@ -38,10 +38,10 @@ RSpec.describe HarnessFactory do
   def factory(registry:, system_saver: nil)
     described_class.new(
       registry:,
-      locator: SessionLocator.new(workdir),
+      locator: SessionLocator.new(workdir, session_id: SESSION_ID),
       settings:,
       file_list: FileList.new([], workdir: workdir),
-      logger: nil,
+      logger: Logger.new(File::NULL),
       system_saver:)
   end
 
@@ -49,7 +49,7 @@ RSpec.describe HarnessFactory do
     it 'attaches a built harness to the job and wires the job id onto its save' do
       registry = registry_with(:main)
       job      = registry.jobs.first
-      harness  = factory(registry: registry).build_for(job, session_id: SESSION_ID)
+      harness  = factory(registry: registry).build_for(job)
 
       expect(job.harness).to be(harness)
       expect(harness.session_manager.job_id).to eq(job.id)
@@ -60,15 +60,15 @@ RSpec.describe HarnessFactory do
     it 'refuses to build a second harness for a job that already has one' do
       registry = registry_with(:main)
       job      = registry.jobs.first
-      factory(registry: registry).build_for(job, session_id: SESSION_ID)
+      factory(registry: registry).build_for(job)
 
       expect do
-        factory(registry: registry).build_for(job, session_id: SESSION_ID)
+        factory(registry: registry).build_for(job)
       end.to raise_error(HarnessError, /job 0 already has a harness/)
     end
 
     it 'refuses to attach to no job at all' do
-      expect { factory(registry: registry_with(:main)).build_for(nil, session_id: SESSION_ID) }
+      expect { factory(registry: registry_with(:main)).build_for(nil) }
         .to raise_error(HarnessError, /no job to attach a harness to/)
     end
 
@@ -78,7 +78,7 @@ RSpec.describe HarnessFactory do
       registry = registry_with(:main, :sub_agent)
       child    = registry.job(1)
 
-      harness = factory(registry: registry).build_for(child, session_id: SESSION_ID)
+      harness = factory(registry: registry).build_for(child)
 
       expect(child.kind).to eq(:sub_agent)
       expect(child.harness).to be(harness)
@@ -93,7 +93,7 @@ RSpec.describe HarnessFactory do
     it 'adds the job to the registry and gives it its own harness' do
       registry = JobRegistry.new
       job      = factory(registry: registry)
-                   .add_harness_job(kind: :main, session_id: SESSION_ID)
+                   .add_harness_job(kind: :main)
 
       expect(registry.jobs.map(&:id)).to eq([job.id])
       expect(registry.foreground).to eq(job.id)
@@ -105,8 +105,8 @@ RSpec.describe HarnessFactory do
     it 'adds a second harness job of its own kind under the SAME session id' do
       registry = JobRegistry.new
       build    = factory(registry: registry)
-      main     = build.add_harness_job(kind: :main, session_id: SESSION_ID)
-      child    = build.add_harness_job(kind: :sub_agent, session_id: SESSION_ID)
+      main     = build.add_harness_job(kind: :main)
+      child    = build.add_harness_job(kind: :sub_agent)
 
       expect(registry.jobs.map(&:id)).to eq([main.id, child.id])
       expect(child.id).to eq(1)
@@ -115,7 +115,7 @@ RSpec.describe HarnessFactory do
       expect(child.harness).not_to be(main.harness)
       expect(child.harness.session_manager.job_id).to eq(1)
       # One uuid for the run: both agents address the same system session dir.
-      expect(child.harness.session.session_id).to eq(main.harness.session.session_id)
+      expect(child.harness.locator.session_id).to eq(main.harness.locator.session_id)
       # Adding a job does not switch the foreground.
       expect(registry.foreground).to eq(main.id)
     end
@@ -126,14 +126,14 @@ RSpec.describe HarnessFactory do
     it 'builds a job harness over the run workdir, not over a saved dir' do
       registry = JobRegistry.new
       build    = factory(registry: registry)
-      main     = build.add_harness_job(kind: :main, session_id: SESSION_ID)
-      child    = build.add_harness_job(kind: :sub_agent, session_id: SESSION_ID)
+      main     = build.add_harness_job(kind: :main)
+      child    = build.add_harness_job(kind: :sub_agent)
 
       expect(main.harness.file_list.workdir).to eq(workdir)
       expect(child.harness.file_list.workdir).to eq(workdir)
       expect(child.harness.session_manager.job_id).to eq(1)
       # The two agents share one session dir but write into different job dirs.
-      expect(child.harness.session.session_id).to eq(main.harness.session.session_id)
+      expect(child.harness.locator.session_id).to eq(main.harness.locator.session_id)
     end
 
     it 'hands the job its own resume data, never the system record' do
@@ -141,7 +141,7 @@ RSpec.describe HarnessFactory do
       resume   = { created_at: Time.now.iso8601,
                    messages: [{ role: 'user', content: 'job chain' }] }
       job      = factory(registry: registry)
-                   .add_harness_job(kind: :sub_agent, session_id: SESSION_ID,
+                   .add_harness_job(kind: :sub_agent,
                                     resume_data: resume)
 
       expect(job.harness.session.messages.map { |m| m[:content] })
@@ -156,10 +156,10 @@ RSpec.describe HarnessFactory do
     def factory_with(registry:, options:)
       described_class.new(
         registry:,
-        locator: SessionLocator.new(workdir),
+        locator: SessionLocator.new(workdir, session_id: SESSION_ID),
         settings: SystemSettings.from_options(options),
         file_list: FileList.new([], workdir: workdir),
-        logger: nil,
+        logger: Logger.new(File::NULL),
         system_saver: nil)
     end
 
@@ -169,7 +169,7 @@ RSpec.describe HarnessFactory do
         system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE,
         default_profile_id: 'cfg-model',
         model_profiles: [{ name: 'cfg-model', id: 'cfg-model' }] })
-      job = factory.add_harness_job(kind: :sub_agent, session_id: SESSION_ID)
+      job = factory.add_harness_job(kind: :sub_agent)
 
       expect(job.harness.model_config.active_profile_id).to eq('cfg-model')
       expect(job.harness.session_manager.active_profile_name).to eq('cfg-model')
@@ -181,7 +181,7 @@ RSpec.describe HarnessFactory do
   describe 'the system writer the factory holds' do
     it 'keeps the saver the caller passed over its own registry' do
       registry = registry_with(:main)
-      saver    = SystemSaver.new(SessionLocator.new(workdir), registry)
+      saver    = SystemSaver.new(SessionLocator.new(workdir, session_id: SESSION_ID), registry)
       built    = factory(registry: registry, system_saver: saver)
 
       expect(built.system_saver).to be(saver)
@@ -199,10 +199,10 @@ RSpec.describe HarnessFactory do
   describe 'the run system saver the factory holds' do
     it 'is the single saver the caller passed over the run registry' do
       registry = registry_with(:main)
-      saver    = SystemSaver.new(SessionLocator.new(workdir), registry)
+      saver    = SystemSaver.new(SessionLocator.new(workdir, session_id: SESSION_ID), registry)
       build    = factory(registry: registry, system_saver: saver)
-      build.add_harness_job(kind: :main, session_id: SESSION_ID)
-      build.add_harness_job(kind: :sub_agent, session_id: SESSION_ID)
+      build.add_harness_job(kind: :main)
+      build.add_harness_job(kind: :sub_agent)
 
       expect(build.system_saver).to be(saver)
       expect(build.system_saver.registry).to be(registry)

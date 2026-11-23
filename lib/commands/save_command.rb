@@ -15,7 +15,7 @@ module Commands
     def handle(_args)
       # The run's own writer: every job's chain plus the system record, in one
       # write by the system's owner (a job SessionManager writes only its own).
-      id = system_saver.save_run(foreground_harness.session.session_id)
+      id = system_saver.save_run
       # issue #207: the session JSON lives inside the session's own dir.
       # Contiguous prose ack -> ONE note call, two paragraphs; the renderer
       # owns the indent and wrap (#470), not the emitter. Resume is startup-only
@@ -23,7 +23,7 @@ module Commands
       emit_role(
         :note,
         [
-          "Session saved as #{id} (#{foreground_harness.session_manager.session_file_path(id)})",
+          "Session saved as #{id} (#{foreground_harness.session_manager.session_file_path})",
           "Resume it in a new run: #{resume_cli_string(id)}"
         ])
     end
