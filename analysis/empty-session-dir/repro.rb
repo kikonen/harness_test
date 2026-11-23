@@ -10,29 +10,37 @@ require "cli"
 require "stringio"
 require "tmpdir"
 
+def contents(dir)
+  Dir.exist?(dir) ? Dir.children(dir).sort : nil
+end
+
 workdir = Dir.mktmpdir("empty-session-repro")
 Dir.chdir(workdir) do
   cli = CLI.new(
     { workdir:, active_model: "m", model: "m" },
     UI::Console.new(stdout: StringIO.new, stdin: StringIO.new))
   cli.setup
-  dir = File.join(".harness/sessions", cli.session_id)
+  id  = cli.locator.session_id
+  dir = File.join(".harness/sessions", id)
 
-  puts "run id:                 #{cli.session_id}"
-  puts "dir right after setup:  #{Dir.exist?(dir)} contents=#{Dir.children(dir).inspect}"
+  puts "run id:                 #{id}"
+  puts "session dir after setup: #{Dir.exist?(dir)} contents=#{contents(dir).inspect}"
+  puts "run log exists:          #{File.file?(cli.locator.session_log_path)}"
+  log_rel = cli.locator.relative_path(cli.locator.session_log_path)
+  puts "run log relative path:   #{log_rel}"
 
   # The exit path of CLI#run, with no prompt ever sent.
   saved = cli.send(:auto_save_session, false)
-  puts "auto_save_session:      #{saved.inspect}"
+  puts "auto_save_session:       #{saved.inspect}"
   puts "any_job_has_session_state?: #{cli.registry.any_job_has_session_state?}"
-  puts "dir after the exit save: #{Dir.exist?(dir)} contents=#{Dir.children(dir).inspect}"
+  puts "session dir after exit:  #{Dir.exist?(dir)} contents=#{contents(dir).inspect}"
 
   locator = SessionLocator.new(workdir)
-  listed = locator.session_dirs.map { |d| File.basename(d) }
-  puts "visible to /sessions?   #{listed.include?(cli.session_id)}"
-  puts "visible to --resume?    #{!locator.find_session_file(cli.session_id).nil?}"
-  puts "visible to --continue?  #{locator.newest_id == cli.session_id rescue false}"
-  puts "leftover dirs on disk:  #{Dir.glob('.harness/sessions/*').map { |d|
+  listed  = locator.session_dirs.map { |d| File.basename(d) }
+  puts "visible to /sessions?    #{listed.include?(id)}"
+  puts "visible to --resume?     #{(locator.find_session_file(id) rescue nil) != nil}"
+  puts "visible to --continue?   #{(locator.newest_id == id) rescue false}"
+  puts "leftover session dirs:   #{Dir.glob('.harness/sessions/*').map { |d|
     File.basename(d)
   }.inspect}"
 end

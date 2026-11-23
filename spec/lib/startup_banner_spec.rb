@@ -60,7 +60,7 @@ RSpec.describe StartupBanner do
   describe '#session_log_path_display' do
     it 'is the per-session log path relative to the workdir' do
       expect(banner.send(:session_log_path_display))
-        .to eq(File.join('.harness', 'sessions', 'abc123', 'harness.log'))
+        .to eq(File.join('.harness', 'logs', 'abc123-harness.log'))
     end
   end
 

@@ -84,11 +84,11 @@ RSpec.describe SessionLocator do
     end
   end
 
-  describe '#session_log_path (issue #113)' do
-    it 'resolves to .harness/sessions/<session-id>/harness.log' do
+  describe '#session_log_path (issue #113, #555)' do
+    it 'resolves to .harness/logs/<session-id>-harness.log, outside sessions/' do
       expect(described_class.new(workdir, session_id: sid_a).session_log_path)
-        .to eq(File.join(workdir, SessionLocator::SESSIONS_DIR, sid_a,
-                         SessionLocator::SESSION_LOG_FILE))
+        .to eq(File.join(workdir, SessionLocator::RUN_LOGS_DIR,
+                         "#{sid_a}-#{SessionLocator::SESSION_LOG_FILE}"))
     end
   end
 

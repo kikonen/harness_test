@@ -132,7 +132,8 @@ module HarnessSpecSupport
   end
 
   def saved_session_ids
-    Dir.children(File.join(workdir, SessionLocator::SESSIONS_DIR))
+    dir = File.join(workdir, SessionLocator::SESSIONS_DIR)
+    Dir.exist?(dir) ? Dir.children(dir) : []
   end
 
   # A harness whose client plays a scripted response sequence (see

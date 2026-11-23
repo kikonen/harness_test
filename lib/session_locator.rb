@@ -21,8 +21,11 @@ class SessionLocator
   REPLAY_FILE = "replay.json"
   # A job's own record (kind, status, result and edges as ids), the detail system.json's jobs[] points at.
   JOB_FILE = "job.json"
-  # Each session logs to its own file inside its session dir, so concurrent sessions in one
-  # workdir do not interleave in a shared log.
+  # Each run logs to its own file, keyed by id but filed OUTSIDE sessions/ so a run
+  # that never saves (no prompt, a crash) cannot leave a log-only dir that looks like
+  # a session but is invisible to /sessions and --delete-session (issue #555). The id
+  # in the name keeps concurrent runs from interleaving in one shared log.
+  RUN_LOGS_DIR = File.join(HARNESS_DIR, "logs")
   SESSION_LOG_FILE = "harness.log"
   # Characters of surrounding text #search shows around a match, so a hit reads as context
   # rather than a bare id. Fixed window - the whole conversation is never dumped, only these windows.
@@ -91,9 +94,12 @@ class SessionLocator
     File.file?(system_file_path)
   end
 
-  # The session's own log file. It is part of WHERE a session lives, so it is spelled once here.
   def session_log_path
-    File.join(session_dir, SESSION_LOG_FILE)
+    File.join(run_logs_dir, "#{@session_id}-#{SESSION_LOG_FILE}")
+  end
+
+  def run_logs_dir
+    File.join(@workdir, RUN_LOGS_DIR)
   end
 
   # Where one session's tool-result images are filed. The dir is configurable

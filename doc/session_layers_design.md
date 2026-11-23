@@ -202,14 +202,17 @@ single `session.json` cannot express.
 .harness/
   harness_history              # legacy read-only fallback
   memories/ plans/ skills/     # system-wide ON PURPOSE - never touched by job GC
+  logs/<session-id>-harness.log # the run log, keyed by id but filed OUTSIDE
+                               # sessions/ so a no-work run cannot leave a
+                               # log-only phantom session dir (issue #555);
+                               # ONE Logger object per run, delimiter format,
+                               # every event stamped with the JOB id, not the thread id
   sessions/<session-id>/       # SecureRandom.uuid == the run/system id (#276)
     system.json                   # version, session_id, created_at, workdir, postures,
                                # mcp_connected, access + file_cache (system-wide TODAY),
                                # next_id, foreground_job,
                                # jobs: [{id, kind, status, requested_by,
                                #         dependencies, dir}]
-    harness.log                # ONE Logger object for the run; delimiter format;
-                               # every event stamped with the JOB id, not the thread id
     harness_history            # Reline input only (#119), escaped one-per-line
     jobs/<id>/                 # job.json   (kind, status, result, edges AS IDS)
                                # session.json (that agent's chain; message 0 implicit
