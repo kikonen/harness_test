@@ -98,7 +98,7 @@ RSpec.describe SessionManager do
       end
 
       def compact_max_size
-        SessionManager::DEFAULT_COMPACT_SUMMARY_WORDS
+        SystemSettings::DEFAULT_COMPACT_MAX_SIZE
       end
 
       # Mirrors Harness#tools_payload: the summary call sends the SAME tool
@@ -336,85 +336,6 @@ RSpec.describe SessionManager do
       expect(result[:context_line]).to match(/🧠 ctx ~\d+\/65536 \(\d+%\)/)
     end
 
-  end
-
-  # Both compact paths ask for the summary through #generate_compact_summary. A
-  # prefix cache matches the RENDERED prompt from token 0 and a chat template
-  # renders the tool definitions into it, so the request must be the live chain
-  # plus its instruction AND the live turn's own tool payload: dropping either
-  # half makes it a different prompt, not a longer one (issue #246; both axes are
-  # measured by analysis/246/repro.rb, the reasoning is
-  # doc/compaction_cache_design.md).
-  describe '#generate_compact_summary (the call both compact paths make)' do
-    it 'sends the FULL chain to the summary call, system message included' do
-      4.times { |i| session.add_user("msg #{i}"); session.add_assistant("reply #{i}") }
-      live_chain = session.messages.map(&:dup)
-
-      captured = nil
-      allow(client).to receive(:chat) do |msgs|
-        captured = msgs
-        { choices: [{ message: { content: 'summary text' } }] }
-      end
-
-      manager.compact_session
-
-      expect(captured.first(live_chain.size)).to eq(live_chain)
-      expect(captured.first[:role]).to eq('system')
-      expect(captured.size).to eq(live_chain.size + 1)
-      expect(captured.last[:role]).to eq('user')
-    end
-    it 'sends the live tools payload on the summary call' do
-      4.times { |i| session.add_user("msg #{i}"); session.add_assistant("reply #{i}") }
-      captured_tools = nil
-      allow(client).to receive(:chat) do |_msgs, tools: nil|
-        captured_tools = tools
-        { choices: [{ message: { content: 'summary text' } }] }
-      end
-
-      manager.compact_session
-
-      expect(captured_tools).to eq(harness.tools_payload)
-    end
-
-    # The fork now sends the live tool payload, so the model CAN answer a
-    # summary request with a tool call. Nothing in a fork is executed (there is
-    # no tool loop here), so the shape must be reported, not swallowed as an
-    # "empty summary" - and never mistaken for a summary.
-    it 'raises naming the tool call when the summary call answers with one' do
-      4.times { |i| session.add_user("msg #{i}"); session.add_assistant("reply #{i}") }
-      allow(client).to receive(:chat).and_return({
-        choices: [{ message: { content: '',
-                              tool_calls: [{ id: 'x1',
-                                            function: { name: 'file.write', arguments: '{}' } }] } }]
-      })
-
-      expect { manager.compact_session }
-        .to raise_error(HarnessError, /tool call \(file.write\) instead of a summary/)
-      expect(session.messages.size).to eq(9) # nothing was compacted
-    end
-
-    it 'keeps a text answer that also carries tool calls, and logs the calls' do
-      log_io = StringIO.new
-      harness.instance_variable_set(:@logger, Logger.new(log_io))
-      4.times { |i| session.add_user("msg #{i}"); session.add_assistant("reply #{i}") }
-      allow(client).to receive(:chat).and_return({
-        choices: [{ message: { content: 'REAL SUMMARY',
-                              tool_calls: [{ id: 'x1',
-                                            function: { name: 'session.note', arguments: '{}' } }] } }]
-      })
-
-      result = manager.compact_session
-
-      expect(result[:summary]).to eq('REAL SUMMARY')
-      expect(log_io.string).to include('summary call returned tool calls (session.note) - ignored')
-    end
-
-    it 'still reports the plain empty-summary error when no tool call came back' do
-      4.times { |i| session.add_user("msg #{i}"); session.add_assistant("reply #{i}") }
-      allow(client).to receive(:chat).and_return({ choices: [{ message: { content: '   ' } }] })
-
-      expect { manager.compact_session }.to raise_error(HarnessError, /empty summary/)
-    end
   end
 
   # The system.json a save writes - and every SYSTEM key in it (postures,
@@ -865,7 +786,7 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
         @session.compact_trigger(model_config.num_ctx, compact_auto_threshold,
                                  reserved_tokens: compact_reserved_tokens)
       end
-      def compact_max_size; SessionManager::DEFAULT_COMPACT_SUMMARY_WORDS; end
+      def compact_max_size; SystemSettings::DEFAULT_COMPACT_MAX_SIZE; end
       def context_indicator; nil; end
       def context_indicator_live(_m = nil); nil; end
     end.new(session, client, options)
@@ -935,7 +856,7 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
       def mcp_connected_summary = []
 
       def compact_max_size
-        SessionManager::DEFAULT_COMPACT_SUMMARY_WORDS
+        SystemSettings::DEFAULT_COMPACT_MAX_SIZE
       end
 
       def compact_auto_threshold
@@ -1232,7 +1153,7 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
     let(:harness) do
       double('harness', session: session, client: client, logger: logger,
              model_config: model_config, settings: settings,
-             compact_trigger_tokens: 1, compact_max_size: SessionManager::DEFAULT_COMPACT_SUMMARY_WORDS,
+             compact_trigger_tokens: 1, compact_max_size: SystemSettings::DEFAULT_COMPACT_MAX_SIZE,
              tools_payload: nil,
              locator: SessionLocator.new(Dir.pwd, session_id: SESSION_ID))
     end

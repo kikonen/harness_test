@@ -128,7 +128,7 @@ that was missing, not the rescue.
 - **A streamed turn lost mid-stream is still `LLM::StreamError`**, not a finish
   reason: no chunk said `length`, the connection did. `doc/streaming_design.md`
   owns that boundary.
-- **Only `call_llm` consumes the reason.** `SessionManager#generate_compact_summary`
+- **Only `call_llm` consumes the reason.** `Compactor#request_summary`
   and `SafetyCheck.run` call `client.chat` directly, so a truncated summary or a
   truncated verdict answer is still reported by their own checks (an empty summary
   raises - naming a tool-call answer if that is what came back; an unplaceable
