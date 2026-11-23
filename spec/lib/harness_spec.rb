@@ -1757,6 +1757,89 @@ RSpec.describe Harness do
     end
   end
 
+  # issue #577: an in-loop compaction must not fire on two consecutive
+  # iterations. The request made right after one has not been re-measured, so a
+  # back-to-back pair reads on the console and in the server stats as "compact
+  # done twice". A re-fill that trips the trigger on a LATER iteration is still
+  # a legitimate re-compaction and must still run.
+  describe '#call_llm in-loop compaction cannot fire back-to-back (issue #577)' do
+    # A client whose usage carries a per-response prompt_tokens, so a spec can
+    # drive the loop's last_prompt_tokens exactly.
+    class PromptCountingClient
+      attr_reader :chats
+      def initialize(responses)
+        @responses = responses
+        @chats = 0
+      end
+      def chat(messages, tools: nil, timeout: nil, stream: false, on_delta: nil)
+        @chats += 1
+        r = @responses.shift || { content: 'done', prompt_tokens: 100 }
+        msg = { content: r[:content], reasoning: nil, tool_calls: r[:tool_calls] }
+        { choices: [{ message: msg }],
+          usage: { prompt_tokens: r[:prompt_tokens], completion_tokens: 5,
+                   total_tokens: r[:prompt_tokens] + 5 } }
+      end
+    end
+
+    # num_ctx 1000, threshold 90 -> trigger 900. Seed a chain already over it.
+    def over_trigger_harness(responses)
+      h = build_harness(model: 'test-model', num_ctx: 1000,
+                        compact_reserved: 0, compact_auto_threshold: 90)
+      big = 'x' * 400
+      h.session.add_user('big task')
+      3.times do |i|
+        h.session.add_assistant_message({ role: 'assistant', content: "a#{i}",
+                                          tool_calls: [{ id: "p#{i}", function: { name: 'test.echo', arguments: '{}' } }] })
+        h.session.add_assistant({ role: 'tool', content: big })
+      end
+      h.session.record_prompt_tokens(950, h.session.messages.size)
+      h.instance_variable_set(:@client, PromptCountingClient.new(responses))
+      h
+    end
+
+    def round(id, pt)
+      { prompt_tokens: pt, tool_calls: [{ id: id, function: { name: 'test.echo', arguments: '{"text":"x"}' } }] }
+    end
+
+    def count_compactions(h)
+      sm = h.session_manager
+      orig = sm.method(:check_inloop_compaction)
+      hits = 0
+      sm.define_singleton_method(:check_inloop_compaction) do |messages, lpt|
+        r = orig.call(messages, lpt)
+        hits += 1 if r
+        r
+      end
+      -> { hits }
+    end
+
+    it 'compacts once when the post-compact request is still over the trigger' do
+      # iter1 over trigger -> compaction at iter2; iter2's request ALSO over
+      # trigger. Without the guard this would compact twice in a row.
+      h = over_trigger_harness([round('c1', 950), { content: 'HANDOFF', prompt_tokens: 500 },
+                                round('c2', 960), { content: 'final', prompt_tokens: 500 }])
+      hits = count_compactions(h)
+
+      h.call_llm
+
+      expect(hits.call).to eq(1)
+    end
+
+    it 'still re-compacts when the context re-fills on a later iteration' do
+      # iter2 request small (500), iter3 request re-fills over trigger (960):
+      # the second compaction is on a NON-adjacent iteration and must run.
+      h = over_trigger_harness([round('c1', 950), { content: 'HANDOFF1', prompt_tokens: 500 },
+                                round('c2', 500), round('c3', 960),
+                                { content: 'HANDOFF2', prompt_tokens: 500 },
+                                { content: 'final', prompt_tokens: 500 }])
+      hits = count_compactions(h)
+
+      h.call_llm
+
+      expect(hits.call).to eq(2)
+    end
+  end
+
   # Issue #283: call_llm emits the request line before every request, so a
   # re-point made by an earlier wait (an in-loop compaction) cannot stick for
   # the rest of the turn.

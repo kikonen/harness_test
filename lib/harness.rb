@@ -511,6 +511,11 @@ class Harness
     last_prompt_tokens = 0
     last_performance   = nil
 
+    # A compaction cannot fire on two consecutive iterations: the request made
+    # right after one has not been re-measured yet, so a back-to-back pair reads
+    # as "compact done twice" (issue #577).
+    compacted_iteration = nil
+
     max_iters = max_tool_iterations
     loop do
       iteration += 1
@@ -518,8 +523,9 @@ class Harness
 
       # Compact on the last call's real size rather than letting the next
       # request fail server-side; iteration 1 has nothing to summarize.
-      if iteration > 1 && last_prompt_tokens > 0 &&
+      if iteration > 1 && last_prompt_tokens > 0 && iteration != compacted_iteration&.+(1) &&
          @session_manager.check_inloop_compaction(messages, last_prompt_tokens)
+        compacted_iteration = iteration
         consecutive_tool_calls = 0
         loop_warning_injected = false
       end
