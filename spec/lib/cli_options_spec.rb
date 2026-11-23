@@ -283,6 +283,31 @@ RSpec.describe CLIOptions do
     end
   end
 
+  # issue #553: the on/off gate for the startup replay, resolved from
+  # resume.replay_on_startup. Default true; only an explicit false turns it off.
+  describe 'resume.replay_on_startup (issue #553)' do
+    def resolve_config(body)
+      resolve(['-m', 'test-model', '-d', workdir,
+               '-c', write_config('resume-config.yml', body)])
+    end
+
+    it 'is true when the config says nothing' do
+      opts = resolve_config("models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\n")
+      expect(opts[:resume_replay_on_startup]).to be(true)
+    end
+
+    it 'carries an explicit false' do
+      opts = resolve_config("models:
+  - id: test-model
+    url: http://host.test/v1
+    model: test-model\nresume:\n  replay_on_startup: false\n")
+      expect(opts[:resume_replay_on_startup]).to be(false)
+    end
+  end
+
   describe 'model requirement' do
     it 'raises when neither -m nor a default model is set (and not listing)' do
       expect {

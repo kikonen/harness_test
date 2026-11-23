@@ -257,6 +257,7 @@ class CLIOptions
     # Config-only (no CLI flag): it is a display preference of the project,
     # not a one-run toggle. nil = Harness' built-in default; 0 disables.
     opts[:resume_replay_entries] = config.resume_replay_entries
+    opts[:resume_replay_on_startup] = config.resume_replay_on_startup?
 
     # issue #107: auto-save at every prompt boundary. Default true; the
     # --no-auto-save flag or config 'auto_save: false' disables it.

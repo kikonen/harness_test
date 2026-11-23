@@ -143,7 +143,8 @@ class HarnessConfig
     }
 
     @resume = {
-      replay_entries: int_or_nil(data.dig(:resume, :replay_entries))
+      replay_entries:    int_or_nil(data.dig(:resume, :replay_entries)),
+      replay_on_startup: data.dig(:resume, :replay_on_startup)
     }
 
     # Two OutputBuffer tail limits per task: tail_memory bounds how much of a buffer's tail
@@ -354,6 +355,13 @@ class HarnessConfig
   # default; 0 disables the replay.
   def resume_replay_entries
     @resume[:replay_entries]
+  end
+
+  # Whether a resumed run redraws the saved tail AT ALL at startup. Default ON
+  # (key absent = true); only an explicit false turns the automatic redraw off.
+  # When off, the record is still saved and /replay still shows it on demand.
+  def resume_replay_on_startup?
+    @resume[:replay_on_startup] != false
   end
 
   # How much of a per-task OutputBuffer tail lives in RAM. nil = the buffer's built-in default.

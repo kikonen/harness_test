@@ -29,6 +29,23 @@ RSpec.describe SystemSettings do
     end
   end
 
+  # issue #553: the startup-replay gate. Default ON; only an explicit false
+  # turns the automatic redraw off (a hand-built hash gets the same default).
+  describe '#resume_replay_on_startup? (issue #553)' do
+    it 'defaults to true when the key is absent' do
+      expect(build.resume_replay_on_startup?).to be(true)
+      expect(build(resume_replay_on_startup: nil).resume_replay_on_startup?).to be(true)
+    end
+
+    it 'honours an explicit false' do
+      expect(build(resume_replay_on_startup: false).resume_replay_on_startup?).to be(false)
+    end
+
+    it 'honours an explicit true' do
+      expect(build(resume_replay_on_startup: true).resume_replay_on_startup?).to be(true)
+    end
+  end
+
   describe 'output_palette (issue #303)' do
     it 'resolves a configured name to that palette' do
       expect(build(output_palette: 'basic16').output_palette.name).to eq('basic16')

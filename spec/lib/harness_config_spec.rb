@@ -90,6 +90,29 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  # issue #553: whether a resumed run redraws the saved tail at all at startup.
+  # Default ON (key absent = true); only an explicit false turns the automatic
+  # redraw off (the record is still saved and /replay still shows it).
+  describe '#resume_replay_on_startup? (issue #553)' do
+    it 'defaults to true when the key is absent' do
+      expect(described_class.new({}).resume_replay_on_startup?).to be(true)
+      expect(described_class.new(resume: {}).resume_replay_on_startup?).to be(true)
+      expect(described_class.new(resume: { replay_on_startup: nil }).resume_replay_on_startup?).to be(true)
+    end
+
+    it 'honours an explicit true' do
+      expect(described_class.new(resume: { replay_on_startup: true }).resume_replay_on_startup?).to be(true)
+    end
+
+    it 'honours an explicit false (the only thing that turns the redraw off)' do
+      expect(described_class.new(resume: { replay_on_startup: false }).resume_replay_on_startup?).to be(false)
+    end
+
+    it 'mentions the key in the default template (commented out)' do
+      expect(template).to include('replay_on_startup')
+    end
+  end
+
   # issue #286: two OutputBuffer tail limits. tail_memory gates the consumed-front
   # trim; tasks_kept is enforced by the registry, the first consumer of the key
   # (issue #286 increment 1). Read here, enforced there.
