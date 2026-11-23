@@ -153,7 +153,7 @@ guard blocks it regardless.
   delete; `.harness/config.yml`, `sessions/...` and `skills/../sessions` stay blocked;
   `.harness/skillsx`, `.harness/skills-backup` and `.harness` itself stay blocked; a
   `.env*` name inside the zone stays blocked even under a recursive grant.
-- `spec/lib/harness_spec.rb` - `#skills` points at the workdir's `.harness/skills`,
+- `spec/lib/harness/harness_turn_support_spec.rb` - `#skills` points at the workdir's `.harness/skills`,
   and both tools were registered over THAT loader instance.
 - `spec/lib/commands/help_command_spec.rb` (already on the books) - the new `/skills`
   command and its README row, both directions.

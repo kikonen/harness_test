@@ -532,7 +532,7 @@ RSpec.describe SessionManager do
   # (like active_profile_id / param_overrides - it is harness state, not
   # conversation state) and is written as a plain boolean, so a session saved
   # before the feature has no key. The RESUME side of the round trip is
-  # Harness#apply_resume_state, covered in spec/lib/harness_spec.rb.
+  # Harness#apply_resume_state, covered in spec/lib/harness/harness_initialize_spec.rb.
   describe 'YOLO posture round trip (issue #221)' do
     def save_with_yolo(dir, on)
       file_list = FileList.new([], workdir: dir)
@@ -557,7 +557,7 @@ RSpec.describe SessionManager do
   # issue #303: the palette the user picked for this session travels with the
   # save too (same treatment as the posture). Stored as its NAME, not as a
   # color table, so the resume side can validate it against the palettes this
-  # build has. RESUME side: Harness#apply_resume_state, in harness_spec.rb.
+  # build has. RESUME side: Harness#apply_resume_state, in harness_initialize_spec.rb.
   describe 'output palette round trip (issue #303)' do
     it 'saves the palette name' do
       Dir.mktmpdir do |dir|
@@ -577,7 +577,7 @@ RSpec.describe SessionManager do
   # conversation could call. Stored per connected server (a down server
   # contributed no tools, so it is not part of what the conversation had).
   # RESUME side (Harness#apply_resume_state -> Mcp::Manager#report_saved_session)
-  # is tested in harness_spec.rb and manager_spec.rb.
+  # is tested in harness_initialize_spec.rb and manager_spec.rb.
   describe 'MCP connected servers round trip (issue #405)' do
     def save_with_mcp(dir, summary)
       file_list = FileList.new([], workdir: dir)
@@ -743,7 +743,7 @@ RSpec.describe SessionManager do
   # issue #28: the streaming posture travels with the session save too (same
   # treatment as yolo - harness posture, not conversation state), as a plain
   # boolean so a session saved before the feature simply has no key. The
-  # RESUME side is Harness#apply_resume_state, covered in harness_spec.rb.
+  # RESUME side is Harness#apply_resume_state, covered in harness_initialize_spec.rb.
   describe 'streaming posture round trip (issue #28)' do
     def save_with_stream(dir, on)
       file_list = FileList.new([], workdir: dir)
