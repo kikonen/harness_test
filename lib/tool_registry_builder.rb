@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "tool_registry"
+require_relative "spill_reader"
 require_relative "mcp/manager"
 require_relative "skills"
 require_relative "memories"
@@ -57,8 +58,8 @@ require_relative "tools/sessions_search_tool"
 # The one remaining Harness dependency is run.command: CommandRunner's
 # AUTO-APPROVE safety fork needs a live turn (client + session chain +
 # tools_payload), so a harness-shaped object is passed straight through to the
-# tool. Narrowing that to a dedicated safety-fork collaborator is the separate
-# TurnEngine increment; until then this builder forwards `harness:`.
+# tool. Its spill_reader is the standalone SpillReader (issue #582), not the
+# harness: a spill read needs the job's own ResultSpill, not the turn engine.
 class ToolRegistryBuilder
   # The Mcp::Manager this build connected, so its owner can close it, report
   # its startup notes, save its connected_summary, and compare a resumed
@@ -71,6 +72,7 @@ class ToolRegistryBuilder
     settings:,
     logger:,
     locator:,
+    result_spill: nil,
     harness: nil
   )
     @file_list = file_list
@@ -78,6 +80,7 @@ class ToolRegistryBuilder
     @settings  = settings
     @logger    = logger
     @locator   = locator
+    @result_spill = result_spill
     @harness   = harness
     @mcp       = Mcp::Manager.new(logger)
   end
@@ -90,7 +93,14 @@ class ToolRegistryBuilder
     registry.register(Tools::GetTimeTool.new)
     registry.register(Tools::FileListTool.new(@file_list))
     registry.register(
-      Tools::FileReadTool.new(@file_list, @file_cache, spill_reader: @harness))
+      Tools::FileReadTool.new(
+        @file_list,
+        @file_cache,
+        spill_reader: @result_spill && SpillReader.new(
+          file_list: @file_list,
+          result_spill: @result_spill,
+          output_result_bytes: @settings.output_result_bytes ||
+            OutputBudget::DEFAULT_RESULT_BYTES)))
     registry.register(Tools::FileImageTool.new(@file_list))
     registry.register(Tools::FileWriteTool.new(@file_list, @file_cache))
     registry.register(Tools::FileRenameTool.new(@file_list, @file_cache))

@@ -9,8 +9,9 @@ require 'system_settings'
 # Issue #551: the size gate that keeps a tool result from becoming a message so
 # large the backend refuses the WHOLE next request (and with it the compaction
 # that would have repaired the run). The gate runs before the result becomes a
-# message, so it is tested at that seam.
-RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
+# message, so it is tested at that seam - ToolCallRunner#budget_result, reached
+# through #execute (issue #582).
+RSpec.describe ToolCallRunner, 'tool-result byte budget (issue #551)' do
   let(:workdir) { Dir.mktmpdir('budget-spec') }
   after { FileUtils.remove_entry(workdir) if File.directory?(workdir) }
   before { allow_any_instance_of(SandboxGemfile).to receive(:lock_seeded?).and_return(true) }
@@ -19,9 +20,20 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
     opts = { system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE,
              num_ctx: 65_536 }.merge(options)
     session_id = opts.delete(:session_id)
-    described_class.new(FileList.new([], workdir: workdir),
-                        settings: SystemSettings.from_options(opts),
-                        session_id:)
+    Harness.new(FileList.new([], workdir: workdir),
+                settings: SystemSettings.from_options(opts),
+                session_id:)
+  end
+
+  # The gate as a callable: a tool whose execute returns `text`, run through
+  # the real ports so the spill lands in this harness' own session dir.
+  def gate(harness, name, text)
+    harness.tool_registry.register(
+      Class.new(Tool) do
+        define_method(:execute) { |_args| text }
+      end.new(name: name, description: 'capped', parameters: {}))
+    call = { id: 'c1', function: { name: name, arguments: '{}' } }
+    harness.tool_call_runner.execute(call, harness.tool_call_ports)
   end
 
   def huge(bytes: 200_000)
@@ -39,13 +51,13 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
   it 'leaves an ordinary result untouched' do
     h = build
 
-    expect(h.budget_tool_result('run.command', 'exit code: 0\n--- output ---\nhi')).to eq(
+    expect(gate(h, 'run.command', 'exit code: 0\n--- output ---\nhi')).to eq(
       'exit code: 0\n--- output ---\nhi')
   end
 
   it 'caps a huge result to the byte budget' do
     h = build(output_result_bytes: 10_000)
-    out = h.budget_tool_result('run.command', huge)
+    out = gate(h, 'run.command', huge)
 
     expect(out.bytesize).to be < huge.bytesize
     expect(out).to include('bytes omitted')
@@ -53,7 +65,7 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
 
   it 'names the file the full output was saved to' do
     h   = build(output_result_bytes: 10_000, session_id: 'sess-1')
-    out = h.budget_tool_result('run.command', huge)
+    out = gate(h, 'run.command', huge)
 
     expect(out).to include(spill_path('sess-1'))
     expect(File.read(File.join(workdir, spill_path('sess-1')))).to eq(huge)
@@ -61,8 +73,8 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
 
   it 'numbers successive spills so they do not overwrite each other' do
     h = build(output_result_bytes: 10_000, session_id: 'sess-2')
-    first  = h.budget_tool_result('run.command', huge)
-    second = h.budget_tool_result('git.show', huge)
+    first  = gate(h, 'run.command', huge)
+    second = gate(h, 'git.show', huge)
 
     expect(first).to include('run.command-1.txt')
     expect(second).to include('git.show-2.txt')
@@ -71,7 +83,7 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
   it 'spills into the job that produced the result' do
     h = build(output_result_bytes: 10_000, session_id: 'sess-3')
     h.session_manager.job_id = 4
-    out = h.budget_tool_result('run.command', huge)
+    out = gate(h, 'run.command', huge)
 
     expect(out).to include('.harness/sessions/sess-3/jobs/4/results/run.command-1.txt')
   end
@@ -79,7 +91,7 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
   it 'uses the built-in default when the config says nothing' do
     h = build
 
-    expect(h.output_result_bytes).to eq(OutputBudget::DEFAULT_RESULT_BYTES)
+    expect(h.tool_call_ports.output_result_bytes).to eq(OutputBudget::DEFAULT_RESULT_BYTES)
   end
 
   # Image bytes are not text: the cap belongs to ImageDelivery's own budget
@@ -90,12 +102,12 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
       ToolResult::Image.new(server: 'b', tool: 't', mime_type: 'image/png', bytes: ('x' * 5000).b)
     ])
 
-    expect(h.budget_tool_result('blender.shot', result)).to be(result)
+    expect(gate(h, 'blender.shot', result)).to be(result)
   end
 
   it 'reports the cap in harness.log so an oversized command is recoverable' do
     h   = build(output_result_bytes: 10_000, session_id: 'sess-4')
-    out = h.budget_tool_result('run.command', huge)
+    out = gate(h, 'run.command', huge)
     log = File.read(File.join(workdir, '.harness', 'sessions', 'sess-4', 'harness.log'))
 
     expect(out).to include('omitted')
@@ -106,7 +118,7 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
   # session save that follows it (the #257 family).
   it 'keeps a capped multi-byte result saveable' do
     h   = build(output_result_bytes: 10_000)
-    out = h.budget_tool_result('run.command', "\u4e2d" * 60_000)
+    out = gate(h, 'run.command', "\u4e2d" * 60_000)
 
     expect(out.valid_encoding?).to be true
     expect { JSON.generate({ 'result' => out }) }.not_to raise_error
@@ -118,9 +130,9 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
   describe 'reading a spill back' do
     it 'answers a read of its own spill file, capped' do
       h = build(output_result_bytes: 10_000, session_id: 'sess-5')
-      h.budget_tool_result('run.command', huge)
+      gate(h, 'run.command', huge)
 
-      out = h.read_spilled_result(spill_path('sess-5'))
+      out = h.tool_call_ports.spill_reader.read_spilled_result(spill_path('sess-5'))
 
       expect(out.bytesize).to be < huge.bytesize
       expect(out).to include('bytes omitted from the middle of 200000')
@@ -128,17 +140,18 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
 
     it 'answers nothing for a path that is not this job spill' do
       h = build(output_result_bytes: 10_000, session_id: 'sess-6')
-      h.budget_tool_result('run.command', huge)
+      gate(h, 'run.command', huge)
 
-      expect(h.read_spilled_result('lib/harness.rb')).to be_nil
-      expect(h.read_spilled_result(spill_path('other'))).to be_nil
+      reader = h.tool_call_ports.spill_reader
+      expect(reader.read_spilled_result('lib/harness.rb')).to be_nil
+      expect(reader.read_spilled_result(spill_path('other'))).to be_nil
     end
 
     it 'accepts the absolute form of the same path' do
       h = build(output_result_bytes: 10_000, session_id: 'sess-7')
-      h.budget_tool_result('run.command', huge)
+      gate(h, 'run.command', huge)
 
-      expect(h.read_spilled_result(File.join(workdir, spill_path('sess-7'))))
+      expect(h.tool_call_ports.spill_reader.read_spilled_result(File.join(workdir, spill_path('sess-7'))))
         .to include('omitted')
     end
     # A spill file is slightly BIGGER than the byte budget (the notice is added
@@ -147,10 +160,10 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
     # never received.
     it 'does not re-spill a spill read that is already capped' do
       h = build(output_result_bytes: 10_000, session_id: 'sess-9')
-      h.budget_tool_result('run.command', huge(bytes: 10_060))
+      gate(h, 'run.command', huge(bytes: 10_060))
 
-      out = h.budget_tool_result('file.read',
-                                 h.read_spilled_result(spill_path('sess-9')))
+      out = gate(h, 'file.read',
+                 h.tool_call_ports.spill_reader.read_spilled_result(spill_path('sess-9')))
 
       expect(Dir.glob(File.join(workdir, '.harness', 'sessions', 'sess-9',
                                 'jobs', '0', 'results', '*'))
@@ -164,8 +177,8 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
       FileUtils.mkdir_p(File.dirname(File.join(workdir, spill_path('sess-10'))))
       File.write(File.join(workdir, spill_path('sess-10')), huge(bytes: 500_000))
 
-      out = h.budget_tool_result('file.read',
-                                 h.read_spilled_result(spill_path('sess-10')))
+      out = gate(h, 'file.read',
+                 h.tool_call_ports.spill_reader.read_spilled_result(spill_path('sess-10')))
 
       expect(out.bytesize).to be < 20_000
       expect(out).to include('bytes omitted from the middle of 500000')
@@ -175,10 +188,9 @@ RSpec.describe Harness, 'tool-result byte budget (issue #551)' do
   # The model's own recovery route: file.read on the spill path must reach the
   # owner BEFORE the grant dialog, since no grant can ever open a session dir.
   it 'lets file.read reach a spill through its owner' do
-    h      = build(output_result_bytes: 10_000, session_id: 'sess-8')
-    tool   = Tools::FileReadTool.new(FileList.new([], workdir: workdir), nil,
-                                     spill_reader: h)
-    h.budget_tool_result('run.command', huge)
+    h    = build(output_result_bytes: 10_000, session_id: 'sess-8')
+    tool = h.tool_registry.get('file.read')
+    gate(h, 'run.command', huge)
 
     out = tool.execute('path' => spill_path('sess-8'))
 
