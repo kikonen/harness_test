@@ -117,13 +117,16 @@ describe 'the main harness is built via HarnessFactory (issue #548)' do
 end
 
   describe 'identity-first bootstrap (issue #276)' do
-    it 'a fresh run puts log, history and session dir under its own id' do
+    it 'a fresh run keys log and history to its own id, and saves no session dir' do
       cli  = build_cli
       cli.setup
 
       id   = cli.foreground_harness.locator.session_id
 
-      expect(session_dirs).to eq([id])
+      # #555: the log lives outside sessions/, so a run that saved nothing
+      # leaves NO session dir (the old phantom dir is gone).
+      expect(session_dirs).to eq([])
+      expect(cli.locator.session_dir).to end_with(id)
       expect(File.file?(cli.locator.session_log_path)).to be true
       expect(cli.history.history_file).to eq(
         File.join(workdir, '.harness', 'sessions', id, 'harness_history')
@@ -165,7 +168,7 @@ end
       # REAL sessions exist (no third one minted for this run).
       expect(session_dirs).to eq([older, newer])
       expect(cli.locator.session_log_path)
-        .to eq(File.join(workdir, '.harness', 'sessions', newer, 'harness.log'))
+        .to eq(File.join(workdir, '.harness', 'logs', "#{newer}-harness.log"))
       expect(File.file?(cli.locator.session_log_path)).to be true
       expect(cli.history.history_file).to eq(
         File.join(workdir, '.harness', 'sessions', newer, 'harness_history')
@@ -261,7 +264,7 @@ end
       id  = cli.foreground_harness.locator.session_id
 
       expect(cli.send(:startup_banner).send(:session_log_path_display))
-        .to eq(File.join('.harness', 'sessions', id, 'harness.log'))
+        .to eq(File.join('.harness', 'logs', "#{id}-harness.log"))
     end
   end
 
@@ -317,7 +320,8 @@ end
       id  = cli.foreground_harness.locator.session_id
 
       expect(cli.foreground_harness.locator.session_id).to eq(id)
-      expect(session_dirs).to eq([id])
+      # #555: an unsaved run leaves no session dir; identity is the id itself.
+      expect(cli.locator.session_dir).to end_with(id)
     end
   end
 

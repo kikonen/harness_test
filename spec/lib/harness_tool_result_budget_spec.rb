@@ -47,7 +47,7 @@ RSpec.describe ToolCallRunner, 'tool-result byte budget (issue #551)' do
   end
 
   def log_of(session)
-    File.read(File.join(workdir, '.harness', 'sessions', session, 'harness.log'))
+    File.read(SessionLocator.new(workdir, session_id: session).session_log_path)
   end
 
   it 'leaves an ordinary result untouched' do
@@ -110,7 +110,7 @@ RSpec.describe ToolCallRunner, 'tool-result byte budget (issue #551)' do
   it 'reports the cap in harness.log so an oversized command is recoverable' do
     h   = build(output_result_bytes: 10_000, session_id: 'sess-4')
     out = gate(h, 'run.command', huge)
-    log = File.read(File.join(workdir, '.harness', 'sessions', 'sess-4', 'harness.log'))
+    log = log_of('sess-4')
 
     expect(out).to include('omitted')
     expect(log).to include('tool run.command result 200000 B capped to')

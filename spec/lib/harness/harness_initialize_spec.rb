@@ -23,9 +23,9 @@ RSpec.describe Harness, 'startup and construction (issue #276)' do
 
       expect(harness.locator.session_id).to eq(id)
       expect(File.read(harness.locator.session_log_path)).to include('startup line')
-      # Issue #123's throwaway-directory symptom is now structurally
-      # impossible: there is no wrong id to log under.
-      expect(saved_session_ids).to eq([id])
+      # #555: a run that saved nothing mints no session dir (the log lives
+      # outside sessions/), so #123's throwaway dir cannot appear at all.
+      expect(saved_session_ids).to eq([])
     end
 
     it 'gives the LLM client the real logger, never a placeholder' do
