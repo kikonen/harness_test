@@ -182,6 +182,42 @@ RSpec.describe ToolCallRunner do
         ENV['HARNESS_STEP_DISPLAY'] = original
       end
     end
+
+    # issue #586: the step line carries the context burned when the step started, so a
+    # step is evidence of WHEN context was spent, not only what the spinner showed between steps.
+    describe 'context in the step data (issue #586)' do
+      it 'reports the context percentage against the model window' do
+        pair2 = build_fixture(num_ctx: 1000)
+        ports2   = pair2[1]
+        runner2  = described_class.new
+        pair2[0].session.add_user('x' * 400)
+
+        runner2.emit_step(message, ports2)
+        ctx = drain_outbox(task).find { |m| m[:type] == :step_label }[:content][:context]
+
+        expect(ctx[:window]).to eq(1000)
+        expect(ctx[:tokens]).to be_a(Integer)
+        expect(ctx[:pct]).to eq((ctx[:tokens].to_f / 1000 * 100).round)
+      end
+
+      it 'reports no context when the session has nothing measured yet' do
+        runner.emit_step(message, ports)
+        ctx = drain_outbox(task).find { |m| m[:type] == :step_label }[:content][:context]
+
+        expect(ctx).to be_nil
+      end
+
+      it 'logs the percentage so context burn is answerable from the session log' do
+        pair2   = build_fixture(num_ctx: 1000)
+        ports2  = pair2[1]
+        runner2 = described_class.new
+        pair2[0].session.add_user('x' * 400)
+
+        runner2.emit_step(message, ports2)
+
+        expect(File.read(pair2[0].log_path)).to match(/step 1 ctx \d+%/)
+      end
+    end
   end
 
   describe '#execute spinner_detail (issue #40)' do
