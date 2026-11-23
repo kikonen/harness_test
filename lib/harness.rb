@@ -199,6 +199,12 @@ class Harness
     @plan = settings.plan_seed?
     @stream_preview  = nil
 
+    # The "step N" label is a monotonic counter over this Harness' whole job,
+    # not the per-call_llm loop counter: a turn that restarts (retry, a context
+    # re-send, or continuing after an interrupt) must not re-issue step numbers
+    # already on the console (issue #577).
+    @step_number = 0
+
     # A live lambda so a mid-turn /yolo flip applies to the next call and off
     # removes coverage at once; never stored, so a resume can't persist it.
     @file_list.posture      = -> { @settings.yolo? }
@@ -563,7 +569,7 @@ class Harness
         end
       end
 
-      emit_step(iteration, message) if message[:tool_calls]
+      emit_step(message) if message[:tool_calls]
 
       # AFTER the step line, so the warn lands inside the block it describes.
       truncated = report_finish_reason(data, iteration)
@@ -1009,7 +1015,7 @@ class Harness
     parts.join(" ")
   end
 
-  def emit_step(iteration, message)
+  def emit_step(message)
     return if step_display_disabled?
 
     @session_manager.log_response(reasoning: message[:reasoning], content: message[:content])
@@ -1020,8 +1026,10 @@ class Harness
 
     tools = message[:tool_calls].map { |tc| tc[:function][:name] }
     # One ROLE per event so UI::Renderer does not regex markers back out; only
-    # the number is emitted here, "step" is the renderer's word.
-    Task.emit(:step_label, origin: :harness, content: iteration)
+    # the number is emitted here, "step" is the renderer's word. The number is
+    # the job-wide counter, not the turn-local iteration (issue #577).
+    @step_number += 1
+    Task.emit(:step_label, origin: :harness, content: @step_number)
     Task.emit(:plan, origin: :harness, content: reason) if reason
     Task.emit(:interstitial, origin: :harness, content:) if content
     Task.emit(:tool_plan, origin: :harness, content: tools.join(", "))
