@@ -303,7 +303,7 @@ RSpec.describe Session do
       10.times { |i| session.add_user("message #{i}") }
       session.add_note('granted write on tmp/')
 
-      session.compact('a summary')
+      session.compact('a summary', recent_count: 6)
 
       expect(pending_notes(session)).to be_empty
       expect(session.messages.last)
@@ -354,7 +354,8 @@ RSpec.describe Session do
     def round_trip(saved_from, new_prompt)
       saved = JSON.parse(JSON.generate(saved_from.to_h(FileList.new([], workdir: '.'))),
                          symbolize_names: true)
-      [saved, described_class.new(new_prompt, file_cache: SessionFileCache.new).restore(saved, FileList.new([], workdir: '.'))]
+      [saved, described_class.new(new_prompt, file_cache: SessionFileCache.new)
+        .restore(saved, FileList.new([], workdir: "."))]
     end
 
     it 'does not store the system prompt in the serialized session' do

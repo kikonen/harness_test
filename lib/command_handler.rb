@@ -86,7 +86,7 @@ class CommandHandler
     registry: nil,
     system_saver: nil,
     harness_factory: nil,
-    session_id: nil
+    locator: nil
   )
     @file_list = file_list
     # The run-wide posture/consent state (#286): posture commands read and
@@ -106,11 +106,10 @@ class CommandHandler
     self.registry = registry
     # The run's single SystemSaver (#548), passed to every command built here.
     self.system_saver = system_saver
-    # The run's HarnessFactory and SYSTEM id (#548): a command that adds an
-    # agent to the run builds it through the factory, under the id the run
-    # owner alone knows. Passed to every command built here, like the registry.
+    # The run's HarnessFactory and SessionLocator (#548), passed to every
+    # command built here, like the registry.
     @harness_factory = harness_factory
-    @session_id      = session_id
+    @locator         = locator
   end
 
   def exiting?
@@ -197,7 +196,7 @@ class CommandHandler
       registry:,
       system_saver:,
       harness_factory: @harness_factory,
-      session_id: @session_id)
+      locator: @locator)
   end
 
   # issue #129: `! cmd` runs a shell command locally, bypassing the model.

@@ -28,14 +28,23 @@ class SessionLocator
   # rather than a bare id. Fixed window - the whole conversation is never dumped, only these windows.
   SNIPPET_RADIUS = 80
 
-  def initialize(workdir)
-    @workdir = workdir
+  # session_id: the id the run's owner settled (its own resolve_id, or a saved
+  # one). Every path this object names is under it, so a consumer is handed a
+  # locator that already knows which run it points at - never an id to repeat.
+  def initialize(workdir, session_id: nil)
+    @workdir    = workdir
+    @session_id = session_id
   end
 
   attr_reader :workdir
+  attr_accessor :session_id
 
   def sessions_dir
     File.join(@workdir, SESSIONS_DIR)
+  end
+
+  def session_dir
+    File.join(sessions_dir, @session_id)
   end
 
   # A path in the working directory as the model sees it (relative), so a spill the model is
@@ -45,46 +54,53 @@ class SessionLocator
     path.start_with?(prefix) ? path[prefix.length..] : path
   end
 
-  def session_file_path(id)
-    File.join(sessions_dir, id, SESSION_FILE)
+  def session_file_path
+    File.join(session_dir, SESSION_FILE)
   end
 
   # -- Layered (dir-per-job) layout -------------------------------------------
   # A saved SYSTEM is a session directory holding system.json plus a jobs/<id>/ tree. These are
   # the path primitives the layered writer and reader build on; session_dirs / session_files
   # below address BOTH a layered system and a flat (one-file) session.
-  def system_file_path(id)
-    File.join(sessions_dir, id, SYSTEM_FILE)
+  def system_file_path
+    File.join(session_dir, SYSTEM_FILE)
   end
 
-  def job_dir_path(id, job_id)
-    File.join(sessions_dir, id, JOBS_DIR, job_id.to_s)
+  def job_dir(job_id)
+    File.join(session_dir, JOBS_DIR, job_id.to_s)
   end
 
   # A job's conversation file. It carries NO session_id (a job is named by this path); the run
   # UUID lives in the dir name and system.json only.
-  def job_session_file_path(id, job_id)
-    File.join(job_dir_path(id, job_id), SESSION_FILE)
+  def job_session_file_path(job_id)
+    File.join(job_dir(job_id), SESSION_FILE)
   end
 
   # A job's own record file (kind/status/result/edges), the detail system.json's jobs[] points at.
-  def job_file_path(id, job_id)
-    File.join(job_dir_path(id, job_id), JOB_FILE)
+  def job_file_path(job_id)
+    File.join(job_dir(job_id), JOB_FILE)
   end
 
-  def job_replay_file_path(id, job_id)
-    File.join(job_dir_path(id, job_id), REPLAY_FILE)
+  def job_replay_file_path(job_id)
+    File.join(job_dir(job_id), REPLAY_FILE)
   end
 
   # True when the directory is a layered SYSTEM (it has system.json). A flat layout dir
   # (top-level session.json, no system.json) is not.
-  def system_dir?(id)
-    File.file?(system_file_path(id))
+  def system_dir?
+    File.file?(system_file_path)
   end
 
   # The session's own log file. It is part of WHERE a session lives, so it is spelled once here.
-  def session_log_path(id)
-    File.join(sessions_dir, id, SESSION_LOG_FILE)
+  def session_log_path
+    File.join(session_dir, SESSION_LOG_FILE)
+  end
+
+  # Where one session's tool-result images are filed. The dir is configurable
+  # (mcp_images.dir), so the base comes from the caller; the id part is this
+  # object's business (ImageStore keys a resumed run's blobs to the same dir).
+  def image_content_dir(base)
+    File.join(base, @session_id.to_s)
   end
 
   # Session DIRECTORY names. The unit of a saved session is its directory, either the flat layout
@@ -172,24 +188,24 @@ class SessionLocator
   # session.json. Both are reassembled into the SAME flat hash so resume consumers read one shape
   # regardless of layout - the layout stays the locator's knowledge. A flat session is read as
   # the degenerate one-job case: its flat file already IS that hash.
-  def read_session(id)
-    path = find_session_file(id)
-    raise HarnessError, "no saved session matching '#{id}' (see /sessions)" unless path
+  def read_session
+    path = find_session_file(@session_id)
+    raise HarnessError, "no saved session matching '#{@session_id}' (see /sessions)" \
+      unless path
 
-    session_id = File.basename(File.dirname(path))
-    unless system_dir?(session_id)
+    unless File.basename(path) == SYSTEM_FILE
       return JSON.parse(File.read(path), symbolize_names: true)
     end
 
-    assemble_system(session_id)
+    assemble_system
   end
 
   # The layered system record: system.json of a session directory, parsed symbolized. Raises
   # when the id has no system record (a flat session has none).
-  def read_system(id)
-    path = system_file_path(id)
-    unless File.file?(path)
-      raise HarnessError, "no system record for session '#{id}' (see /sessions)"
+  def read_system
+    path = find_session_file(@session_id)
+    unless path && File.basename(path) == SYSTEM_FILE
+      raise HarnessError, "no system record for session '#{@session_id}' (see /sessions)"
     end
 
     JSON.parse(File.read(path), symbolize_names: true)
@@ -197,10 +213,10 @@ class SessionLocator
 
   # A job's conversation file (jobs/<id>/session.json), parsed symbolized. Raises when that job
   # has no conversation file (its dir was dropped, or it is the degenerate layout with no per-job tree).
-  def read_job_session(id, job_id)
-    path = job_session_file_path(id, job_id)
+  def read_job_session(job_id)
+    path = job_session_file_path(job_id)
     unless File.file?(path)
-      raise HarnessError, "no session for job #{job_id} of session '#{id}'"
+      raise HarnessError, "no session for job #{job_id} of session '#{@session_id}'"
     end
 
     JSON.parse(File.read(path), symbolize_names: true)
@@ -208,10 +224,10 @@ class SessionLocator
 
   # A job's own record (jobs/<id>/job.json): kind, status, result and edges as ids. Read by the
   # per-job resume path. Raises when the job has no record.
-  def read_job_record(id, job_id)
-    path = job_file_path(id, job_id)
+  def read_job_record(job_id)
+    path = job_file_path(job_id)
     unless File.file?(path)
-      raise HarnessError, "no job record for job #{job_id} of session '#{id}'"
+      raise HarnessError, "no job record for job #{job_id} of session '#{@session_id}'"
     end
 
     JSON.parse(File.read(path), symbolize_names: true)
@@ -226,23 +242,23 @@ class SessionLocator
   # entry. A flat session has no per-job tree so contributes nothing (read_system would raise -
   # hence the system_dir? guard). Reading a saved file is main-safe; putting these into live jobs
   # is the system owner's.
-  def job_restores(id)
-    return [] unless system_dir?(id)
+  def job_restores
+    return [] unless system_dir?
 
-    Array(read_system(id)[:jobs]).filter_map do |entry|
+    Array(read_system[:jobs]).filter_map do |entry|
       job_id = entry[:id]
       next if job_id.nil?
-      next unless File.file?(job_session_file_path(id, job_id))
+      next unless File.file?(job_session_file_path(job_id))
 
       # Status and kind come from the job's OWN record (job.json is what a save writes them into);
       # the index entry names the job, the record describes it.
-      record_data = parse_json(job_file_path(id, job_id)) || {}
+      record_data = parse_json(job_file_path(job_id)) || {}
       {
         id: job_id,
         kind: record_data[:kind] || entry[:kind],
         status: record_data[:status] || entry[:status],
-        session: parse_json(job_session_file_path(id, job_id)) || {},
-        replay_tail: Array(parse_json(job_replay_file_path(id, job_id)))
+        session: parse_json(job_session_file_path(job_id)) || {},
+        replay_tail: Array(parse_json(job_replay_file_path(job_id)))
       }
     end
   end
@@ -288,7 +304,7 @@ class SessionLocator
       end
       next if data.nil?
 
-      matches = match_all(id, data, q)
+      matches = match_all(id, data, File.dirname(path), q)
       next if matches.empty?
 
       {
@@ -309,9 +325,6 @@ class SessionLocator
   # system (its recorded jobs carry each job's conversation size), or the flat session.json as-is.
   # Resume keeps its own assemble_system - a listing never needs the conversation folded back in.
   def entry_data(path)
-    id = File.basename(File.dirname(path))
-    return read_system(id) if File.basename(path) == SYSTEM_FILE
-
     JSON.parse(File.read(path), symbolize_names: true)
   end
 
@@ -319,8 +332,8 @@ class SessionLocator
   # foreground, jobs, next_id). It carries NO job conversation - the system's owner reads each job's
   # own files and restores them job by job. Which job is foreground is the system owner's decision,
   # not the locator's.
-  def assemble_system(session_id)
-    read_system(session_id)
+  def assemble_system
+    read_system
   end
 
   # -- Reading helpers -------------------------------------------------------
@@ -370,10 +383,10 @@ class SessionLocator
   # Where a query appears in one session: the id, then every job's message text. A layered system
   # stores each conversation in its own jobs/<id>/session.json, so a search reads them all (a
   # sub-agent transcript must be findable, not just the foreground's). One snippet per matching location.
-  def match_all(id, data, query)
+  def match_all(id, data, session_dir, query)
     found = []
     found << snippet(id.to_s, query) if id.to_s.downcase.include?(query)
-    job_texts(id, data).each do |content|
+    job_texts(data, session_dir).each do |content|
       text = content.to_s
       found << snippet(text, query) if text.downcase.include?(query)
     end
@@ -382,11 +395,13 @@ class SessionLocator
 
   # The message contents of every conversation a session owns: the flat file for a flat session,
   # every retained job's session.json for a layered system.
-  def job_texts(id, data)
-    return Array(data[:messages]).map { |m| m[:content] } unless system_dir?(id)
+  # A layered system records each job's size in system.json but keeps the text in
+  # the job's own file under the session dir the entry file lives in.
+  def job_texts(data, session_dir)
+    return Array(data[:messages]).map { |m| m[:content] } unless data.key?(:jobs)
 
-    Array(read_system(id)[:jobs]).flat_map do |job|
-      path = job_session_file_path(id, job[:id])
+    Array(data[:jobs]).flat_map do |job|
+      path = File.join(session_dir, JOBS_DIR, job[:id].to_s, SESSION_FILE)
       File.file?(path) ? Array(parse_json(path)[:messages]).map { |m| m[:content] } : []
     end
   end

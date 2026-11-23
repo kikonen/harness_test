@@ -19,10 +19,12 @@ RSpec.describe ToolCallRunner, 'tool-result byte budget (issue #551)' do
   def build(options = {})
     opts = { system_file: Harness::DEFAULT_SYSTEM_PROMPT_FILE,
              num_ctx: 65_536 }.merge(options)
-    session_id = opts.delete(:session_id)
+    session_id  = opts.delete(:session_id) || SessionLocator.new(workdir).fresh_id
+    run_locator = SessionLocator.new(workdir, session_id:)
+    logger      = SessionLogger.build(run_locator.session_log_path)
     Harness.new(FileList.new([], workdir: workdir),
                 settings: SystemSettings.from_options(opts),
-                session_id:)
+                locator: run_locator, logger:)
   end
 
   # The gate as a callable: a tool whose execute returns `text`, run through

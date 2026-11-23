@@ -10,9 +10,9 @@ RSpec.describe Harness do
       harness = build_harness
 
       expected = File.join(workdir, Harness::HARNESS_DIR,
-                           'sessions', harness.session.session_id,
+                           'sessions', harness.session_id,
                            Harness::SESSION_LOG_FILE)
-      expect(harness.session_log_path).to eq(expected)
+      expect(locator.session_log_path(harness.session_id)).to eq(expected)
     end
 
     it 'creates the log file at the per-session path during #initialize' do
@@ -22,7 +22,7 @@ RSpec.describe Harness do
       # logger is built in #initialize - the file exists from construction
       # on, without anything having to ask for the logger first.
       expect(harness.logger).to be_a(Logger)
-      expect(File.file?(harness.session_log_path)).to be true
+      expect(File.file?(locator.session_log_path(harness.session_id))).to be true
     end
 
     it 'does not write to the legacy shared .harness/harness.log' do

@@ -60,6 +60,7 @@ class Harness
     :model_config,
     :tool_registry,
     :file_list,
+    :locator,
     :session,
     :session_manager,
     :client,
@@ -93,28 +94,25 @@ class Harness
     @mailbox.discard_pending_user_note(kind)
   end
 
-  def initialize(file_list, settings:, session_id: nil, resume_data: nil, logger: nil)
+  def initialize(
+    file_list,
+    settings:,
+    locator:,
+    logger:,
+    resume_data: nil
+  )
     @file_list = file_list
     @settings  = settings
-    @locator   = SessionLocator.new(file_list.workdir)
+    @locator   = locator
 
     # One shared cache for Session and the tool registry: a digest a tool
     # records must be the one a later write is checked against.
     @file_cache = SessionFileCache.new
 
-    log_id  = session_id || @locator.fresh_id
-    @logger = logger || SessionLogger.build(@locator.session_log_path(log_id))
+    @logger = logger
+    @session = Session.new(build_system_prompt, file_cache: @file_cache)
 
-    @session = Session.new(build_system_prompt, session_id: log_id, file_cache: @file_cache)
-
-    if resume_data
-      saved_id = resume_data[:session_id]
-      if saved_id && saved_id != log_id
-        raise HarnessError,
-          "session file says id #{saved_id} but it is stored under #{log_id}"
-      end
-      @session.restore(resume_data, @file_list)
-    end
+    @session.restore(resume_data, @file_list) if resume_data
 
     @mailbox = TurnMailbox.new(@logger)
     StateMigrator.run(@file_list.workdir, HARNESS_DIR)
@@ -151,7 +149,8 @@ class Harness
 
     # A dir under this session id, so a saved path still resolves on resume.
     @image_store = ImageStore.new(
-      @file_list.workdir, dir: image_content_dir(@session.session_id))
+      @file_list.workdir,
+      dir: @locator.image_content_dir(settings.mcp_images_dir || ImageStore::DEFAULT_DIR))
 
     # The tool-call half of a turn (issue #582): it sees the ports below and
     # never reads back into Harness.
@@ -191,10 +190,6 @@ class Harness
     "#{base}\n\n## Project-Specific Rules\n\n#{content}\n"
   end
 
-  def session_log_path
-    @locator.session_log_path(@session.session_id)
-  end
-
   # Same payload for every request: omitting tools makes a different prompt.
   def tools_payload
     tool_registry.empty? ? nil : tool_registry.to_openai
@@ -231,11 +226,6 @@ class Harness
 
   def vision?
     @session_manager.vision?
-  end
-
-  def image_content_dir(session_id)
-    base = settings.mcp_images_dir || ImageStore::DEFAULT_DIR
-    File.join(base, session_id.to_s)
   end
 
   # A live rate is '~' (estimated from stream chars); a "(last)" rate is the
@@ -387,7 +377,6 @@ class Harness
 
     @result_spill = ResultSpill.new(
       @locator,
-      @session.session_id,
       job_id: @session_manager.job_id)
   end
 
@@ -410,7 +399,7 @@ class Harness
           OutputBudget::DEFAULT_RESULT_BYTES),
       result_spill: -> { result_spill },
       text_tool_call_parser: @text_tool_call_parser,
-      tool_wait_suffix:
+      tool_wait_suffix:,
     )
   end
 

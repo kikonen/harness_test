@@ -29,7 +29,7 @@ RSpec.describe ToolCallRunner do
     settings = SystemSettings.from_options(options)
     registry = ToolRegistry.new
     session  = Session.new("system prompt", file_cache: SessionFileCache.new)
-    spill    = ResultSpill.new(SessionLocator.new(workdir), "spec", job_id: 0)
+    spill    = ResultSpill.new(SessionLocator.new(workdir, session_id: "spec"), job_id: 0)
     flist    = FileList.new([], workdir: workdir)
     fixture  = Struct.new(:workdir, :log_path, :settings, :session, :client,
                           :tool_registry).new(workdir, log_path, settings, session, nil, registry)

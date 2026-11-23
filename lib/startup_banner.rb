@@ -8,7 +8,8 @@ require_relative "ui"
 # state and writes only through the injected UI; the resumed tail is drawn
 # BEFORE the banner so the facts stay one block. Rationale: doc/startup_banner_design.md
 class StartupBanner
-  def initialize(ui:, settings:, file_list:, harness:, registry:, resumed:)
+  def initialize(ui:, settings:, file_list:, harness:, registry:, resumed:, locator:)
+    @locator  = locator
     @ui       = ui
     @settings = settings
     @file_list = file_list
@@ -50,7 +51,7 @@ class StartupBanner
 
     # Show the session id so the user knows where its log is written and which id a
     # later /save or --resume refers to.
-    @ui.puts "Session: #{@harness.session.session_id} (log: #{session_log_path_display})"
+    @ui.puts "Session: #{@locator.session_id} (log: #{session_log_path_display})"
 
     # A rules file that is not valid UTF-8 now LOADS (bad bytes replaced) instead of
     # crashing, so the repair must be said out loud: the prompt the model got is not
@@ -131,8 +132,7 @@ class StartupBanner
   # The log path relative to the workdir (an absolute path would duplicate the
   # Working directory line above).
   def session_log_path_display
-    id = @harness.session.session_id
-    File.join(SessionLocator::SESSIONS_DIR, id, SessionLocator::SESSION_LOG_FILE)
+    @locator.relative_path(@locator.session_log_path)
   end
 
   def consent_posture_display

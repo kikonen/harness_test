@@ -400,7 +400,7 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
     it 'logs the locked branch when the offline lock succeeded' do
       h = build_harness
 
-      expect(File.read(h.session_log_path)).to include('ruby sandbox seeded and locked offline')
+      expect(File.read(h.locator.session_log_path)).to include('ruby sandbox seeded and locked offline')
     end
 
     # The unlocked branch (a starter gem absent on the box) is the same seed
@@ -409,8 +409,8 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
       allow_any_instance_of(SandboxGemfile).to receive(:lock_seeded?).and_return(false)
       h = build_harness
 
-      expect(File.read(h.session_log_path)).to include('ruby sandbox seeded')
-      expect(File.read(h.session_log_path)).to include('offline lock failed')
+      expect(File.read(h.locator.session_log_path)).to include('ruby sandbox seeded')
+      expect(File.read(h.locator.session_log_path)).to include('offline lock failed')
     end
 
     # A model-managed Gemfile is never re-locked or overwritten on a later launch:
@@ -426,7 +426,7 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
       expect(text).to start_with("gem 'mine'\n")
       expect(text).to include("gem 'mine'")
       expect(text.scan(/gem 'mine'/).size).to eq(1)
-      expect(File.read(h.session_log_path)).not_to include('ruby sandbox seeded')
+      expect(File.read(h.locator.session_log_path)).not_to include('ruby sandbox seeded')
     end
   end
 
@@ -494,7 +494,7 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
       first.tool_registry.get('memory.add').execute('name' => 'cross-session', 'text' => 'a fact')
 
       later = build_harness
-      expect(later.session.session_id).not_to eq(first.session.session_id)
+      expect(later.locator.session_id).not_to eq(first.locator.session_id)
       expect(memories_store(later).body('cross-session')).to eq('a fact')
       expect(later.tool_registry.get('memory.read').execute('name' => 'cross-session')).to eq('a fact')
     end
@@ -510,7 +510,7 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
                       arguments: JSON.generate(name: 'logged-note', text: 'a fact') } },
         h.tool_call_ports)
 
-      log = File.read(h.session_log_path)
+      log = File.read(h.locator.session_log_path)
       expect(log).to include("tool memory.add → ok: saved memory 'logged-note'")
       expect(memories_store(h).body('logged-note')).to eq('a fact')
     end
@@ -575,7 +575,7 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
                       arguments: JSON.generate(url: 'http://127.0.0.1:9/x') } },
         h.tool_call_ports)
 
-      log = File.read(h.session_log_path)
+      log = File.read(h.locator.session_log_path)
       expect(log).to include("tool web.fetch → error: 127.0.0.1 is a blocked address")
     end
   end
@@ -643,7 +643,7 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
         "skipped MCP tool 'file.read' (name collides with a built-in tool)"
       )
       # The note is logged once, with the same text the banner shows.
-      expect(File.read(h.session_log_path))
+      expect(File.read(h.locator.session_log_path))
         .to include("skipped MCP tool 'file.read' (name collides with a built-in tool)")
     end
 

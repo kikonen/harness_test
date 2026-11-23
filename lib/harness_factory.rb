@@ -38,15 +38,13 @@ class HarnessFactory
   attr_reader :registry, :locator, :settings, :file_list, :system_saver
 
   # Add a job to the run's registry AND give it its own agent, in one step.
-  # `session_id` is the SYSTEM id whose sessions/<id>/jobs/<job>/ tree this job's
-  # files live under - a job is named by its directory, never by a second copy of
-  # the run's UUID (doc/session_layers_design.md). `kind` is any Job::KINDS value;
+  # A job is named by its directory under the locator's session id, never by a
+  # second copy of the run's UUID (doc/session_layers_design.md). `kind` is any Job::KINDS value;
   # the main turn and a new sub-agent differ only by it.
   # Returns the Job: the caller asked for a job, and the agent it got is
   # `job.harness` - the Job is the registry-side handle that stays useful.
   def add_harness_job(
     kind:,
-    session_id:,
     dependencies: [],
     requested_by: nil,
     resume_data: nil,
@@ -54,7 +52,7 @@ class HarnessFactory
     id: nil
   )
     job = @registry.add_job(kind:, dependencies:, requested_by:, id:)
-    build_for(job, session_id:, resume_data:, base_file_list:) && job
+    build_for(job, resume_data:, base_file_list:) && job
   end
 
   # Build this job's own Harness and attach it. `resume_data` is this job's OWN
@@ -64,14 +62,14 @@ class HarnessFactory
   # Public so the run owner can give a job that already exists (a rebuilt saved
   # job) its agent, which is exactly what a layered resume has to do for every
   # saved job - not only for the foreground one.
-  def build_for(job, session_id:, resume_data: nil, base_file_list: nil)
+  def build_for(job, resume_data: nil, base_file_list: nil)
     raise HarnessError, "no job to attach a harness to" if job.nil?
     raise HarnessError, "job #{job.id} already has a harness" if job.harness
 
     harness = Harness.new(
       job_file_list(base_file_list),
       settings: @settings,
-      session_id:,
+      locator: @locator,
       resume_data:,
       logger: @logger)
     # A resumed job's model comes from its own saved half (Harness#apply_resume_state).

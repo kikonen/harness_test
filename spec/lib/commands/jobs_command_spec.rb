@@ -122,16 +122,17 @@ RSpec.describe Commands::JobsCommand do
       registry  = JobRegistry.new
       factory   = HarnessFactory.new(
         registry:,
-        locator: SessionLocator.new(workdir),
+        locator: SessionLocator.new(workdir, session_id: NAME_RUN_ID),
         settings: SystemSettings.from_options({}),
         file_list: FileList.new([], workdir: workdir),
-        system_saver: SystemSaver.new(SessionLocator.new(workdir), registry),
-        logger: nil)
-      main = factory.add_harness_job(kind: :main, session_id: NAME_RUN_ID)
+        system_saver: SystemSaver.new(SessionLocator.new(workdir, session_id: NAME_RUN_ID), registry),
+        logger: Logger.new(File::NULL))
+      main = factory.add_harness_job(kind: :main)
       io = StringIO.new
       command = described_class.new(
         registry:, file_list: nil, ui: UI::Console.new(stdout: io),
-        harness_factory: factory, session_id: NAME_RUN_ID, **extra)
+        harness_factory: factory,
+        locator: SessionLocator.new(workdir, session_id: NAME_RUN_ID), **extra)
       [command, io, registry, main]
     end
 
@@ -237,28 +238,28 @@ RSpec.describe Commands::JobsCommand do
       registry = JobRegistry.new
       factory  = HarnessFactory.new(
         registry:,
-        locator: SessionLocator.new(workdir),
+        locator: SessionLocator.new(workdir, session_id: NAME_RUN_ID),
         settings: SystemSettings.from_options({}),
         file_list: FileList.new([], workdir: workdir),
-        system_saver: SystemSaver.new(SessionLocator.new(workdir), registry),
-        logger: nil)
-      main  = factory.add_harness_job(kind: :main, session_id: NAME_RUN_ID)
-      child = factory.add_harness_job(kind: :sub_agent, session_id: NAME_RUN_ID,
-                                      requested_by: main)
-      saver = SystemSaver.new(SessionLocator.new(workdir), registry)
+        system_saver: SystemSaver.new(SessionLocator.new(workdir, session_id: NAME_RUN_ID), registry),
+        logger: Logger.new(File::NULL))
+      main  = factory.add_harness_job(kind: :main)
+      child = factory.add_harness_job(kind: :sub_agent, requested_by: main)
+      saver = SystemSaver.new(SessionLocator.new(workdir, session_id: NAME_RUN_ID), registry)
       registry.foreground = main.id
-      saver.save_run(NAME_RUN_ID) if saved
+      saver.save_run if saved
       io = StringIO.new
       command = described_class.new(
         registry:, file_list: nil, ui: UI::Console.new(stdout: io),
-        system_saver: saver, harness_factory: factory, session_id: NAME_RUN_ID)
+        system_saver: saver, harness_factory: factory,
+        locator: SessionLocator.new(workdir, session_id: NAME_RUN_ID))
       [command, io, registry, child, workdir, saver]
     end
 
     it 'deletes a finished non-foreground job from disk and the registry' do
       command, io, registry, child, workdir = delete_run(saved: true)
       child.finish('done')
-      dir = SessionLocator.new(workdir).job_dir_path(NAME_RUN_ID, child.id)
+      dir = SessionLocator.new(workdir, session_id: NAME_RUN_ID).job_dir(child.id)
       expect(File.directory?(dir)).to be(true)
 
       command.handle("delete #{child.id}")
@@ -266,7 +267,7 @@ RSpec.describe Commands::JobsCommand do
       expect(registry.job(child.id)).to be_nil
       expect(File.directory?(dir)).to be(false)
       system_data = JSON.parse(
-        File.read(SessionLocator.new(workdir).system_file_path(NAME_RUN_ID)), symbolize_names: true)
+        File.read(SessionLocator.new(workdir, session_id: NAME_RUN_ID).system_file_path), symbolize_names: true)
       expect(system_data[:jobs].map { |j| j[:id] }).to eq([0])
       expect(registry.foreground).to eq(0)
       expect(io.string).to include("job ##{child.id} (sub_agent) deleted from the run")

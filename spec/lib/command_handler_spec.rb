@@ -284,27 +284,27 @@ RSpec.describe CommandHandler do
     end
   end
 
-  # #548: the factory and the SYSTEM id belong to the run owner, and a command
+  # #548: the factory and the locator belong to the run owner, and a command
   # that adds an agent builds through them, so build_command must hand both down
   # the way it hands the registry.
-  describe 'the factory and system id passed to built commands (issue #548)' do
-    it 'gives a built command the run harness_factory and session_id' do
+  describe 'the factory and locator passed to built commands (issue #548)' do
+    it 'gives a built command the run harness_factory and locator' do
       seen   = {}
       probe  = Class.new(Commands::JobsCommand) do
         def handle(_args)
           @seen[:factory] = @harness_factory
-          @seen[:session] = @session_id
+          @seen[:locator] = @locator
         end
       end
       handler = make_handler(Dir.mktmpdir, UI::Console.new(stdout: StringIO.new))
       factory = Struct.new(:tag).new('factory')
       handler.instance_variable_set(:@harness_factory, factory)
-      handler.instance_variable_set(:@session_id, 'sess-1')
+      handler.instance_variable_set(:@locator, 'locator-1')
 
       handler.send(:build_command, probe).tap { |c| c.instance_variable_set(:@seen, seen) }.handle('')
 
       expect(seen[:factory]).to be(factory)
-      expect(seen[:session]).to eq('sess-1')
+      expect(seen[:locator]).to eq('locator-1')
     end
   end
 end

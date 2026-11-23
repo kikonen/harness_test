@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "time"
-require "securerandom"
 
 require_relative "session_file_cache"
 require_relative "llm/usage_stats"
@@ -14,29 +13,17 @@ class Session
   UUID_RE = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
   FILE_CACHE_KEY = "file_cache"
 
-  # Verbatim tail retained after a summary so exact file contents survive.
-  COMPACT_RECENT_MESSAGES = 6
-
-  # 100 or higher disables auto-compaction.
-  AUTO_COMPACT_THRESHOLD = 88
-
-  # Absolute headroom keeps the same room for the summary call regardless
-  # of window size; a percentage would shrink it on small windows.
-  COMPACT_RESERVED_TOKENS = 8192
-
   # Rough chars-per-token ratio used only for fallback context estimates.
   EST_CHARS_PER_TOKEN = 4
 
-  attr_reader :messages, :created_at, :system_prompt, :session_id,
+  attr_reader :messages, :created_at, :system_prompt,
               :last_reasoning, :file_cache
 
-  # session_id is minted once by the identity resolver (SessionLocator): the
-  # log file, history file and session dir are all derived from it. The
-  # default exists only for standalone construction in specs.
-  def initialize(system_prompt, session_id: nil, file_cache:)
+  # A conversation has no identity: the run's owner names it by the session
+  # directory its files live under (SessionLocator), never by a value it carries.
+  def initialize(system_prompt, file_cache:)
     @system_prompt = system_prompt
     @created_at    = Time.now
-    @session_id    = session_id || SecureRandom.uuid
     @user_prompts  = 0
     @last_stats    = nil
     @last_reasoning = nil
@@ -146,7 +133,7 @@ class Session
   # The retained window never begins on a `tool` message: an orphaned tool
   # result without its assistant tool_calls would fail the API. @file_cache
   # is deliberately untouched - a compacted file is still the same file.
-  def compact(summary_text, recent_count: COMPACT_RECENT_MESSAGES)
+  def compact(summary_text, recent_count:)
     conversation = @messages[1..]
     recent = nil
     if recent_count > 0 && conversation.size > recent_count
@@ -254,7 +241,6 @@ class Session
     @messages.each { |m| counts[m[:role]] += 1 }
 
     items = [
-      { field: "Session id", value: session_id },
       { field: "Session started", value: created_at.strftime("%Y-%m-%d %H:%M:%S") },
       { field: "Messages", value: "#{@messages.size} total" }
     ]
@@ -284,7 +270,6 @@ class Session
   def to_h(file_list)
     {
       version:       1,
-      session_id:    @session_id,
       created_at:    created_at.iso8601,
       user_prompts:  @user_prompts,
       last_stats:    @last_stats,
@@ -309,7 +294,6 @@ class Session
     # the whole resume for the cost of one cosmetic /session line.
     created = data[:created_at]
     @created_at = created ? Time.parse(created) : Time.now
-    @session_id    = data[:session_id] if data[:session_id]
     @user_prompts  = data[:user_prompts] || 0
     @last_stats    = data[:last_stats]
     conversation   = data[:messages] || []

@@ -189,7 +189,7 @@ RSpec.describe TurnRunner do
         # is the label - the class names the failure alongside its message.
         .to include('in-loop compaction failed: HarnessError: LLM answered the ' \
                     'summary request with a tool call (test.echo)')
-      expect(File.read(h.session_log_path)).not_to include('PWNED')
+      expect(File.read(h.locator.session_log_path)).not_to include('PWNED')
       expect(client.calls.size).to eq(4) # turn, turn, summary fork, post-compact turn
     end
   end
@@ -465,7 +465,7 @@ RSpec.describe TurnRunner do
       # The harness' own budget is named next to what the server reported.
       expect(line).to include('5 completion tokens')
       expect(line).to include('no token limit configured')
-      expect(File.read(h.session_log_path)).to include('cut off by the token budget')
+      expect(File.read(h.locator.session_log_path)).to include('cut off by the token budget')
     end
 
     it 'names the configured limit when one is set' do
@@ -531,7 +531,7 @@ RSpec.describe TurnRunner do
       expect(result).to include('cut off by the token budget')
       expect(result).to include('NOT executed')
       expect(result).not_to include('not valid JSON')
-      expect(File.read(h.session_log_path)).to include('arguments did not parse')
+      expect(File.read(h.locator.session_log_path)).to include('arguments did not parse')
     end
 
     # The same parse failure with NO truncation is still named as what it is.
@@ -625,7 +625,7 @@ RSpec.describe TurnRunner do
       expect(line).not_to be_nil
       expect(line[:content]).to include('arrived as text/XML, not JSON')
       expect(line[:content]).to include('parsed and running')
-      expect(File.read(h.session_log_path))
+      expect(File.read(h.locator.session_log_path))
         .to include('tool call arrived as text/XML (issue #461), not JSON - parsed and running')
     end
 

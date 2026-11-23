@@ -93,19 +93,19 @@ RSpec.describe SystemRecord do
   it 'records job edges as ids in job.json, omitting a non-Job dependency' do
     Dir.mktmpdir do |dir|
       id      = 'edededed-0000-0000-0000-000000000000'
-      locator = SessionLocator.new(dir)
+      locator = SessionLocator.new(dir, session_id: id)
       registry = JobRegistry.new
       main = registry.add_job(kind: :main)
       registry.add_job(kind: :command, requested_by: main, dependencies: [main])
       registry.add_job(kind: :timed, dependencies: [-> { true }])
 
       described_class.new(registry).write_system_files(
-        locator, id, session_h(id, dir))
+        locator, session_h(id, dir))
 
-      command = locator.read_job_record(id, 1)
+      command = locator.read_job_record(1)
       expect(command[:requested_by]).to eq(main.id)   # id, not a Job object
       expect(command[:dependencies]).to eq([main.id]) # ids, not Job objects
-      expect(locator.read_job_record(id, 2)[:dependencies]).to eq([])
+      expect(locator.read_job_record(2)[:dependencies]).to eq([])
     end
   end
 
@@ -123,31 +123,31 @@ RSpec.describe SystemRecord do
   it 'writes system.json + an empty replay.json for a registry-less (one-job) record' do
     Dir.mktmpdir do |dir|
       id      = 'aaaaaaaa-0000-0000-0000-000000000000'
-      locator = SessionLocator.new(dir)
+      locator = SessionLocator.new(dir, session_id: id)
 
       described_class.new(nil).write_system_files(
-        locator, id, session_h(id, dir))
+        locator, session_h(id, dir))
 
-      run = JSON.parse(File.read(locator.system_file_path(id)), symbolize_names: true)
+      run = JSON.parse(File.read(locator.system_file_path), symbolize_names: true)
       expect(run[:foreground_job]).to eq(0)
       expect(run[:next_id]).to eq(1)
       expect(run[:jobs].map { |j| j[:id] }).to eq([0])
       expect(run[:jobs].first[:dir]).to eq('jobs/0')
-      expect(JSON.parse(File.read(locator.job_replay_file_path(id, 0)))).to eq([])
+      expect(JSON.parse(File.read(locator.job_replay_file_path(0)))).to eq([])
     end
   end
 
   it 'records NO conversation in the system half - the seam SystemRecord enforces' do
     Dir.mktmpdir do |dir|
       id      = 'bbbbbbbb-0000-0000-0000-000000000000'
-      locator = SessionLocator.new(dir)
+      locator = SessionLocator.new(dir, session_id: id)
       sh      = session_h(id, dir)
       sh[:messages] = [{ role: 'user', content: 'secret chain' }]
 
       described_class.new(nil).write_system_files(
-        locator, id, sh)
+        locator, sh)
 
-      run = JSON.parse(File.read(locator.system_file_path(id)), symbolize_names: true)
+      run = JSON.parse(File.read(locator.system_file_path), symbolize_names: true)
       expect(run).not_to have_key(:messages)
     end
   end
@@ -157,7 +157,7 @@ RSpec.describe SystemRecord do
   it 'writes replay.json for every retained job (not only the foreground)' do
     Dir.mktmpdir do |dir|
       id       = 'dddddddd-0000-0000-0000-000000000000'
-      locator  = SessionLocator.new(dir)
+      locator  = SessionLocator.new(dir, session_id: id)
       registry = JobRegistry.new
       main = registry.add_job(kind: :main)
       child = registry.add_job(kind: :sub_agent, requested_by: main)
@@ -166,10 +166,10 @@ RSpec.describe SystemRecord do
       registry.foreground = main.id
 
       described_class.new(registry).write_system_files(
-        locator, id, session_h(id, dir))
+        locator, session_h(id, dir))
 
-      fg = JSON.parse(File.read(locator.job_replay_file_path(id, 0)), symbolize_names: true)
-      job1 = JSON.parse(File.read(locator.job_replay_file_path(id, 1)), symbolize_names: true)
+      fg = JSON.parse(File.read(locator.job_replay_file_path(0)), symbolize_names: true)
+      job1 = JSON.parse(File.read(locator.job_replay_file_path(1)), symbolize_names: true)
       expect(fg).to eq([])
       expect(job1.first[:content]).to eq('child shown')
     end
@@ -178,7 +178,7 @@ RSpec.describe SystemRecord do
   it 'writes the system -> job map from a real registry, postures read off the registry settings' do
     Dir.mktmpdir do |dir|
       id       = 'cccccccc-0000-0000-0000-000000000000'
-      locator  = SessionLocator.new(dir)
+      locator  = SessionLocator.new(dir, session_id: id)
       settings = SystemSettings.from_options({ yolo: true })
       registry = JobRegistry.new(settings: settings)
       main = registry.add_job(kind: :main)
@@ -186,15 +186,15 @@ RSpec.describe SystemRecord do
       registry.foreground_buffer.restore([{ type: 'user', origin: 'user', content: 'shown' }])
 
       described_class.new(registry).write_system_files(
-        locator, id, session_h(id, dir))
+        locator, session_h(id, dir))
 
-      run = JSON.parse(File.read(locator.system_file_path(id)), symbolize_names: true)
+      run = JSON.parse(File.read(locator.system_file_path), symbolize_names: true)
       expect(run[:next_id]).to eq(2)
       expect(run[:jobs].map { |j| j[:id] }).to eq([0, 1])
       expect(run[:yolo]).to be(true)
       # Edges are not in the index (issue #548 E); they live in job.json.
       expect(run[:jobs][1]).not_to have_key(:requested_by)
-      replay = JSON.parse(File.read(locator.job_replay_file_path(id, 0)), symbolize_names: true)
+      replay = JSON.parse(File.read(locator.job_replay_file_path(0)), symbolize_names: true)
       expect(replay.first[:content]).to eq('shown')
     end
   end
@@ -204,17 +204,17 @@ RSpec.describe SystemRecord do
   it 'writes a job.json for every retained job (the per-job record)' do
     Dir.mktmpdir do |dir|
       id      = 'eeeeeeee-0000-0000-0000-000000000000'
-      locator = SessionLocator.new(dir)
+      locator = SessionLocator.new(dir, session_id: id)
       registry = JobRegistry.new
       main  = registry.add_job(kind: :main)
       child = registry.add_job(kind: :sub_agent, requested_by: main, dependencies: [main])
       child.finish('child answer')
 
       described_class.new(registry).write_system_files(
-        locator, id, session_h(id, dir))
+        locator, session_h(id, dir))
 
-      job0 = locator.read_job_record(id, 0)
-      job1 = locator.read_job_record(id, 1)
+      job0 = locator.read_job_record(0)
+      job1 = locator.read_job_record(1)
       # The round trip is JSON: a Symbol value reads back as a String.
       expect(job0).to eq(id: 0, kind: 'main', status: 'pending', result: nil,
                          requested_by: nil, dependencies: [])
@@ -231,28 +231,28 @@ RSpec.describe SystemRecord do
   it 'records a job result that is not JSON-representable as a labelled placeholder' do
     Dir.mktmpdir do |dir|
       id      = 'ffffffff-0000-0000-0000-000000000000'
-      locator = SessionLocator.new(dir)
+      locator = SessionLocator.new(dir, session_id: id)
       registry = JobRegistry.new
       registry.add_job(kind: :main).finish(->(x) { x })
 
       described_class.new(registry).write_system_files(
-        locator, id, session_h(id, dir))
+        locator, session_h(id, dir))
 
-      expect(locator.read_job_record(id, 0)[:result]).to eq('(unserializable Proc)')
+      expect(locator.read_job_record(0)[:result]).to eq('(unserializable Proc)')
     end
   end
 
   it 'writes the degenerate job.json when the record has no registry' do
     Dir.mktmpdir do |dir|
       id      = 'abababab-0000-0000-0000-000000000000'
-      locator = SessionLocator.new(dir)
+      locator = SessionLocator.new(dir, session_id: id)
 
       described_class.new(nil).write_system_files(
-        locator, id, session_h(id, dir))
+        locator, session_h(id, dir))
 
       # A nil-registry save has no Job to take a result from, so it records an
       # unfinished job with the fields a live Job would supply.
-      expect(locator.read_job_record(id, 0)).to eq(
+      expect(locator.read_job_record(0)).to eq(
         id: 0, kind: 'main', status: 'pending', result: nil, requested_by: nil, dependencies: []
       )
     end

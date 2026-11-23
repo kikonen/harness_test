@@ -70,10 +70,10 @@ class SystemRecord
   # for the system's owner to write.
   # session_h carries identity/access that Session#to_h produced; the postures
   # and MCP summary come from what this record was built with.
-  def write_system_files(locator, id, session_h)
-    system_path = locator.system_file_path(id)
+  def write_system_files(locator, session_h)
+    system_path = locator.system_file_path
     FileUtils.mkdir_p(File.dirname(system_path))
-    File.write(system_path, JSON.generate(system_json(id, session_h)))
+    File.write(system_path, JSON.generate(system_json(locator.session_id, session_h)))
 
     # Every retained job gets its own job.json (what it was, how it ended, its
     # edges as ids) and its own replay.json (its own main-owned buffer), so a
@@ -82,8 +82,8 @@ class SystemRecord
     # off the LIVE job, not derived from the index entry (issue #548 E: no second
     # source of one fact).
     each_saved_job do |job, job_id|
-      job_path    = locator.job_file_path(id, job_id)
-      replay_path = locator.job_replay_file_path(id, job_id)
+      job_path    = locator.job_file_path(job_id)
+      replay_path = locator.job_replay_file_path(job_id)
       FileUtils.mkdir_p(File.dirname(job_path))
       File.write(job_path, JSON.generate(job_record(job, job_id)))
       File.write(replay_path, JSON.generate(replay_tail_for_job(job_id)))

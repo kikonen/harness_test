@@ -49,7 +49,7 @@ class Command
     registry: nil,
     system_saver: nil,
     harness_factory: nil,
-    session_id: nil
+    locator: nil
   )
     @file_list  = file_list
     @ui         = ui
@@ -63,12 +63,12 @@ class Command
     # job and TaskRunner records main-thread reports into it.
     self.registry = registry
     self.system_saver = system_saver
-    # The run's HarnessFactory and the SYSTEM id its jobs save under (#548):
-    # a command that adds an agent to the run needs both, and only the run
-    # owner (the CLI) knows the id. Commands that do not build an agent ignore
-    # them, so they stay optional keyword args.
+    # The run's HarnessFactory and SessionLocator (#548): a command that adds
+    # an agent builds through the factory; a command that names where a session
+    # lives reads the locator. Commands that need neither ignore them, so they
+    # stay optional keyword args.
     @harness_factory = harness_factory
-    @session_id      = session_id
+    @locator         = locator
   end
 
   # A command reaches the Harness through the FOREGROUND job it acts on (#286),

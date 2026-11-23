@@ -13,6 +13,11 @@ require 'session_locator'
 RSpec.describe SessionLocator do
   let(:workdir) { Dir.mktmpdir('locator-spec') }
   let(:locator) { described_class.new(workdir) }
+
+  # A locator that already names one session: the shape every id-taking read uses.
+  def locator_for(id)
+    described_class.new(workdir, session_id: id)
+  end
   let(:sid_a) { 'aaaaaaaa-bbbb-cccc-dddd-111111111111' }
   let(:sid_b) { 'ffffffff-0000-1111-2222-333333333333' }
   let(:sid_c) { 'cccccccc-0000-1111-2222-333333333333' }
@@ -70,10 +75,20 @@ RSpec.describe SessionLocator do
   end
 
   describe '#sessions_dir / #session_file_path' do
-    it 'derives both from the workdir alone' do
-      expect(locator.sessions_dir).to eq(File.join(workdir, '.harness', 'sessions'))
-      expect(locator.session_file_path(sid_a))
+    it 'derives both from the workdir and the id' do
+      with_id = described_class.new(workdir, session_id: sid_a)
+
+      expect(with_id.sessions_dir).to eq(File.join(workdir, '.harness', 'sessions'))
+      expect(with_id.session_file_path)
         .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'session.json'))
+    end
+  end
+
+  describe '#session_log_path (issue #113)' do
+    it 'resolves to .harness/sessions/<session-id>/harness.log' do
+      expect(described_class.new(workdir, session_id: sid_a).session_log_path)
+        .to eq(File.join(workdir, SessionLocator::SESSIONS_DIR, sid_a,
+                         SessionLocator::SESSION_LOG_FILE))
     end
   end
 
@@ -191,17 +206,17 @@ RSpec.describe SessionLocator do
   end
 
   describe '#read_session' do
-    it 'returns the saved data symbolized, for a caller whose id is settled' do
+    it 'returns the saved data symbolized for the locator own id' do
       seed_session(sid_a, messages: 3)
 
-      data = locator.read_session(sid_a[0, 8])
+      data = locator_for(sid_a[0, 8]).read_session
 
       expect(data[:session_id]).to eq(sid_a)
       expect(data[:messages].size).to eq(3)
     end
 
     it 'raises for an unknown id' do
-      expect { locator.read_session('deadbeef') }
+      expect { locator_for('deadbeef').read_session }
         .to raise_error(HarnessError, /no saved session matching/)
     end
   end
@@ -215,11 +230,12 @@ RSpec.describe SessionLocator do
 # which job is foreground is the owner's decision, not the locator's.
   describe '#read_session returns the system half (issue #548)' do
     it 'returns system.json as-is, with no job conversation merged in' do
+      id_locator = locator_for(sid_c)
       seed_system(sid_c, jobs: [0])
-      File.write(locator.job_replay_file_path(sid_c, 0),
+      File.write(id_locator.job_replay_file_path(0),
                  JSON.generate([{ type: 'user', origin: 'user', content: 'do the thing' }]))
 
-      data = locator.read_session(sid_c)
+      data = id_locator.read_session
 
       expect(data[:session_id]).to eq(sid_c)
       expect(data[:next_id]).to eq(1)
@@ -232,7 +248,7 @@ RSpec.describe SessionLocator do
     it 'is the system.json of a layered system unchanged' do
       seed_system(sid_c, jobs: [0, 1])
 
-      data = locator.read_session(sid_c)
+      data = locator_for(sid_c).read_session
 
       expect(data[:jobs].map { |j| j[:id] }).to eq([0, 1])
       expect(data).not_to have_key(:messages)
@@ -241,11 +257,12 @@ RSpec.describe SessionLocator do
 
   describe '#job_restores (issue #548 per-job restore)' do
     it 'returns EVERY job with a saved dir, with its own session half, status and tail' do
+      id_locator = locator_for(sid_c)
       seed_system(sid_c, jobs: [0, 1, 2], statuses: { 1 => "pending", 2 => "finished" })
-      File.write(locator.job_replay_file_path(sid_c, 1),
+      File.write(id_locator.job_replay_file_path(1),
                  JSON.generate([{ type: 'response', origin: 'session_manager', content: 'shown' }]))
 
-      restores = locator.job_restores(sid_c)
+      restores = id_locator.job_restores
 
       expect(restores.map { |r| r[:id] }).to eq([0, 1, 2])
       job1 = restores.find { |r| r[:id] == 1 }
@@ -253,7 +270,7 @@ RSpec.describe SessionLocator do
       expect(job1[:replay_tail].first[:content]).to eq('shown')
       # The status comes from the job's OWN record file (job.json), not from
       # system.json's index, which names the job rather than describing it.
-      expect(File.basename(locator.job_file_path(sid_c, 2))).to eq('job.json')
+      expect(File.basename(id_locator.job_file_path(2))).to eq('job.json')
       expect(restores.last[:status]).to eq('finished')
       expect(restores.first[:kind]).to eq('main')
       expect(restores.first[:status]).to eq('pending')
@@ -261,15 +278,15 @@ RSpec.describe SessionLocator do
 
     it 'skips a job whose conversation file was dropped' do
       seed_system(sid_c, jobs: [0, 1])
-      FileUtils.remove_entry(locator.job_dir_path(sid_c, 1))
+      FileUtils.remove_entry(locator_for(sid_c).job_dir(1))
 
-      expect(locator.job_restores(sid_c).map { |r| r[:id] }).to eq([0])
+      expect(locator_for(sid_c).job_restores.map { |r| r[:id] }).to eq([0])
     end
 
     it 'is empty for a #207 session (it has no jobs/ tree)' do
       seed_session(sid_a)
 
-      expect(locator.job_restores(sid_a)).to eq([])
+      expect(locator_for(sid_a).job_restores).to eq([])
     end
   end
 
@@ -422,15 +439,15 @@ RSpec.describe SessionLocator do
   # same increment as the writer), so a #207 session and a layered system coexist.
   describe '#548 layered layout primitives' do
     it 'derives system.json, a job dir, and a job session path from the workdir' do
-      expect(locator.system_file_path(sid_a))
+      expect(locator_for(sid_a).system_file_path)
         .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'system.json'))
-      expect(locator.job_dir_path(sid_a, 0))
+      expect(locator_for(sid_a).job_dir(0))
         .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'jobs', '0'))
-      expect(locator.job_session_file_path(sid_a, 3))
+      expect(locator_for(sid_a).job_session_file_path(3))
         .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'jobs', '3', 'session.json'))
-      expect(locator.job_file_path(sid_a, 3))
+      expect(locator_for(sid_a).job_file_path(3))
         .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'jobs', '3', 'job.json'))
-      expect(locator.job_replay_file_path(sid_a, 3))
+      expect(locator_for(sid_a).job_replay_file_path(3))
         .to eq(File.join(workdir, '.harness', 'sessions', sid_a, 'jobs', '3', 'replay.json'))
     end
 
@@ -439,11 +456,11 @@ RSpec.describe SessionLocator do
     # and not its shown output.
     it 'reads a job.json symbolized beside the job session.json' do
       seed_system(sid_a, jobs: [0])
-      File.write(locator.job_file_path(sid_a, 0),
+      File.write(locator_for(sid_a).job_file_path(0),
                  JSON.generate({ id: 0, kind: 'sub_agent', status: 'finished',
                                  result: 'answer', requested_by: 1, dependencies: [2] }))
 
-      record = locator.read_job_record(sid_a, 0)
+      record = locator_for(sid_a).read_job_record(0)
 
       expect(record[:kind]).to eq('sub_agent')
       expect(record[:status]).to eq('finished')
@@ -456,7 +473,7 @@ RSpec.describe SessionLocator do
     it 'raises reading a job record that is not there' do
       seed_system(sid_a, jobs: [0])
 
-      expect { locator.read_job_record(sid_a, 5) }
+      expect { locator_for(sid_a).read_job_record(5) }
         .to raise_error(HarnessError, /no job record for job 5 of session/)
     end
 
@@ -464,15 +481,15 @@ RSpec.describe SessionLocator do
       seed_system(sid_a)
       seed_session(sid_b)
 
-      expect(locator.system_dir?(sid_a)).to be true
-      expect(locator.system_dir?(sid_b)).to be false
-      expect(locator.system_dir?(sid_c)).to be false # no such dir at all
+      expect(locator_for(sid_a).system_dir?).to be true
+      expect(locator_for(sid_b).system_dir?).to be false
+      expect(locator_for(sid_c).system_dir?).to be false # no such dir at all
     end
 
     it 'reads system.json symbolized for a layered session' do
       seed_system(sid_a, jobs: [0, 1, 2])
 
-      record = locator.read_system(sid_a)
+      record = locator_for(sid_a).read_system
 
       expect(record[:session_id]).to eq(sid_a)
       expect(record[:next_id]).to eq(3)
@@ -482,7 +499,7 @@ RSpec.describe SessionLocator do
     it 'reads a job session.json symbolized, carrying no session_id' do
       seed_system(sid_a, jobs: [0])
 
-      job = locator.read_job_session(sid_a, 0)
+      job = locator_for(sid_a).read_job_session(0)
 
       expect(job[:messages].first[:content]).to eq('job0')
       expect(job).not_to have_key(:session_id)
@@ -491,16 +508,16 @@ RSpec.describe SessionLocator do
     it 'raises reading a system record that is not there (a #207 session has none)' do
       seed_session(sid_b)
 
-      expect { locator.read_system(sid_b) }
+      expect { locator_for(sid_b).read_system }
         .to raise_error(HarnessError, /no system record for session/)
-      expect { locator.read_system(sid_c) }
+      expect { locator_for(sid_c).read_system }
         .to raise_error(HarnessError, /no system record for session/)
     end
 
     it 'raises reading a job session that is not there' do
       seed_system(sid_a, jobs: [0])
 
-      expect { locator.read_job_session(sid_a, 5) }
+      expect { locator_for(sid_a).read_job_session(5) }
         .to raise_error(HarnessError, /no session for job 5 of session/)
     end
   end

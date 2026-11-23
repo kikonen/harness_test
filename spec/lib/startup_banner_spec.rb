@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'startup_banner'
 require 'system_settings'
+require 'session_locator'
 
 RSpec.describe StartupBanner do
   let(:ui) { instance_double(UI::Console) }
@@ -12,7 +13,8 @@ RSpec.describe StartupBanner do
   def banner(settings: SystemSettings.from_options({}), resumed: false, registry: nil, harness: nil)
     described_class.new(
       ui: ui, settings: settings, file_list: file_list,
-      harness: harness, registry: registry, resumed: resumed)
+      harness: harness, registry: registry, resumed: resumed,
+      locator: SessionLocator.new(workdir, session_id: 'abc123'))
   end
 
   describe '#consent_posture_display' do
@@ -57,10 +59,7 @@ RSpec.describe StartupBanner do
 
   describe '#session_log_path_display' do
     it 'is the per-session log path relative to the workdir' do
-      session = double('session', session_id: 'abc123')
-      harness = double('harness', session: session)
-
-      expect(banner(harness: harness).send(:session_log_path_display))
+      expect(banner.send(:session_log_path_display))
         .to eq(File.join('.harness', 'sessions', 'abc123', 'harness.log'))
     end
   end
@@ -98,7 +97,6 @@ RSpec.describe StartupBanner do
       buffer = double('buffer', replay_tail: [entry])
       registry = double('registry', foreground_buffer: buffer)
       harness = double('harness')
-      allow(harness).to receive(:session).and_return(double(session_id: 'abc'))
       allow(harness).to receive(:rules_repair_note).and_return(nil)
       allow(harness).to receive(:mcp_status_notes).and_return([])
       allow(harness).to receive(:logger).and_return(double(info: nil))
@@ -119,7 +117,6 @@ RSpec.describe StartupBanner do
       registry = double('registry', foreground_buffer: buffer)
       s = SystemSettings.from_options(resume_replay_on_startup: false)
       harness = double('harness')
-      allow(harness).to receive(:session).and_return(double(session_id: 'abc'))
       allow(harness).to receive(:rules_repair_note).and_return(nil)
       allow(harness).to receive(:mcp_status_notes).and_return([])
       allow(harness).to receive(:logger).and_return(double(info: nil))

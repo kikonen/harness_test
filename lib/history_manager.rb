@@ -27,8 +27,8 @@ class HistoryManager
   # file then stays the legacy shared one. A mid-run /resume (#280) builds a
   # NEW manager under the resumed id instead of re-binding this one.
   def initialize(workdir, session_id: nil)
-    @workdir      = workdir
-    @current_id   = session_id
+    @workdir    = workdir
+    @session_id = session_id
     @history_file = resolve_file
   end
 
@@ -110,8 +110,8 @@ class HistoryManager
   # when no session has been bound yet (e.g. --list-sessions at startup).
   def resolve_file
     base = File.join(@workdir, Harness::HARNESS_DIR)
-    if @current_id
-      File.join(base, "sessions", @current_id, LEGACY_FILENAME)
+    if @session_id
+      File.join(base, "sessions", @session_id, LEGACY_FILENAME)
     else
       File.join(base, LEGACY_FILENAME)
     end
@@ -123,7 +123,7 @@ class HistoryManager
   # always go to the per-session file, keeping sessions isolated.
   def read_file
     per_session = @history_file
-    if @current_id && !File.exist?(per_session)
+    if @session_id && !File.exist?(per_session)
       legacy = File.join(@workdir, Harness::HARNESS_DIR, LEGACY_FILENAME)
       return legacy if File.exist?(legacy)
     end

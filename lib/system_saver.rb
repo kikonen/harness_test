@@ -18,37 +18,25 @@ class SystemSaver
 
   attr_reader :registry
 
-  # A standalone (single-job) save: assemble the one-job run this save IS and
-  # write it in the same two steps save_run uses, so every save - interactive
-  # or standalone - produces the same complete layered record. It mutates no
-  # registry: a SessionManager built for a harness on its own has no run.
-  def save_standalone(run_id, harness)
-    session_h = harness.session.to_h(harness.file_list)
-    harness.session_manager.job_id = 0
-    harness.session_manager.save_job_session(run_id)
-    SystemRecord.new(nil).write_system_files(@locator, run_id, session_h)
-    run_id
-  end
-
   def foreground_job
     @record.foreground_job
   end
 
-  def write_system_files(id, session_h)
-    @record.write_system_files(@locator, id, session_h)
+  def write_system_files(session_h)
+    @record.write_system_files(@locator, session_h)
   end
 
   # Every job with a saved conversation dir: its own chain half, kind, status and
   # shown tail. The saved system id is passed in: this object is built before the
   # CLI has resolved one, and a resume reads the jobs of the session it resumed.
-  def job_restores(saved_system_id)
-    @locator.job_restores(saved_system_id)
+  def job_restores
+    @locator.job_restores
   end
 
   # The saved shown tail of a job (its own replay.json), for the foreground
   # buffer a resumed run redraws. [] when the job has no replay.json.
-  def replay_tail_of(saved_system_id, job_id)
-    tail_path = @locator.job_replay_file_path(saved_system_id, job_id)
+  def replay_tail_of(job_id)
+    tail_path = @locator.job_replay_file_path(job_id)
     return [] unless File.file?(tail_path)
 
     JSON.parse(File.read(tail_path), symbolize_names: true)
@@ -56,8 +44,8 @@ class SystemSaver
 
   # Saved job ids with no live Job under them: dropped by the retention rule, or
   # not rebuilt by this resume. The edges naming them stay dangling.
-  def dropped_job_ids(saved_system_id)
-    job_restores(saved_system_id).map { |restore| restore[:id] }.reject do |job_id|
+  def dropped_job_ids
+    job_restores.map { |restore| restore[:id] }.reject do |job_id|
       @registry&.job(job_id)
     end
   end
@@ -65,8 +53,8 @@ class SystemSaver
   # Remove ONE job from a saved system: unlink the index entry before rm_rf so
   # a crash between the two leaves a recoverable orphan dir, never a dangling
   # id a resume tries to rebuild ("The drop rule", doc/session_layers_design.md).
-  def remove_job(saved_system_id, job_id)
-    path = @locator.system_file_path(saved_system_id)
+  def remove_job(job_id)
+    path = @locator.system_file_path
     if File.file?(path)
       system = JSON.parse(File.read(path), symbolize_names: true)
       system[:jobs] = Array(system[:jobs]).reject do |entry|
@@ -75,7 +63,7 @@ class SystemSaver
       File.write(path, JSON.generate(system))
     end
 
-    FileUtils.rm_rf(@locator.job_dir_path(saved_system_id, job_id))
+    FileUtils.rm_rf(@locator.job_dir(job_id))
     registry&.remove_job(registry&.job(job_id))
     job_id
   end
@@ -83,7 +71,7 @@ class SystemSaver
   # The system half is written on every call, even when no job chain is
   # non-empty: the caller has already decided the run is worth saving (a
   # settings-only change has an empty chain but must still persist).
-  def save_run(run_id)
+  def save_run
     # A save is the SYSTEM's write: system.json plus every retained job's own
     # files, in ONE call by the run's owner. A SessionManager never assembles
     # this - system.json carries the SYSTEM's access list and digest cache, and
@@ -107,31 +95,31 @@ class SystemSaver
       next if harness.nil?
 
       harness.session_manager.job_id = job.id
-      harness.session_manager.save_job_session(run_id)
+      harness.session_manager.save_job_session
     end
 
     # The system half describes the system through its foreground job: the
     # foreground carries the run's own FileList, so its to_h is where the system's
     # access list, digest cache and workdir come from.
     harness = @registry.foreground_job&.harness
-    return run_id if harness.nil?
+    return @locator.session_id if harness.nil?
 
-    write_system_files(run_id, harness.session.to_h(harness.file_list))
+    write_system_files(harness.session.to_h(harness.file_list))
     # Must run after the index is written: it is the enumeration of what survives.
-    prune_stale_job_dirs(run_id)
-    run_id
+    prune_stale_job_dirs
+    @locator.session_id
   end
 
   # Prune saved job dirs the freshly-written index no longer names (#557).
   # Enumerate dirs from DISK, not the index: a resumed job rebuilt from disk
   # stays in @jobs, so its dir is in that index and is never a candidate.
-  def prune_stale_job_dirs(saved_system_id)
-    return unless @locator.system_dir?(saved_system_id)
+  def prune_stale_job_dirs
+    return unless @locator.system_dir?
 
-    index = Array(@locator.read_system(saved_system_id)[:jobs]).filter_map do |entry|
+    index = Array(@locator.read_system[:jobs]).filter_map do |entry|
       entry[:id] || entry["id"]
     end
-    jobs_dir = File.join(@locator.sessions_dir, saved_system_id, SessionLocator::JOBS_DIR)
+    jobs_dir = File.join(@locator.session_dir, SessionLocator::JOBS_DIR)
     return unless File.directory?(jobs_dir)
 
     Dir.glob(File.join(jobs_dir, "*")).each do |path|

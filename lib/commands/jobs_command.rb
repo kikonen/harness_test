@@ -100,15 +100,11 @@ module Commands
       if @harness_factory.nil?
         return emit_role(:error, "No HarnessFactory - this run adds no agents.")
       end
-      if @session_id.nil?
-        return emit_role(:error, "No system id - a job is named by its directory.")
-      end
 
       # No `dependencies`: those gate a job's START, and a foreground job the
       # user prompts has no gate to wait behind. `requested_by` is the link out.
       job = @harness_factory.add_harness_job(
         kind: :sub_agent,
-        session_id: @session_id,
         requested_by: registry.foreground_job)
       # The line is recorded BEFORE this job is made foreground, named as its
       # owner: the job being foregrounded is the one its saved tail is read from,
@@ -137,12 +133,12 @@ module Commands
       if target.running?
         return emit_role(:error, "job ##{id} is running; it cannot be interrupted here")
       end
-      if @session_id.nil? || system_saver.nil?
+      if @locator.nil? || system_saver.nil?
         return emit_role(:error, "No system id - a job is named by its directory.")
       end
 
       target.interrupt
-      removed = system_saver.remove_job(@session_id, id)
+      removed = system_saver.remove_job(id)
       re_save_running_system
       emit_role(:note, "job ##{removed} (#{target.kind}) deleted from the run")
       show_registry(registry)
@@ -151,11 +147,10 @@ module Commands
     # Re-save so a delete-then-quit run cannot rewrite the removed job back
     # into system.json from the live registry.
     def re_save_running_system
-      return if @session_id.nil?
-      return unless system_saver.job_restores(@session_id).any?
+      return unless system_saver.job_restores.any?
 
       begin
-        system_saver.save_run(@session_id)
+        system_saver.save_run
       rescue StandardError => e
         emit_role(:warn, "job removed but the system re-save failed (#{e.message})")
       end
