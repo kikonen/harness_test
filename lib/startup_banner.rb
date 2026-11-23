@@ -53,6 +53,11 @@ class StartupBanner
     # later /save or --resume refers to.
     @ui.puts "Session: #{@locator.session_id} (log: #{session_log_path_display})"
 
+    # The pid is here because the case it serves is a run that must be killed from
+    # outside - a hung run no longer responds to its own prompt loop. /session
+    # repeats it when the banner has already scrolled away.
+    @ui.puts "Process: #{Process.pid}"
+
     # A rules file that is not valid UTF-8 now LOADS (bad bytes replaced) instead of
     # crashing, so the repair must be said out loud: the prompt the model got is not
     # byte-for-byte what harness.md holds.

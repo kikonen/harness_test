@@ -446,6 +446,20 @@ RSpec.describe Session do
       rows.find { |row| row[:field] == field }&.dig(:value)
     end
 
+    # The pid is a run fact the CALLER passes in (#527) - Session is the per-LLM
+    # conversation and owns no process knowledge, so with no argument there is no row.
+    it 'shows no process row unless the caller supplies an id' do
+      session.add_user('go')
+
+      expect(value_for(session.summary, 'Process id')).to be_nil
+    end
+
+    it 'shows the process id the caller supplied' do
+      session.add_user('go')
+
+      expect(value_for(session.summary(process_id: 4242), 'Process id')).to eq('4242')
+    end
+
     it 'names the cache depth and the rates in the last-request row' do
       session.add_user('go')
       session.add_assistant('done')

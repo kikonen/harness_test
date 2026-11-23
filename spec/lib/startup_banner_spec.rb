@@ -111,6 +111,25 @@ RSpec.describe StartupBanner do
       banner(resumed: true, registry: registry, harness: harness).print
     end
 
+    # issue #527: the pid is printed because the case it serves is a run that has to
+    # be killed from outside, so it belongs with the other run-identity facts.
+    it 'prints the process id after the session line' do
+      harness = double('harness')
+      allow(harness).to receive(:rules_repair_note).and_return(nil)
+      allow(harness).to receive(:mcp_status_notes).and_return([])
+      allow(harness).to receive(:logger).and_return(double(info: nil))
+      allow(harness).to receive(:session_manager).and_return(
+        double(active_profile_name: 'm', target_display: 't'))
+      allow(harness).to receive(:model_config).and_return(double(base_url: 'u'))
+
+      lines = []
+      allow(ui).to receive(:puts) { |line = nil| lines << line }
+      banner(harness: harness).print
+
+      session_line = lines.index { |l| l.to_s.start_with?('Session: abc123') }
+      expect(lines[session_line + 1]).to eq("Process: #{Process.pid}")
+    end
+
     it 'skips the replay when resume_replay_on_startup is false' do
       entry  = OutputBuffer::Entry.new(type: :user, origin: :user, content: 'do the thing')
       buffer = double('buffer', replay_tail: [entry])
