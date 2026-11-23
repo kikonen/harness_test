@@ -1026,10 +1026,11 @@ class Harness
 
     tools = message[:tool_calls].map { |tc| tc[:function][:name] }
     # One ROLE per event so UI::Renderer does not regex markers back out; only
-    # the number is emitted here, "step" is the renderer's word. The number is
-    # the job-wide counter, not the turn-local iteration (issue #577).
+    # the number and call count are emitted here, "step"/"[]" are the
+    # renderer's words. The number is the job-wide counter, not the turn-local
+    # iteration (issue #577).
     @step_number += 1
-    Task.emit(:step_label, origin: :harness, content: @step_number)
+    Task.emit(:step_label, origin: :harness, content: { number: @step_number, calls: tools.size })
     Task.emit(:plan, origin: :harness, content: reason) if reason
     Task.emit(:interstitial, origin: :harness, content:) if content
     Task.emit(:tool_plan, origin: :harness, content: tools.join(", "))

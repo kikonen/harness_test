@@ -179,7 +179,7 @@ module UI
       return status_line(type, text, origin) if STATUS_GLYPHS.key?(type)
       return ack_note_line(text, origin, ack) if type == ACK_NOTE
       return ack_line(type, text, origin) if ACK_TYPES.include?(type)
-      return boundary_line(type, text) if BOUNDARY_ROLES.include?(type)
+      return boundary_line(type, content) if BOUNDARY_ROLES.include?(type)
       return note_line(text) if type == NOTE
       return labeled_markdown_line(type, text) if markdown_role?(type)
       return wrapped_labeled_line(type, text) if MARKDOWN_ROLES.include?(type)
@@ -386,8 +386,18 @@ module UI
     # A full-width fused rule naming the role, then the content EXACTLY as emitted (no label,
     # no indent: a model answer keeps its own paragraphs). :step_label IS its rule - its content
     # is the number fused inside it.
+    # :step_label content is the step DATA: a bare number, or a {number:, calls:} hash whose
+    # calls count is fused as a compact "[N]" so the rule says how many tool calls the step ran.
     def boundary_line(type, content)
-      label = type == :step_label ? "step #{content}" : self.class.boundary_label(type)
+      label =
+        if type == :step_label
+          data   = content.is_a?(Hash) ? content : { number: content }
+          number = data[:number]
+          calls  = data[:calls]
+          calls.nil? ? "step #{number}" : "step #{number} [#{calls}]"
+        else
+          self.class.boundary_label(type)
+        end
       rule  = fused_rule(label, type)
       return rule if type == :step_label || content.empty?
 
