@@ -9,20 +9,283 @@ Regeneration is its own docs-only PR.
 
 Issue numbers link to https://github.com/kikonen/harness_test/issues/<n>.
 
-Horizon (measured 2026-11-08 against master `22f80a2`: 188 merged PRs, 124 in
+Horizon (measured 2026-11-23 against master `d2ece8a`: 263 merged PRs, 199 in
 the horizon (>= 2026-10-10), 64 older):
 
-- 2026-11-08 .. 2026-10-10 (124 merged PRs): one bullet per merged PR, keyed on
+- 2026-11-23 .. 2026-10-10 (199 merged PRs): one bullet per merged PR, keyed on
   its PR number; a bullet may wrap to at most 5 lines at 80 columns.
 - older than 2026-10-10: nothing here. `git log` and `gh pr list --state merged`
   are the archive; the horizon moves on each regeneration.
 
 A subsystem's rationale is NOT here - it is in `doc/<topic>.md` or the issue.
-Measured at generation: 33 design docs on master, all of them pointed at from
+Measured at generation: 47 design docs on master, all of them pointed at from
 here (its own procedure doc `doc/changelog_generation.md` among them), so every
 doc pointer in this file resolves.
 
+## 2026-11-23
+- #579 fixed steps repeated / jumping backwards (issue #577): the `step N`
+  label was the per-`call_llm` loop counter, reset on every turn restart, so a
+  continuous console saw 11,11,12,12. It is now a Harness-level monotonic
+  `@step_number`; same PR: a tool-call count in the label (`step 8 [2]`) and a
+  guard so in-loop compaction cannot fire on consecutive iterations.
+- #576 renamed the `ui.note` tool to `session.note` (issue #550): the note is
+  model-side state, never a UI message; the `ui.` namespace made notes read like
+  user steering. `record_note` matcher, system prompt, README and docs updated.
+- #581 split `spec/lib/harness_spec.rb` (3370 lines) into ten scoped files plus
+  `harness_spec_support.rb` under `spec/lib/harness/` (issue #580). No test
+  changed: 224 examples before and after, whole suite 3164 / 0.
+- #578 drew the resume replay BEFORE the startup banner (issue #553): the saved
+  tail was printed partway through the banner, so the run's facts wrapped around
+  the replay. New `resume.replay_on_startup` gate (default on);
+  `print_startup_banner` refactored.
+## 2026-11-22
+- #549 recorded the #548 design: session persistence as a harness session
+  (per-agent conversation) vs a run (system) session (the JobRegistry record,
+  postures, the run -> agent-session map). Design:
+  `doc/session_layers_design.md` .
+- #554 continued #548: `/jobs add` builds a real second agent through the run's
+  `HarnessFactory`; `/replay` shows the recorded tail; a resume rebuilds EVERY
+  saved job (the old `finished?` gate left background chains unwritten); a job
+  carries only its own record - record before the foreground switch, seed every
+  restored job from its own tail.
+- #575 added `file.touch` (issue #552): the external-change reconciliation tool
+  the write/patch errors already promised - re-baselines the cached digest,
+  never creates or modifies the file, never bypasses a grant.
+- #566 fixed the renderer width falling back to 80 columns (issue #561):
+  `#width` asked only the sink, so `RULE_FALLBACK_WIDTH` became the width and
+  the 80% rule was never taken. Specs pin SPEC_TERMINAL_COLUMNS=176 so a
+  wrapped spec cannot pass locally and fail in CI.
+- #565 fixed the steering note ack and body being two lines at different widths
+  (#561): new `:ack_note` role - ack + body as ONE block at the note width.
+- #563 excluded `analysis/**` from rubocop: CI was red on every run - 26 of 329
+  files' offenses were in `analysis/551/measure.rb`; a repro script's style is
+  not what its issue is about.
+- #562 printed the resume line the user can actually run (issue #502):
+  `bin/harness` is the entry point (.env, BUNDLE_GEMFILE); `-m` can contradict
+  the session's saved `active_model`. Five sites fixed, not the three named.
+- #569 closed #551 by measurement: the byte-budget fix (OutputBudget + spill,
+  `doc/tool_output_budget_design.md`) already caps every shape the issue names
+  (a 4 MB single line lands at 20,042 B); the issue's figures are a historical
+  baseline.
+- #571 gave a model profile three distinct facts (issues #556, #572): id (the
+  selector, unique), name (display), and a required `model:` field the backends
+  send on the wire - only the profile knows which model its endpoint answers
+  for. Pre-id configs and pre-`model:` sessions still resume. Design:
+  `doc/model_identity_design.md` .
+- #573 added `/jobs delete <id>` (issue #558) and prune-at-save (issue #557):
+  `JobRegistry#remove_job` + `SystemSaver#remove_job` (unlink the `system.json`
+  entry first, then the job dir); `Job#interrupt` answers only a truly-awaiting
+  job; the foreground job is refused.
+- #564 fixed the invisible mid-turn prompt (issue #561): `poll_for_note` reuses
+  the run's shared InputPath, whose `PROMPT = "  "` is a continuation marker -
+  no modeline above a mid-turn read made it look like a frozen turn.
+- #570 reported the stats line of a turn that aborted (issue #567): `call_llm`
+  publishes the turn's measurements as state; an aborted turn prints answered-
+  over-sent iterations, no `📊`/`⚡` (those describe requests that returned).
+- #574 briefened comments across lib/ (issue #558): code byte-identical, long
+  class headers moved to doc/ (3-line max), method comments trimmed to the house
+  budget, issue refs dropped from method bodies. Suite 3132 / 0.
+- #559 made the sandbox starter a repo config file (#340):
+  `config/sandbox_gemfile.example.rb` is the single source `ensure_starter!`
+  copies verbatim; the default gem list gained `fiddle` + `reline` (measured:
+  reline is no longer a default gem and its Windows IO gate needs fiddle).
+- #560 fixed the sandbox template header (#340): the seed copies the file
+  VERBATIM, so text written from the template's own point of view contradicts
+  itself inside the copy; rewritten true in both roles.
+## 2026-11-20
+- #546 moved the postures and consent flags out of the options carrier (PR1
+  slice A of the #286 god-object refactor): `Harness#initialize` no longer seeds
+  yolo/stream/markdown/plan/palette/safety-approve from `options`; the creator
+  (`CLI#apply_initial_postures`) sets them. The four session-persisted postures
+  still restore over it (#221). Design: `doc/system_settings_design.md` .
+## 2026-11-15
+- #530 settled the registry shape (#286 phase 0): one buffer per JOB, so the
+  head key stays origin + type and the job is supplied by WHICH buffer is read
+  (measured: one shared buffer collapses two live tasks into ONE cell).
+- #531 landed #286 increment 1: `Job` (graph node: id, kind, status, deps, own
+  buffer, own inbox, NO outbox - events go to the registry's ONE fan-in queue
+  tagged with the job id, which keeps cross-job order defined) and `Registry`
+  (the single poller; each event lands in the event's own job buffer). The
+  main turn is job #0. Design: `doc/task_design.md` .
+- #534 landed #286 increment 2: `TaskRunner#run_on_task` AWAITs a job; a task
+  built for a job (its inbox IS the job inbox, its buffer IS the job buffer,
+  poll reads the ONE registry queue); a background dialog denial returns
+  `Job::DENIED_ANSWER` (grant dialogs excepted); `lib/input_path.rb` makes
+  prompt and mid-turn note ONE read with edit state in the poll loop.
+- #536 fixed an interrupted turn answering what it owes (refs #473, #424): a
+  force-stopped turn answers every open request with `Job::INTERRUPTED_ANSWER`
+  (STOP is not an answer, so `request()` raised); `Job#respond` is the single
+  answer primitive; the raw-stdin hold is gated to POSIX hosts.
+- #542 made edit mode dispatch commands mid-turn (#286 inc1): a `/command`
+  submitted during a turn goes through `CommandHandler#run_mid_turn`, gated by
+  `Command#mid_turn_safe?` - the `/yolo` note-gesture hack is deleted. Bare text
+  keeps the note route byte-for-byte. Design: `doc/unified_loop_design.md` .
+- #541 extracted the `Poller` off `Task` (#286 inc 2a): the drain loop, spinner
+  control, note read and raw-stdin hold belong to whoever polls, not to a Task.
+  Mechanical, no behavior change.
+- #540 renamed `Registry` to `JobRegistry` (#286): the job layer and the tool
+  layer shared a bare "Registry" suffix, and the class actively owns the ONE
+  fan-in queue, not a lookup table.
+- #538 kept head AND tail when truncating `run.command` (issue #537): a test
+  runner prints its failure block at the TAIL, which head-only truncation cut -
+  exactly the "missing errors" complaint. `DEFAULT_LIMIT` 200 -> 500.
+- #539 gave each dialog request a dedicated reply channel (issue #424):
+  `Task#request` popped the shared inbox, so a steering note queued ahead became
+  the dialog's choice and the real answer leaked to the next request. `#request`
+  now opens a private `@pending_reply` queue.
+## 2026-11-14
+- #529 documented the registry layer before any runtime (#286 phase 0): the head
+  key's task part (measured: two live tasks on one (origin, type) stream
+  collapse into ONE cell) and `output: tasks_kept`'s first enforcement point.
+  Naming decided: the graph node is Job, the executor keeps Task.
+- #528 collapsed the two output stores into ONE OutputBuffer per run (#286
+  inc6): `absorb_turn` existed only to copy between a per-Task buffer and the
+  run-level `@output_log`; the drain loop is now the single main-thread writer,
+  so a turn's output lands in the record a save reads.
+- #526 split the OutputBuffer record into the durable tail (append-only
+  immutable Entries - the half a renderer re-lays out) and the live head (one
+  mutable cell per stream, `:append` vs `:replace` modes), bound into the drain
+  loop, with two tail limits (memory + saved). Refs #286.
+- #525 moved `HelpRenderer` into `UI` and banned the hand-built `ljust` table
+  (#474 inc24): the command table, topic index and usage block state named
+  fields laid out by `UI::Renderer` `:table`; a width is chars or a percentage.
+## 2026-11-13
+- #522 made `/ctx` a field/value `:table` (#474 inc21): `Harness#context_report`
+  became `Harness#context_usage` answering the facts the compaction decision
+  already computes; the row shape belongs to the renderer.
+- #519 added the `:body` role (#474 inc19): `PlansCommand` was the only command
+  building its own renderer; all three stores now state role + raw text and
+  `UI::Renderer#body_line` renders it - one mechanism, no markdown markers
+  leaking from `/memory` / `/skills`.
+- #511 rendered the `/mcp` server report as a `:table` (#474 inc16): name /
+  transport / target / status as named fields; the status carries either the
+  tool count or the failure reason - data, not a sub-line.
+- #512 turned `/clear` outcomes into verdicts (#474 inc17): a revocation that
+  removed something is `:ok`, an already-empty store is `:info` (a count is a
+  statement about the store, not a verdict) - the case that makes the split
+  worth having, recorded in the doc.
+- #513 made the `/palette` role groups a `:table` (#474 inc18): group | role |
+  code per row; a nil-mapped role states `(terminal color)`.
+- #521 gave `/memory` and `/plans` a `:table` listing with a number the payload
+  carries (#474 inc20): `memory <N>` works like `plans <N>`; the body rule shows
+  the number only when the entry was opened by number.
+- #517 raised `Plans::MAX_BODY_CHARS` 8000 -> 12000 (addresses #515): every
+  message quotes the constant, so one line changed everything; measured need was
+  a real plan refused at 8274 chars.
+- #524 made the blank line framing a turn the `:gap` role (#474 inc23): a
+  `ui.puts` call is never in the record, so a replay had nothing to lay out.
+- #514 renamed the emit-only methods for what they do (#474):
+  `print_step_display` -> `emit_step`, `print_stats` -> `emit_stats`,
+  `print_params` -> `emit_params`, `dump_verbatim` -> `emit_verbatim`.
+- #516 renamed `PaletteCommand#print_roles` -> `#emit_roles` (#474); after this
+  every remaining `print_*` name is accurate (measured by reading each body).
+- #523 stated the TaskRunner error line and `#emit_line` as roles (#474 inc22):
+  the `:kind` role with origin `task error`, and ONE router (`#status_event`)
+  instead of a second direct-`ui.puts` path.
+## 2026-11-12
+- #498 rendered the `/mcp` tool listing as a `:table` (#474 inc6): MCP tool
+  descriptions are genuinely multi-paragraph markdown; kramdown owns the cells.
+- #499 rendered `/tools` as a `:table` and dropped the dead `:grouped_kv` kind
+  (#474 inc7); tool names are already namespaced, so no group column.
+- #500 rendered `/param` and `/session` as `:table`s (#474 inc8): `list_items` /
+  `summary` return named-field rows; the #219 shared-listing invariant holds.
+- #501 folded the remaining prose acks into `:note` (#474 inc9); data-source
+  `:text` (help, ctx, clear) stays verbatim - its value IS its alignment.
+- #505 folded the yolo denylist and mcp collision blocks onto `:bullet`
+  (#474 inc10), with the correction recorded: they were NOT byte-identical -
+  `:bullet` re-indents them out of the report nesting.
+- #506 rendered the palette legend as a `:table` (#474 inc11); doc correction:
+  the role groups were listed as alignment blocks and are not (longest line 106
+  chars, nothing padded).
+- #507 folded the batch-B prose lines onto `:note` (#474 inc12): nine verbatim
+  `@ui.puts` lines across five commands.
+- #508 rendered the grant store lists as a `:table` (#474 inc13): the ordinal is
+  data the payload carries; reusing `:numbered_kv` with an empty description
+  renders a dangling ` - `, so the owner chose the table.
+- #509 stated the store errors as a verdict (#474 inc14): `[error]` lines in
+  memory/plans/skills became `:fail` with the store as origin - a refused name
+  is a hard stop, not a `:warn`.
+- #510 registered `:rule` in `VERBATIM` so a rule line can be painted
+  (#474 inc15): the palette always had a `rule` role but no renderer type could
+  name it; `emit_role(:rule, ...)` hit the #146 untyped diagnostic.
+## 2026-11-10
+- #492 landed the #474 groundwork: a command report emits structure - a
+  `{ title:, kind:, columns:, items: }` payload drawn from fields by
+  `UI::Renderer#list_line`; the browser half is deliberately deferred. Footer
+  indent is a LEVEL, not baked spaces. Design:
+  `doc/output_rendering_design.md` .
+- #493 added the `:kv` list kind for `/skills` and `/memory` (#474 inc1): a
+  row's fields are read BY NAME, so the `columns` order never decides what a
+  field is.
+- #494 added `:numbered_kv` for `/plans` (#474 inc2): the ordinal is a named
+  field the renderer right-aligns, not the array position.
+- #495 added `:grouped_kv` for `/tools` (#474 inc3): each item is a section
+  (header + rows), the registry's caching order passed through.
+- #496 added `:session` for `/sessions` (#474 inc4): the separators are renderer
+  layout; the same PR stripped the restating #474 comments.
+- #497 replaced the bespoke `:session` kind with a generic `:table` rendered via
+  kramdown (#474 inc5): the payload's `columns` array IS the schema; column
+  sizing and word-wrap are kramdown's, the hand-rolled padding was removed.
+- #490 fed the first unresolved text-shaped tool call back to the model (refs
+  #487, option C): a call whose name matches no tool previously failed only to
+  the user, so the model repeated it; a `user` message now names the ambiguity.
+  #487 stays open on purpose (options A/B undecided).
+- #491 restored Ctrl+C on Windows (#473): the raw-stdin hold's guard was true on
+  every Windows turn but `input_pending?` does not exist there, so the hold
+  served nothing and broke Ctrl+C; the hold is gated on `input_pending?`.
+- #488 held a real-tty stdin in raw mode for the turn wait (#473): a cooked tty
+  line-buffers, so `stdin.input_pending?` never fired and a lone keypress never
+  opened the note editor on a Linux/KDE console. `raw!(intr: true)` keeps Ctrl-C
+  raising Interrupt.
+- #489 wrapped a markdown-off `:plan` / `:interstitial` line to RULE_WIDTH
+  (#485): the markdown-ON path wrapped, the default path emitted one unbounded
+  line; continuations align under the label.
+## 2026-11-09
+- #484 salvaged the leading array from double-encoded dialog options (issue
+  #468): a model that stringified `options` AND fused the sibling keys into
+  that string produced an unparseable value; `salvage_leading_array`
+  bracket-scans the array out, with a sharp error when nothing salvageable
+  remains.
+- #472 moved the LINE BREAK to the renderer (issue #470): the `:note` role -
+  unwrapped paragraphs, re-wrapped to a fixed NOTE_WIDTH (78 content cols), not
+  the terminal width; a report's contiguous prose is ONE `:note` array call.
+  Design: `doc/output_rendering_design.md` .
+- #486 rendered a command's bad-argument usage from its HELP (#471): five
+  commands carried a hand-aligned `def usage` duplicating their `HELP`;
+  `HelpRenderer#render_inline` + optional `CommandHelp#form_notes` is now the
+  one source. Design: `doc/command_help_design.md` .
+- #477 stopped a markdown `:response` dropping angle-bracket content (issue
+  #475): kramdown-ansi renders an unknown html_element to nothing - even the
+  text after an inline tag. `#escape_angle` escapes `<` outside code spans; `>`
+  is never escaped so blockquotes still work.
+- #478 wrapped dialog notes and option descriptions to a fixed width (issue
+  #476); a fitting note prints verbatim, so 72 dialog specs pass untouched.
+- #483 reopened #476: the fixed 80 was a picked value, not a rule - on a
+  narrower terminal the wrapped lines overflow and option titles were never
+  wrapped. The dialog now wraps to the same percentage-of-terminal basis the
+  plan/say markdown path uses.
+- #480 rendered a steering note as `:note` (issue #479): the committed note was
+  one hand-baked string whose header ran past 80 columns and whose body dumped
+  at column 0, stored `:text` so the resume replayed it misaligned; now a
+  `:kind` ack + a renderer-wrapped body.
+- #482 dropped `rprompt` from the note editor's readmultiline (issue #481):
+  Reline paints rprompt on the first visible row, gluing a copy of `note> ` to
+  the right edge. A live probe disproved the buffer-vs-window theory: Reline
+  tracks the window LIVE.
 ## 2026-11-08
+- #463 regenerated this file (issue #305): dataset rebuilt with gh - 188 merged
+  PRs, 124 in the horizon; the previous file declared 77, so its own lag check
+  named exactly the 47 uncovered PRs. Docs-only. The gotcha a regeneration
+  cannot fix: it cannot bullet its own PR.
+- #465 stopped persisting the system prompt in the session file (issue #464):
+  `Session#to_h` serialized it twice (`system_prompt:` and `messages[0]`), and
+  resume REPLACED the freshly built prompt with the save-time one, so a
+  `harness.md` edit after a save was silently ignored. `to_h` now serializes
+  only `@messages[1..]`; resume rebuilds from `build_system_prompt`.
+- #467 made the renderer own labels/brackets and the sink own the palette
+  (issue #466): emitters state ONE role (+ origin), `UI::Renderer` decides the
+  label/glyph/bracket, `UI::Palette` the color; a browser sink paints nothing;
+  terminal bytes stay identical. Design: `doc/output_rendering_design.md` .
 - #462 ran a tool call a model wrote as TEXT (issue #461, qwen pseudo-XML): it
   left `message[:tool_calls]` empty, so the pseudo-XML was committed as the
   final answer and the turn ended silently. `TextToolCallParser` rebuilds the
