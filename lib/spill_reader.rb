@@ -21,6 +21,13 @@ class SpillReader
     rel = @file_list.relative_path(@file_list.resolve(path))
     return nil unless rel && spill.covers?(rel)
 
+    if spill.pruned?(rel)
+      return ResultSpill::ALREADY_CAPPED_MARK + (
+        "#{rel} is no longer kept: this job's spill dir holds only its newest " \
+          "results (issue #595). Re-run the command to produce it again."
+      )
+    end
+
     ResultSpill::ALREADY_CAPPED_MARK +
       OutputBudget.read_capped(@file_list.resolve(path), limit: @output_result_bytes)[0]
   rescue SystemCallError => e

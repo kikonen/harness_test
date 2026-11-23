@@ -199,4 +199,17 @@ RSpec.describe SystemSettings do
       expect(s.find_profile('qwen')).to be_nil
     end
   end
+
+  # issue #595: the spill window travels the same static-config route as the
+  # result byte budget (nil here means "apply the built-in default").
+  describe '#output_spill_keep (issue #595)' do
+    it 'is nil when the key is absent' do
+      expect(build.output_spill_keep).to be_nil
+    end
+
+    it 'passes the configured value through' do
+      expect(build(output_spill_keep: 20).output_spill_keep).to eq(20)
+      expect(build(output_spill_keep: 0).output_spill_keep).to eq(0)
+    end
+  end
 end

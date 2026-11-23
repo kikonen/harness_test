@@ -78,6 +78,7 @@ class HarnessConfig
     @double_enter_submit = data[:double_enter_submit] == true
     @max_tool_iterations = int_or_nil(data[:max_tool_iterations])
     @output_result_bytes = int_or_nil(data[:output_result_bytes])
+    @output_spill_keep   = int_or_nil(data[:output_spill_keep])
     @max_memories = int_or_nil(data[:max_memories])
 
     # Opt-in streamed LLM responses (default off: a profile or global key that does not ask
@@ -267,6 +268,13 @@ class HarnessConfig
   # from inside that run, so the size a project allows is persistent policy, not a per-run flag.
   def output_result_bytes
     @output_result_bytes
+  end
+
+  # How many spill files one job's results dir keeps (nil = the built-in default).
+  # Config-only like output_result_bytes: it bounds harness state a run writes as it
+  # goes, not something the model should be able to widen mid-turn.
+  def output_spill_keep
+    @output_spill_keep
   end
 
   # Max memory notes for one store (or nil; the built-in default applies).

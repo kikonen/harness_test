@@ -46,6 +46,7 @@ class SystemSettings
     output_tail_memory
     output_tasks_kept
     output_result_bytes
+    output_spill_keep
     markdown_max_width
     workdir
     editor

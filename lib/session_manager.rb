@@ -167,6 +167,9 @@ class SessionManager
     # Dump the whole post-compaction chain so the summary itself is inspectable.
     log_retained_window(@harness.session.messages)
 
+    # The previews that cited the oldest spills just left the chain.
+    prune_spills
+
     @harness.logger.info "session compacted: #{before} to #{after} messages " \
       "(summary: #{summary_text.length} chars, #{retained} recent retained)"
 
@@ -237,6 +240,9 @@ class SessionManager
     messages.replace(new_chain)
     @harness.session.flush_notes # pending notes must survive the compaction
     log_retained_window(messages)
+
+    # The whole work trail - every spill path it named - is now only in the summary.
+    prune_spills
 
     @harness.logger.info "in-loop compaction: #{before} -> #{messages.size} messages " \
       "(summary: #{summary_text.length} chars)"
@@ -365,6 +371,21 @@ class SessionManager
       %(#{m[:role]}:\n#{m[:content].to_s})
     end
     @harness.logger.info "retained after compaction:\n" + lines.join("\n")
+  end
+
+  # Compaction is when a spill stops being reachable: the tool result that named
+  # its path leaves the chain, and only the summary's prose may still cite it.
+  # So the job's spill dir is trimmed to its newest window here and nowhere else
+  # (issue #595). Best-effort: a harness double without a spill, or a failed
+  # remove, must not fail the compaction that already succeeded.
+  def prune_spills
+    removed = @harness.result_spill.prune if @harness.respond_to?(:result_spill)
+    return if removed.nil? || removed.empty?
+
+    @harness.logger.info "spill files pruned: #{removed.size} (kept the newest " \
+      "#{ResultSpill::DEFAULT_KEEP} or the configured output_spill_keep)"
+  rescue SystemCallError => e
+    @harness.logger.warn "spill prune failed: #{ErrorText.label(e)}"
   end
 
   def build_system_prompt
