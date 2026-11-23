@@ -2,6 +2,7 @@
 
 require_relative "ui/palette"
 require_relative "model_profile"
+require_relative "session"
 
 # -- SystemSettings -------------------------------------------------------
 # Typed view + behavior layer over the resolved CLI options hash it OWNS;
@@ -10,6 +11,11 @@ class SystemSettings
   # How many entries of the run record a session saves and a resumed run
   # redraws. 0 disables the run record entirely.
   DEFAULT_RESUME_REPLAY_ENTRIES = 30
+
+  # Built-ins for config keys that stay nil when nothing is configured;
+  # a harness.md turn can read these values as-is.
+  DEFAULT_MAX_TOOL_ITERATIONS = 200
+  DEFAULT_COMPACT_MAX_SIZE    = 500
 
   # Config read once and never rewritten: the run's owner (CLI) and Harness
   # access these by name; nothing else needs them.
@@ -79,6 +85,31 @@ class SystemSettings
   # automatic redraw off; /replay still shows the record whatever this says.
   def resume_replay_on_startup?
     @options.fetch(:resume_replay_on_startup, true) != false
+  end
+
+  def max_tool_iterations
+    value = @options[:max_tool_iterations]
+    value.nil? ? DEFAULT_MAX_TOOL_ITERATIONS : value.to_i
+  end
+
+  def compact_recent_messages
+    value = @options[:compact_recent]
+    value.nil? ? Session::COMPACT_RECENT_MESSAGES : value.to_i
+  end
+
+  def compact_auto_threshold
+    value = @options[:compact_auto_threshold]
+    value.nil? ? Session::AUTO_COMPACT_THRESHOLD : value.to_i
+  end
+
+  def compact_reserved_tokens
+    value = @options[:compact_reserved]
+    value.nil? ? Session::COMPACT_RESERVED_TOKENS : value.to_i
+  end
+
+  def compact_max_size
+    value = @options[:compact_max_size]
+    value.nil? ? DEFAULT_COMPACT_MAX_SIZE : value.to_i
   end
 
   # A hand-built options hash gets the same default the config would: an

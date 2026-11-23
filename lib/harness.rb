@@ -31,6 +31,7 @@ require_relative "system_settings"
 require_relative "model_config"
 require_relative "tool_registry_builder"
 require_relative "session_logger"
+require_relative "turn_runner"
 
 require_relative "text_tool_call_parser"
 # -- Harness --------------------------------------------------------------
@@ -38,7 +39,6 @@ require_relative "text_tool_call_parser"
 class Harness
   DEFAULT_SYSTEM_PROMPT_FILE = File.expand_path("../config/system_prompt.txt", __dir__)
 
-  MAX_TOOL_ITERATIONS = 200
   # Consecutive-call thresholds: warn (inject a stop message), then break.
   TOOL_LOOP_WARN_THRESHOLD = 30
   # After this many consecutive tool-call iterations, force-break and return whatever we have
@@ -85,6 +85,7 @@ class Harness
     :session,
     :session_manager,
     :client,
+    :request_seconds,
     :rules_repair_note,
     :mcp,
     :image_store,
@@ -92,33 +93,50 @@ class Harness
 
   attr_accessor :history
 
-  # Set by the main thread, consumed on the JOB's own thread: it only flips
-  # this flag, never reads the running chain.
+  # Written by the main thread, read-and-cleared on the JOB's own thread;
+  # every cross-thread touch takes @note_lock or the write can be lost.
   def request_save
-    @save_requested = true
+    @note_lock.synchronize { @save_requested = true }
   end
 
   def save_requested?
-    @save_requested == true
+    @note_lock.synchronize { @save_requested == true }
+  end
+
+  # Consume a save request set on another thread (nil when there is none).
+  def take_save_request
+    @note_lock.synchronize do
+      next nil unless @save_requested
+
+      @save_requested = false
+      true
+    end
+  end
+
+  # Consume the in-flight note (the latest line won; nil when there is none).
+  def take_user_note
+    @note_lock.synchronize do
+      note = @user_note
+      @user_note = nil
+      note
+    end
   end
 
   # Only one note is in flight: the latest line wins.
   def user_note_text=(text)
-    @user_note = text.to_s.strip.empty? ? nil : text.to_s.strip
-  end
-
-  def user_notes
-    @user_notes
+    note = text.to_s.strip
+    @note_lock.synchronize do
+      @user_note = note.empty? ? nil : note
+    end
   end
 
   # A note still pending when a turn ends is dropped here, not injected into
   # the next prompt as a phantom mid-turn note - only a finished turn can tell
   # a late note from a usable one.
   def discard_pending_user_note(kind)
-    return nil if @user_note.nil?
+    note = take_user_note
+    return nil if note.nil?
 
-    note = @user_note
-    @user_note = nil
     logger.warn "user mid-turn note discarded (#{kind}): #{note}"
     Tool.push_status(
       label: "note",
@@ -152,30 +170,12 @@ class Harness
       @session.restore(resume_data, @file_list)
     end
 
-    @user_note     = nil
-    @user_notes    = []
+    @note_lock      = Mutex.new
+    @user_note      = nil
     @save_requested = false
     StateMigrator.run(@file_list.workdir, HARNESS_DIR)
 
-    # Seeded here because the model's file tools cannot write .harness/.
-    @sandbox_gemfile = SandboxGemfile.new(@file_list.workdir)
-    case @sandbox_gemfile.ensure_starter!
-    when :seeded_locked
-      @logger.info "ruby sandbox seeded and locked offline"
-    when :seeded_unlocked
-      @logger.info "ruby sandbox seeded but the offline lock failed " \
-                   "(a starter gem is absent on this box) - bundle install it"
-    when :seeded_unreadable
-      @logger.warn "ruby sandbox NOT seeded - the default Gemfile " \
-                   "#{SandboxGemfile::STARTER_TEMPLATE_FILE} is unreadable"
-    end
-    case @sandbox_gemfile.ensure_default_gems!
-    when :resynced_locked
-      @logger.info "ruby sandbox resynced with the default gems and re-locked"
-    when :resynced_unlocked
-      @logger.info "ruby sandbox resynced with the default gems but the offline " \
-                   "lock failed - bundle install it"
-    end
+    @sandbox_gemfile = SandboxGemfile.new(@file_list.workdir).setup!(@logger)
 
     builder = ToolRegistryBuilder.new(
       file_list: @file_list,
@@ -244,27 +244,6 @@ class Harness
   # Same payload for every request: omitting tools makes a different prompt.
   def tools_payload
     tool_registry.empty? ? nil : tool_registry.to_openai
-  end
-
-  def compact_recent_messages
-    settings.compact_recent || Session::COMPACT_RECENT_MESSAGES
-  end
-
-  def compact_auto_threshold
-    settings.compact_auto_threshold || Session::AUTO_COMPACT_THRESHOLD
-  end
-
-  # A small window compacts earlier to leave headroom for the summary call.
-  def compact_reserved_tokens
-    settings.compact_reserved || Session::COMPACT_RESERVED_TOKENS
-  end
-
-  def compact_max_size
-    settings.compact_max_size
-  end
-
-  def max_tool_iterations
-    settings.max_tool_iterations || MAX_TOOL_ITERATIONS
   end
 
   def plan?
@@ -415,8 +394,8 @@ class Harness
 
     @session.compact_trigger(
       window,
-      compact_auto_threshold,
-      reserved_tokens: compact_reserved_tokens)
+      settings.compact_auto_threshold,
+      reserved_tokens: settings.compact_reserved_tokens)
   end
 
   # [args, nil] or [{}, err]: rescuing straight to {} hides a call that lost shape.
@@ -485,225 +464,13 @@ class Harness
 
   # Each round is appended as it happens, so a turn that dies mid-loop keeps its
   # rounds and /retry resumes from that point, not from the prompt.
-  def call_llm
-    messages = @session.messages
-
-    @user_notes = []
-    tools = tools_payload
-
-    iteration = 0
-    consecutive_tool_calls = 0
-    last_tool_name = nil
-    loop_warning_injected = false
-    loop_hard_break = false
-    text_call_retried = false
-    total_usage = EMPTY_USAGE.dup
-
-    # Iterations whose request came back: the loop counter runs ahead of it.
-    answered = 0
-
-    # One per turn: its inline budget is turn-scoped, and its base64 must reach
-    # the token estimate before a request carries it.
-    delivery = image_delivery
-
-    # The LAST call's prompt_tokens is the context size: each call already
-    # carries the history, so summing over counts.
-    last_prompt_tokens = 0
-    last_performance   = nil
-
-    # A compaction cannot fire on two consecutive iterations: the request made
-    # right after one has not been re-measured yet, so a back-to-back pair reads
-    # as "compact done twice" (issue #577).
-    compacted_iteration = nil
-
-    max_iters = max_tool_iterations
-    loop do
-      iteration += 1
-      raise ToolLoopError, "exceeded max tool iterations (#{max_iters})" if iteration > max_iters
-
-      # Compact on the last call's real size rather than letting the next
-      # request fail server-side; iteration 1 has nothing to summarize.
-      if iteration > 1 && last_prompt_tokens > 0 && iteration != compacted_iteration&.+(1) &&
-         @session_manager.check_inloop_compaction(messages, last_prompt_tokens)
-        compacted_iteration = iteration
-        consecutive_tool_calls = 0
-        loop_warning_injected = false
-      end
-
-      if @user_note
-        note = @user_note
-        @user_note = nil
-        @user_notes << note
-        logger.info "user mid-turn note injected: #{note}"
-        messages << { role: "user", content: "User note (mid-turn): #{note}" }
-        Tool.push_status(label: "note", verdict: :info, message: "sent to model")
-      end
-
-      # Consumed on the JOB's own thread at the same safe point a note lands, so
-      # the agent saves its own chain with no cross-thread read.
-      if @save_requested
-        @save_requested = false
-        @session_manager.save_job_session
-        logger.info "save request consumed (job ##{@session_manager.job_id})"
-      end
-
-      # Each request announces its own wait, so an earlier re-point (an
-      # in-loop compaction) cannot outlive it.
-      @session_manager.request_spinner_detail
-
-      # Before the request leaves: an aborted turn needs to know which one died.
-      open_turn_stats(iteration:, answered:, usage: total_usage)
-      data    = request_chain(messages, tools)
-      message = data[:choices][0][:message]
-
-      # The model has seen them; keeping them would re-send the same bytes in
-      # every later request. The text naming the stored file survives.
-      strip_image_payloads(messages)
-
-      # A text-shaped call is parsed leniently so the turn does not silently
-      # break; an unresolvable name stays prose and ends as an answer.
-      if !message[:tool_calls] && @text_tool_call_parser.text_call?(message[:content])
-        committed = messages.filter_map { |m| m[:tool_calls] }.flatten
-        recovered = @text_tool_call_parser.parse(message[:content], committed:)
-        if recovered.any?
-          message[:tool_calls] = recovered
-          logger.warn "tool call arrived as text/XML (issue #461), not JSON - parsed and running"
-          Tool.push_status(
-            label: "text_call",
-            verdict: :warn,
-            message: "tool call arrived as text/XML, not JSON - parsed and running")
-        end
-      end
-
-      emit_step(message) if message[:tool_calls]
-
-      # AFTER the step line, so the warn lands inside the block it describes.
-      truncated = report_finish_reason(data, iteration)
-
-      if data[:usage]
-        total_usage[:prompt_tokens]     += data[:usage][:prompt_tokens]     || 0
-        total_usage[:completion_tokens] += data[:usage][:completion_tokens] || 0
-        total_usage[:total_tokens]      += data[:usage][:total_tokens]      || 0
-        last_prompt_tokens              = data[:usage][:prompt_tokens].to_i
-      end
-      answered = iteration
-
-      # The request's own clock and counts, never stats[:elapsed_seconds] (the
-      # TURN's time, tool execution included).
-      record_last_rate(data[:usage], @request_seconds)
-
-      # The LAST call describes the next request's state, so it replaces the
-      # earlier ones - measurements of different requests cannot be summed.
-      last_performance = LLM::UsageStats.performance_snapshot(data[:usage])
-
-      @session.record_prompt_tokens(last_prompt_tokens, messages.size)
-
-      if message[:tool_calls]
-        # -- Tool-loop detection --
-        current_tool_name = message[:tool_calls].first[:function][:name]
-        if current_tool_name == last_tool_name
-          consecutive_tool_calls += 1
-        else
-          consecutive_tool_calls = 1
-          last_tool_name = current_tool_name
-        end
-
-        if consecutive_tool_calls >= TOOL_LOOP_HARD_LIMIT
-          logger.warn "tool-loop hard limit reached (#{consecutive_tool_calls} consecutive calls to '#{current_tool_name}') - forcing final response"
-          loop_hard_break = true
-        elsif consecutive_tool_calls >= TOOL_LOOP_WARN_THRESHOLD && !loop_warning_injected
-          logger.warn "tool-loop warning: #{consecutive_tool_calls} consecutive calls to '#{current_tool_name}' - injecting stop message"
-          loop_warning_injected = true
-        end
-
-        logger.info "--- tool_calls (iteration #{iteration}, consecutive: #{consecutive_tool_calls}) ---"
-        message[:tool_calls].each do |tc|
-          logger.info "  calling #{tc[:function][:name]}(#{tc[:function][:arguments]})"
-        end
-
-        assistant_msg = { role: "assistant", content: message[:content] }
-        assistant_msg[:tool_calls] = message[:tool_calls]
-        @session.add_assistant_message(assistant_msg)
-
-        # Single run.command calls check themselves inside CommandRunner.
-        precheck_batch_safety(message[:tool_calls])
-        message[:tool_calls].each do |tc|
-          raw = execute_tool_call(tc, truncated:)
-          tool_msg = tool_result_message(tc, raw, delivery)
-          record_note(tc, tool_msg[:content])
-          messages << tool_msg
-        end
-
-        # The model cannot see the harness' budget, so the cut is named once per
-        # round - otherwise it retried the same oversized call forever.
-        if truncated
-          messages << {
-            role: "user",
-            content: "Your previous response was cut off by the token budget " \
-                     "(#{budget_note(data)}). Any tool call in it may be incomplete. " \
-                     "Do NOT re-send the same call: split it into smaller calls or " \
-                     "shorten its content."
-          }
-        end
-
-        if loop_hard_break
-          messages << {
-            role: "user",
-            content: "STOP. You are stuck in a tool loop. Do NOT call any more tools. " \
-                     "Respond NOW with your final answer. If you were editing files, use the file.write tool to save them. " \
-                     "If this was a query, answer it directly in plain text."
-          }
-          next
-        end
-
-        if loop_warning_injected && consecutive_tool_calls == TOOL_LOOP_WARN_THRESHOLD
-          messages << {
-            role: "user",
-            content: "Reminder: You have called the same tool multiple times in a row. " \
-                     "If you have enough information, stop calling the same tool and provide your final answer now."
-          }
-        end
-
-        next
-      end
-
-      discard_pending_user_note(:late)
-
-      # An unresolved text call is fed back ONCE (the model would otherwise never
-      # learn its call failed); the second occurrence falls through to warn +
-      # commit, so quoted prose cannot spin the loop.
-      if text_call_retried
-        report_unresolved_text_tool_call(message[:content])
-      elsif log_unresolved_text_tool_call(message[:content])
-        text_call_retried = true
-        @session.add_assistant_message({ role: "assistant", content: message[:content] })
-        messages << { role: "user", content: UNSOLVED_TEXT_CALL_FEEDBACK }
-        Tool.push_status(
-          label: "text_call",
-          verdict: :warn,
-          message: "tool call arrived as text the harness could not run - " \
-                   "asked the model to re-issue it")
-        next
-      end
-
-      stats = close_turn_stats(iteration:, usage: total_usage,
-                               prompt_tokens: last_prompt_tokens,
-                               performance: last_performance)
-
-      @session.add_assistant(message[:content])
-      @session.flush_notes
-      @session.record_stats(stats)
-      @session.record_reasoning(message[:reasoning])
-
-      # A committed chain is text state: no base64 belongs in it or a session file.
-      strip_image_payloads(messages)
-
-      return {
-        reasoning: message[:reasoning],
-        content:   message[:content],
-        stats:
-      }
-    end
+  # The turn engine entry: build this turn's runner and let it loop. The
+  # per-turn loop state lives in TurnRunner (issue #582); state that is
+  # genuinely the Harness's (@user_note, @save_requested, the session chain,
+  # the client, the postures) stays here and the runner reaches it through self.
+  # notes: optional caller-owned list; the turn's injected notes land in it.
+  def call_llm(notes: [])
+    TurnRunner.new(self).run(notes)
   end
 
   # A String passes through; a ToolResult goes to ImageDelivery, which names each
@@ -932,8 +699,10 @@ class Harness
                                     job_id: @session_manager.job_id)
   end
 
-  private
-
+  # Read and driven by TurnRunner (issue #582): the turn's stats bookkeeping and
+  # the per-request chain live here because the client, the stream preview and
+  # @request_seconds are Harness state; aborted_turn_stats reads @turn_stats
+  # from the CLI side.
   def open_turn_stats(iteration:, answered:, usage:)
     @turn_stats = {
       job_id: @session_manager.job_id,

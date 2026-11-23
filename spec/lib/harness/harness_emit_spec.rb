@@ -326,13 +326,14 @@ RSpec.describe Harness, 'emit and tool-execution display (issues #131, #40, #138
       expect(sent.last).to eq({ role: 'user', content: 'User note (mid-turn): steer left' })
     end
 
-    it 'tracks injected notes on #user_notes and clears the pending slot' do
+    it 'hands injected notes to the caller list and clears the pending slot' do
       harness.session.add_user('original prompt')
       harness.user_note_text = 'steer left'
 
-      harness.call_llm
+      notes = []
+      harness.call_llm(notes: notes)
 
-      expect(harness.user_notes).to eq(['steer left'])
+      expect(notes).to eq(['steer left'])
       # issue #208: the note committed into the SESSION directly (it is in
       # the chain now), and a second turn sends that chain - nothing is
       # replayed or double-appended.
@@ -351,11 +352,12 @@ RSpec.describe Harness, 'emit and tool-execution display (issues #131, #40, #138
       harness.user_note_text = '   '
 
       harness.session.add_user('original prompt')
-      harness.call_llm
+      notes = []
+      harness.call_llm(notes: notes)
 
       sent = harness.client.calls.first
       expect(sent.map { |m| m[:content].to_s }).not_to include('User note (mid-turn):')
-      expect(harness.user_notes).to be_empty
+      expect(notes).to be_empty
     end
 
     it 'keeps only the LATEST pending note (single slot in flight)' do
@@ -365,15 +367,16 @@ RSpec.describe Harness, 'emit and tool-execution display (issues #131, #40, #138
       harness.user_note_text = 'use ruby'
       harness.user_note_text = 'no - use python'
 
-      harness.call_llm
+      notes = []
+      harness.call_llm(notes: notes)
 
       sent = harness.client.calls.first
       # Restrict to user messages: the built-in system prompt itself
       # documents the "User note (mid-turn):" prefix, so a substring match
       # over the whole chain would also catch the system message.
-      notes = sent.select { |m| m[:role] == 'user' && m[:content].to_s.include?('User note (mid-turn):') }
-      expect(notes).to eq([{ role: 'user', content: 'User note (mid-turn): no - use python' }])
-      expect(harness.user_notes).to eq(['no - use python'])
+      injected = sent.select { |m| m[:role] == 'user' && m[:content].to_s.include?('User note (mid-turn):') }
+      expect(injected).to eq([{ role: 'user', content: 'User note (mid-turn): no - use python' }])
+      expect(notes).to eq(['no - use python'])
       expect(harness.session.pending?).to be(false) # final reply committed
     end
 
@@ -405,11 +408,11 @@ RSpec.describe Harness, 'emit and tool-execution display (issues #131, #40, #138
       harness.session.add_user('original prompt')
 
       expect(harness.call_llm[:content]).to eq('the final answer')
+      # The note arrived mid-call: nothing was injected, so the list stays empty.
 
       sent = harness.client.calls.first
       notes = sent.select { |m| m[:role] == 'user' && m[:content].to_s.include?('User note (mid-turn):') }
       expect(notes).to be_empty
-      expect(harness.user_notes).to be_empty
       # Nothing phantom is left for a later turn either.
       expect(harness.session.messages.map { |m| m[:content].to_s })
         .not_to include(a_string_including('use ruby instead'))

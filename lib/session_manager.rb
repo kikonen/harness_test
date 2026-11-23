@@ -13,6 +13,8 @@ require_relative "harness_config"
 # model switching, and persistence (save/resume/list).
 # Extracted from Harness to keep the LLM-call logic focused.
 class SessionManager
+  DEFAULT_COMPACT_SUMMARY_WORDS = 500
+
   SESSION_FILE = SessionLocator::SESSION_FILE
 
   RULES_FILE   = "harness.md"
@@ -94,8 +96,8 @@ class SessionManager
     # compact first, then re-send.
     if @harness.session.auto_compact_due?(
       @harness.model_config.num_ctx || LLMClient::NUM_CTX,
-      @harness.compact_auto_threshold,
-      reserved_tokens: @harness.compact_reserved_tokens)
+      @harness.settings.compact_auto_threshold,
+      reserved_tokens: @harness.settings.compact_reserved_tokens)
 
       Task.emit(
         :compact,
@@ -145,7 +147,7 @@ class SessionManager
   # IS (system message included) with the live turn's own tools payload, so the
   # request stays a prefix of the live prompt - doc/compaction_cache_design.md.
   def generate_compact_summary(chain, instruction)
-    max_words = @harness.compact_max_size || 500
+    max_words = @harness.settings.compact_max_size
     messages = chain + [
       {
         role: "user",
@@ -201,7 +203,7 @@ class SessionManager
       })
 
     summary_text = generate_compact_summary(chain, end_instruction)
-    @harness.session.compact(summary_text, recent_count: @harness.compact_recent_messages)
+    @harness.session.compact(summary_text, recent_count: @harness.settings.compact_recent_messages)
     after = @harness.session.messages.size
     retained = [after - 3, 0].max
 
@@ -353,8 +355,8 @@ class SessionManager
   def compact_if_due
     return unless @harness.session.auto_compact_due?(
       @harness.model_config.num_ctx || LLMClient::NUM_CTX,
-      @harness.compact_auto_threshold,
-      reserved_tokens: @harness.compact_reserved_tokens)
+      @harness.settings.compact_auto_threshold,
+      reserved_tokens: @harness.settings.compact_reserved_tokens)
 
     trigger = compact_trigger_tokens
     Task.emit(

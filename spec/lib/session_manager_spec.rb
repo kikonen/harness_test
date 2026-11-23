@@ -93,7 +93,7 @@ RSpec.describe SessionManager do
       end
 
       def compact_max_size
-        nil
+        SessionManager::DEFAULT_COMPACT_SUMMARY_WORDS
       end
 
       # Mirrors Harness#tools_payload: the summary call sends the SAME tool
@@ -854,7 +854,7 @@ RSpec.describe SessionManager, 'session-level param overrides (issue #219)' do
         @session.compact_trigger(model_config.num_ctx, compact_auto_threshold,
                                  reserved_tokens: compact_reserved_tokens)
       end
-      def compact_max_size; nil; end
+      def compact_max_size; SessionManager::DEFAULT_COMPACT_SUMMARY_WORDS; end
       def context_indicator; nil; end
       def context_indicator_live(_m = nil); nil; end
     end.new(session, client, options)
@@ -923,7 +923,7 @@ RSpec.describe SessionManager, 'in-loop compaction (issue #108)' do
       def mcp_connected_summary = []
 
       def compact_max_size
-        nil
+        SessionManager::DEFAULT_COMPACT_SUMMARY_WORDS
       end
 
       def compact_auto_threshold
@@ -1186,7 +1186,7 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
     let(:client) { double('client', chat: { choices: [{ message: { content: long_summary } }] }) }
     let(:harness) do
       double('harness', session: session, client: client, logger: logger,
-             compact_recent_messages: 2, compact_max_size: nil,
+             settings: SystemSettings.from_options({ compact_recent: 2 }),
              tools_payload: nil,
              context_indicator: 'ctx 1/65536 (0%)')
     end
@@ -1216,7 +1216,7 @@ RSpec.describe SessionManager, 'retained-window logging (issue #139)' do
     let(:harness) do
       double('harness', session: session, client: client, logger: logger,
              model_config: model_config, settings: settings,
-             compact_trigger_tokens: 1, compact_max_size: nil,
+             compact_trigger_tokens: 1, compact_max_size: SessionManager::DEFAULT_COMPACT_SUMMARY_WORDS,
              tools_payload: nil)
     end
     let(:manager) { described_class.new(harness, FileList.new([], workdir: Dir.pwd)) }

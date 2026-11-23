@@ -172,13 +172,13 @@ RSpec.describe Harness, 'system prompt and async job self-save (issues #223, #34
     end
   end
 
-  describe '#max_tool_iterations (issue #226)' do
+  describe 'max_tool_iterations resolved in SystemSettings (issue #226)' do
     it 'defaults to 200 when the option is not set' do
-      expect(build_harness.max_tool_iterations).to eq(200)
+      expect(build_harness.settings.max_tool_iterations).to eq(200)
     end
 
     it 'reads from options when set' do
-      expect(build_harness(max_tool_iterations: 50).max_tool_iterations).to eq(50)
+      expect(build_harness(max_tool_iterations: 50).settings.max_tool_iterations).to eq(50)
     end
 
     it 'raises ToolLoopError once the configurable limit is exceeded' do
