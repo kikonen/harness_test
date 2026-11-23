@@ -386,15 +386,21 @@ module UI
     # A full-width fused rule naming the role, then the content EXACTLY as emitted (no label,
     # no indent: a model answer keeps its own paragraphs). :step_label IS its rule - its content
     # is the number fused inside it.
-    # :step_label content is the step DATA: a bare number, or a {number:, calls:} hash whose
-    # calls count is fused as a compact "[N]" so the rule says how many tool calls the step ran.
+    # :step_label content is the step DATA: a bare number, or a hash whose calls count is fused
+    # as a compact "[N]" (how many tool calls the step ran) and whose context is fused as a
+    # trailing percentage (issue #586). The tokens/window ride in the DATA for the log; only the
+    # percentage is printed - the rule stays glanceable at RULE_WIDTH whatever the label grows to.
     def boundary_line(type, content)
       label =
         if type == :step_label
           data   = content.is_a?(Hash) ? content : { number: content }
           number = data[:number]
           calls  = data[:calls]
-          calls.nil? ? "step #{number}" : "step #{number} [#{calls}]"
+          label  = calls.nil? ? "step #{number}" : "step #{number} [#{calls}]"
+          if (ctx = data[:context])
+            label = "#{label} #{ctx[:pct]}%"
+          end
+          label
         else
           self.class.boundary_label(type)
         end

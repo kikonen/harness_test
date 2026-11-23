@@ -131,6 +131,27 @@ RSpec.describe UI::Renderer do
 
       expect(widths).to all(eq(described_class::RULE_WIDTH))
     end
+
+    # issue #586: the context burned at the step's start is fused into the rule as a bare
+    # percentage. tokens/window stay in the payload for the log - printing them here would
+    # eat the rule's glanceability.
+    it 'fuses the context percentage from a {number:, calls:, context:} payload' do
+      data = { number: 8, calls: 2, context: { tokens: 24_000, window: 65_536, pct: 37 } }
+      expect(renderer.line(type: :step_label, content: data)).to eq(
+        "#{'-' * 32} step 8 [2] 37% #{'-' * 32}"
+      )
+    end
+
+    it 'is exactly RULE_WIDTH wide with a context percentage fused in' do
+      widths = [
+        { number: 1, calls: 1, context: { tokens: 0, window: 1000, pct: 0 } },
+        { number: 100, calls: 12, context: { tokens: 65_536, window: 65_536, pct: 100 } }
+      ].map do |payload|
+        renderer.line(type: :step_label, content: payload).length
+      end
+
+      expect(widths).to all(eq(described_class::RULE_WIDTH))
+    end
   end
 
   # The final answer gets the SAME boundary shape as an iteration start, which

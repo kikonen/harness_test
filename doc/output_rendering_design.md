@@ -39,7 +39,7 @@ decoration that a renderer can produce itself.
 
 | type | emitted content | rendered line |
 | --- | --- | --- |
-| `:step_label` | the iteration NUMBER | fused gray rule (see "Block boundaries") |
+| `:step_label` | step DATA: `{number:, calls:, context:}` | fused gray rule (see "Block boundaries") |
 | `:plan` | the reasoning digest | `plan:  I will read the tool first` (wrapped to RULE_WIDTH, continuation aligned under the label; #485) |
 | `:interstitial` | the model's interim text | `say:   checking one more site` (wrapped like `:plan`) |
 | `:tool_plan` | the tool names | `tools: file.read, file.search` |
@@ -408,10 +408,18 @@ Two roles are boundaries of a BLOCK rather than lines inside one, and they get
 the SAME shape - `BOUNDARY_ROLES` in `UI::Renderer` is that decision written as
 a list:
 
-- `:step_label` IS its rule: the number sits fused inside it, exactly 80
-  columns whatever the number is.
+- `:step_label` IS its rule: the step DATA sits fused inside it, exactly 80
+  columns whatever the label grows to (`fused_rule` absorbs the label length).
+  The calls count is a compact `[N]` and the context burned at the step's start
+  is a bare percentage (#586):
 
     ------------------------------------ step 8 ------------------------------------
+
+    ------------------------------ step 1421 [1] 31% ------------------------------
+
+  Only the percentage is PRINTED. `tokens` and `window` stay in the emitted
+  payload (and in the session log's `step N ctx M%` line) so "when was context
+  burned" is answerable after the run without widening the rule.
 
 - `:response` gets the rule as its own line, naming the role, and the answer
   below it EXACTLY as emitted - no label, no indent, so a model answer keeps

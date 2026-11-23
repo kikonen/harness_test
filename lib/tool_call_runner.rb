@@ -5,6 +5,7 @@ require "json"
 require_relative "harness_error"
 require_relative "error_text"
 require_relative "image_delivery"
+require_relative "llm_client"
 require_relative "output_budget"
 require_relative "safety_check"
 require_relative "task"
@@ -118,6 +119,7 @@ class ToolCallRunner
   def emit_step(message, ports)
     return if step_display_disabled?(ports)
 
+    context = step_context(ports)
     log_response(message[:reasoning], message[:content], ports.logger)
 
     first_line = ->(key) {
@@ -134,10 +136,13 @@ class ToolCallRunner
     # renderer's words. The number is the job-wide counter, not the turn-local
     # iteration (issue #577).
     @step_number += 1
+    # The log gets the same percentage the console shows, so "when was context
+    # burned" is answerable from the session log after the run (issue #586).
+    ports.logger.info "step #{@step_number} ctx #{context ? "#{context[:pct]}%" : "n/a"}"
     Task.emit(
       :step_label,
       origin: :harness,
-      content: { number: @step_number, calls: tools.size })
+      content: { number: @step_number, calls: tools.size, context: })
     Task.emit(:plan, origin: :harness, content: reason) if reason
     Task.emit(:interstitial, origin: :harness, content:) if content
     Task.emit(:tool_plan, origin: :harness, content: tools.join(", "))
@@ -346,5 +351,22 @@ class ToolCallRunner
 
   def step_display_disabled?(ports)
     ENV.fetch("HARNESS_STEP_DISPLAY", "") == "off" || ports.settings.step_display == false
+  end
+
+  # The context burned at the moment this step started, so a step line shows WHEN
+  # context is spent rather than only what the spinner said between steps (issue #586).
+  # The window is the model config's own (num_ctx, else the client default) because a
+  # model switch mid-job changes it; a percentage measured against the OLD window would
+  # misread a step taken after the switch.
+  def step_context(ports)
+    used = ports.session.context_used
+    return nil if used.nil?
+
+    window = ports.model_config.num_ctx || LLMClient::NUM_CTX
+    return nil if window.to_i <= 0
+
+    tokens = used[:tokens]
+    pct    = (tokens.to_f / window * 100).round
+    { tokens:, window:, pct: }
   end
 end
