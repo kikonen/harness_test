@@ -38,7 +38,7 @@ number from a run should say which environment produced it.
   Windows' 2.56.0.windows.2 and much newer than WSL2's 2.43.0. A failure that
   shows only in CI is plausibly about CI's git rather than about the code, so a
   green local run does not prove a CI-only failure bogus.
-- Worked example (issue #292): `git_apply_tool_spec` failed in CI only, on a
+- Worked example (issue #292): `git_patch_tool_spec` (then `git_apply_tool_spec`) failed in CI only, on a
   path the example never touched (`Errno::ENOENT .../objects/maintenance.lock`
   during `Dir.mktmpdir` teardown). It was not a phantom - `git commit` spawns
   `git maintenance run --auto --quiet --detach`, whose detached child writes

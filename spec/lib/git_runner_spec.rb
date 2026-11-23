@@ -15,7 +15,7 @@ class ProbeGitRunner < GitRunner
 end
 
 # The git.* tools run REAL git, so the base's env setup is asserted against a real
-# repository rather than a stub (same approach as git_apply_tool_spec).
+# repository rather than a stub (same approach as git_patch_tool_spec).
 # maintenance.auto / gc.auto are switched off through git's own config env so no
 # detached `git maintenance` child writes into the tmp repo while Dir.mktmpdir is
 # walking the same tree to delete it.

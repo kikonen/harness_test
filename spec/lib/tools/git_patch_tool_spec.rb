@@ -2,38 +2,38 @@
 
 require 'spec_helper'
 require 'tmpdir'
-require 'tools/git_apply_tool'
+require "tools/git_patch_tool"
 require 'session_file_cache'
 
-RSpec.describe Tools::GitApplyTool do
-  # Minimal git repo in a tmp dir: the apply tool runs real git. Identity via
-  # the environment so no global config is needed.
-  #
-  # maintenance.auto / gc.auto are switched OFF through git's own config env
-  # mechanism because `git commit` otherwise spawns a DETACHED
-  # `git maintenance run --auto --quiet --detach` child that writes
-  # .git/objects/maintenance.lock inside the tmp repo - after the example
-  # finished, while Dir.mktmpdir is walking the same tree to delete it. The
-  # cleanup then dies on a path it had already enumerated (Errno::ENOENT) and
-  # the example fails on teardown, not on its own assertions.
-  GIT_ENV = {
-    'GIT_AUTHOR_NAME'     => 'test',
-    'GIT_AUTHOR_EMAIL'    => 'test@example.com',
-    'GIT_COMMITTER_NAME'  => 'test',
-    'GIT_COMMITTER_EMAIL' => 'test@example.com',
-    'GIT_CONFIG_COUNT'    => '2',
-    'GIT_CONFIG_KEY_0'    => 'maintenance.auto',
-    'GIT_CONFIG_VALUE_0'  => 'false',
-    'GIT_CONFIG_KEY_1'    => 'gc.auto',
-    'GIT_CONFIG_VALUE_1'  => '0'
-  }.freeze
+# Minimal git repo in a tmp dir: the tool runs real git. Identity via the
+# environment so no global config is needed.
+#
+# maintenance.auto / gc.auto are switched OFF through git's own config env
+# mechanism because `git commit` otherwise spawns a DETACHED
+# `git maintenance run --auto --quiet --detach` child that writes
+# .git/objects/maintenance.lock inside the tmp repo - after the example
+# finished, while Dir.mktmpdir is walking the same tree to delete it. The
+# cleanup then dies on a path it had already enumerated (Errno::ENOENT) and
+# the example fails on teardown, not on its own assertions.
+GIT_PATCH_GIT_ENV = {
+  'GIT_AUTHOR_NAME'     => 'test',
+  'GIT_AUTHOR_EMAIL'    => 'test@example.com',
+  'GIT_COMMITTER_NAME'  => 'test',
+  'GIT_COMMITTER_EMAIL' => 'test@example.com',
+  'GIT_CONFIG_COUNT'    => '2',
+  'GIT_CONFIG_KEY_0'    => 'maintenance.auto',
+  'GIT_CONFIG_VALUE_0'  => 'false',
+  'GIT_CONFIG_KEY_1'    => 'gc.auto',
+  'GIT_CONFIG_VALUE_1'  => '0'
+}.freeze
 
+RSpec.describe Tools::GitPatchTool do
   def setup_git_repo(dir, file: 'hello.txt', content: "line1\nline2\nline3\n")
     target = File.join(dir, file)
     File.write(target, content)
-    system(GIT_ENV, 'git', 'init', '-q', chdir: dir, exception: true)
-    system(GIT_ENV, 'git', 'add', file, chdir: dir, exception: true)
-    system(GIT_ENV, 'git', 'commit', '-q', '-m', 'init',
+    system(GIT_PATCH_GIT_ENV, 'git', 'init', '-q', chdir: dir, exception: true)
+    system(GIT_PATCH_GIT_ENV, 'git', 'add', file, chdir: dir, exception: true)
+    system(GIT_PATCH_GIT_ENV, 'git', 'commit', '-q', '-m', 'init',
            chdir: dir, exception: true)
     target
   end
@@ -116,8 +116,8 @@ RSpec.describe Tools::GitApplyTool do
         a = setup_git_repo(dir, file: 'a.txt', content: "one\ntwo\n")
         b = File.join(dir, 'b.txt')
         File.write(b, "x\ny\n")
-        system(GIT_ENV, 'git', 'add', 'b.txt', chdir: dir, exception: true)
-        system(GIT_ENV, 'git', 'commit', '-q', '-m', 'b', chdir: dir, exception: true)
+        system(GIT_PATCH_GIT_ENV, 'git', 'add', 'b.txt', chdir: dir, exception: true)
+        system(GIT_PATCH_GIT_ENV, 'git', 'commit', '-q', '-m', 'b', chdir: dir, exception: true)
 
         list = FileList.new(workdir: dir)
         list.add_file('a.txt', :rw)
@@ -190,6 +190,31 @@ RSpec.describe Tools::GitApplyTool do
 
         out = tool.execute('diff' => diff)
         expect(out).to start_with('error: git apply failed')
+      end
+    end
+
+    # issue #547: the tool is for a diff that came FROM git. When a model-authored diff
+    # fails on context, the error must send it to file.patch rather than invite a retry here.
+    it 'sends a context mismatch to file.patch (issue #547)' do
+      Dir.mktmpdir do |dir|
+        setup_git_repo(dir)
+        list   = FileList.new(workdir: dir)
+        list.add_file('hello.txt', :rw)
+        tool   = described_class.new(list)
+
+        diff = <<~DIFF
+          --- a/hello.txt
+          +++ b/hello.txt
+          @@ -1,3 +1,3 @@
+           line1
+          -TOTALLY-WRONG
+          +line2
+           line3
+        DIFF
+
+        out = tool.execute('diff' => diff)
+        expect(out).to include('use file.patch')
+        expect(out).to include('diff that came from git')
       end
     end
 

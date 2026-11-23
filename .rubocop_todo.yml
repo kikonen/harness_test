@@ -61,7 +61,6 @@ Layout/EmptyLineAfterGuardClause:
     - 'lib/shell_tokenizer.rb'
     - 'lib/task.rb'
     - 'lib/tools/file_info_tool.rb'
-    - 'lib/tools/git_apply_tool.rb'
     - 'lib/ui/dialog.rb'
 
 # Offense count: 1
@@ -77,7 +76,6 @@ Layout/EmptyLineAfterMagicComment:
 Layout/EmptyLineBetweenDefs:
   Exclude:
     - 'lib/command_runner.rb'
-    - 'lib/tools/git_apply_tool.rb'
 
 # Offense count: 1
 # This cop supports safe autocorrection (--autocorrect).
@@ -107,7 +105,6 @@ Layout/EmptyLinesAroundModuleBody:
     - 'lib/tools/file_search_tool.rb'
     - 'lib/tools/file_write_tool.rb'
     - 'lib/tools/get_time_tool.rb'
-    - 'lib/tools/git_apply_tool.rb'
     - 'lib/tools/git_diff_tool.rb'
     - 'lib/tools/git_grep_tool.rb'
     - 'lib/tools/git_log_tool.rb'
@@ -190,7 +187,6 @@ Layout/HashAlignment:
     - 'lib/tools/file_patch_tool.rb'
     - 'lib/tools/file_search_tool.rb'
     - 'lib/tools/file_write_tool.rb'
-    - 'lib/tools/git_apply_tool.rb'
     - 'lib/tools/git_diff_tool.rb'
     - 'lib/tools/git_grep_tool.rb'
     - 'lib/tools/git_log_tool.rb'
@@ -233,7 +229,6 @@ Layout/LineEndStringConcatenationIndentation:
     - 'lib/tools/file_rename_tool.rb'
     - 'lib/tools/file_search_tool.rb'
     - 'lib/tools/file_write_tool.rb'
-    - 'lib/tools/git_apply_tool.rb'
     - 'lib/tools/git_diff_tool.rb'
     - 'lib/tools/git_grep_tool.rb'
     - 'lib/tools/git_log_tool.rb'
@@ -276,7 +271,6 @@ Layout/LineLength:
     - 'lib/tools/file_rename_tool.rb'
     - 'lib/tools/file_search_tool.rb'
     - 'lib/tools/file_write_tool.rb'
-    - 'lib/tools/git_apply_tool.rb'
     - 'lib/tools/git_diff_tool.rb'
     - 'lib/tools/git_grep_tool.rb'
     - 'lib/tools/git_log_tool.rb'
@@ -325,7 +319,6 @@ Layout/MultilineMethodCallBraceLayout:
     - 'lib/tools/dir_create_tool.rb'
     - 'lib/tools/file_list_tool.rb'
     - 'lib/tools/file_search_tool.rb'
-    - 'lib/tools/git_apply_tool.rb'
 
 # Offense count: 15
 # This cop supports safe autocorrection (--autocorrect).
@@ -338,7 +331,6 @@ Layout/MultilineMethodCallIndentation:
     - 'lib/commands/grant_command.rb'
     - 'lib/history_manager.rb'
     - 'lib/tool_registry.rb'
-    - 'lib/tools/git_apply_tool.rb'
 
 # Offense count: 13
 # This cop supports safe autocorrection (--autocorrect).
@@ -399,7 +391,6 @@ Lint/ConstantDefinitionInBlock:
     - 'spec/lib/safety_check_spec.rb'
     - 'spec/lib/session_file_cache_spec.rb'
     - 'spec/lib/task_spec.rb'
-    - 'spec/lib/tools/git_apply_tool_spec.rb'
     - 'spec/lib/turn_runner_spec.rb'
 
 # Offense count: 1

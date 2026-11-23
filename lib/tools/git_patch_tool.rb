@@ -4,46 +4,49 @@ require "tempfile"
 
 require_relative "../git_runner"
 
-# Applies a unified diff patch to the working tree (git apply).
-# The model provides the diff text; it is written to a temporary file
-# and passed to `git apply`. By default this only touches the working
-# tree (not the index), mirroring the behavior of `file.patch` but
-# using git's own robust patch engine.
+# Applies a git-PRODUCED diff to the working tree (`git apply`): a patch that came from
+# `git.diff` / `git.show` / a bundle, where the context lines are exact. For editing a file,
+# `file.patch` is the tool - it locates hunks by context search and so tolerates an
+# imprecise model-authored diff, which this one hard-rejects (issue #547).
 #
-# Options:
-#   dry_run  - validate with `git apply --check` without applying
-#   three_way - if the direct apply fails, retry with a 3-way merge
-#               (requires the blob objects to be present in the repo)
+# Options: dry_run (validate with `git apply --check`), three_way (retry a failed apply as a
+# 3-way merge against the repo's blob objects; can leave conflict markers in the files).
 #
-# issue #170: takes an optional trailing `file_cache` argument - when given,
-# patched files are checked against it (external-change detection) and their
-# new digests are recorded on success.
-# issue #171: the diff is normalized before git sees it (CRLF -> LF and
-# trailing whitespace stripped from every line), which absorbs the two
-# most common model output quirks. Hunk line numbers are treated as
-# hints by git itself, so small numbering mistakes are tolerated too.
-# issue #22: structurally broken diffs (no hunk at all, or hunks without
-# any file header) fail up front with an actionable message instead of
-# the generic "does not match the working tree" error.
+# The diff is normalized before git sees it (CRLF -> LF, trailing whitespace stripped) and
+# structurally broken diffs fail up front with an actionable message (#171, #22). The trailing
+# `file_cache` argument gives the same external-change detection and digest refresh as
+# file.write / file.patch (#170).
 module Tools
-
-  class GitApplyTool < GitRunner
+  class GitPatchTool < GitRunner
     def initialize(file_list, file_cache = nil)
       @file_list = file_list
       @file_cache = file_cache
       super(
-        name: "git.apply",
-        description: "Applies a unified diff patch to the working tree (like `git apply`). " \
-                     "Provide the full unified diff (with --- / +++ / @@ hunks). " \
-                     "Use dry_run to validate without applying. " \
-                     "Unlike file.patch, multiple files can be patched in a single call. " \
-                     "Hunk line numbers and stray trailing whitespace are tolerated.",
+        name: "git.patch",
+        description:
+          "Applies a diff that came FROM GIT (git.diff, git.show, a bundle) to the " \
+          "working tree, across multiple files in one call. For EDITING a file use " \
+          "file.patch instead: it locates hunks by matching context, so it tolerates " \
+          "an imprecise diff, while this tool requires the context to be exact " \
+          "(like `git apply`). Provide the full unified diff (--- / +++ / @@ hunks). " \
+          "dry_run validates without applying; three_way retries a failed apply as a " \
+          "3-way merge (may leave conflict markers in the files).",
         parameters: {
           type: "object",
           properties: {
-            diff:      { type: "string",  description: "Unified diff to apply (standard format with --- / +++ / @@ hunks)" },
-            dry_run:   { type: "boolean", description: "Validate the patch with `git apply --check` without applying it (default false)" },
-            three_way: { type: "boolean", description: "If a direct apply fails, retry with a 3-way merge (default false)" }
+            diff: {
+              type: "string",
+              description: "Unified diff to apply (--- / +++ / @@ hunks)"
+            },
+            dry_run: {
+              type: "boolean",
+              description: "Validate with `git apply --check`, applying nothing"
+            },
+            three_way: {
+              type: "boolean",
+              description: "Retry a failed apply as a 3-way merge " \
+                "(default false; may leave conflict markers)"
+            }
           },
           required: ["diff"]
         }
@@ -71,9 +74,10 @@ module Tools
         next if @file_list.writable?(target)
 
         result = @file_list.grant_access(target, :w)
-        return Tool.denial_error(
-          "error: write access denied for '#{@file_list.display_path(target)}'", result
-        ) unless Tool.granted?(result)
+        next if Tool.granted?(result)
+
+        denied = @file_list.display_path(target)
+        return Tool.denial_error("error: write access denied for '#{denied}'", result)
       end
 
       if files.any?
@@ -86,7 +90,7 @@ module Tools
       guard = external_change_guard(files)
       return guard if guard
 
-      Tempfile.create(["harness_git_apply", ".diff"]) do |tmp|
+      Tempfile.create(["harness_git_patch", ".diff"]) do |tmp|
         # issue #171: normalize before git sees the diff - consistent LF
         # line endings and no trailing whitespace on any line (a common
         # model output quirk that would otherwise hard-fail context lines).
@@ -102,11 +106,17 @@ module Tools
         end
 
         if result[:status] != 0
-          detail = result[:stderr].strip.empty? ? result[:stdout].strip : result[:stderr].strip
-          msg = "error: git apply failed (exit #{result[:status]}): #{detail.lines.first&.strip || 'no error message'}"
-          msg += ". The patch does not match the working tree - check the context lines and retry, or use file.patch per file."
+          detail = result[:stderr].strip.empty? ? result[:stdout] : result[:stderr]
+          detail = detail.strip.lines.first&.strip || "no error message"
+          msg = "error: git apply failed (exit #{result[:status]}): #{detail}"
+          # git apply needs EXACT context; a model-authored diff usually does not have it, and
+          # file.patch is the tool built for that case.
+          msg += ". The context lines do not match the working tree exactly - for an " \
+            "edit use file.patch (it locates hunks by context search); this tool is " \
+            "for a diff that came from git."
           status(:fail, msg)
           return "#{msg}\nfiles: #{files.join(', ')}" if files.any?
+
           msg
         end
 
@@ -163,11 +173,12 @@ module Tools
     # context lines do not hard-fail the match (a common model quirk).
     def normalize_diff(diff)
       diff.gsub("\r\n", "\n")
-          # Strip trailing whitespace before each newline; a blank context
-          # line ("" or " ") is left empty either way, and the file's own
-          # final newline is preserved.
-          .gsub(/[ \t]+\n/, "\n")
+        # Strip trailing whitespace before each newline; a blank context
+        # line ("" or " ") is left empty either way, and the file's own
+        # final newline is preserved.
+        .gsub(/[ \t]+\n/, "\n")
     end
+
     # issue #170: external-change detection (same rule as file.write and
     # file.patch) - every touched file that has a cached digest must still
     # match the on-disk bytes, otherwise someone changed it outside us.
@@ -186,8 +197,8 @@ module Tools
         shown = @file_list.display_path(path)
         status(:fail, "#{shown} (externally changed since last read)")
         return "error: '#{shown}' has changed externally since you last read it. " \
-               "Re-read the file with file.read, or report the external change " \
-               "with file.touch if you know what happened."
+          "Re-read the file with file.read, or report the external change " \
+          "with file.touch if you know what happened."
       end
       nil
     end

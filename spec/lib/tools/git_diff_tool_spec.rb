@@ -18,7 +18,7 @@ DIFF_GIT_ENV = {
 }.freeze
 
 RSpec.describe Tools::GitDiffTool do
-  # Same real-repo setup as git_apply_tool_spec: the tool runs real git, so the
+  # Same real-repo setup as git_patch_tool_spec: the tool runs real git, so the
   # assertions are about git's real exit codes and empty-output cases rather
   # than a stubbed run_git. maintenance.auto is switched off through git's own
   # config env so no detached maintenance child writes into the tmp repo during

@@ -284,7 +284,7 @@ rule enforce recurrence in CI - no meta-spec is needed to hold it.
 The `&.` fix is the whole repair; the alternative the issue floated (make
 `session` a required constructor argument) was measured and rejected: five other
 tools take it as optional too (`file.read`, `file.write`, `file.patch`,
-`git.apply`, `dir.delete`) and each guards the cache step its own way - an
+`git.patch`, `dir.delete`) and each guards the cache step its own way - an
 `if @session` block, a `return unless @session` guard clause, or a both-hops
 `@session&.file_cache&.clear`. And a spec that constructs a tool without a
 session is the normal way to test a tool in isolation (17 of the 18 tool
