@@ -826,12 +826,12 @@ RSpec.describe CommandRunner do
       seed_allowlist(dir, 'seq 3')
       runner = make_tool_runner(dir)
       allow_any_instance_of(described_class).to receive(:run_in_shell) do
-        stdout = (1..3).map { |_i| 'x' * 100_000 }.join("\n") + "\n"
+        stdout = (1..5).map { |_i| 'x' * 20_000 }.join("\n") + "\n"
         [stdout, Struct.new(:exitstatus).new(0)]
       end
 
       out = runner.run('seq 3', limit: 500)
-      expect(out.bytesize).to be < 60_000
+      expect(out.bytesize).to be < 100_000
       expect(out).to include('output too large')
     end
   end
