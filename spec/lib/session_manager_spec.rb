@@ -13,6 +13,7 @@ require 'job_registry'
 require 'system_saver'
 require 'fileutils'
 require 'tmpdir'
+require 'result_spill'
 
 # The id a spec hands the run-owner save path. Session carries no id (the id is
 # the session directory name), so a spec naming one names it here.
@@ -1431,5 +1432,96 @@ RSpec.describe SessionManager, 'vision and image limits (issue #449)' do
     # whose profile term is now nil and must fall back to the preserved global.
     expect(mgr.vision?).to be(true)
     expect(mgr.image_limits[:inline_max_tokens]).to eq(80_000)
+  end
+end
+
+# issue #595: a job spill dir grew without bound. Compaction is the moment a spill
+# stops being reachable (the tool result that named its path leaves the chain), so
+# that is where the window is enforced.
+RSpec.describe SessionManager, 'spill-window pruning (issue #595)' do
+  let(:log_io) { StringIO.new }
+  let(:logger) { Logger.new(log_io) }
+  let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
+  let(:client) { double('client', chat: { choices: [{ message: { content: 'HANDOFF' } }] }) }
+
+  def with_spills(keep:, count:)
+    Dir.mktmpdir do |dir|
+      spill = ResultSpill.new(SessionLocator.new(dir, session_id: SESSION_ID), keep:)
+      count.times { |i| spill.write('run.command', i + 1, "output #{i}") }
+      harness = double('harness', session: session, client: client, logger: logger,
+                       settings: SystemSettings.from_options({ compact_recent: 2 }),
+                       tools_payload: nil, context_indicator: nil,
+                       model_config: ModelConfig.new({ num_ctx: 1000 }),
+                       compact_trigger_tokens: 1,
+                       result_spill: spill,
+                       locator: SessionLocator.new(dir, session_id: SESSION_ID))
+      yield described_class.new(harness, FileList.new([], workdir: dir)), spill, dir
+    end
+  end
+
+  def spill_names(dir)
+    Dir.glob(File.join(dir, '.harness', 'sessions', SESSION_ID, 'jobs', '0',
+                       'results', '*.txt')).map { |p| File.basename(p) }.sort
+  end
+
+  it 'prunes the job spill dir on compact_session, keeping the newest window' do
+    with_spills(keep: 3, count: 7) do |manager, _spill, dir|
+      4.times { |i| session.add_user("msg #{i}") }
+
+      manager.compact_session
+
+      expect(spill_names(dir)).to eq(%w[run.command-5.txt run.command-6.txt run.command-7.txt])
+      expect(log_io.string).to include('spill files pruned: 4')
+    end
+  end
+
+  it 'prunes on in-loop compaction too' do
+    with_spills(keep: 2, count: 5) do |manager, _spill, dir|
+      messages = [
+        { role: 'system', content: 'system prompt' },
+        { role: 'user', content: 'implement X' },
+        { role: 'assistant', content: nil,
+          tool_calls: [{ id: 't1', function: { name: 'x', id: 'x' } }] },
+        { role: 'tool', tool_call_id: 't1', content: 'r1' },
+        { role: 'assistant', content: 'done' }
+      ]
+
+      expect(manager.check_inloop_compaction(messages, 1000)).to be(true)
+      expect(spill_names(dir)).to eq(%w[run.command-4.txt run.command-5.txt])
+    end
+  end
+
+  it 'leaves the dir alone when it is already inside the window' do
+    with_spills(keep: 10, count: 3) do |manager, _spill, dir|
+      4.times { |i| session.add_user("msg #{i}") }
+
+      manager.compact_session
+
+      expect(spill_names(dir).size).to eq(3)
+      expect(log_io.string).not_to include('spill files pruned')
+    end
+  end
+
+  # A harness double (or a sub-agent harness) with no spill must still compact.
+  it 'compacts normally when the harness exposes no spill' do
+    harness = double('harness', session: session, client: client, logger: logger,
+                     settings: SystemSettings.from_options({ compact_recent: 2 }),
+                     tools_payload: nil, context_indicator: nil,
+                     locator: SessionLocator.new(Dir.pwd, session_id: SESSION_ID))
+    manager = described_class.new(harness, FileList.new([], workdir: Dir.pwd))
+    4.times { |i| session.add_user("msg #{i}") }
+
+    expect { manager.compact_session }.not_to raise_error
+    expect(session.messages.size).to be < 9
+  end
+
+  it 'a failed prune does not fail the compaction' do
+    with_spills(keep: 1, count: 3) do |manager, spill, _dir|
+      allow(spill).to receive(:prune).and_raise(Errno::EACCES, 'read-only file system')
+      4.times { |i| session.add_user("msg #{i}") }
+
+      expect { manager.compact_session }.not_to raise_error
+      expect(log_io.string).to include('spill prune failed')
+    end
   end
 end

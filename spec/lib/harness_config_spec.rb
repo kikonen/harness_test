@@ -184,6 +184,26 @@ RSpec.describe HarnessConfig do
     end
   end
 
+  # issue #595: the spill window is config-settable for the same reason the byte
+  # budget is - it bounds harness state a run writes as it goes.
+  describe '#output_spill_keep (issue #595)' do
+    it 'defaults to nil when the key is absent (built-in default applies)' do
+      expect(described_class.new({}).output_spill_keep).to be_nil
+    end
+
+    it 'reads the output_spill_keep key' do
+      expect(described_class.new(output_spill_keep: 20).output_spill_keep).to eq(20)
+    end
+
+    it 'coerces an integer-valued string to an integer' do
+      expect(described_class.new(output_spill_keep: '20').output_spill_keep).to eq(20)
+    end
+
+    it 'mentions the key in the default template' do
+      expect(template).to include('output_spill_keep')
+    end
+  end
+
   describe '#output_palette_name (issue #303)' do
     it 'defaults to nil when the key is absent (the default palette applies)' do
       expect(described_class.new({}).output_palette_name).to be_nil

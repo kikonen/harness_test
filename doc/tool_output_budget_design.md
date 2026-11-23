@@ -121,6 +121,29 @@ is an explicit user Allow, not a silent read) plus the byte budget every command
 result passes through. `file.list` on a spill dir stays refused: listing harness
 state would expose other sessions' and other jobs' files to one job's agent.
 
+## The spill dir is bounded: the window and when it is pruned (issue #595)
+
+The spill dir was append-only and grew without bound: measured in this project's
+own session, 1267 files / 7.07 MB, 1151 of them from `run.command`
+(`sh analysis/595/measure.sh`). Two facts make a window safe:
+
+- A spill is reachable only while the conversation still NAMES its path. There is
+  no registry: `ResultSpill#covers?` is a prefix test on this job's own results
+  dir, and `SpillReader#read_spilled_result` reads whatever path is asked for.
+- Compaction is exactly when that stops being true. The `role: "tool"` message
+  that carried the preview (and the path inside it) leaves the chain, and only the
+  summary's prose may still cite it.
+
+So `ResultSpill#prune` keeps the newest `output_spill_keep` files (built-in
+`ResultSpill::DEFAULT_KEEP`, 0 disables the window) and it runs ONLY from
+`SessionManager#prune_spills`, at the end of both compact paths - never on a
+write, which would cut a spill the current turn just produced. Ordering is by the
+sequence number in the name, not mtime: a fast run writes several files per
+second and a resumed run appends to the same dir. A prune is best-effort - a
+failed remove must not fail a compaction that already succeeded. A read of a path
+the window already removed answers with what happened (`ResultSpill#pruned?`)
+instead of falling through to the file tools and reading as "access denied".
+
 ## Not done, deliberately
 
 - **No pre-request `MAX_REQUEST_BYTES` gate.** It cannot shrink a chain that is

@@ -99,6 +99,14 @@ compact:
 # for the built-in default (48000). Config-only (no CLI flag).
 # output_result_bytes: 48000
 
+# How many spilled tool-result files ONE job keeps in its results dir (issue #595).
+# A spill is only reachable while the conversation still names its path, so the
+# oldest ones are pruned at compaction - the moment the previews that cited them
+# leave the chain. Omit the key for the built-in default (50); 0 disables the
+# window (the dir then grows for the life of the session). Config-only, like
+# output_result_bytes.
+# output_spill_keep: 50
+
 # Auto-save the session at every prompt boundary (crash-proof, issue #107).
 auto_save: true
 

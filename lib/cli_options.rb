@@ -287,6 +287,10 @@ class CLIOptions
     # inside the run that caused it.
     opts[:output_result_bytes] = config.output_result_bytes
 
+    # issue #595: how many spill files one job keeps before the oldest are pruned.
+    # Config-only for the same reason as the byte budget above.
+    opts[:output_spill_keep] = config.output_spill_keep
+
     # issue #303: rendered-output palette. CLI flag > config > default palette.
     # Validated HERE rather than when the Harness builds the palette, so a typo
     # is reported before the model is contacted (and --list-sessions, which

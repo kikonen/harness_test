@@ -377,7 +377,8 @@ class Harness
 
     @result_spill = ResultSpill.new(
       @locator,
-      job_id: @session_manager.job_id)
+      job_id: @session_manager.job_id,
+      keep: settings.output_spill_keep || ResultSpill::DEFAULT_KEEP)
   end
 
   # The narrow view the tool-call half is allowed to see (issue #582). State
