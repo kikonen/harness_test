@@ -92,7 +92,7 @@ module Commands
       registry.jobs.each { |job| show_job(job) }
     end
 
-    # The startup replay's layout (CLI#print_resume_replay): rule, one header
+    # The startup replay's layout (StartupBanner#print_resume_replay): rule, one header
     # line, the entries through the renderer, rule. The renderer is built the way
     # TaskRunner builds one (the sink's palette wins, then the run's settings) so
     # a command with no harness of its own paints the same lines the run does.

@@ -74,6 +74,13 @@ class SystemSettings
     entries.nil? ? DEFAULT_RESUME_REPLAY_ENTRIES : entries.to_i
   end
 
+  # Whether a resumed run redraws the saved tail at startup (config
+  # resume.replay_on_startup, default ON). Only an explicit false turns the
+  # automatic redraw off; /replay still shows the record whatever this says.
+  def resume_replay_on_startup?
+    @options.fetch(:resume_replay_on_startup, true) != false
+  end
+
   # A hand-built options hash gets the same default the config would: an
   # explicit false is the only thing that turns the standing grant off.
   def grant_workdir?

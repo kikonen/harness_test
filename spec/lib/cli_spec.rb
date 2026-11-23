@@ -253,14 +253,14 @@ end
     end
   end
 
-  describe '#session_log_path_display' do
+  describe 'StartupBanner#session_log_path_display' do
     it 'is the per-session log path relative to the workdir' do
       cli = build_cli
       cli.setup
 
       id  = cli.foreground_harness.session.session_id
 
-      expect(cli.send(:session_log_path_display))
+      expect(cli.send(:startup_banner).send(:session_log_path_display))
         .to eq(File.join('.harness', 'sessions', id, 'harness.log'))
     end
   end
@@ -603,6 +603,53 @@ end
       expect(ui).to receive(:puts).at_least(:once)
 
       cli.run
+    end
+  end
+
+  # issue #553: the replay block is printed BEFORE the startup banner, so the
+  # run's own facts stay one contiguous block instead of wrapping the replay.
+  # resume.replay_on_startup (default on) gates the automatic redraw; /replay
+  # still works when it is off.
+  describe 'startup replay ordering (issue #553)' do
+    # A saved session carrying a non-empty replay tail, so a resumed run has a
+    # block to redraw. The tail content is arbitrary - the ordering is what is tested.
+    def seed_saved_session_with_tail(id)
+      dir = File.join(workdir, '.harness', 'sessions', id)
+      FileUtils.mkdir_p(dir)
+      File.write(File.join(dir, 'session.json'), JSON.generate({
+        session_id: id, created_at: Time.now.iso8601,
+        system_prompt: 'saved prompt',
+        messages: [{ role: 'system', content: 'saved prompt' },
+                   { role: 'user', content: 'earlier' }],
+        foreground_job: 0,
+        replay_tail: [{ type: 'user', origin: 'user', content: 'do the thing' }]
+      }))
+      id
+    end
+
+    it 'draws the replay block before the banner facts on a resumed run' do
+      saved = seed_saved_session_with_tail('f7931611-30b4-4b4b-aec6-f7083ef2942a')
+      cli = described_class.new(options.merge(resume: saved), ui)
+      stub_prompt_reader
+
+      expect(ui).to receive(:puts).with(/^Resumed output/).ordered
+      expect(ui).to receive(:puts).with(/^Harness ready/).ordered
+      expect(ui).to receive(:puts).at_least(:once)
+
+      cli.run
+    end
+
+    it 'skips the replay block when resume.replay_on_startup is false' do
+      saved = seed_saved_session_with_tail('f7931611-30b4-4b4b-aec6-f7083ef2942a')
+      cli = described_class.new(
+        options.merge(resume: saved, resume_replay_on_startup: false), ui)
+      stub_prompt_reader
+      allow(ui).to receive(:puts)
+
+      cli.run
+
+      expect(ui).not_to have_received(:puts).with(/^Resumed output/)
+      expect(ui).to have_received(:puts).with(/^Harness ready/)
     end
   end
 

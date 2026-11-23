@@ -70,8 +70,13 @@ compact:
 # line is one entry); animated spinner lines are never replayed. Set 0 to turn
 # the redraw off. Config-only (no CLI flag): a display preference of the
 # project, not a per-run toggle. Omit the key for the built-in default (30).
+# replay_on_startup (issue #553) gates WHETHER the redraw happens at all on a
+# resumed run: default true (the tail is shown, before the startup banner so the
+# run's own facts stay one contiguous block). Set false to skip it at startup -
+# the record is still saved and /replay still shows it on demand. Config-only.
 # resume:
 #   replay_entries: 30
+#   replay_on_startup: true
 
 # Two OutputBuffer tail limits per task (issue #286). tail_memory bounds how much
 # of a task's tail lives in RAM: the saved window is always inside what memory
