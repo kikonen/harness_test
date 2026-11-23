@@ -10,7 +10,7 @@ ran, no step line appeared, nothing reached the console - the turn just ended.
 
 Claims below marked **(measured)** were run against this repo's tool set /
 parser; the harness-side behaviour is asserted by the `#call_llm text-shaped
-tool call (issue #461)` examples in `spec/lib/harness_spec.rb`.
+tool call (issue #461)` examples in `spec/lib/harness/harness_call_llm_spec.rb`.
 
 ---
 

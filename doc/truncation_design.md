@@ -6,7 +6,7 @@ error as "the model wrote a bad call".
 
 Claims below marked **(ref)** come from the Ollama / OpenAI API reference; they
 were not measured against our local server. The harness-side behavior is
-asserted by `spec/lib/harness_spec.rb`, the plumbing by the `spec/lib/llm/`
+asserted by `spec/lib/harness/harness_call_llm_spec.rb`, the plumbing by the `spec/lib/llm/`
 specs.
 
 ---

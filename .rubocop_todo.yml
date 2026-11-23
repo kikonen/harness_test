@@ -441,7 +441,8 @@ Lint/AmbiguousRange:
 # AllowedMethods: enums
 Lint/ConstantDefinitionInBlock:
   Exclude:
-    - 'spec/lib/harness_spec.rb'
+    - 'spec/lib/harness/harness_call_llm_spec.rb'
+    - 'spec/lib/harness/harness_turn_support_spec.rb'
     - 'spec/lib/llm/base_backend_spec.rb'
     - 'spec/lib/safety_check_spec.rb'
     - 'spec/lib/session_file_cache_spec.rb'
@@ -459,7 +460,6 @@ Lint/DuplicateBranch:
 # Configuration parameters: AllowComments, AllowEmptyLambdas.
 Lint/EmptyBlock:
   Exclude:
-    - 'spec/lib/harness_spec.rb'
     - 'spec/lib/session_manager_spec.rb'
     - 'spec/lib/task_spec.rb'
     - 'spec/lib/ui/dialog_spec.rb'
@@ -505,7 +505,8 @@ Lint/UnusedBlockArgument:
 Lint/UnusedMethodArgument:
   Exclude:
     - 'lib/command_runner.rb'
-    - 'spec/lib/harness_spec.rb'
+    - 'spec/lib/harness/harness_call_llm_spec.rb'
+    - 'spec/lib/harness/harness_spec_support.rb'
 
 # Offense count: 7
 # This cop supports safe autocorrection (--autocorrect).
@@ -542,7 +543,12 @@ Naming/MethodParameterName:
     - 'lib/task.rb'
     - 'lib/ui/editor.rb'
     - 'lib/ui/spinner.rb'
-    - 'spec/lib/harness_spec.rb'
+    - 'spec/lib/harness/harness_call_llm_spec.rb'
+    - 'spec/lib/harness/harness_emit_spec.rb'
+    - 'spec/lib/harness/harness_initialize_spec.rb'
+    - 'spec/lib/harness/harness_modes_spec.rb'
+    - 'spec/lib/harness/harness_system_prompt_spec.rb'
+    - 'spec/lib/harness/harness_turn_support_spec.rb'
     - 'spec/lib/session_manager_spec.rb'
     - 'spec/lib/text_normalizer_spec.rb'
     - 'spec/lib/ui/editor_spec.rb'
