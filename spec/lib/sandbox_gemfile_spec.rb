@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'logger'
+require 'stringio'
 require 'tmpdir'
 require 'fileutils'
 require 'sandbox_gemfile'
@@ -224,6 +226,33 @@ RSpec.describe SandboxGemfile do
           .and_raise(StandardError, "bundler exploded")
 
         expect(s.lock_seeded?).to be false
+      end
+    end
+  end
+
+  describe '#setup! (the construction-time setup the harness used to inline)' do
+    # The seed outcome is logged so a seed that could NOT lock is visible at
+    # startup instead of surfacing later as a mid-run LoadError.
+    it 'seeds a fresh sandbox and logs the locked branch' do
+      Dir.mktmpdir do |dir|
+        s = sandbox_in(dir)
+        allow(s).to receive(:lock_seeded?).and_return(true)
+        log = Logger.new(StringIO.new)
+
+        expect(s.setup!(log)).to be(s)
+        expect(s.exist?).to be true
+        expect(log.instance_variable_get(:@logdev).dev.string)
+          .to include('ruby sandbox seeded and locked offline')
+      end
+    end
+
+    it 'logs nothing without a logger and still seeds' do
+      Dir.mktmpdir do |dir|
+        s = sandbox_in(dir)
+        allow(s).to receive(:lock_seeded?).and_return(true)
+
+        expect(s.setup!(nil)).to be(s)
+        expect(s.exist?).to be true
       end
     end
   end

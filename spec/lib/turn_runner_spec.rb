@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
-require_relative 'harness_spec_support'
+require_relative 'harness/harness_spec_support'
 
-RSpec.describe Harness, 'call_llm: the tool loop' do
+# The tool loop lives in TurnRunner (issue #582); the specs drive it through
+# the Harness#call_llm entry, the way session_manager does, so the entry's
+# wiring is covered too.
+RSpec.describe TurnRunner do
   include HarnessSpecSupport
 
   describe '#call_llm mid-loop failure keeps the tool trail (issue #208)' do

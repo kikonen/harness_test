@@ -24,6 +24,30 @@ class SandboxGemfile
     @workdir = workdir
   end
 
+  # Seed the starter and keep the default list as a floor, logging each outcome
+  # (nil logger logs nothing). The harness calls this once at construction
+  # because the model's file tools cannot write .harness/.
+  def setup!(logger = nil)
+    case ensure_starter!
+    when :seeded_locked
+      logger&.info "ruby sandbox seeded and locked offline"
+    when :seeded_unlocked
+      logger&.info "ruby sandbox seeded but the offline lock failed " \
+        "(a starter gem is absent on this box) - bundle install it"
+    when :seeded_unreadable
+      logger&.warn "ruby sandbox NOT seeded - the default Gemfile " \
+        "#{STARTER_TEMPLATE_FILE} is unreadable"
+    end
+    case ensure_default_gems!
+    when :resynced_locked
+      logger&.info "ruby sandbox resynced with the default gems and re-locked"
+    when :resynced_unlocked
+      logger&.info "ruby sandbox resynced with the default gems but the offline " \
+        "lock failed - bundle install it"
+    end
+    self
+  end
+
   def dir
     File.join(@workdir, DIR)
   end
