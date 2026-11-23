@@ -8,29 +8,18 @@ require_relative "session_locator"
 require_relative "param_overrides"
 require_relative "error_text"
 require_relative "harness_config"
+require_relative "compactor"
 
 # Manages all session-related logic: prompt flow, compaction, rules file,
 # model switching, and persistence (save/resume/list).
 # Extracted from Harness to keep the LLM-call logic focused.
 class SessionManager
-  DEFAULT_COMPACT_SUMMARY_WORDS = 500
-
   SESSION_FILE = SessionLocator::SESSION_FILE
 
   RULES_FILE   = "harness.md"
 
   # De-dups the pre-send and post-turn saves when the round trip is fast.
   AUTOSAVE_MIN_INTERVAL = 0.5
-
-  # Mid-turn there is no verbatim tail, so the summary carries the whole state.
-  INLOOP_SUMMARY_INSTRUCTION = "Summarize the ENTIRE conversation and tool work above " \
-    "(the work done, not the system rules you were given) as a " \
-    "hand-off for continuing an in-progress task. Include: " \
-    "(1) the original goal, (2) every step already completed with its " \
-    "concrete results (file paths, SHAs, command outputs when available), " \
-    "(3) key decisions made, (4) files modified or created and their " \
-    "current state, (5) the exact next step to take. " \
-    "Do NOT call any tools - answer with text only. "
 
   def initialize(harness, file_list)
     @harness     = harness
@@ -76,12 +65,6 @@ class SessionManager
     # Persist BEFORE sending so an in-flight prompt survives a mid-turn death.
     maybe_auto_save("pre-send")
     send_session
-  end
-
-  # True when an error message looks like the model rejected the request
-  # because the context window was exceeded (wording varies by server).
-  def context_exceeded_error?(msg)
-    msg =~ /context|num_ctx|max.*token|too many tokens|exceeds/i
   end
 
   # Resumes from the pending point the session ends on (unanswered prompt, or
@@ -143,35 +126,15 @@ class SessionManager
     end
   end
 
-  # Ask the LLM for a summary of an arbitrary message chain. The chain rides AS
-  # IS (system message included) with the live turn's own tools payload, so the
-  # request stays a prefix of the live prompt - doc/compaction_cache_design.md.
-  def generate_compact_summary(chain, instruction)
-    max_words = @harness.settings.compact_max_size
-    messages = chain + [
-      {
-        role: "user",
-        content: "#{instruction} " \
-          "Keep it under #{max_words} words. " \
-          "Do NOT include the summarization instruction itself."
-      }
-    ]
-
-    data    = @harness.client.chat(messages, tools: @harness.tools_payload)
-    message = data[:choices][0][:message]
-    calls   = Array(message[:tool_calls]).filter_map { |tc| tc.dig(:function, :name) }
-    text    = message[:content]
-    if text.nil? || text.strip.empty?
-      named = calls.join(", ")
-      raise HarnessError,
-        calls.empty? ? "LLM returned empty summary" :
-          "LLM answered the summary request with a tool call (#{named}) instead of a summary"
-    end
-    if calls.any?
-      @harness.logger.info "summary call returned tool calls (#{calls.join(', ')}) - ignored"
-    end
-
-    text.strip
+  # The fork that turns a chain into a summary lives in Compactor; it reads this
+  # harness live, so a /model switch or a rebuilt tool registry reaches the next
+  # compaction instead of being captured at startup.
+  def compactor
+    Compactor.new(
+      client: @harness.client,
+      tools_payload: @harness.tools_payload,
+      max_words: @harness.settings.compact_max_size,
+      logger: @harness.logger)
   end
 
   def compact_session
@@ -186,12 +149,6 @@ class SessionManager
 
     # The FULL chain keeps the summary call a prefix of the live prompt.
     chain = @harness.session.messages
-    end_instruction = "Summarize the entire CONVERSATION above (the work done, not the " \
-      "system rules you were given) in a concise, structured format. " \
-      "Include: (1) what was being worked on, (2) key decisions made, " \
-      "(3) files that were modified or created, (4) any pending tasks or " \
-      "unresolved issues, (5) important context needed to continue. " \
-      "Do NOT call any tools - answer with text only. "
 
     # A callable suffix re-evaluates the CURRENT chain every frame.
     Task.emit(
@@ -202,7 +159,7 @@ class SessionManager
         suffix: -> { @harness.context_indicator_live }
       })
 
-    summary_text = generate_compact_summary(chain, end_instruction)
+    summary_text = compactor.summarize(chain, Compactor::END_INSTRUCTION)
     @harness.session.compact(summary_text, recent_count: @harness.settings.compact_recent_messages)
     after = @harness.session.messages.size
     retained = [after - 3, 0].max
@@ -252,7 +209,9 @@ class SessionManager
         suffix: -> { @harness.context_indicator_live(messages) }
       })
 
-    summary_text = generate_compact_summary(messages, INLOOP_SUMMARY_INSTRUCTION)
+    # The same #503 fallback applies here: the in-loop chain is the largest chain
+    # a run ever holds, so it is the one most likely to reject its own summary call.
+    summary_text = compactor.summarize(messages, Compactor::INLOOP_INSTRUCTION)
     new_chain = [
       { role: "system", content: @harness.session.system_prompt },
       {
@@ -313,7 +272,8 @@ class SessionManager
     rescue LLMError => e
       # A context-exceeded rejection: compact and re-send once (the pending
       # prompt and any mid-loop tool trail survive). Anything else re-raises.
-      raise unless context_exceeded_error?(e.message) && @harness.session.conversation_size >= 4
+      raise unless Compactor.context_exceeded?(e.message) &&
+        @harness.session.conversation_size >= 4
 
       Task.emit(
         :compact,

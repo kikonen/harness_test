@@ -22,7 +22,7 @@ source of the tool definitions, and the three advisory callers now send it:
 | request | chain | tools |
 | --- | --- | --- |
 | live turn (`Harness#call_llm`) | `session.messages` | `tools_payload` |
-| `SessionManager#generate_compact_summary` (both compact paths) | the chain AS IS | `tools_payload` |
+| `Compactor#request_summary` (both compact paths) | the chain AS IS | `tools_payload` |
 | `SafetyCheck.run` (both callers) | `truncate_for_check(chain)` | caller's `tools:` |
 
 ## Why it was expensive before: measured, on a live server
@@ -83,7 +83,7 @@ tokens of new prefill, not a fresh system + tools bill. A 500-word summary cap
 New failure mode, handled: sending tools lets the model answer a summary request
 with a tool call instead of text. Both instructions now say "Do NOT call any
 tools - answer with text only" (the safety prompt already said it), and
-`generate_compact_summary` reports the shape it actually got: a tool-call answer
+`Compactor#request_summary` reports the shape it actually got: a tool-call answer
 with no text raises naming the tool(s) (in-loop compaction degrades to keeping
 the chain), and a text-plus-tool-calls answer keeps the text and logs the ignored
 calls. Those tool calls are never executed - the fork has no tool loop.
@@ -105,6 +105,34 @@ keeping all requests identical to each other - a separate decision about what th
 model is allowed to know, not a compaction decision, and it would free window
 space at the trigger too (`compact_reserved_tokens` exists because the summary
 call needs room).
+
+## The fork that cannot fit: #503, and why dropping is allowed to break the prefix
+
+The fork sends the FULL chain, so it is BIGGER than the request that just failed
+and can be rejected for the identical reason. That is issue **#503**, and it is
+the shape `doc/tool_output_budget_design.md` describes from the other side: an
+oversized tool result makes the live request fail, `compact_session` then
+summarizes the chain that still holds that result, and the repair dies with the
+same 400.
+
+`Compactor#summarize` (extracted from `SessionManager` for this reason) retries
+with the OLDEST conversation entries dropped, `Compactor::DROP_ROUND` at a time,
+until the request is accepted or nothing is left to drop. Message 0 is never
+dropped: it is the prefix the cache matches from and every request needs it. A
+cut walks forward off `tool` rows so no assistant `tool_calls` is orphaned -
+the same rule `Session#compact` applies to its retained window.
+
+This is the one place where the harness deliberately sends a NON-extension of the
+live prompt, and it is paid for only after the server has already refused the
+chain: the prefilled prefix the prefix rule protects no longer exists at that
+point, so a truncated retry costs nothing it had not already lost. The first
+attempt is still the chain AS IS, which is what keeps the common (fitting) case
+cache-friendly.
+
+Giving up is reported rather than looped on: a chain cannot shrink below one
+conversation message, so a single message larger than the window can never fit.
+A non-context failure (an empty summary, a tool-call answer) is NOT retried by
+dropping - dropping cannot fix it, so it re-raises.
 
 ## Measuring it
 
