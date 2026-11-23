@@ -31,7 +31,7 @@ require_relative "tools/git_show_tool"
 require_relative "tools/git_status_tool"
 require_relative "tools/git_log_tool"
 require_relative "tools/git_grep_tool"
-require_relative "tools/git_apply_tool"
+require_relative "tools/git_patch_tool"
 require_relative "tools/run_command_tool"
 require_relative "tools/web_fetch_tool"
 require_relative "tools/tools_list_tool"
@@ -122,7 +122,7 @@ class ToolRegistryBuilder
     registry.register(Tools::GitStatusTool.new(@file_list))
     registry.register(Tools::GitLogTool.new(@file_list))
     registry.register(Tools::GitGrepTool.new(@file_list))
-    registry.register(Tools::GitApplyTool.new(@file_list, @file_cache))
+    registry.register(Tools::GitPatchTool.new(@file_list, @file_cache))
     registry.register(
       Tools::RunCommandTool.new(
         @file_list,

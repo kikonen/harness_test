@@ -297,7 +297,11 @@ front and logged path by path; needs one DELETE grant - so `rm -rf` through
 `run.command` is never needed)
 
 `git.grep` (search commit diffs for when code was added/removed),
-`git.apply` (apply a unified diff; `dry_run` validates it without applying)
+`git.patch` (apply a diff that came **from git** - `git.diff`, `git.show`, a
+`.patch`/`.bundle` - across multiple files in one call; `dry_run` validates it
+without applying, `three_way` retries a failed apply as a 3-way merge). For
+**editing** a file use `file.patch`: it locates hunks by matching context, so it
+tolerates an imprecise diff, while `git.patch` requires the context to be exact.
 
 **Shell** - `run.command` (full command shown, explicit Allow required
 unless the prefix is already allowlisted or the posture you picked accepts it
