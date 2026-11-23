@@ -115,6 +115,22 @@ RSpec.describe UI::Renderer do
         "#{'-' * 35} step 12 #{'-' * 36}"
       )
     end
+
+    # The harness emits {number:, calls:}; the renderer owns the "[N]" wording so
+    # the rule says how many tool calls the step ran.
+    it 'fuses the tool-call count from a {number:, calls:} payload' do
+      expect(renderer.line(type: :step_label, content: { number: 8, calls: 2 })).to eq(
+        "#{'-' * 34} step 8 [2] #{'-' * 34}"
+      )
+    end
+
+    it 'is exactly RULE_WIDTH wide with a call count fused in' do
+      widths = [{ number: 1, calls: 1 }, { number: 100, calls: 12 }].map do |data|
+        renderer.line(type: :step_label, content: data).length
+      end
+
+      expect(widths).to all(eq(described_class::RULE_WIDTH))
+    end
   end
 
   # The final answer gets the SAME boundary shape as an iteration start, which

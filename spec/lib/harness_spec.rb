@@ -696,12 +696,16 @@ RSpec.describe Harness do
 
     it 'emits the step number, a digest of the reasoning and the tools called' do
       harness.send(:emit_step, message)
-      lines = drained_lines
+      events = drain_outbox(task)
+      lines = events.map { |m| m[:content] }
 
       # Content is the ROLE the emitter stated; the pattern ('step ',
       # 'plan:  ') belongs to UI::Renderer, so it is asserted here on the
       # rendered line (spec/lib/ui/renderer_spec.rb covers the labels).
-      expect(lines).to include(1)
+      step = events.find { |m| m[:type] == :step_label }[:content]
+      expect(step[:number]).to eq(1)
+      # The count is the number of tool calls in this step.
+      expect(step[:calls]).to eq(2)
       expect(lines).to include('First I will inspect the spinner, then run the specs.')
       expect(lines).to include('file.read, run.command')
     end
@@ -712,7 +716,7 @@ RSpec.describe Harness do
     it 'numbers steps monotonically across repeated calls (issue #577)' do
       numbers = 3.times.map do
         harness.send(:emit_step, message)
-        drain_outbox(task).find { |m| m[:type] == :step_label }[:content]
+        drain_outbox(task).find { |m| m[:type] == :step_label }[:content][:number]
       end
 
       expect(numbers).to eq([1, 2, 3])
