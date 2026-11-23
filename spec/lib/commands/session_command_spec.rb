@@ -8,7 +8,11 @@ require 'commands/session_command'
 RSpec.describe Commands::SessionCommand do
   def run_command(summary)
     session = Object.new
-    session.define_singleton_method(:summary) { summary }
+    session.define_singleton_method(:summary) do |process_id: nil|
+      @process_id = process_id
+      summary
+    end
+    session.define_singleton_method(:process_id_seen) { @process_id }
     harness = Object.new
     harness.define_singleton_method(:session) { session }
     harness.define_singleton_method(:markdown_max_width) { nil }
@@ -17,7 +21,7 @@ RSpec.describe Commands::SessionCommand do
     registry.add_job(kind: :main, harness:)
     described_class.new(registry:, file_list: nil,
                         ui: UI::Console.new(stdout: stdout)).handle('')
-    stdout.string
+    [stdout.string, session]
   end
   # Session#summary now returns structured rows, so /session prints them as a
   # markdown table (raw markdown here - this console has no palette). A table is
@@ -27,7 +31,7 @@ RSpec.describe Commands::SessionCommand do
   end
 
   it 'prints the summary as a field/value table' do
-    out = run_command([{ field: 'Session id', value: 'abc12345' },
+    out, = run_command([{ field: 'Session id', value: 'abc12345' },
                        { field: 'Messages', value: '12' }])
     lines = out.lines.map(&:chomp)
 
@@ -39,9 +43,18 @@ RSpec.describe Commands::SessionCommand do
   # The summary rows are the data method's, so adding a row here would make
   # /session disagree with what /save reports.
   it 'adds nothing around the summary table' do
-    out = run_command([{ field: 'x', value: 'y' }])
+    out, = run_command([{ field: 'x', value: 'y' }])
     data_rows = out.lines.map(&:chomp)[2..].map { |l| split_row(l) }
     expect(data_rows).to eq([%w[x y]])
+  end
+
+  # issue #527: the pid is a run fact the command supplies, because Session is the
+  # per-LLM conversation and must not know the OS process.
+  it 'supplies the process id with a kill hint (issue #527)' do
+    _, session = run_command([{ field: 'x', value: 'y' }])
+    hint = Gem.win_platform? ? "taskkill /PID #{Process.pid} /T /F" : "kill #{Process.pid}"
+
+    expect(session.process_id_seen).to eq("#{Process.pid} (#{hint})")
   end
 
   it 'declares its HELP entry in the session group' do

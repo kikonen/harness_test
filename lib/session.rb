@@ -236,7 +236,10 @@ class Session
     @messages.size - 1
   end
 
-  def summary
+  # process_id: a RUN fact the caller supplies (#527). Session is the per-LLM
+  # conversation and has no business knowing the OS process, so the value is
+  # passed in and only displayed here; nil (the default) shows no row.
+  def summary(process_id: nil)
     counts = Hash.new(0)
     @messages.each { |m| counts[m[:role]] += 1 }
 
@@ -250,6 +253,7 @@ class Session
       field: "Pending prompt",
       value: pending? ? "yes (last request failed - use /retry)" : "no"
     }
+    items << { field: "Process id", value: process_id.to_s } if process_id
     if @last_stats
       usage = @last_stats[:usage]
       parts = ["#{@last_stats[:elapsed_seconds]}s, #{@last_stats[:iterations]} iteration(s)"]

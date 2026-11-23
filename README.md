@@ -256,7 +256,7 @@ racc -o lib/shell_parser.rb lib/shell_parser.y
 | `/grant` | Show all current grants (file/dir access + both command allowlists + web.fetch hosts) |
 | `/clear [access\|commands\|shell\|hosts\|all]` | Revoke grants: bare = file/dir access; commands / shell / hosts clear the command and host allowlists; all clears every list |
 | `/retry` | Re-send the chain after a failed request; tool work already done is kept, so the turn resumes from there |
-| `/session` | Show a summary of the current session |
+| `/session` | Show a summary of the current session (id, counts, prompts, pending prompt, last stats, process id + kill hint) |
 | `/session-clear` | Drop all conversation messages |
 | `/compact` | Summarize the conversation to free context |
 | `/save` | Save the session (conversation + access list) now |
