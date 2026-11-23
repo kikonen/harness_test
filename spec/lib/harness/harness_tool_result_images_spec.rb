@@ -6,7 +6,7 @@ require_relative 'harness_spec_support'
 # MCP server that returned image blocks) must reach the chain as text + a
 # stored file + (only for a vision profile, within budget) an inline payload,
 # and the inline payload must never survive into the committed session.
-RSpec.describe Harness, 'tool-result images (issue #449)' do
+RSpec.describe ToolCallRunner, 'tool-result images (issue #449)' do
   include HarnessSpecSupport
 
   def build(options = {})
@@ -52,8 +52,8 @@ RSpec.describe Harness, 'tool-result images (issue #449)' do
 
   it 'a vision profile gets an inline payload beside the text' do
     h = build_harness_vision
-    msg = h.tool_result_message(tool_call, ToolResult.new(text: 'shot', images: [image]),
-                                h.image_delivery)
+    msg = h.tool_call_runner.result_message(tool_call, ToolResult.new(text: 'shot', images: [image]),
+                                            h.image_delivery, h.tool_call_ports)
 
     expect(msg[:content]).to include('shot')
     expect(msg[:content]).to include('attached to this result')
@@ -62,8 +62,8 @@ RSpec.describe Harness, 'tool-result images (issue #449)' do
 
   it 'a text profile gets the stored path in text and NO inline payload' do
     h = build
-    msg = h.tool_result_message(tool_call, ToolResult.new(text: 'shot', images: [image]),
-                                h.image_delivery)
+    msg = h.tool_call_runner.result_message(tool_call, ToolResult.new(text: 'shot', images: [image]),
+                                            h.image_delivery, h.tool_call_ports)
 
     expect(msg).not_to have_key(:images)
     expect(msg[:content]).to include("stored as .harness/content/#{h.session.session_id}/blender_shot_1.png")
@@ -72,10 +72,10 @@ RSpec.describe Harness, 'tool-result images (issue #449)' do
 
   it 'strip_image_payloads drops the base64 but keeps the text' do
     h = build_harness_vision
-    msg = h.tool_result_message(tool_call, ToolResult.new(text: 'shot', images: [image]),
-                                h.image_delivery)
+    msg = h.tool_call_runner.result_message(tool_call, ToolResult.new(text: 'shot', images: [image]),
+                                            h.image_delivery, h.tool_call_ports)
     messages = [msg]
-    h.strip_image_payloads(messages)
+    h.tool_call_runner.strip_image_payloads(messages)
 
     expect(messages.first).not_to have_key(:images)
     expect(messages.first[:content]).to include('shot')

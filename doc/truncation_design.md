@@ -69,7 +69,7 @@ Omitting the key when the server sent nothing is deliberate (the same rule as
 
 ## What Harness does with it
 
-1. **`report_finish_reason(data, iteration)`**, called once per request in
+1. **`truncated_by_finish_reason?(data, iteration, ports)`**, called once per request in
    `call_llm`. A reason outside `FINISH_EXPECTED` gets `logger.warn` (so it is
    in the session's `harness.log`) AND a `Task.emit(:warn, ...)` line (so it is
    on the console - `:warn` is the existing "the turn survived, but" role in

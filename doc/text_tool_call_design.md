@@ -24,7 +24,7 @@ loop already consumes, and the existing loop then runs it through
 `execute_tool_call` (so FileList grants and the CommandRunner consent floor are
 unchanged). Harness holds one `TextToolCallParser` per run (built over its tool
 registry) and `call_llm` calls it; only the *reporting* of an unrecovered call
-stays in Harness (`report_unresolved_text_tool_call`).
+stays with the tool-call runner (`warn_unresolved_text_tool_call?`).
 
 Only an OPEN marker gates the attempt: the safety is name resolution, not the
 closing tags, because a truncated call (issue #332) has no closing tags yet is
@@ -52,7 +52,7 @@ re-issue it as a structured call (or answer in plain text), a `text_call` status
 line says so, and the loop `next`s for one retry.
 
 The retry is bounded to **one** per turn (`text_call_retried`). A second
-occurrence falls through to `report_unresolved_text_tool_call` (warn on console
+occurrence falls through to `warn_unresolved_text_tool_call?` (warn on console
 + log, then commit the turn). This bound is what keeps prose that merely
 **quotes** a call from spinning the loop: quoting prose cannot re-issue a real
 call, so its second occurrence ends the turn with the honest warn. Prose

@@ -60,7 +60,7 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
 
       h.call_llm
 
-      expect(h.stream_preview_line).to be_nil
+      expect(h.request_log.preview&.tail_line).to be_nil
     end
 
     # The delta callback is held by the TRANSPORT, which can still have a delta
@@ -77,13 +77,13 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
       h = scripted(build_harness(stream: true), client)
 
       h.call_llm
-      expect(h.stream_preview_line).to be_nil
+      expect(h.request_log.preview&.tail_line).to be_nil
       expect(captured).to respond_to(:call)
 
       expect { captured.call({ content: 'late delta' }) }.not_to raise_error
       # The late delta published into ITS OWN preview object: the reader sees
       # nothing, so a finished request's tail cannot come back.
-      expect(h.stream_preview_line).to be_nil
+      expect(h.request_log.preview&.tail_line).to be_nil
     end
 
     # The same clearing on the FAILURE path: a request that died mid-stream
@@ -101,7 +101,7 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
       h = scripted(build_harness(stream: true), client)
 
       expect { h.call_llm }.to raise_error(LLMError, 'stream lost')
-      expect(h.stream_preview_line).to be_nil
+      expect(h.request_log.preview&.tail_line).to be_nil
     end
 
     # The suffix callable the spinner evaluates every frame is the harness's,
@@ -305,7 +305,7 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
 
       harness = build_harness(session_id: id, resume_data: data)
 
-      expect(harness.last_rate_segment).to eq('27.8 tok/s (last)')
+      expect(harness.turn_stats.rate_segment).to eq('27.8 tok/s (last)')
     end
 
     # A rate was measured against ONE server. /model points the run at another,
@@ -504,10 +504,11 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
     # in sync.
     it 'records a memory write in this session\'s harness.log' do
       h = build_harness
-      h.send(:execute_tool_call, {
-        id: 'c1',
-        function: { name: 'memory.add', arguments: JSON.generate(name: 'logged-note', text: 'a fact') }
-      })
+      h.tool_call_runner.execute(
+        { id: 'c1',
+          function: { name: 'memory.add',
+                      arguments: JSON.generate(name: 'logged-note', text: 'a fact') } },
+        h.tool_call_ports)
 
       log = File.read(h.session_log_path)
       expect(log).to include("tool memory.add → ok: saved memory 'logged-note'")
@@ -568,10 +569,11 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
     # tool verdict: a network call that never happened still leaves a trace.
     it 'records a refused fetch in this session\'s harness.log' do
       h = build_harness
-      h.send(:execute_tool_call, {
-        id: 'c1',
-        function: { name: 'web.fetch', arguments: JSON.generate(url: 'http://127.0.0.1:9/x') }
-      })
+      h.tool_call_runner.execute(
+        { id: 'c1',
+          function: { name: 'web.fetch',
+                      arguments: JSON.generate(url: 'http://127.0.0.1:9/x') } },
+        h.tool_call_ports)
 
       log = File.read(h.session_log_path)
       expect(log).to include("tool web.fetch → error: 127.0.0.1 is a blocked address")
@@ -678,10 +680,11 @@ RSpec.describe Harness, 'turn support: waits, stores, web.fetch, MCP wiring' do
       allow(Mcp::ServerConnection).to receive(:new).and_return(conn)
       h = build_harness(mcp_servers: [server_entry])
 
-      result = h.send(:execute_tool_call, {
-        id: 'c1',
-        function: { name: 'fs.echo_tool', arguments: JSON.generate(message: 'hi') }
-      })
+      result = h.tool_call_runner.execute(
+        { id: 'c1',
+          function: { name: 'fs.echo_tool', arguments: JSON.generate(message: 'hi') } },
+        h.tool_call_ports
+      )
       expect(result).to eq('echo: hi')
     end
     # Standing constraint: MCP tools reach the model through tools_payload (the
