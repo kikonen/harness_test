@@ -25,18 +25,20 @@ class MainLoop
   # sink, the command dispatcher, the shared input path, and the foreground job's
   # parked worker. The modeline is a callable (the idle prompt's own renderer) so
   # the loop does not know what an idle line looks like.
-  def initialize(registry:, ui:, commands:, input_path:, worker:, modeline: nil)
+  def initialize(registry:, ui:, commands:, input_path:, worker:,
+                 modeline: nil, logger: nil)
     @registry    = registry
     @ui          = ui
     @commands    = commands
     @input_path  = input_path
     @worker      = worker
     @modeline    = modeline
+    @logger      = logger
     @spinner     = nil
     @draft       = nil
   end
 
-  attr_reader :registry, :ui, :commands, :input_path, :worker, :modeline
+  attr_reader :registry, :ui, :commands, :input_path, :worker, :modeline, :logger
 
   # The job whose events this loop renders: the worker's job, which is the
   # foreground job. A /jobs switch repoints the worker (repoint_worker), so the
@@ -52,9 +54,9 @@ class MainLoop
   # Repoint the loop at another job's parked worker (a /jobs foreground switch).
   # The old worker is stopped; the new one is built if none lives yet.
   def repoint_worker(job)
-    return if worker.job.equal?(job)
+    return if worker&.job.equal?(job)
 
-    worker&.stop
+    worker.stop if worker
     @worker = registry.worker_for(job, ui:, input_path:)
   end
 
@@ -73,9 +75,13 @@ class MainLoop
   end
 
   # The run loop (main thread). Traps SIGINT for the whole run so an interrupt
-  # targets the loop (which force-stops the worker) and re-raises for the CLI's
-  # cleanup. Returns when the user quits (Ctrl-D at the idle prompt) or a command
-  # ends the run.
+  # targets the loop. Ctrl+C during a LIVE turn is a TURN abort, not a run exit
+  # (the master shape: the drain loop stopped the worker and the idle loop
+  # survived): the worker is stopped and the run re-prompts, replacing the
+  # stopped worker because the next turn needs a parked one. Ctrl+C AT the idle
+  # read (no live turn) exits the run and re-raises for the CLI's cleanup.
+  # Returns when the user quits (Ctrl-D at the idle prompt) or a command ends
+  # the run.
   def run
     old_trap  = trap("INT") { raise Interrupt }
     raw_stdin = hold_raw_stdin
@@ -86,11 +92,20 @@ class MainLoop
         break if text.nil?
         break if commands.exiting?
 
-        if prompt_submit?(text)
-          registry.record_user_prompt(text)
-          run_turn { |t| commands.run_prompt(t, text) }
-        else
-          commands.handle(text)
+        begin
+          if prompt_submit?(text)
+            registry.record_user_prompt(text)
+            run_turn { |t| commands.run_prompt(t, text) }
+          else
+            commands.handle(text)
+          end
+        rescue Interrupt
+          worker.stop
+          ui.puts "\n  [interrupted]"
+          logger&.info("turn interrupted (Ctrl+C)")
+          # NOT repoint_worker: it early-returns for the same job and keeps the
+          # stopped worker. The next turn needs a live parked one.
+          @worker = registry.worker_for(shown_job, ui:, input_path:)
         end
         break if commands.exiting?
 
@@ -99,6 +114,8 @@ class MainLoop
         ui.puts
       end
     rescue Interrupt
+      # Ctrl+C AT the idle read: treat as a normal exit so history and the
+      # session save.
       worker&.stop
       raise
     ensure

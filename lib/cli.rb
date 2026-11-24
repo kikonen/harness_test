@@ -218,7 +218,8 @@ class CLI
       @commands.main_loop = MainLoop.new(
         registry: @registry, ui: @ui, commands: @commands,
         input_path:, worker:,
-        modeline: -> { render_modeline })
+        modeline: -> { render_modeline },
+        logger: @harness_factory.logger)
       @main_loop = @commands.main_loop
       @main_loop.run
     rescue Interrupt

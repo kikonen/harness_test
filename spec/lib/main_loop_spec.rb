@@ -697,4 +697,65 @@ RSpec.describe MainLoop do
       expect(loop_.ui.stdout.string).to include('done-side')
     end
   end
+
+  # Ctrl+C semantics (the increment-3 regression the owner hit): an interrupt
+  # during a LIVE turn aborts the TURN and the run re-prompts; an interrupt AT
+  # the idle read is the quit gesture (like Ctrl-D) and re-raises for the CLI.
+  describe 'MainLoop#run interrupt semantics (turn abort vs run exit)' do
+    def interrupt_loop(mode)
+      registry = JobRegistry.new
+      job = registry.add_job(kind: :main)
+      ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
+      worker = Task.new(registry:, job:)
+      worker.ui = ui
+      worker.prepare(harness: nil, ui:)
+      worker.start
+      commands = Object.new
+      def commands.exiting? = false
+      def commands.report_turn_error(_job, _error); end
+      def commands.handle(_text); end
+      input_path = InputPath.new(ui:)
+      reads = 0
+      allow(input_path).to receive(:read) do
+        reads += 1
+        if mode == :at_read
+          raise Interrupt # the idle read is where the quit gesture lives
+        end
+
+        # The third read returns EOF (the Ctrl-D quit) after the two aborted turns.
+        next UI::Editor::EDITOR_RESULT.new(nil, :eof) if reads > 2
+
+        UI::Editor::EDITOR_RESULT.new('go', :submitted)
+      end
+      loop_ = described_class.new(registry:, ui:, commands:, input_path:,
+                                  worker:, modeline: nil)
+      allow(loop_).to receive(:run_turn) { raise Interrupt }
+      [loop_, worker, registry, input_path]
+    end
+
+    it 'Ctrl+C during a live turn aborts the turn and keeps the run looping' do
+      loop_, worker, _registry, input_path = interrupt_loop(:during_turn)
+
+      expect { loop_.run }.not_to raise_error
+
+      # The replacement worker's own thread ends on the run's shutdown STOP;
+      # alive? is false once #run's ensure has joined it. What the loop must
+      # guarantee mid-run is that the NEXT turn gets a live worker, which the
+      # two aborted turns (read #1, read #2) prove.
+      expect(worker.alive?).to be false # the interrupted worker was stopped
+      expect(loop_.worker).not_to be_nil
+      expect(loop_.worker).not_to equal(worker)
+      expect(loop_.ui.stdout.string).to include('[interrupted]')
+      # read #1 -> turn #1 aborted -> read #2 -> turn #2 aborted -> read #3 Ctrl-D quits.
+      expect(input_path).to have_received(:read).exactly(3).times
+      loop_.worker.stop
+    end
+
+    it 'Ctrl+C at the idle read is a quit: it re-raises for the CLI cleanup' do
+      loop_, worker, _registry, _input_path = interrupt_loop(:at_read)
+
+      expect { loop_.run }.to raise_error(Interrupt)
+      expect(worker.alive?).to be false
+    end
+  end
 end

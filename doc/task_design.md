@@ -155,8 +155,11 @@ I/O call.
 ## Ctrl+C
 
 While `MainLoop#run` runs, SIGINT is trapped so an interrupt targets the loop,
-not a random thread. The worker is force-stopped (no background work survives
-the turn) and the Interrupt is re-raised for the CLI's cleanup path.
+not a random thread. Ctrl+C during a LIVE turn is a TURN abort: the worker is
+force-stopped (no background work survives the turn), the loop prints
+`[interrupted]`, and a fresh parked worker is built for the shown job so the
+run re-prompts instead of exiting. Ctrl+C AT the idle read (no live turn) is
+the quit gesture: it re-raises for the CLI's cleanup path, like Ctrl-D.
 
 `Task#stop` answers what the turn OWES before stopping it. STOP is not an answer,
 so a blocked requester that got STOP instead of a value raises "task was stopped
