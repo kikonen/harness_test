@@ -42,6 +42,25 @@ Main thread -> Task thread: task.respond(value)                  [reply channel]
 Main thread (drain loop):   poll outbox, dispatch by type
 ```
 
+## The parked worker (issue #286 increment 2)
+
+A worker is PARKED, not per-turn: `#start` spawns ONE thread per job that takes a
+`WORK` item, runs it as a turn (`service_turn`), and waits for the next. A turn ends
+with a `:done` event; the THREAD ends only on a `STOP`. `JobRegistry#await_turn`
+submits a turn's block and awaits its `:done` while the caller's own loop drains the
+queue - this is what removes `TaskRunner#run_on_task`'s nested drain loop.
+
+Two queues, one reader each: the job **inbox** is the drain loop's (steering notes
+land there and stay there), and the worker's own **`@await_work`** is the worker's.
+`Job#deliver` routes to `@await_work` while a parked worker lives (`job.worker` names
+it), else to the inbox. `submit_work` delivers a `WORK` item through the job, so a
+caller never touches the thread.
+
+`Task.run` is the per-turn form: it starts the worker, drains it, and stops it on
+every return - a worker left parked would read this job's deliveries forever.
+`MainLoop#run` never calls `#start` (its owner does); a second `#start` would spawn a
+second worker and run the block twice.
+
 ## A task error: one line out, the frames into harness.log
 
 A task thread owns no console (single-thread I/O rule), so an exception raised
@@ -152,9 +171,10 @@ while waiting for response". An interrupted turn therefore delivers
   job from the owed set so the same answer is not also queued into its inbox.
 - A request owned by ANOTHER awaiting job blocks on that job's inbox; `stop`
   delivers the interrupted answer via `Job#respond` (the single answer primitive).
-- STOP itself only lands in `@inbox` when neither already answered: this task had
-  no live reply channel AND no owed answer already hit that inbox (`@inbox` IS
-  the foreground job's inbox).
+- STOP lands on the worker's own queue (`@await_work`), never the job inbox: the
+  parked worker pops `@await_work`, and `@await_work << STOP` unblocks a pending
+  pop and ends the worker loop. The job inbox stays the drain loop's reader-side
+  queue, so a steering note resident there is never mistaken for a wake-up.
 
 The join grace is short (`DEFAULT_STOP_JOIN_TIMEOUT`, 0.5s): a task thread blocked
 in a long call (the LLM read) never reads the STOP, so the old 5s join was why
@@ -173,8 +193,9 @@ the real answer leaks to the next request.
 The fix: a task issues at most one request at a time (it is single-threaded), so
 `#request` opens a private `@pending_reply` queue and blocks on THAT. Only
 `#respond` and `#stop` ever write it, so a note (which stays in `@inbox`) can
-never be mistaken for the answer. `@inbox` keeps carrying steering notes and the
-STOP-for-a-task-with-no-live-request. Multiple tasks asking the user a question
+never be mistaken for the answer. `@inbox` keeps carrying steering notes (the
+drain loop reads them); a parked worker's deliveries arrive on its own
+`@await_work` via `Job#deliver`. Multiple tasks asking the user a question
 do not conflict: each has its own reply channel. (Async answers from sub-agent
 jobs are a separate future concern; on master `requested_by` is never set, so no
 inbox value is legitimately delivered to a live `#request`.)

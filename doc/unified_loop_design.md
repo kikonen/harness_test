@@ -146,8 +146,13 @@ The lifecycle question is ANSWERED: an ALWAYS-RUNNING worker parked on its job
 inbox, not a thread started per turn. `MainLoop` is to REPLACE `CLI#run` - a run
 must not have two mains. Order:
 
-2. Turn = inbox event. The foreground worker parks on its inbox; a prompt delivers
-   a WORK item; `TaskRunner#run_on_task` reduced to deliver + await, then deleted.
+2. SHIPPED (mechanism). A worker parks on its own `@await_work` queue (NOT the job
+   inbox - the drain loop is the inbox's reader, so a steering note stays there);
+   `Job#deliver` routes a delivery to the live worker's `@await_work` (via
+   `job.worker`), else to the inbox. `JobRegistry#await_turn` delivers a WORK item
+   and awaits its `:done` while the caller drains the queue; `worker_for` parks a
+   worker. `TaskRunner#run_on_task` still uses the per-turn `registry.run` until
+   increment 3 makes the CLI loop the caller (then it reduces to deliver + await).
 3. `MainLoop` replaces `CLI#run`: the idle prompt read moves INSIDE the loop
    (`PromptReader` folds in), Ctrl-D exits the loop, commands dispatch from it.
 4. Live `/compact` and `/retry` as control events drained beside the note in

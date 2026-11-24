@@ -12,6 +12,7 @@ require_relative "ui/editor"
 require_relative "main_loop"
 require_relative "ui/spinner"
 require_relative "error_text"
+require_relative "harness_error"
 
 class Task
   # Default spinner message; a :spinner_detail event may override it (and its
@@ -22,10 +23,19 @@ class Task
   # #request so the task thread can exit cleanly.
   STOP = Object.new.freeze
 
+  # Inbox item naming one turn's work: a parked worker takes it, runs the block as
+  # a turn, and parks again. A turn is a VALUE the registry hands the job, not a
+  # thread a caller spawns.
+  WORK = :__work__
+
   DEFAULT_POLL_TIMEOUT = 0.1
 
   # Grace #stop gives the task thread before killing it.
   DEFAULT_STOP_JOIN_TIMEOUT = 0.5
+
+  # #await_turn's guard on one turn ending. A turn is an LLM tool loop, so this is
+  # a hang guard, not a normal wait.
+  DEFAULT_TURN_TIMEOUT = 300.0
 
   # Raised by the drain loop when the note editor saw EOF (Ctrl-D inside it
   # while editing a mid-turn note): aborts the turn like Ctrl+C.
@@ -35,6 +45,8 @@ class Task
   CONTROL_EVENTS = %i[error_ctrl __request__].freeze
 
   attr_reader :thread, :buffer, :ui, :renderer, :job, :registry, :input_path
+  # The worker's private queue (WORK items and STOP only); see #start.
+  attr_reader :await_work
 
   # Set by #run from the harness's configured palette; the constructor's own
   # renderer colors nothing, which is what a Task without a harness needs.
@@ -43,15 +55,18 @@ class Task
   attr_accessor :note_editor
   attr_accessor :harness
 
-  # A task built for a job reads the registry's ONE queue, and its inbox IS the
-  # job's inbox (the registry routes answers to it).
+  # A worker built with no block parks until #submit_work hands it one; a worker
+  # built WITH a block runs that turn first and then parks (the per-turn form
+  # Task.run uses).
+  attr_accessor :block
+
+  # A task built for a job reads the registry's ONE queue. The job's inbox is the
+  # drain loop's reader-side queue; the worker's deliveries arrive on @await_work.
   def initialize(registry:, job:, input_path: nil, &block)
     @block   = block
-    # main -> task (the job's inbox), where the registry routes steering notes
-    # (and STOP for a task servicing no live request). #request answers come back
-    # on the SEPARATE @pending_reply, so a note can never be mistaken for a
-    # dialog answer.
-    @inbox         = job.inbox
+    # #request answers come back on the SEPARATE @pending_reply, so a steering
+    # note (which the registry routes into the job's inbox) can never be mistaken
+    # for a dialog answer.
     @pending_reply = nil            # live request's reply channel (one at a time)
     @registry = registry
     @job      = job
@@ -69,6 +84,10 @@ class Task
     @input_path   = input_path
     @started_at   = nil            # turn clock, set by #start
     @harness      = nil
+    # The worker's own queue (WORK items and STOP only). #start parks the worker
+    # on it; Job#deliver routes to it while a worker is live. It is separate from
+    # the job inbox so a steering note can never be mistaken for work.
+    @await_work   = Thread::Queue.new
   end
 
   attr_writer :ui
@@ -88,29 +107,84 @@ class Task
 
   # -- Lifecycle ---------------------------------------------------------------
 
-  # Spawn the task thread and run the block. The task reference is published on
-  # Thread.current so nested code finds it via `Task.current`. No buffer
-  # reference is exposed to task code - the buffer is runner-side only.
+  # Spawn this job's worker thread. The task reference is published on
+  # Thread.current so nested code finds it via `Task.current`. No buffer reference
+  # is exposed to task code - the buffer is runner-side only.
+  #
+  # The worker is PARKED, not per-turn: it takes a WORK item from its own
+  # @await_work, runs that turn, and waits for the next. A turn ends with a :done
+  # event (the turn's end); the THREAD ends only on a STOP - what an interrupt or
+  # the run's shutdown sends. A worker built with a block runs that turn first, so
+  # the per-turn form (Task.run) is the same body with one item already in hand.
   def start
-    @started_at = Time.now
+    raise HarnessError, "task for job #{@job.id} already has a worker" if @thread&.alive?
+
+    # A worker built WITH a block has its turn in hand NOW, so the turn clock
+    # starts here (synchronously) - the caller may read elapsed_label before the
+    # worker thread reaches service_turn. A parked worker starts its clock in
+    # service_turn, per turn.
+    @started_at = Time.now if @block
+    @job.worker = self
     @thread = Thread.new do
       Thread.current[:harness_task] = self
       Thread.current.name = "job-#{@job.id}"
-      begin
-        value = @block.call(self)
-      rescue => e
-        # The event goes FIRST: a logger that cannot write must not swallow the
-        # error the user is owed.
-        push_event(type: :error_ctrl, content: ErrorText.label(e))
-        record_task_error(e)
-      ensure
-        # The block's value IS the job's result, so the caller awaiting the job
-        # gets it back on the :done event.
-        push_event(type: :done, result: value)
-        # Unblock any pending request so the thread can exit cleanly.
-        @inbox << STOP
+      # A worker built WITH a block runs that turn first: the block is the caller's
+      # own, so it is never routed through the inbox (which also carries answers and
+      # notes that must not be mistaken for work).
+      service_turn if @block
+      loop do
+        # #await_work is the worker's own queue, not the job inbox: the drain loop
+        # is the reader of the job inbox during a turn (steering notes stay there
+        # for it), and Job#deliver routes the answer to the live worker.
+        item = await_work.pop
+        break if item.equal?(STOP)
+        # A non-WORK item is a stray answer or note: the loop drains those, not the worker.
+        next unless work_item?(item)
+
+        @block = item[:block]
+        service_turn
       end
+      # A worker that exits on its own (a STOP, or a killed turn) leaves no reader
+      # of this job's deliveries: clear the slot so alive? is false and Job#deliver
+      # goes back to the inbox.
+      @thread = nil
     end
+    self
+  end
+
+  # Hand this job's worker the next turn's block (main thread only). The worker
+  # picks it up from its own queue (Job#deliver routes it there), so a caller never
+  # touches the thread - and a job can be handed work whenever it is idle.
+  def submit_work(&block)
+    @job.deliver({ type: WORK, block: })
+    self
+  end
+
+  # One turn: run the block, report an error, announce the turn's end. Called once
+  # per WORK item by the worker, and directly by a caller that wants exactly one
+  # turn with @block already set.
+  def service_turn
+    # The turn clock starts here (not at #start): a parked worker's thread exists
+    # long before its first turn, and elapsed_label must stay nil until one runs.
+    @started_at = Time.now
+    begin
+      value = @block.call(self)
+    rescue => e
+      # The event goes FIRST: a logger that cannot write must not swallow the
+      # error the user is owed.
+      push_event(type: :error_ctrl, content: ErrorText.label(e))
+      record_task_error(e)
+    ensure
+      # The block's value is the turn's result, on the :done event the caller
+      # awaits. It is NOT the job's finish: a parked worker lives on after a turn,
+      # and only an explicit Job#finish ends the JOB.
+      push_event(type: :done, result: value)
+    end
+    self
+  end
+
+  def work_item?(item)
+    item.is_a?(Hash) && item[:type] == WORK
   end
 
   # The turn clock for the spinner's elapsed segment: whole seconds under a
@@ -147,7 +221,9 @@ class Task
     if @pending_reply
       @pending_reply << value
     else
-      @inbox << value
+      # No live request on this task: the value is a delivery for the job,
+      # routed by Job#deliver (to the parked worker if one lives).
+      @job.deliver(value)
     end
   end
 
@@ -174,14 +250,13 @@ class Task
       owed = owed.reject { |job| job.equal?(@job) }
     end
     owed.each { |job| job.respond(Job::INTERRUPTED_ANSWER) }
-    # No live request on this task: STOP the inbox only when the owed answers
-    # did not already land in it (@inbox IS the foreground job's inbox).
-    unless had_live || owed.any? { |job| job.inbox.equal?(@inbox) }
-      @inbox << STOP
-    end
+    # The parked worker pops await_work, not the inbox, so the wake-up goes
+    # there: STOP unblocks a pending pop and ends the worker loop.
+    @await_work << STOP
     @thread&.join(timeout)
     @thread&.kill if @thread&.alive?
     @thread = nil
+    @job.worker = nil if @job.worker.equal?(self)
   end
 
   # -- Task-thread side (called from inside the block) -----------------------
@@ -291,27 +366,42 @@ class Task
     input_path: nil,
     &block
   )
-    # The task runs on its job's registry, buffer and inbox. The drain loop is
-    # the single main-thread writer, so every put lands in the same record a save reads.
     task = Task.new(registry:, job:, input_path:, &block)
-    task.ui = ui
-    # The input path is the ONE reader the main thread's poll loop shares with
-    # the idle prompt. It only PEEKS stdin until typing starts, so nothing races
-    # for the keyboard. Input needs a harness to land on (nil = unit test).
-    task.harness = harness
-    # The palette is the run's settings: a nil harness (a unit-test run) colors
-    # nothing, so the plain renderer stays.
-    palette = harness&.settings&.output_palette
-    # Markdown rendering of the assistant answer is opt-in; the posture is read
-    # here (a Task builds its renderer once per turn), so a mid-run /markdown
-    # toggle lands on the next turn.
-    markdown = harness&.settings&.markdown?
-    # The table-width basis: config-derived, read once per turn like the
-    # palette. nil = the renderer's default (80% of the terminal).
-    max_width = harness&.settings&.markdown_max_width
-    task.renderer = UI::Renderer.new(palette:, markdown:, markdown_max_width: max_width)
-    task.note_editor = UI::Editor.new(ui.stdin) if ui.stdin && harness
-    # The MainLoop owns the main-thread loop, the spinner, stdin and dialog serving.
-    MainLoop.new(task).run
+    task.prepare(harness:, ui:)
+    task.start
+    error, task = MainLoop.new(task).run
+    # The per-turn form: this call owns the worker it started, so it stops it on
+    # EVERY return - a turn the loop ended mid-request is unfinished, and a
+    # worker left parked would read this job's inbox forever (stealing the next
+    # turn's WORK item or a later turn's dialog answer). The registry's own
+    # parked worker (#worker_for) is never stopped this way.
+    task.stop
+    [error, task]
+  end
+
+  # The per-turn presentation a drain loop reads ONCE per turn: the palette and the
+  # markdown posture from the run's settings (so a mid-run /markdown toggle lands on
+  # the NEXT turn) and the note editor for the mid-turn read. A nil harness (a
+  # unit-test run) colors nothing, so the plain renderer stays.
+  def prepare(harness:, ui:)
+    # The input path is the ONE reader the main thread's loop shares with the idle
+    # prompt: it only PEEKS stdin until typing starts, so nothing races for the
+    # keyboard. Input needs a harness to land on (nil = unit test).
+    @harness = harness
+    @ui      = ui
+    settings = harness&.settings
+    @renderer = UI::Renderer.new(
+      palette: settings&.output_palette,
+      markdown: settings&.markdown?,
+      markdown_max_width: settings&.markdown_max_width)
+    @note_editor = UI::Editor.new(ui.stdin) if ui.stdin && harness
+    self
+  end
+
+  # A worker parked on this task's inbox, ready for a turn it has not been given
+  # yet: the block is delivered later by #submit_work.
+  def start_parked
+    @block = nil
+    start
   end
 end

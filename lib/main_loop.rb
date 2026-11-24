@@ -67,7 +67,9 @@ class MainLoop
     raw_stdin  = hold_raw_stdin
 
     begin
-      task.start
+      # The worker is started by its owner (Task.run / JobRegistry#worker_for),
+      # never here: a parked worker's block is still unset at this point, and a
+      # second #start would spawn a second worker and run @block twice.
 
       # Input waiting at turn start must not be lost to an immediate :done.
       poll_for_note

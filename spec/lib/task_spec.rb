@@ -203,7 +203,8 @@ RSpec.describe Task do
     # A force-stopped turn answers every request it still owes with a VALUE, not
     # STOP: STOP is not an answer, so a requester blocked on that request would
     # raise on it. Here the owed request belongs to another job (a background
-    # round), so it is answered and the stopping thread still gets its own STOP.
+    # round), so it is answered and the stopping worker still gets its own STOP
+    # on its await queue (the job inbox is the drain loop's reader-side queue).
     it 'answers another job owed request and still stops its own thread' do
       registry = JobRegistry.new
       main = registry.add_job(kind: :main)
@@ -214,7 +215,7 @@ RSpec.describe Task do
       task.stop(0.1)
 
       expect(background.inbox.pop(true)).to eq(Job::INTERRUPTED_ANSWER)
-      expect(main.inbox.pop(true)).to equal(Task::STOP)
+      expect(task.await_work.pop(true)).to equal(Task::STOP)
     end
 
     # When the owed request is the stopping thread's OWN inbox, the interrupted

@@ -35,6 +35,11 @@ class Job
   attr_reader :id, :kind, :status, :result, :registry, :buffer, :inbox
   attr_reader :dependencies, :requested_by, :harness
 
+  # The Task whose worker is parked on this job's deliveries (#286). A parked
+  # worker reads the job's deliveries from its OWN queue (await_work), so a
+  # steering note resident in the inbox stays the drain loop's to read.
+  attr_accessor :worker
+
   # The buffer comes from the registry: its limits belong to the buffer, and the
   # fan-in queue is shared by all jobs.
   def initialize(
@@ -163,6 +168,12 @@ class Job
   # Latest line wins ONLY while the pending event is itself a note; a note after
   # another kind queues behind it.
   def deliver(value)
+    # A live parked worker takes deliveries from its own queue; the inbox keeps
+    # what no worker is waiting for (notes for the loop, results for no reader).
+    if @worker&.alive?
+      @worker.await_work << value
+      return value
+    end
     pending = @inbox.size == 1 ? @inbox.pop(true) : nil
     if pending && !(note?(value) && note?(pending))
       @inbox << pending
