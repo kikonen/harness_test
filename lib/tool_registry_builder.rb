@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "tool_registry"
+require_relative "tool_manifest"
 require_relative "spill_reader"
 require_relative "mcp/manager"
 require_relative "skills"
@@ -73,7 +74,9 @@ class ToolRegistryBuilder
     logger:,
     locator:,
     result_spill: nil,
-    harness: nil
+    harness: nil,
+    # The job kind whose manifest (config/tool_manifests.yml) narrows this registry.
+    manifest: ToolManifest::FULL
   )
     @file_list = file_list
     @file_cache = file_cache
@@ -82,6 +85,7 @@ class ToolRegistryBuilder
     @locator   = locator
     @result_spill = result_spill
     @harness   = harness
+    @manifest  = manifest
     @mcp       = Mcp::Manager.new(logger)
   end
 
@@ -167,6 +171,6 @@ class ToolRegistryBuilder
     # (the built-in wins) and the servers connect after the run's own tools exist.
     @mcp.load(registry, @settings.mcp_servers)
 
-    registry
+    registry.only(ToolManifest.names_for(@manifest, registry))
   end
 end

@@ -149,6 +149,41 @@ RSpec.describe HarnessFactory do
     end
   end
 
+  # config/tool_manifests.yml names every job kind and says what each may use
+  # (issue #286). Each job has its OWN FileList (its own grant state), so what the
+  # manifest guarantees is the NAME SET and the tool CLASS - the class is what says
+  # the tool was built the run's way, not a separate restricted build.
+  describe 'the tool manifest a job agent gets' do
+    it 'restricts a kind the YAML names to exactly its list' do
+      registry = JobRegistry.new
+      build    = factory(registry: registry)
+      main     = build.add_harness_job(kind: :main)
+      child    = build.add_harness_job(kind: :sub_agent)
+
+      expect(child.harness.tool_registry.names)
+        .to eq(ToolManifest.manifests[:sub_agent].sort)
+      expect(child.harness.tool_registry.names - main.harness.tool_registry.names)
+        .to be_empty
+    end
+
+    it 'narrows the registry rather than rebuilding the tools' do
+      registry = JobRegistry.new
+      job      = factory(registry: registry).add_harness_job(kind: :sub_agent)
+
+      expect(job.harness.tool_registry.get('file.read').class)
+        .to eq(Tools::FileReadTool)
+      expect(job.harness.tool_registry.get('git.log').class)
+        .to eq(Tools::GitLogTool)
+    end
+
+    it 'gives a kind marked full everything the run built' do
+      registry = JobRegistry.new
+      job      = factory(registry: registry).add_harness_job(kind: :command)
+
+      expect(job.harness.tool_registry.names).to include('run.command', 'file.write')
+    end
+  end
+
   # A job built fresh (a /jobs add) seeds its model from settings alone, where a
   # config DEFAULT model leaves active_profile_id nil. Without the run's own name on it,
   # the job's model display and the active_profile_id it then saves would both be nil.

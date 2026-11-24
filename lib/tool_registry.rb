@@ -28,6 +28,12 @@ class ToolRegistry
     @tools.values.sort_by(&:name)
   end
 
+  def only(names)
+    subset = ToolRegistry.new
+    Array(names).each { |name| subset.register(@tools[name]) if @tools.key?(name) }
+    subset
+  end
+
   def to_openai
     sorted_tools.map(&:to_openai)
   end
