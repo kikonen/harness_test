@@ -9,7 +9,6 @@ require_relative "input_path"
 require_relative "output_buffer"
 require_relative "ui/renderer"
 require_relative "ui/editor"
-require_relative "main_loop"
 require_relative "ui/spinner"
 require_relative "error_text"
 require_relative "harness_error"
@@ -32,10 +31,6 @@ class Task
 
   # Grace #stop gives the task thread before killing it.
   DEFAULT_STOP_JOIN_TIMEOUT = 0.5
-
-  # #await_turn's guard on one turn ending. A turn is an LLM tool loop, so this is
-  # a hang guard, not a normal wait.
-  DEFAULT_TURN_TIMEOUT = 300.0
 
   # Raised by the drain loop when the note editor saw EOF (Ctrl-D inside it
   # while editing a mid-turn note): aborts the turn like Ctrl+C.
@@ -352,33 +347,6 @@ class Task
 
   # -- Drain loop entry (main thread) ----------------------------------------
   #
-  # Builds the task and hands it to a MainLoop, which runs the poll loop over the
-  # single event queue, drives the spinner, serves dialogs and reads mid-turn
-  # notes, and returns when the task finishes. The required `ui:` console is the
-  # single sink for ALL output; tests can pass a StringIO-backed UI::Console.
-  #
-  # Returns [error_msg, task] where error_msg is nil on success.
-  def self.run(
-    harness:,
-    ui:,
-    registry:,
-    job:,
-    input_path: nil,
-    &block
-  )
-    task = Task.new(registry:, job:, input_path:, &block)
-    task.prepare(harness:, ui:)
-    task.start
-    error, task = MainLoop.new(task).run
-    # The per-turn form: this call owns the worker it started, so it stops it on
-    # EVERY return - a turn the loop ended mid-request is unfinished, and a
-    # worker left parked would read this job's inbox forever (stealing the next
-    # turn's WORK item or a later turn's dialog answer). The registry's own
-    # parked worker (#worker_for) is never stopped this way.
-    task.stop
-    [error, task]
-  end
-
   # The per-turn presentation a drain loop reads ONCE per turn: the palette and the
   # markdown posture from the run's settings (so a mid-run /markdown toggle lands on
   # the NEXT turn) and the note editor for the mid-turn read. A nil harness (a

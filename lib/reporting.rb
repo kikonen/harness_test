@@ -3,47 +3,23 @@
 require_relative "task"
 require_relative "tool"
 
-# Shared wrapper for running an LLM round on a Task thread (the
-# single-thread I/O rule, issue #40): the block runs on a task thread and all
-# its console I/O is serialized through the main-thread drain loop.
-# Without it, Task.emit events (spinner, response lines) are silently
-# dropped and any dialog blocks the console - the log moves but the console
-# looks stuck (issue #235). A task error is the :kind role, so the bracket shape
+# Shared console-reporting mixin for the run's LLM-round hosts (issue #235):
+# CommandHandler (direct prompts) and the Command subclasses that drive a round
+# (/retry issue #235, /compact issue #253). The includer must expose #ui and
+# #settings; each host runs its own #run_on_worker against the run loop's
+# parked worker. Without this, Task.emit events (spinner, response lines) are
+# silently dropped and any dialog blocks the console - the log moves but the
+# console looks stuck. A task error is the :kind role, so the bracket shape
 # belongs to UI::Renderer and not to this emitter (#474, increment 22).
-#
-# Included by anything that drives an LLM round: CommandHandler (direct
-# prompts) and the Command subclasses that do (/retry issue #235, /compact
-# issue #253). The includer must expose #foreground_harness and #ui.
-module TaskRunner
-  # The run's ONE input path (issue #286): the same reader the idle prompt uses,
-  # so the edit state is one state of the poll loop and not two mechanisms.
-  attr_accessor :input_path
-
-  # Issue #286: the JobRegistry the RUN owns is the executor and the home of the
-  # run record, so this AWAITs a job there rather than running a turn itself. The
-  # host's registry is never nil: every TaskRunner host (Command, CommandHandler)
-  # is built by the run with its registry.
+module Reporting
+  # Issue #286: the JobRegistry the RUN owns is the home of the run record, so
+  # main-thread reports land in its buffers. The host's registry is never nil:
+  # every Reporting host (Command, CommandHandler) is built by the run with it.
   attr_accessor :registry
 
   # The run's single SystemSaver (issue #548): the /save command's writer of the
   # whole layered system, passed down from the run owner like the registry.
   attr_accessor :system_saver
-
-  def run_on_task(job: nil)
-    emit_role(:gap, "")
-    # The host's registry is never nil (#286): it is the executor and the home
-    # of the run record. The Harness is the job's, so the registry reads it off
-    # the job rather than this host handing one to the executor.
-    job ||= registry.foreground_job
-    error, _task, result = registry.run(job:, ui:, **input_kwargs) { |_t| yield }
-    emit_role(:kind, error, origin: "task error") if error
-    # The drain loop has ended by now, so this line is printed, not emitted: an
-    # event left on the run's queue would be read by the next turn (#567).
-    summary = job&.harness&.aborted_turn_stats_line(job.id)
-    ui.puts(summary) unless summary.nil?
-    emit_role(:gap, "")
-    result
-  end
 
   # Console line emitted from INSIDE a task block. A task thread must never
   # write to a stream (single-thread I/O rule, issue #40), so the line goes
@@ -97,12 +73,6 @@ module TaskRunner
 
   private
 
-  # Only pass the input path when the run owns one (a spec host without one
-  # keeps the drain loop's own default reader).
-  def input_kwargs
-    input_path ? { input_path: } : {}
-  end
-
   # Route a typed role to the right sink: a live Task carries it as an event
   # (rendered by the drain loop with the harness palette), the main thread
   # renders it with the SINK palette so a non-terminal sink stays plain.
@@ -124,7 +94,7 @@ module TaskRunner
   end
 
   def main_thread_renderer
-    # Palette and table width are the run's settings (#286): every TaskRunner host
+    # Palette and table width are the run's settings (#286): every Reporting host
     # (Command, CommandHandler) carries settings, so no harness fallback here.
     UI::Renderer.new(
       palette: UI::Renderer.palette_for(ui:, settings:),

@@ -94,7 +94,7 @@ module Commands
 
     # The startup replay's layout (StartupBanner#print_resume_replay): rule, one header
     # line, the entries through the renderer, rule. The renderer is built the way
-    # TaskRunner builds one (the sink's palette wins, then the run's settings) so
+    # Reporting builds one (the sink's palette wins, then the run's settings) so
     # a command with no harness of its own paints the same lines the run does.
     def render_block(header, entries)
       return emit_role(:note, "#{header}: nothing recorded") if entries.empty?

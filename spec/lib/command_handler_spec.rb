@@ -141,11 +141,10 @@ RSpec.describe CommandHandler do
         stdout = StringIO.new
         handler = make_handler(dir, UI::Console.new(stdout: stdout))
 
-        allow(handler).to receive(:run_direct_prompt) { |_t| :prompted }
         allow(handler).to receive(:run_bang_command) { |_c| :shelled }
 
-        handler.handle('hello there')
-        expect(handler).to have_received(:run_direct_prompt).with('hello there')
+        expect { handler.handle('hello there') }
+          .to raise_error(HarnessError, /bare prompt/)
 
         handler.handle('! ls -la')
         expect(handler).to have_received(:run_bang_command).with('ls -la')

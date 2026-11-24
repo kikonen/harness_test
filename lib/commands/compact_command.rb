@@ -10,7 +10,7 @@ module Commands
   # synchronously on the main thread broke the single-thread I/O rule
   # (issue #40): the compaction spinner was never driven and any dialog
   # blocked the console - the log moved while the console looked stuck.
-  # Output lines go through TaskRunner#emit_line (the event queue), never
+  # Output lines go through Reporting#emit_line (the event queue), never
   # straight to the stream.
   class CompactCommand < Command
     HELP = CommandHelp.new(
@@ -20,13 +20,13 @@ module Commands
       group: :session,
       see_also: %w[ctx session conversation])
 
-    # Drives an LLM round (#run_on_task): a mid-turn submit would start a
-    # second drain loop over the single queue. Refused until it becomes an
-    # event to the live task (doc/unified_loop_design.md).
+    # Drives an LLM round: it submits to the run loop's worker, which is only
+    # idle between turns. While a turn is live it is refused until it becomes a
+    # control event drained beside the note (issue #286 increment 4).
     def self.mid_turn_safe? = false
 
     def handle(_args)
-      run_on_task do |_t|
+      run_on_worker do |_t|
         result = foreground_harness.session_manager.compact_session
         retained = result[:retained]
         emit_line "Session compacted: #{result[:before]} messages -> " \

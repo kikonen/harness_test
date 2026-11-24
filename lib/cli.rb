@@ -14,7 +14,7 @@ require_relative "system_saver"
 require_relative "history_manager"
 require_relative "session_locator"
 require_relative "command_handler"
-require_relative "prompt_reader"
+require_relative "main_loop"
 require_relative "ui"
 require_relative "harness_factory"
 require_relative "session_logger"
@@ -206,52 +206,21 @@ class CLI
     startup_banner.print
 
     begin
-      # ONE input path for the whole run: the idle prompt and a mid-turn note are the
-      # same read, so edit state is a state of the single poll loop, which the command
-      # handler also drains events through.
-      reader = PromptReader.new(ui: @ui, registry: @registry)
-      @commands.input_path = reader.input_path
-      @commands.input_path.target = -> { @registry.foreground_job }
-      @commands.input_path.registry = -> { @registry }
-      # The poll loop dispatches a "/command" submitted mid-turn through this handler.
-      reader.input_path.command_handler = -> { @commands }
-
-      loop do
-        input = reader.read
-        break if input.nil?
-
-        begin
-          commands.handle(input)
-        rescue Interrupt
-          ui.puts "\n  [interrupted]"
-          foreground_harness.logger.info "command interrupted (Ctrl+C)"
-        # LLMError and ToolLoopError subclass HarnessError, so they MUST be rescued
-        # before it or the HarnessError branch swallows them and their hint never prints.
-        rescue LLMError => e
-          foreground_harness.logger.warn "LLM error: #{e.class.name}: #{e.message}"
-          ui.puts "  [LLM error] #{e.message}"
-          ui.puts "  (everything up to this point is kept in the session - type /retry"
-          ui.puts "   to resume from exactly there, including tool work already done)"
-        rescue ToolLoopError => e
-          foreground_harness.logger.warn "tool loop: #{e.class.name}: #{e.message}"
-          ui.puts "  [tool loop] #{e.message}"
-        rescue HarnessError => e
-          foreground_harness.logger.warn "command error: #{e.class.name}: #{e.message}"
-          ui.puts "  [error] #{e.message}"
-        rescue StandardError => e
-          # A crash the harness did not expect: full backtrace to the log.
-          foreground_harness.logger.error ErrorText.detailed(e, "unexpected error")
-          ui.puts "  [unexpected error] #{ErrorText.label(e)}"
-          ui.puts ErrorText.backtrace(e)
-          ui.puts "  (harness continues - type /exit to quit)"
-        end
-
-        break if commands.exiting?
-
-        ui.puts
-        ui.puts "-" * 40
-        ui.puts
-      end
+      # ONE loop for the whole run (issue #286 increment 3): the idle prompt read
+      # and a turn's event drain are two modes of the same MainLoop. The foreground
+      # job gets its parked worker here; the loop submits a prompt as a WORK item
+      # and drains its events, so there is no per-turn nested drain loop.
+      input_path = InputPath.new(ui: @ui, prompt: MainLoop::IDLE_PROMPT)
+      input_path.target   = -> { @registry.foreground_job }
+      input_path.registry = -> { @registry }
+      worker = @registry.worker_for(
+        @registry.foreground_job, ui: @ui, input_path:)
+      @commands.main_loop = MainLoop.new(
+        registry: @registry, ui: @ui, commands: @commands,
+        input_path:, worker:,
+        modeline: -> { render_modeline })
+      @main_loop = @commands.main_loop
+      @main_loop.run
     rescue Interrupt
       # Ctrl+C at the prompt: treat as a normal exit so history and the session save.
       foreground_harness.logger.info "prompt read interrupted (Ctrl+C)"
@@ -278,6 +247,31 @@ class CLI
   end
 
   private
+
+  # The idle modeline (moved off PromptReader, issue #286 increment 3): a
+  # bracketed model name (effort inside it) then the posture tags, then the
+  # context indicator on the SAME line. The posture tags come from the SAME
+  # builder the spinner badge uses (MainLoop.mode_badge), so consent and streaming
+  # cannot read differently in the two places.
+  def render_modeline
+    harness = foreground_harness
+    profile = harness.session_manager.active_profile_name
+    effort  = harness.session_manager.param_overrides.reasoning_effort_display
+    tags    = ["[#{profile ? "#{profile} (#{effort})" : effort}]"]
+    badge   = MainLoop.mode_badge(harness)
+    tags   << badge if badge
+    prefix  = "#{tags.join(' ')}#{job_tag} > "
+    ctx     = harness.context_indicator
+    ui.puts ctx ? "#{ctx} #{prefix}" : prefix
+    ui.flush
+  end
+
+  # Which job the next prompt goes to (#548): the SAME builder the spinner uses,
+  # so the idle line and a live turn cannot name different things.
+  def job_tag
+    tag = MainLoop.job_tag(@registry.foreground_job)
+    tag ? " #{tag}" : ""
+  end
 
   # The run's startup display object, built after #setup so the foreground Harness
   # it reads exists. The replay-before-banner ordering lives in StartupBanner.

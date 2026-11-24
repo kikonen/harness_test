@@ -113,17 +113,32 @@ RSpec.describe Command do
     end
   end
 
-  describe 'TaskRunner inclusion' do
-    # Commands that drive an LLM round (/retry, /compact) go through the shared
-    # task wrapper; a thin command like /ctx must not have to implement it.
-    it 'is included so a command can run a round on a task thread' do
-      expect(described_class.include?(TaskRunner)).to be true
+  describe 'Reporting inclusion and #run_on_worker' do
+    # Commands that drive an LLM round (/retry, /compact) share the console
+    # reporting mixin; a thin command like /ctx inherits it without using it.
+    it 'is included so a command can report a round on a task thread' do
+      expect(described_class.include?(Reporting)).to be true
     end
 
-    it 'responds to #run_on_task and #emit_line' do
+    it 'responds to #run_on_worker and #emit_line' do
       cmd = build(described_class)
 
-      expect(cmd).to respond_to(:run_on_task, :emit_line)
+      expect(cmd).to respond_to(:run_on_worker, :emit_line)
+    end
+
+    # #286 increment 3: the round is submitted to the run loop's parked worker;
+    # the loop drains the turn and reports a worker error itself.
+    it 'submits its block to the main_loop it was built with' do
+      seen = []
+      loop_ = Object.new
+      loop_.define_singleton_method(:run_turn) { |&blk| seen << blk.call(:task) }
+      cmd = build(described_class, main_loop: loop_)
+      returned = nil
+
+      cmd.run_on_worker { |task| returned = task }
+
+      expect(seen).to eq([:task])
+      expect(returned).to eq(:task)
     end
   end
 end

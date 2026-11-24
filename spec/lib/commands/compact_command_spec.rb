@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'stringio'
+require 'logger'
 require 'job_registry'
 require 'commands/compact_command'
 
@@ -10,11 +11,12 @@ require 'commands/compact_command'
 #
 # issue #253: the summary is an LLM round, so it must run on a Task thread
 # (the single-thread I/O rule, issue #40). Output lines are emitted through
-# the task event queue (TaskRunner#emit_line), not written to a stream from
+# the task event queue (Reporting#emit_line), not written to a stream from
 # the task thread. The command reaches the Harness through the foreground
 # job's harness (#286), so the spec carries the harness on a real registry's
-# main job; the round itself is run by a stubbed registry.run (the executor)
-# that executes the block synchronously.
+# main job; increment 3 runs the round for real: a parked worker on the
+# registry and a MainLoop double whose run_turn drains the queue the way the
+# loop does (record + render to :done).
 RSpec.describe Commands::CompactCommand do
   let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
   let(:result) do
@@ -34,8 +36,17 @@ RSpec.describe Commands::CompactCommand do
     Class.new do
       attr_accessor :session, :session_manager
 
-      # task_runner.rb asks a job's harness for an aborted turn's line (#567).
-      def aborted_turn_stats_line(_job_id) = nil
+      # Task#record_task_error logs a raising turn through the harness logger.
+      def logger = @logger ||= Logger.new(File::NULL)
+
+      # Task#prepare reads the renderer settings off the harness.
+      def settings
+        @settings ||= Class.new do
+          def output_palette = nil
+          def markdown?      = false
+          def markdown_max_width = nil
+        end.new
+      end
 
       def initialize(session, manager)
         @session         = session
@@ -54,102 +65,100 @@ RSpec.describe Commands::CompactCommand do
     JobRegistry.new.tap { |r| r.add_job(kind: :main, harness:) }
   end
 
+  # A MainLoop stand-in: run_turn submits the block to the parked worker and
+  # drains the registry queue the way the loop does (record + render until the
+  # shown job's :done), so the command's lines arrive as events.
+  def loop_double(registry, worker, console: ui)
+    loop_ = Object.new
+    loop_.define_singleton_method(:run_turn) do |&blk|
+      worker.submit_work(&blk)
+      # The worker pushes :done in its ensure, so the drain ends there - the
+      # worker thread may still be inside its ensure when :done is polled.
+      finished = false
+      until finished
+        event = registry.poll(0.1)
+        next if event.nil?
+
+        registry.record(event)
+        finished = event[:type] == :done
+
+        line = worker.renderer.line(type: event[:type],
+                                    content: event[:content], origin: event[:origin])
+        console.puts(line)
+      end
+    end
+    loop_
+  end
+
   def command
-    described_class.new(registry: registry_with_harness, file_list: nil, ui:)
-  end
-
-  # Stub the registry executor to capture the block it is handed and execute it
-  # synchronously. The spec does not need a real task thread - only the protocol
-  # contract: the block must perform the compaction.
-  def stub_run(cmd, error: nil, result_value: nil)
-    allow(cmd.registry).to receive(:run) do |job:, ui:, &blk|
-      blk.call(nil)
-      [error, nil, result_value]
-    end
-  end
-
-  def run_with_captured_block
-    cmd = command
-    block = nil
-    allow(cmd.registry).to receive(:run) do |job:, ui:, &blk|
-      block = blk
-      blk.call(nil)
-      [nil, nil, nil]
-    end
-    cmd.handle('')
-    block
-  end
-
-  def run_command
-    run_with_captured_block
-    io.string
+    registry = registry_with_harness
+    worker   = registry.worker_for(registry.foreground_job, ui:)
+    described_class.new(file_list: nil, registry:, ui:,
+                        main_loop: loop_double(registry, worker))
   end
 
   it 'runs the compaction inside a Task (I/O routed through the drain loop)' do
-    block = run_with_captured_block
+    command.handle('')
 
-    expect(block).to be_a(Proc)
     expect(manager).to have_received(:compact_session)
   end
 
   it 'prints the resulting context size after compaction' do
-    out = run_command
+    command.handle('')
 
-    expect(out).to match(
-      /Session compacted: 10 messages -> 4 messages \(2 recent retained\)\.\n  🧠 ctx ~62100\/65536 \(95%\) -> 🧠 ctx ~523\/65536 \(1%\)\n\nSummary:\nsummary text\n/
+    expect(io.string).to include(
+      "Session compacted: 10 messages -> 4 messages (2 recent retained)."
     )
+    expect(io.string).to include(
+      "🧠 ctx ~62100/65536 (95%) -> 🧠 ctx ~523/65536 (1%)"
+    )
+    expect(io.string).to include("Summary:\nsummary text")
   end
 
   it 'omits the context line when before or after is missing' do
     result[:context_before] = nil
 
-    expect(run_command).not_to match(/🧠 ctx/)
+    command.handle('')
+    expect(io.string).not_to match(/🧠 ctx/)
 
     result[:context_before] = '🧠 ctx ~62100/65536 (95%)'
     result[:context_line]   = nil
 
-    expect(run_command).not_to match(/🧠 ctx/)
+    command.handle('')
+    expect(io.string).not_to match(/🧠 ctx/)
 
     result[:context_before] = '🧠 ctx ~62100/65536 (95%)'
     result[:context_line]   = '🧠 ctx ~523/65536 (1%)'
   end
 
-  it 'reports a task error as a [task error] line' do
-    cmd = command
-    stub_run(cmd, error: 'boom')
+  # The [task error] line is the LOOP's report (MainLoop#run_turn hands the
+  # error to CommandHandler#report_turn_error), so a command spec no longer
+  # asserts it - it asserts the worker SURVIVES a raising round.
+  it 'keeps the worker parked after a raising round' do
+    registry = registry_with_harness
+    worker   = registry.worker_for(registry.foreground_job, ui:)
+    allow(manager).to receive(:compact_session).and_raise(RuntimeError, 'boom')
+    cmd = described_class.new(file_list: nil, registry:, ui:,
+                              main_loop: loop_double(registry, worker))
 
     cmd.handle('')
 
-    expect(io.string).to include('[task error] boom')
+    expect(worker.alive?).to be true
   end
 
   it 'emits lines as task events instead of writing to the stream' do
-    events = []
-    fake_task = Class.new do
-      define_method(:push_event) do |type:, origin: nil, content: nil|
-        events << { type: type, origin: origin, content: content }
-      end
-    end.new
-
-    allow(Task).to receive(:current).and_return(fake_task)
-    cmd = command
-    stub_run(cmd)
+    registry = registry_with_harness
+    worker   = registry.worker_for(registry.foreground_job, ui:)
+    cmd = described_class.new(file_list: nil, registry:, ui:,
+                              main_loop: loop_double(registry, worker))
 
     cmd.handle('')
 
-    # Nothing reached the console directly: every line is an event.
-    expect(io.string).to eq("")
-    expect(events).to eq([
-      { type: :gap, origin: nil, content: '' },
-      { type: :text, origin: 'command',
-        content: 'Session compacted: 10 messages -> 4 messages (2 recent retained).' },
-      { type: :text, origin: 'command',
-        content: '  🧠 ctx ~62100/65536 (95%) -> 🧠 ctx ~523/65536 (1%)' },
-      { type: :text, origin: 'command', content: '' },
-      { type: :text, origin: 'command', content: 'Summary:' },
-      { type: :text, origin: 'command', content: 'summary text' },
-      { type: :text, origin: 'command', content: '' },
-      { type: :gap, origin: nil, content: '' }
-    ])
+    # The command thread wrote nothing to the stream: the console holds only
+    # what the drain rendered from the job's event record.
+    expect(registry.foreground_job.buffer.tail.map(&:content)).to include(
+      'Session compacted: 10 messages -> 4 messages (2 recent retained).'
+    )
+    expect(registry.foreground_job.buffer.tail.map(&:origin).uniq).to eq([:command])
   end
 end

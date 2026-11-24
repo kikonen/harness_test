@@ -3,7 +3,6 @@
 require_relative "output_buffer"
 require_relative "job"
 require_relative "task"
-require_relative "harness_error"
 
 # The flat job list, the ONE fan-in queue that orders events across jobs, and
 # the executor: a turn is AWAITED here rather than run in place by a caller.
@@ -87,51 +86,6 @@ class JobRegistry
   # True when no event is waiting on the ONE queue (the spinner check).
   def queue_empty?
     @queue.empty?
-  end
-
-  # The executor: the CLI asks the registry to run a job and awaits its result.
-  # The drain loop stays the single main-thread writer of the job's buffer.
-  def run(job:, ui:, input_path: nil, &block)
-    # The Harness is the job's: a Harness lives INSIDE the job it drives, so the
-    # executor reads it off the job rather than taking it from the caller.
-    error, task = Task.run(
-      harness: job.harness, ui:, registry: self, job:, input_path:, &block)
-    [error, task, job.result]
-  end
-
-  # The parked-worker form of the same executor: hand the job's worker the turn's
-  # block and AWAIT the turn's end. No drain loop is built here, so a caller can
-  # run a turn while a loop is already draining the queue - which is what removes
-  # TaskRunner#run_on_task's nested loop. The caller's +on_event+ is what renders
-  # the turn's output; a caller with no renderer records events only.
-  # Returns [error_msg, task, result].
-  def await_turn(task:, job:, on_event: nil, timeout: Task::DEFAULT_TURN_TIMEOUT)
-    deadline = Time.now + timeout
-    task.submit_work { |t| yield t }
-    error_msg = nil
-    result    = nil
-    loop do
-      event = poll(Task::DEFAULT_POLL_TIMEOUT)
-      if event.nil?
-        raise HarnessError, "job ##{job.id} turn did not end in #{timeout}s" \
-          if Time.now > deadline
-
-        next
-      end
-
-      on_event&.call(event)
-      record(event)
-      case event[:type]
-      when :done
-        next unless event[:job] == job.id
-
-        result = event[:result]
-        break
-      when :error_ctrl
-        error_msg = event[:content] if event[:job] == job.id
-      end
-    end
-    [error_msg, task, result]
   end
 
   # Give a job its parked worker (issue #286). The worker has NO block: it waits

@@ -7,7 +7,7 @@ module Commands
   #
   # issue #235: the re-send is an LLM round (spinner, tool loop, dialogs),
   # so it MUST run on a Task thread like any other prompt - the shared
-  # #run_on_task wrapper (TaskRunner) routes all console I/O through the
+  # #run_on_worker wrapper routes all console I/O through the
   # main-thread drain loop (issue #40). Running it synchronously on the
   # main thread broke that rule: no spinner was driven and any dialog
   # blocked the console, so the log moved but the console looked stuck.
@@ -19,13 +19,13 @@ module Commands
       group: :session,
       see_also: %w[conversation session saving])
 
-    # Drives an LLM round (#run_on_task): a mid-turn submit would start a
-    # second drain loop over the single queue. Refused until it becomes an
-    # event to the live task (doc/unified_loop_design.md).
+    # Drives an LLM round: it submits to the run loop's worker, which is only
+    # idle between turns. While a turn is live it is refused until it becomes a
+    # control event drained beside the note (issue #286 increment 4).
     def self.mid_turn_safe? = false
 
     def handle(_args)
-      run_on_task do |_t|
+      run_on_worker do |_t|
         foreground_harness.session_manager.retry
       end
     end
