@@ -1,0 +1,26 @@
+main: full
+command: full
+timed: full
+
+sub_agent:
+  - file.list
+  - file.read
+  - file.search
+  - file.info
+  - file.image
+  - git.diff
+  - git.show
+  - git.status
+  - git.log
+  - git.grep
+  - tools.list
+  - tools.search
+  - skills.list
+  - skills.read
+  - memory.list
+  - memory.read
+  - plan.list
+  - plan.read
+  - plan.search
+  - sessions.search
+  - ui.dialog

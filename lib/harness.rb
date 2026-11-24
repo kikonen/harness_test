@@ -15,6 +15,7 @@ require_relative "session_file_cache"
 require_relative "session_locator"
 require_relative "task"
 require_relative "llm/stream_preview"
+require_relative "tool_manifest"
 require_relative "llm/usage_stats"
 require_relative "session_manager"
 require_relative "state_migrator"
@@ -99,11 +100,14 @@ class Harness
     settings:,
     locator:,
     logger:,
-    resume_data: nil
+    resume_data: nil,
+    # The job kind whose manifest (config/tool_manifests.yml) narrows this agent's tools.
+    manifest: ToolManifest::FULL
   )
     @file_list = file_list
     @settings  = settings
     @locator   = locator
+    @manifest  = manifest
 
     # One shared cache for Session and the tool registry: a digest a tool
     # records must be the one a later write is checked against.
@@ -126,8 +130,11 @@ class Harness
       logger: @logger,
       locator: @locator,
       # A spill belongs to the job running NOW, so the reader resolves it live.
+      # The lambda is bound to THIS Harness on purpose: a spill read must use the
+      # reading agent's own ResultSpill, never another agent's.
       result_spill: -> { result_spill },
-      harness: self
+      harness: self,
+      manifest: @manifest
     )
     @tool_registry = builder.build
     @mcp           = builder.mcp

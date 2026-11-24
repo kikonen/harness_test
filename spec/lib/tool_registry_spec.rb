@@ -130,4 +130,31 @@ RSpec.describe ToolRegistry do
       expect(reg.tools.keys).to contain_exactly('a.tool', 'b.tool')
     end
   end
+  # ToolManifest narrows a registry through this (issue #286).
+  describe '#only' do
+    it 'keeps only the named tools' do
+      reg = registry_with('file.read', 'run.command', 'file.write')
+
+      expect(reg.only(%w[file.read file.write]).names).to eq(%w[file.read file.write])
+    end
+
+    # A restricted agent must see the run's ONE FileList and grant rules, not copies.
+    it 'reuses the SAME tool instances' do
+      reg = registry_with('file.read', 'run.command')
+      subset = reg.only(['file.read'])
+
+      expect(subset.get('file.read')).to equal(reg.get('file.read'))
+    end
+
+    it 'ignores a name the registry does not have (ToolManifest validates first)' do
+      expect(registry_with('a.tool').only(%w[a.tool nope]).names).to eq(['a.tool'])
+    end
+
+    it 'leaves the original registry untouched' do
+      reg = registry_with('a.tool', 'b.tool')
+      reg.only(['a.tool'])
+
+      expect(reg.names).to eq(%w[a.tool b.tool])
+    end
+  end
 end
