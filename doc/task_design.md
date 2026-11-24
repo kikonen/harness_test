@@ -1,7 +1,8 @@
 # Task: async turn design
 
-Design notes for `lib/task.rb`: how a turn runs on a background thread while
-all console I/O stays on the main thread.
+Design notes for `lib/task.rb` (a job's runner) and `lib/main_loop.rb` (the run's
+main loop): how a turn runs on a background thread while all console I/O stays on
+the main thread.
 
 ---
 
@@ -26,6 +27,11 @@ Under the registry design (issue #286 phase 0, `doc/task_model_design.md`) the q
 belongs to the registry, not to one task: every job pushes onto that ONE queue and each
 event carries the job id. Fan-in keeps this guarantee across jobs - one queue per job
 would leave cross-job order undefined.
+
+The loop that reads it is `MainLoop` (renamed from `Poller`: polling is one step of
+the loop, not its identity). The loop owns the registry it polls and records EVERY
+job's event; it renders only the job it shows. A Task hands the loop nothing but its
+own runner state - `Task#poll` is the unfiltered queue read.
 
 Protocol:
 

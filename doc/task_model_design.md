@@ -121,9 +121,17 @@ order they were pushed - defined. With one queue per job there is no shared cloc
 cross-job order is undefined, and the registry would need a select/poll or a sleep/wake
 pipe to learn which queue has data. Fan-in keeps the invariant with no extra mechanism.
 
-`Task#poll` therefore polls the registry queue for events tagged with the job id the
-executor is running for, and the registry's own loop polls the queue once per pass over
-all jobs, writing each event into that job's buffer.
+`MainLoop#next_shown_event` (issue #286, increment 1) is the queue's reader: it pulls
+every event and records each into its own job's buffer, so cross-job order is the push
+order and no job's event is ever dropped. Which events are RENDERED is the loop's
+decision, not a runner's: only the SHOWN job's events reach the console, and a
+background job's output is read through `/jobs` rather than interleaved with a live
+turn. `Task#poll` is the raw queue read with no filter - a Task is a job's runner, not
+the queue's reader. A foreign `:done` is recorded and its result delivered by the
+registry; it does not end the loop, because the shown job's turn is still running.
+
+The loop is `MainLoop` (was `Poller`): polling is one step of it, and it owns console,
+stdin, the spinner and the registry it polls.
 
 ## Gates for increment 1 (the first runtime) - RESOLVED
 

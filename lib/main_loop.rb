@@ -1,24 +1,60 @@
 # frozen_string_literal: true
 
-# Poller: the main-thread drain loop that owns the console for a task's turn -
-# it polls the event queue, renders output, drives the spinner, serves dialogs,
-# and reads mid-turn notes. The spinner and the input path are the poller's,
-# not the Task's: a Task is just the background runner of the block.
+# MainLoop: the run's main loop on the MAIN thread. It polls the ONE event queue
+# for every job, renders the shown job's output, drives the spinner, serves
+# dialogs and reads mid-turn input. Polling is one step of it, not its identity:
+# a Task is only a job's runner, so the loop is what owns console, stdin and the
+# spinner.
 # Design and protocol: doc/task_design.md.
 
 require "io/console"
 require_relative "input_path"
 require_relative "ui/spinner"
 
-class Poller
+class MainLoop
   # What the mid-turn read shows. See #poll_for_note.
   NOTE_PROMPT = "> "
 
-  # Constructed around the task whose events this loop drains. The task carries the single sink
-  # (ui), the renderer, the note editor and the spinner storage; the Poller is the only code that
-  # touches console, stdin and the spinner.
-  def initialize(task)
-    @task = task
+  # The task whose turn this loop is draining: it carries the single sink (ui), the
+  # renderer, the note editor and the spinner storage. The MainLoop is the only code
+  # that touches console, stdin and the spinner.
+  #
+  # The loop owns the REGISTRY it polls: a Task is one job's runner, so it is not
+  # where a loop learns what it is draining. The task's own registry fills in when
+  # none is given (a Task always carries one).
+  def initialize(task, registry: nil)
+    @task     = task
+    @registry = registry || task.registry
+  end
+
+  # The ONE queue and its single writer, the loop's own.
+  attr_reader :registry
+
+  # The queue is polled for EVERY job: each event is recorded into its own job's
+  # buffer, the registry's single-writer rule unchanged. Only the SHOWN job's
+  # events are rendered - a background job's output is read through /jobs rather
+  # than interleaved with a live turn. doc/task_model_design.md.
+  def shown_job
+    @task.job
+  end
+
+  def shown_event?(event)
+    event[:job] == shown_job.id
+  end
+
+  # The next event this loop shows: pull from the ONE queue, record what belongs
+  # to another job, and keep pulling until an event for the shown job arrives or
+  # the queue goes quiet. The filter lives HERE, not in Task: the loop is the
+  # queue's reader, a Task is only a job's runner.
+  def next_shown_event(timeout = Task::DEFAULT_POLL_TIMEOUT)
+    loop do
+      event = registry.poll(timeout)
+      return nil if event.nil?
+      return event if shown_event?(event)
+
+      registry.record(event)
+      timeout = 0
+    end
   end
 
   # Drain loop (called from the MAIN thread). Traps SIGINT for the duration so an interrupt targets
@@ -40,7 +76,7 @@ class Poller
         poll_for_note
 
         # Wait for the next event on the SINGLE queue (blocks up to timeout).
-        msg = task.poll
+        msg = next_shown_event
         # Poll FIRST, animate only on a quiet tick: polling first gives the task thread its first
         # ~100ms to say what it is doing (:spinner_detail), so the first frame is the real message
         # ("Sending to model...") not a stray 'Working' frame at the start of every turn.
@@ -60,14 +96,16 @@ class Poller
         loop do
           case msg[:type]
           when :done
-            finished = true
+            # A :done ends the SHOWN job's turn. Another job finishing is recorded
+            # and its result delivered by the registry; this loop keeps draining.
+            finished = shown_event?(msg)
             # The registry is the only writer of the record, so the finish (and the result the caller
             # awaits) lands there, not here. A drain-loop task is always built by the registry, so
             # its registry is never nil.
-            task.registry.record(msg)
+            registry.record(msg)
             break
           when :error_ctrl
-            error_msg = msg[:content]
+            error_msg = msg[:content] if shown_event?(msg)
           when :__request__
             handle_request(msg)
           when :spinner_detail
@@ -80,7 +118,7 @@ class Poller
             store_and_render(msg)
           end
 
-          msg = task.poll(0) # non-blocking: grab next if available
+          msg = next_shown_event(0) # non-blocking: grab next if available
           break unless msg
         end
 
@@ -143,8 +181,10 @@ class Poller
     # previous one shows the SAME message the task asked for, not the bare default. The buffer's head
     # is the live spinner state, so the rebuild reads it instead of an ivar copy.
     detail  = task.buffer.latest_head(:spinner_detail)&.content || {}
-    spinner = UI::Spinner.new(detail[:message] || Task::DEFAULT_SPINNER_MESSAGE,
-                              detail[:suffix], ui: task.ui)
+    spinner = UI::Spinner.new(
+      detail[:message] || Task::DEFAULT_SPINNER_MESSAGE,
+      detail[:suffix],
+      ui: task.ui)
     # A live badge: which job is working plus the posture tags, so a mid-turn /yolo toggle is visible
     # at once. The badge exists even for a harness-less task (the job half does not need a harness).
     spinner.badge = -> { self.class.turn_badge(task:, harness: task.harness) }
@@ -230,7 +270,7 @@ class Poller
         handler.run_mid_turn(text)
         return
       end
-      commit_input(task.registry.note_event(result.text))
+      commit_input(registry.note_event(result.text))
     when *InputPath::ROUND_TRIP
       # An editor round-trip is NOT an input commit - closing an editor is not a submission, and a
       # note that reached the model just because an editor was closed would inject text the user never sent.
@@ -243,8 +283,7 @@ class Poller
   # Commit one input event: route it to the job's inbox (so the override rule applies - a note
   # replaces a pending note only, otherwise it queues behind), then ack and record it. Main thread only.
   def commit_input(event)
-    task = @task
-    task.registry.route_input(task.job.id, event)
+    registry.route_input(shown_job.id, event)
 
     commit_note(event[:content])
   end
@@ -258,8 +297,11 @@ class Poller
     # ONE render call: the ack bracket and the note body are one block at the note width, the body's
     # first line continuing the ack line. The buffer still stores the RAW note as :note, so a replay
     # redraws it as a wrapped paragraph (no baked ack in the record).
-    line = task.renderer.line(type: :ack_note, content: note,
-                              origin: "note", ack: "got it")
+    line = task.renderer.line(
+      type: :ack_note,
+      content: note,
+      origin: "note",
+      ack: "got it")
     ui.puts(line)
     task.buffer.put(type: :note, origin: :user_note, content: note)
   end
@@ -271,8 +313,8 @@ class Poller
     dialog = msg[:dialog]
     # A job outside the foreground cannot be shown a dialog, so it gets an answer VALUE the tool can
     # return to the model. Grant dialogs are excepted: denying one would stop the job working at all.
-    target = task.registry.job(msg[:job])
-    if task.registry.denied?(target, dialog)
+    target = registry.job(msg[:job])
+    if registry.denied?(target, dialog)
       task.respond(Job::DENIED_ANSWER)
       return
     end
@@ -328,8 +370,10 @@ class Poller
   # After :done, drain any remaining events from the queue and render them.
   def drain_remaining
     loop do
-      msg = @task.poll(0)
+      msg = next_shown_event(0)
       break unless msg
+      # A control event is not output. A :done from ANOTHER job was already
+      # recorded by #next_shown_event, so it must not be rendered here either.
       next if msg[:type] == :done || msg[:type] == :error_ctrl
 
       store_and_render(msg)

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../command"
-require_relative "../poller"
+require_relative "../main_loop"
 
 module Commands
   # /replay - print the tail of what the run RECORDED, the same entries a resume
@@ -81,7 +81,7 @@ module Commands
 
       # The header names the job with the modeline/spinner tag (issue #548), plus
       # FOREGROUND for the one the next prompt reaches.
-      tag = Poller.job_tag(job).to_s
+      tag = MainLoop.job_tag(job).to_s
       tag += " FOREGROUND" if registry.foreground?(job.id)
       header  = "Replay #{tag} (#{job.kind}, #{job.status})"
       entries = registry.replay_tail_for_job(job.id)

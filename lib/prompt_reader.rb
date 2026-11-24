@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "input_path"
-require_relative "poller"
+require_relative "main_loop"
 require_relative "ui"
 
 # -- PromptReader ---------------------------------------------------------
@@ -68,13 +68,13 @@ class PromptReader
   # The modeline: a bracketed model name (effort inside it) then the posture
   # tags, then the context indicator on the SAME line to save vertical space.
   # The posture tags come from the SAME builder the spinner badge uses
-  # (Poller.mode_badge), so consent and streaming cannot read differently in the
+  # (MainLoop.mode_badge), so consent and streaming cannot read differently in the
   # two places (the spinner only exists while the model works, not while idle).
   def render_modeline(harness)
     profile = harness.session_manager.active_profile_name
     effort = harness.session_manager.param_overrides.reasoning_effort_display
     tags   = ["[#{profile ? "#{profile} (#{effort})" : effort}]"]
-    badge = Poller.mode_badge(harness)
+    badge = MainLoop.mode_badge(harness)
     tags  << badge if badge
     prefix = "#{tags.join(' ')}#{job_tag} > "
     ctx = harness.context_indicator
@@ -86,7 +86,7 @@ class PromptReader
   # so the idle line and a live turn cannot name different things. Every job is
   # named, job 0 (:main) included - consistency over omitting the common case.
   def job_tag
-    tag = Poller.job_tag(@registry.foreground_job)
+    tag = MainLoop.job_tag(@registry.foreground_job)
     tag ? " #{tag}" : ""
   end
 end

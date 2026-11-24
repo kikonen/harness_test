@@ -913,9 +913,10 @@ RSpec.describe Task do
       expect(task.buffer).to equal(job.buffer)
     end
 
-    # The foreground task never renders another job's lines: an event naming a
-    # foreign job is recorded into that job's own buffer and skipped.
-    it 'records a foreign-job event into that job buffer and does not render it' do
+    # A Task is a job's RUNNER, not the queue's reader: #poll hands back the next
+    # event whatever job it names. Deciding which job's events to show - and
+    # recording the rest - is the drain loop's (main_loop_spec).
+    it 'poll returns a foreign-job event without recording it' do
       registry = JobRegistry.new
       main = registry.add_job(kind: :main)
       other = registry.add_job(kind: :command, requested_by: main)
@@ -923,8 +924,8 @@ RSpec.describe Task do
       other.push_event(type: :text, origin: :task, content: 'from job 1')
 
       event = task.poll(0)
-      expect(event).to be_nil
-      expect(other.buffer.tail.map(&:content)).to eq(['from job 1'])
+      expect(event[:job]).to eq(other.id)
+      expect(other.buffer.tail).to be_empty
       expect(main.buffer.tail).to be_empty
     end
 

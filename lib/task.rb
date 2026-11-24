@@ -9,7 +9,7 @@ require_relative "input_path"
 require_relative "output_buffer"
 require_relative "ui/renderer"
 require_relative "ui/editor"
-require_relative "poller"
+require_relative "main_loop"
 require_relative "ui/spinner"
 require_relative "error_text"
 
@@ -124,16 +124,12 @@ class Task
     "#{(secs / 60)}m #{format('%02d', secs % 60)}s"
   end
 
-  # Non-blocking poll: returns one message, or nil after the timeout. An event
-  # naming ANOTHER job is recorded into that job's buffer and skipped - the
-  # foreground task never renders another job's lines.
+  # Non-blocking poll of the ONE queue: the next event, whatever job it belongs
+  # to, or nil after the timeout. Deciding WHICH job's events a loop shows is the
+  # loop's decision (MainLoop#next_shown_event), not this runner's - a Task is a
+  # job's runner, not the queue's reader.
   def poll(timeout = DEFAULT_POLL_TIMEOUT)
-    event = @registry.poll(timeout)
-    return nil if event.nil?
-    return event if event[:job] == @job.id
-
-    @registry.record(event)
-    poll(0)
+    @registry.poll(timeout)
   rescue ThreadError
     nil
   end
@@ -257,9 +253,9 @@ class Task
     nil
   end
 
-  # -- The ONE spinner (held on the task, driven by the Poller) --------------
+  # -- The ONE spinner (held on the task, driven by the MainLoop) --------------
   # The spinner's storage lives here because the task is the single sink it
-  # draws into; the Poller owns its creation, animation and clearing.
+  # draws into; the MainLoop owns its creation, animation and clearing.
 
   # The task's single spinner (set by the drain loop; nil before first tick).
   attr_reader :spinner
@@ -281,7 +277,7 @@ class Task
 
   # -- Drain loop entry (main thread) ----------------------------------------
   #
-  # Builds the task and hands it to a Poller, which runs the poll loop over the
+  # Builds the task and hands it to a MainLoop, which runs the poll loop over the
   # single event queue, drives the spinner, serves dialogs and reads mid-turn
   # notes, and returns when the task finishes. The required `ui:` console is the
   # single sink for ALL output; tests can pass a StringIO-backed UI::Console.
@@ -315,7 +311,7 @@ class Task
     max_width = harness&.settings&.markdown_max_width
     task.renderer = UI::Renderer.new(palette:, markdown:, markdown_max_width: max_width)
     task.note_editor = UI::Editor.new(ui.stdin) if ui.stdin && harness
-    # The Poller owns the main-thread loop, the spinner, stdin and dialog serving.
-    Poller.new(task).run
+    # The MainLoop owns the main-thread loop, the spinner, stdin and dialog serving.
+    MainLoop.new(task).run
   end
 end

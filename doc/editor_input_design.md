@@ -16,11 +16,11 @@ share one code path so no two can race for the keyboard:
 - **Mid-turn steering** - the Task drain loop peeks `stdin.input_pending?` on
   every tick (cross-platform, no reader thread - see `doc/task_design.md`); on a
   hit it opens the editor ON THE MAIN THREAD with prompt `> `
-  (`Poller::NOTE_PROMPT`). Because the main thread owns the keyboard for the
+  (`MainLoop::NOTE_PROMPT`). Because the main thread owns the keyboard for the
   whole read, the #198 stuck-dialog / lost-line bug class dies by construction.
   Steering reads through the run's SHARED path, so that label is per-read
-  (issue #561): `Poller#poll_for_note` reuses `task.input_path` - the object the
-  idle prompt reads through - because `Poller#commit_read` needs its
+  (issue #561): `MainLoop#poll_for_note` reuses `task.input_path` - the object the
+  idle prompt reads through - because `MainLoop#commit_read` needs its
   `command_handler` (dropping it would kill mid-turn `/commands`). The idle
   label, `PromptReader::PROMPT = "  "`, is a continuation marker that reads
   correctly only under a modeline ending ` > `; a mid-turn read has no modeline

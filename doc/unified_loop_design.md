@@ -1,7 +1,7 @@
 # Unified loop: the poll loop as the harness main loop
 
 Target design for the task/job/registry division of work (issue #286). Verified
-against the Poller-extraction baseline `3739f17` (2026-11). Cross-refs:
+against the Poller (now MainLoop) extraction baseline `3739f17` (2026-11). Cross-refs:
 #286, #36/#198 (steering notes), #221 (the /yolo gesture hack), #267 (its tech
 debt, #424. Read `doc/task_model_design.md` and `doc/task_design.md` first.
 
@@ -31,7 +31,7 @@ route it through the one command handler instead.
 ## Why (the hack this removed)
 
 Before the mid-turn dispatch landed, a mid-turn submit was a "note," and the
-ONLY command it could honour was a hardcoded `Poller#commit_note` gesture:
+ONLY command it could honour was a hardcoded `MainLoop#commit_note` gesture:
 
 ```ruby
 if (toggle = self.class.yolo_note_action(note))   # ugly, not scalable (#221/#267)
@@ -45,7 +45,7 @@ unnecessary: a bare word is a note-event, a `/x` is a command, both in one path.
 ## Shipped: mid-turn dispatch (state-only inline)
 
 The first routing step is in. A submitted block in the poll loop
-(`Poller#commit_read`) classifies itself:
+(`MainLoop#commit_read`) classifies itself:
 
 - a `"/"`-prefixed submit (edit mode) goes to the run's `CommandHandler` through
   the shared `InputPath#command_handler` (a callable wired by the CLI like
@@ -65,7 +65,7 @@ thread (the poll loop IS the main thread), gated by `Command.mid_turn_safe?`:
   posture toggles (`/yolo`, `/stream`, `/plan`) are pure
   Harness state writes and stay safe.
 
-This is what deleted `Poller#yolo_note_action` and the `commit_note` gesture
+This is what deleted `MainLoop#yolo_note_action` and the `commit_note` gesture
 branch: `/yolo` mid-turn is now just `CommandHandler#run_mid_turn('/yolo')`.
 
 ## Command routing in the unified loop
@@ -111,8 +111,23 @@ acceptable; pick when the first slice needs an answer:
   they share this one reader" (`doc/reline_cursor_and_enter_handling.md`).
 - `CommandHandler` already receives `input_path.target` / `input_path.registry`
   (`cli.rb`), i.e. it already reaches into the loop's foreground-job notion.
-- `Poller` owns the drain loop + spinner + note path (this commit), so the
+- `MainLoop` owns the drain loop + spinner + note path (this commit), so the
   loop's mid-turn logic is already in one class to edit.
+
+## SHIPPED: the loop reads the queue for every job (increment 1)
+
+`MainLoop` (renamed from `Poller` - polling is one step of the loop, not its
+identity) now owns the registry it polls and reads the ONE queue for EVERY job:
+`#next_shown_event` records each event into its own job's buffer and keeps pulling
+until an event for the SHOWN job arrives. Only the shown job's events are rendered;
+a background job's output is read through `/jobs` rather than interleaved with a live
+turn (owner decision). A foreign `:done` is recorded and its result delivered but does
+not end the loop. `Task#poll` lost its job-id filter: a Task is a job's runner, not the
+queue's reader.
+
+This is the prerequisite for the rest of the plan: a loop that filters the queue by one
+job id can never BE the run loop, and a parked worker alone buys nothing while a
+per-turn loop is still built for each turn.
 
 ## Suggested increments (small, each shippable)
 
@@ -122,9 +137,24 @@ acceptable; pick when the first slice needs an answer:
    `CommandHandler` via `CommandHandler#run_mid_turn` + `Command.mid_turn_safe?`.
    State-only commands run inline; a model/rebuild command is refused (see
    "Shipped" above).
-3. SHIPPED. Deleted `Poller#yolo_note_action` + the `commit_note` gesture
+3. SHIPPED. Deleted `MainLoop#yolo_note_action` + the `commit_note` gesture
    branch; `/yolo` is an ordinary command through the handler.
-4. Make `/model` and `/compact` event-to-task instead of shared-state writes /
-   refusals (the next step: replace the mid-turn refusal with a live-task event).
-5. Decide the task-thread lifecycle (on-demand vs always-running) once the
-   event path is stable.
+
+## Remaining increments (owner order, 2026-11-24)
+
+The lifecycle question is ANSWERED: an ALWAYS-RUNNING worker parked on its job
+inbox, not a thread started per turn. `MainLoop` is to REPLACE `CLI#run` - a run
+must not have two mains. Order:
+
+2. Turn = inbox event. The foreground worker parks on its inbox; a prompt delivers
+   a WORK item; `TaskRunner#run_on_task` reduced to deliver + await, then deleted.
+3. `MainLoop` replaces `CLI#run`: the idle prompt read moves INSIDE the loop
+   (`PromptReader` folds in), Ctrl-D exits the loop, commands dispatch from it.
+4. Live `/compact` and `/retry` as control events drained beside the note in
+   `TurnRunner`; their `mid_turn_safe? = false` refusals deleted. `/jobs add` last
+   (it builds an agent).
+5. Interrupt and shutdown semantics for a parked worker.
+
+Do NOT park a worker before step 1's loop ownership is in place: a parked loop and a
+per-turn loop reading the same queue steal each other's events (measured - the suite
+hangs).

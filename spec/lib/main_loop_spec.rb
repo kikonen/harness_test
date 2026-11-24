@@ -1,18 +1,18 @@
 # frozen_string_literal: true
 
 require 'logger'
-require 'poller'
+require 'main_loop'
 require 'task'
 require 'harness'
 require 'job_registry'
 require 'ui/spinner'
 require 'stringio'
 
-# The Poller owns the drain loop, the spinner, the input path and the dialog
+# The MainLoop owns the drain loop, the spinner, the input path and the dialog
 # serving that the Task no longer runs directly (issue #286). These specs drive
 # those methods the way the loop calls them: the instance methods through a
-# Poller built around a task, the posture-badge helper as a class method.
-RSpec.describe Poller do
+# MainLoop built around a task, the posture-badge helper as a class method.
+RSpec.describe MainLoop do
   # A Task always runs on a registry + job (#286): these specs build the
   # smallest real one (a single main job) so every Task is a genuine registry task.
   def spec_task(input_path: nil, &block)
@@ -36,7 +36,7 @@ RSpec.describe Poller do
       end.new
       task.spinner = recorder
 
-      Poller.new(task).store_and_render({ type: :spinner_detail, origin: :session_manager,
+      MainLoop.new(task).store_and_render({ type: :spinner_detail, origin: :session_manager,
                                           content: { message: 'Sending', suffix: 'ctx 12%' } })
 
       expect(task.buffer.cell(:session_manager, :spinner_detail).content)
@@ -47,7 +47,7 @@ RSpec.describe Poller do
 
   # issue #224 follow-up: the spinner badge ALWAYS shows the command
   # consent mode (live, re-read every frame) when the harness exposes it.
-  describe 'Poller#ensure_spinner_running mode badge (issue #224 follow-up)' do
+  describe 'MainLoop#ensure_spinner_running mode badge (issue #224 follow-up)' do
     def mode_harness(label)
       # #286: the consent/stream labels live under harness#settings; the plan
       # label is Harness-owned. A stand-in settings answers the posture labels.
@@ -285,7 +285,7 @@ RSpec.describe Poller do
     end
   end
 
-  describe 'Poller#poll_for_note with no harness (the guard, at unit level)' do
+  describe 'MainLoop#poll_for_note with no harness (the guard, at unit level)' do
     # Task.run always arrives with a harness (only run_on_task calls it), so the
     # harness-less turn is not a production path any more. The guard itself is
     # still real and is pinned at unit level: a task with no harness never reads
@@ -312,7 +312,7 @@ RSpec.describe Poller do
   # the main thread), NOT the note path - this is what removes the old /yolo
   # note-gesture hack (#221/#267): /yolo is now just a command. Bare text keeps
   # the note route exactly. Design: doc/unified_loop_design.md.
-  describe 'Poller mid-turn command dispatch (issue #286)' do
+  describe 'MainLoop mid-turn command dispatch (issue #286)' do
     # A stand-in CommandHandler: records what the poll loop dispatched. The
     # loop reaches it through the shared input path's command_handler (a
     # callable, like target/registry - doc/unified_loop_design.md).
@@ -343,7 +343,7 @@ RSpec.describe Poller do
 
     # Drive poll_for_note for one submitted block. The task shares one input
     # path (the read poll_for_note uses); poll_for_note feeds its result to
-    # Poller#commit_read, where a "/command" diverges from a bare note. Returns
+    # MainLoop#commit_read, where a "/command" diverges from a bare note. Returns
     # [task, input_path] so the test can wire command_handler onto the path.
     def task_for_submit(text)
       editor = instance_double(UI::Editor)
@@ -384,7 +384,7 @@ RSpec.describe Poller do
       expect(task.harness.notes).to eq(['please run it with yolo off'])
     end
 
-    it 'routes /yolo on to the handler as a command, not a poller gesture' do
+    it 'routes /yolo on to the handler as a command, not a loop gesture' do
       task, path = task_for_submit('/yolo on')
       handler = fake_handler
       path.command_handler = -> { handler }
@@ -412,7 +412,7 @@ RSpec.describe Poller do
   # editor opens - and NOT committed as a note: an editor round-trip is not a
   # submission, and a note that reaches the model just because an editor was
   # closed would inject text the user never sent.
-  describe 'Poller#poll_for_note and the Ctrl+G hand-off (issue #298)' do
+  describe 'MainLoop#poll_for_note and the Ctrl+G hand-off (issue #298)' do
     let(:note_harness) do
       Class.new do
         attr_reader :notes
@@ -460,8 +460,8 @@ RSpec.describe Poller do
       described_class.new(task).poll_for_note
 
       expect(editor).to have_received(:read_multiline)
-        .with(prompt: Poller::NOTE_PROMPT, prefill: nil)
-      expect(Poller::NOTE_PROMPT).to include('>')
+        .with(prompt: MainLoop::NOTE_PROMPT, prefill: nil)
+      expect(MainLoop::NOTE_PROMPT).to include('>')
     end
 
     it 'keeps the edited text as the note draft instead of committing it' do
@@ -488,7 +488,7 @@ RSpec.describe Poller do
       described_class.new(task).poll_for_note
 
       expect(editor).to have_received(:read_multiline).with(
-        prefill: 'draft from vim', prompt: Poller::NOTE_PROMPT
+        prefill: 'draft from vim', prompt: MainLoop::NOTE_PROMPT
       )
       expect(note_harness.notes).to be_empty
     end
@@ -501,7 +501,7 @@ RSpec.describe Poller do
   # a true #tty? - every spec stdin (StringIO, IO.pipe, Object, the
   # FakePendingStdin wrapper) fails one of those and must be left untouched,
   # otherwise the whole note suite above would call raw! on a pipe.
-  describe 'Poller#hold_raw_stdin (issue #473 raw-mode guard)' do
+  describe 'MainLoop#hold_raw_stdin (issue #473 raw-mode guard)' do
     def task_with_stdin(stdin)
       t = spec_task
       t.ui = UI::Console.new(stdout: StringIO.new, stdin: stdin)
@@ -586,9 +586,60 @@ RSpec.describe Poller do
     end
   end
 
+  # The drain loop is the queue's reader for EVERY job: it records all of them and
+  # renders only the job it shows. doc/task_model_design.md.
+  describe 'the drain loop polls all jobs and shows one (issue #286)' do
+    def two_jobs
+      registry = JobRegistry.new
+      main = registry.add_job(kind: :main)
+      [registry, main, registry.add_job(kind: :command, requested_by: main)]
+    end
+
+    it 'next_shown_event records a foreign event and keeps pulling to the shown one' do
+      registry, main, other = two_jobs
+      task = Task.new(registry:, job: main)
+      task.ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
+      other.push_event(type: :text, origin: :task, content: 'from job 1')
+      main.push_event(type: :text, origin: :task, content: 'mine')
+
+      event = described_class.new(task).next_shown_event(0)
+
+      expect(event[:content]).to eq('mine')
+      # The foreign event landed in ITS OWN buffer and never reached the shown one.
+      expect(other.buffer.tail.map(&:content)).to eq(['from job 1'])
+      expect(main.buffer.tail).to be_empty
+    end
+
+    it 'next_shown_event returns nil when only foreign events are queued' do
+      registry, main, other = two_jobs
+      task = Task.new(registry:, job: main)
+      task.ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
+      other.push_event(type: :text, origin: :task, content: 'from job 1')
+
+      expect(described_class.new(task).next_shown_event(0)).to be_nil
+      expect(other.buffer.tail.map(&:content)).to eq(['from job 1'])
+    end
+
+    # A background job finishing is recorded and its result delivered, but it does
+    # not end the loop: the shown job's turn is still running.
+    it 'a foreign :done is recorded and does not end the drain loop' do
+      registry, main, other = two_jobs
+      task = Task.new(registry:, job: main) { nil }
+      task.ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
+      other.push_event(type: :done, result: 'child answer')
+      main.push_event(type: :done, result: 'mine')
+
+      _error, _t = described_class.new(task).run
+
+      expect(other.finished?).to be true
+      expect(other.result).to eq('child answer')
+      expect(task.ui.stdout.string).not_to include('child answer')
+    end
+  end
+
   # A job outside the foreground cannot be shown a dialog, so its request gets an
   # answer VALUE the tool can return to the model; a grant dialog is excepted.
-  describe 'Poller#handle_request and the background denial (issue #286)' do
+  describe 'MainLoop#handle_request and the background denial (issue #286)' do
     def denied_registry
       registry = JobRegistry.new
       main = registry.add_job(kind: :main)
