@@ -56,17 +56,17 @@ land there and stay there), and the worker's own **`@await_work`** is the worker
 it), else to the inbox. `submit_work` delivers a `WORK` item through the job, so a
 caller never touches the thread.
 
-`Task.run` is the per-turn form: it starts the worker, drains it, and stops it on
-every return - a worker left parked would read this job's deliveries forever.
-`MainLoop#run` never calls `#start` (its owner does); a second `#start` would spawn a
-second worker and run the block twice.
+Increment 3 deleted the per-turn `Task.run` form: the run's ONE `MainLoop` drains
+the queue (`MainLoop#run_turn`), and the worker stays parked between turns. The CLI
+builds it once via `JobRegistry#worker_for`; a second `#start` would spawn a second
+worker and run the block twice.
 
 ## A task error: one line out, the frames into harness.log
 
 A task thread owns no console (single-thread I/O rule), so an exception raised
 inside the turn block cannot be printed where it happened. It travels as one
-`:error_ctrl` event carrying `"Class: message"`; `Task.run` returns that string
-and `TaskRunner#run_on_task` states it as the `:kind` role with origin `task error`
+`:error_ctrl` event carrying `"Class: message"`; `MainLoop#run_turn` collects it
+and `CommandHandler#report_turn_error` states it as the `:kind` role with origin `task error`
 (issue #474, increment 22), so `UI::Renderer` draws the bracket - the emitter holds
 the message alone, which is what lets a replay redraw the line from the record rather
 than inherit this emitter's prefix.
@@ -85,7 +85,7 @@ never load-bearing on the error path.
 
 ## Structured log
 
-There is ONE OutputBuffer per run (issue #286). `Task.run` hands the task the
+There is ONE OutputBuffer per run (issue #286). `Task#prepare` hands the task the
 harness' single buffer, so every put the drain loop makes lands in the same record
 a save reads - no harvest step, no second store. At the registry layer (issue #286)
 each job gets its OWN buffer, so this becomes the buffer of the foreground job.
@@ -140,14 +140,13 @@ The spinner's own segments (elapsed turn time, posture badge) come from
 the runner too, always as callables: the drain loop rebuilds the spinner
 whenever the outbox empties again, so anything the spinner computed itself
 would restart on every rebuild. Only the runner knows how long the turn has
-been running (issue #277). The badge is `Task.mode_badge` - one bracket per
-NON-default posture - and it is the SAME builder the idle prompt line uses
-(`PromptReader`), so a posture cannot read differently in the spinner and
-the prompt (issue #387).
+been running (issue #277). The badge is `MainLoop.mode_badge` - one bracket per
+NON-default posture - and it is the SAME builder the idle prompt line uses, so a
+posture cannot read differently in the spinner and the prompt (issue #387).
 
 ## Console injection
 
-`Task.run` REQUIRES a `ui:` (a `UI::Console` wrapping an explicit stdout/stdin
+`Task#prepare` takes a `ui:` (a `UI::Console` wrapping an explicit stdout/stdin
 pair). The same console is used for spinner frames, text output, and dialog
 prompts so tests can capture everything through a single StringIO-backed
 console. It is published on the task instance and passed explicitly to every
@@ -155,10 +154,9 @@ I/O call.
 
 ## Ctrl+C
 
-While `Task.run` is draining, SIGINT is trapped so an interrupt targets the
-drain loop, not a random thread. The task thread is force-stopped (no
-background work survives the turn) and the Interrupt is re-raised for the CLI's
-cleanup path.
+While `MainLoop#run` runs, SIGINT is trapped so an interrupt targets the loop,
+not a random thread. The worker is force-stopped (no background work survives
+the turn) and the Interrupt is re-raised for the CLI's cleanup path.
 
 `Task#stop` answers what the turn OWES before stopping it. STOP is not an answer,
 so a blocked requester that got STOP instead of a value raises "task was stopped
@@ -211,7 +209,7 @@ into the chain before the next LLM call.
 `input_pending?` is a core `io/console` peek that only reports a keypress once
 the tty hands bytes over one at a time. A cooked tty (measured on Linux/KDE;
 issue #473) buffers a whole line, so a lone keypress never fired the peek and no
-editor opened. `Task.run` therefore holds a real-tty stdin in raw mode for the
+editor opened. `MainLoop#run` therefore holds a real-tty stdin in raw mode for the
 wait (`raw!(intr: true)`, restored by `cooked!` in its `ensure`); the hold is
 guarded to a stream answering `#raw`, a true `#tty?`, AND `#input_pending?`, on a
 host that supports the hold (see the host gate below).
@@ -224,7 +222,7 @@ opens the editor there. On a Windows console `raw!(intr:true)` cannot make
 Ctrl+C a signal at all (Windows has no POSIX ISIG), so the held `0x03` byte is
 read by the peek as a keystroke - the note editor opens and the turn never
 aborts. The hold is therefore a POSIX-tty tool, not a capability: the guard is
-a host gate (`Task.raw_hold_host_supported?`), so on a Windows host the stdin
+a host gate (`MainLoop.raw_hold_host_supported?`), so on a Windows host the stdin
 stays cooked and Ctrl+C aborts as it did before #473, while the Linux/KDE raw
 hold stays where it helps. A redirected stdin and every spec stdin (StringIO,
 pipe, plain Object) still fail the `#raw`/`#tty?` guards.

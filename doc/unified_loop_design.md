@@ -23,10 +23,9 @@ note/prompt event to the foreground job." One loop, two *modes* of that loop:
 So "prompt" and "steering note" are the SAME submit reaching the foreground
 job; the only difference is whether a worker thread happened to be alive
 (prompt starts one, note lands beside one). The `InputPath` is already this one
-shared read (`cli.rb` wires one `PromptReader` whose `input_path` the poll loop
-also uses; `PromptReader#edit_state?` already exists). The unification is to
-stop routing a mid-turn submit through the special-cased note plumbing and
-route it through the one command handler instead.
+shared read (`cli.rb` wires one `InputPath` both the idle read and a note read
+use). The unification is to stop routing a mid-turn submit through the
+special-cased note plumbing and route it through the one command handler instead.
 
 ## Why (the hack this removed)
 
@@ -107,10 +106,6 @@ acceptable; pick when the first slice needs an answer:
 ## What already exists (so this is unification, not a new subsystem)
 
 - One `InputPath` shared by idle prompt and mid-turn note (`lib/input_path.rb`).
-- `PromptReader#edit_state?` - "idle and mid-turn share the edit state because
-  they share this one reader" (`doc/reline_cursor_and_enter_handling.md`).
-- `CommandHandler` already receives `input_path.target` / `input_path.registry`
-  (`cli.rb`), i.e. it already reaches into the loop's foreground-job notion.
 - `MainLoop` owns the drain loop + spinner + note path (this commit), so the
   loop's mid-turn logic is already in one class to edit.
 
@@ -150,16 +145,21 @@ must not have two mains. Order:
    inbox - the drain loop is the inbox's reader, so a steering note stays there);
    `Job#deliver` routes a delivery to the live worker's `@await_work` (via
    `job.worker`), else to the inbox. `JobRegistry#await_turn` delivers a WORK item
-   and awaits its `:done` while the caller drains the queue; `worker_for` parks a
-   worker. `TaskRunner#run_on_task` still uses the per-turn `registry.run` until
-   increment 3 makes the CLI loop the caller (then it reduces to deliver + await).
-3. `MainLoop` replaces `CLI#run`: the idle prompt read moves INSIDE the loop
-   (`PromptReader` folds in), Ctrl-D exits the loop, commands dispatch from it.
+   and awaits its `:done`; `worker_for` parks a worker.
+3. SHIPPED (the run loop). ONE `MainLoop` for the whole run: `CLI#run` builds the
+   shared `InputPath` + the foreground job's parked worker and runs the loop; the
+   idle prompt read (`read_prompt`, modeline from CLI) and a turn's drain
+   (`run_turn`: submit WORK, drain to the shown job's `:done`) are two modes of it.
+   Deleted: `Task.run`, `JobRegistry#run`/`#await_turn`, `PromptReader` (folded
+   into `read_prompt` + `CLI#render_modeline`), `TaskRunner` (the mixin survives as
+   `Reporting` - console roles only; `Command#run_on_worker` is the wrapper and
+   `MainLoop#run_turn` reports a worker error via `CommandHandler#report_turn_error`).
+   Spinner storage moved onto the loop.
 4. Live `/compact` and `/retry` as control events drained beside the note in
    `TurnRunner`; their `mid_turn_safe? = false` refusals deleted. `/jobs add` last
    (it builds an agent).
 5. Interrupt and shutdown semantics for a parked worker.
 
-Do NOT park a worker before step 1's loop ownership is in place: a parked loop and a
+Do NOT park a worker before the loop owns the queue: a parked loop and a
 per-turn loop reading the same queue steal each other's events (measured - the suite
-hangs).
+hangs). Increment 3 removed the per-turn loop, so one reader remains.

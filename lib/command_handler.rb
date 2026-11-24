@@ -256,10 +256,10 @@ class CommandHandler
     end
   end
 
-  private
-
   # issue #286 increment 3: a direct prompt is ONE submit to the run loop's
   # parked worker - the loop drains its events, so there is no per-turn drain
+  # loop here. Both this and #report_turn_error below are called BY THE LOOP
+  # (MainLoop#run / #run_turn), so they stay public.
   # loop here. The user's own line is one side of the exchange the resume replay
   # redraws; the registry records it in the foreground buffer (issue #458).
   # The turn block runs on the worker thread (single-thread I/O rule): the model
@@ -276,6 +276,8 @@ class CommandHandler
     summary = job&.harness&.aborted_turn_stats_line(job.id)
     ui.puts(summary) unless summary.nil?
   end
+
+  private
 
   # A wrong command name is usually a typo, so name the closest registered
   # names - all of them derived from the SAME registry the dispatch just

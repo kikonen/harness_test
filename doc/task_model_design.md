@@ -4,7 +4,8 @@ Design notes for the flat task list and the layer that owns it. Verified against
 master `97e7d94` (2026-11-14). Increment 1 built the shape in code: `lib/job.rb`
 (Job) and `lib/job_registry.rb` (JobRegistry), plus the minimum wiring - the main turn is
 registered as job #0, so the run record is job #0's buffer. Increment 2 wired the
-executor: `TaskRunner#run_on_task` AWAITs the foreground job on the registry, a
+executor: a host AWAITed the foreground job on the registry (increment 3 moved the
+await into `MainLoop#run_turn` and deleted `TaskRunner`), a
 job's task reads the ONE queue instead of its own outbox, and the input path is
 the same read for the idle prompt and a mid-turn note (`lib/input_path.rb`). No
 run builds a JobRegistry for a job other than #0 yet.
@@ -26,7 +27,7 @@ The graph node is a different thing from the executor, so the split is:
 - **Task** - keeps the name. The executor that runs a Job in the foreground and
   renders to the console.
 
-`Thread.current[:harness_task]`, `Task.current`, `TaskRunner` and the dialog
+`Thread.current[:harness_task]`, `Task.current` and the dialog
 routing all resolve to the executor, so nothing has to be renamed. The registry
 holds Jobs.
 
@@ -141,11 +142,10 @@ code. All three are settled; the wiring is what remains.
 - **Main turn is job #0** (owner answered, 2026-11-14; open decision 4 closed). The
   registry has no special case, `JobRegistry#add_job` assigns ids in add order so the
   first job added is #0, and its buffer is just job #0's buffer.
-- `TaskRunner#run_on_task` stops RUNNING a turn and AWAITS one: the registry is the
-  executor, so the CLI asks it to run a job and awaits the result. Decision resolved;
-  `lib/task_runner.rb` awaits the foreground job on the registry. The host's registry
-  is never nil: every TaskRunner host (Command, CommandHandler) is built by the run
-  with its registry, so the plain no-registry drain loop affordance was removed.
+- A host stops RUNNING a turn and AWAITS one: the registry is the executor. Decision
+  resolved; increment 3 made the run's `MainLoop#run_turn` the awaiter and deleted
+  `TaskRunner`. The host's registry is never nil: every reporting host (Command,
+  CommandHandler) is built by the run with its registry.
 - **A denied background dialog returns a real answer value** (resolved).
   `DialogTool#execute` blocks on `task.request(:dialog, ...)`, so the denial must come
   back as a value the tool can return to the model - a bare refusal is not an answer it

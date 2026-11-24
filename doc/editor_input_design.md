@@ -22,7 +22,7 @@ share one code path so no two can race for the keyboard:
   (issue #561): `MainLoop#poll_for_note` reuses `task.input_path` - the object the
   idle prompt reads through - because `MainLoop#commit_read` needs its
   `command_handler` (dropping it would kill mid-turn `/commands`). The idle
-  label, `PromptReader::PROMPT = "  "`, is a continuation marker that reads
+  label, `MainLoop::IDLE_PROMPT = "  "`, is a continuation marker that reads
   correctly only under a modeline ending ` > `; a mid-turn read has no modeline
   above it, so inheriting it there is invisible and an accidentally-opened
   editor looked like a frozen turn. `InputPath#read(prompt:)` labels ONE read

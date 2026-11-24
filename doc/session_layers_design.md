@@ -611,10 +611,11 @@ the foreground for the same reason.
 the main thread: while a **foreground** job's turn is live, the main thread is inside
 that turn's `MainLoop#run` loop and a `/jobs delete` cannot dispatch - the only
 main-thread interrupt for a live turn is Ctrl+C (`MainLoop` -> `task.stop`). A job's
-live `Task` is built by `Task.run` on a path no registry field holds, so there is no
-handle to stop a running job from an idle command either: delete refuses a running job
-rather than abandoning its thread. A job merely *awaiting* a dialog answer owes its
-thread a value, so `Job#interrupt` delivers `Job::INTERRUPTED_ANSWER` before removal.
+live `Task` is built by `JobRegistry#worker_for`; only the JOB names it (`job.worker`),
+never the registry, so there is no handle to stop a running job from an idle command
+either: delete refuses a running job rather than abandoning its thread. A job merely
+*awaiting* a dialog answer owes its thread a value, so `Job#interrupt` delivers
+`Job::INTERRUPTED_ANSWER` before removal.
 A concurrent drain loop over several jobs (the same next step `add` names) is what
 would give the registry a per-job task handle and let a running job be interrupted.
 
@@ -624,7 +625,7 @@ A run that has several jobs cannot be read from the spinner alone: two jobs can 
 waiting at the same moment and the console says only "Sending (model)". The tag is
 `MainLoop.job_tag(job)` -> `[job <id> <kind>]`, and it is on **every** line that names
 a job - the spinner badge (`MainLoop.turn_badge`) and the modeline
-(`PromptReader#job_tag`, the same builder) - so a prompt line reads
+(CLI#render_modeline via `MainLoop.job_tag`, the same builder) - so a prompt line reads
 `[model] [MANUAL] [job 0 main] > `.
 
 **The main turn is tagged too.** Leaving job 0 untagged while tagging the others reads
