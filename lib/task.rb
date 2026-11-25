@@ -12,6 +12,7 @@ require_relative "ui/editor"
 require_relative "ui/spinner"
 require_relative "error_text"
 require_relative "harness_error"
+require_relative "request_event"
 
 class Task
   # Default spinner message; a :spinner_detail event may override it (and its
@@ -133,6 +134,12 @@ class Task
         # for it), and Job#deliver routes the answer to the live worker.
         item = await_work.pop
         break if item.equal?(STOP)
+        # A command-side request event (:compact, ...): it becomes this worker's
+        # next turn, so the requested work runs on the JOB's thread.
+        if RequestEvent.deliver?(item)
+          service_request(item)
+          next
+        end
         # A non-WORK item is a stray answer or note: the loop drains those, not the worker.
         next unless work_item?(item)
 
@@ -157,13 +164,20 @@ class Task
 
   # One turn: run the block, report an error, announce the turn's end. Called once
   # per WORK item by the worker, and directly by a caller that wants exactly one
-  # turn with @block already set.
+  # turn with @block already set. A request event that arrives while the block
+  # runs is serviced BEFORE the turn's :done: the :done finishes the JOB, so a
+  # mini-turn pushed after it would land on a finished job (and a second :done
+  # would be dropped by Job#finish's once-only guard).
   def service_turn
+    # Live-ness is the JOB's status: the worker services a turn only while this
+    # job has one, and the registry's :done record finishes the job again.
+    @job.mark_running
     # The turn clock starts here (not at #start): a parked worker's thread exists
     # long before its first turn, and elapsed_label must stay nil until one runs.
     @started_at = Time.now
     begin
       value = @block.call(self)
+      service_pending_requests
     rescue => e
       # The event goes FIRST: a logger that cannot write must not swallow the
       # error the user is owed.
@@ -174,6 +188,37 @@ class Task
       # awaits. It is NOT the job's finish: a parked worker lives on after a turn,
       # and only an explicit Job#finish ends the JOB.
       push_event(type: :done, result: value)
+    end
+    self
+  end
+
+  # Drain the request events already on the worker's queue (non-blocking pop):
+  # each becomes a mini-turn on this job, inside the live turn.
+  def service_pending_requests
+    loop do
+      item = await_work.pop(true) rescue nil
+      break unless item
+      if RequestEvent.deliver?(item)
+        service_request(item)
+      elsif work_item?(item)
+        @block = item[:block]
+        service_turn
+      end
+    end
+  end
+
+  # One request event the loop handed to this worker: run the requested work on
+  # the JOB's thread. A mini-turn pushes NO :done: the enclosing turn's :done is
+  # what ends the turn and carries the turn's result, and a :done here would
+  # finish the job mid-turn (Job#finish is once-only, so the real result would
+  # be dropped). A raising mini-turn reports like a turn does.
+  def service_request(item)
+    @started_at = Time.now
+    begin
+      harness.session_manager.compact_session if RequestEvent.request?(item)
+    rescue => e
+      push_event(type: :error_ctrl, content: ErrorText.label(e))
+      record_task_error(e)
     end
     self
   end

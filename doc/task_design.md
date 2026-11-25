@@ -61,6 +61,15 @@ the queue (`MainLoop#run_turn`), and the worker stays parked between turns. The 
 builds it once via `JobRegistry#worker_for`; a second `#start` would spawn a second
 worker and run the block twice.
 
+## Request events: a mini-turn inside the live turn
+
+A `RequestEvent` (issue #286 increment 4, `lib/request_event.rb`) is a command's
+ask delivered on `@await_work` while a turn is live. `service_turn` drains the
+request items already queued and runs each as a mini-turn (`service_request`)
+BEFORE pushing the turn's `:done`: the `:done` finishes the JOB, so servicing
+after it - or pushing a `:done` from the mini-turn - would finish the job
+mid-turn and drop the turn's result.
+
 ## A task error: one line out, the frames into harness.log
 
 A task thread owns no console (single-thread I/O rule), so an exception raised

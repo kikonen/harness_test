@@ -12,6 +12,7 @@ require "io/console"
 require_relative "input_path"
 require_relative "task"
 require_relative "ui/spinner"
+require_relative "request_event"
 
 class MainLoop
   # What the mid-turn read shows. See #poll_for_note.
@@ -49,6 +50,25 @@ class MainLoop
 
   def shown_event?(event)
     event[:job] == shown_job.id
+  end
+
+  # A command's ask to the live turn, mid-drain: the event goes straight onto
+  # the worker's own delivery queue (the route the drain's :__request__ branch
+  # takes) and the worker services it on its next loop pass. Nothing waits for
+  # an answer - fire-and-forget. A command calls this while the drain is live;
+  # an idle command starts its own turn with #run_turn instead.
+  def request_event(kind:)
+    worker.await_work << { type: :__request__, kind:, job: shown_job.id }
+    # Return the loop, not the push's value: a turn block's last expression is
+    # often this call, and a Queue would leak into the turn's :done result.
+    self
+  end
+
+  # The drain's :__request__ branch for a command-side kind: hand the event to
+  # the worker's queue. A dialog request is answered by #handle_request instead.
+  def route_request_event(msg)
+    worker.await_work << msg
+    worker
   end
 
   # Repoint the loop at another job's parked worker (a /jobs foreground switch).
@@ -190,7 +210,7 @@ class MainLoop
           when :error_ctrl
             error = msg[:content] if shown_event?(msg)
           when :__request__
-            handle_request(msg)
+            RequestEvent.request?(msg) ? route_request_event(msg) : handle_request(msg)
           when :spinner_detail
             # Re-points the spinner (keeps it alive for the next tick).
           end

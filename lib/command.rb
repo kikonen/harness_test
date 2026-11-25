@@ -2,6 +2,7 @@
 
 require_relative "ui"
 require_relative "command_help"
+require_relative "request_event"
 require_relative "reporting"
 require_relative "ui/help_renderer"
 
@@ -83,6 +84,19 @@ class Command
     emit_role(:gap, "")
     @main_loop.run_turn { |task| yield task }
     emit_role(:gap, "")
+  end
+
+  # True while the run loop is draining a live turn on the worker.
+  def turn_live?
+    job = @main_loop&.shown_job
+    !job.nil? && job.running?
+  end
+
+  # Send a RequestEvent to the live turn this command is being dispatched in
+  # (#286 increment 4): fire-and-forget, the turn keeps running and the job's
+  # own thread does the work at its next request boundary.
+  def send_request_event
+    @main_loop&.request_event(kind: RequestEvent::KIND)
   end
 
   # A command reaches the Harness through the FOREGROUND job it acts on (#286),

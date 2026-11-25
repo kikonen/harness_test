@@ -71,6 +71,7 @@ RSpec.describe Commands::CompactCommand do
   def loop_double(registry, worker, console: ui)
     loop_ = Object.new
     loop_.define_singleton_method(:run_turn) do |&blk|
+      worker.job.mark_running
       worker.submit_work(&blk)
       # The worker pushes :done in its ensure, so the drain ends there - the
       # worker thread may still be inside its ensure when :done is polled.
@@ -87,6 +88,8 @@ RSpec.describe Commands::CompactCommand do
         console.puts(line)
       end
     end
+    # Command#turn_live? reads live-ness off the loop's shown job.
+    loop_.define_singleton_method(:shown_job) { worker.job }
     loop_
   end
 

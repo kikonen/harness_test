@@ -67,8 +67,13 @@ RSpec.describe Command do
     # one that rebuilds/ends the run has no live loop to act in: both opt out.
     it 'is false for commands that drive an LLM round or rebuild the run' do
       expect(Commands::RetryCommand.mid_turn_safe?).to be false
-      expect(Commands::CompactCommand.mid_turn_safe?).to be false
       expect(Commands::ExitCommand.mid_turn_safe?).to be false
+    end
+
+    # /compact no longer opts out: mid-turn it sends a RequestEvent to the live
+    # turn instead of starting a nested round (#286 increment 4).
+    it 'is true for /compact (it reaches the live turn as a request event)' do
+      expect(Commands::CompactCommand.mid_turn_safe?).to be true
     end
   end
 

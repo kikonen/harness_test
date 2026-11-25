@@ -696,6 +696,78 @@ RSpec.describe MainLoop do
       expect(loop_.ui.stdout.string).to include('late')
       expect(loop_.ui.stdout.string).to include('done-side')
     end
+
+    # increment 4: a mid-turn command asks the LIVE turn for work instead of
+    # starting a nested round. The event goes straight onto the worker's own
+    # delivery queue and the worker services it as a mini-turn INSIDE the live
+    # turn (before its :done), so the job is never finished out from under the
+    # turn and the turn keeps running.
+    describe 'the request-event path (issue #286 increment 4)' do
+      def request_harness
+        harness = Object.new
+        harness.define_singleton_method(:mailbox) { TurnMailbox.new(Logger.new(File::NULL)) }
+        harness.define_singleton_method(:settings) do
+          Class.new do
+            def output_palette = nil
+            def markdown?      = false
+            def markdown_max_width = nil
+          end.new
+        end
+        harness.define_singleton_method(:logger) { Logger.new(File::NULL) }
+        harness
+      end
+
+      it 'routes a RequestEvent straight onto the worker queue, off the console' do
+        harness = request_harness
+        loop_ = turn_loop(harness:)
+
+        loop_.run_turn do
+          loop_.request_event(kind: RequestEvent::KIND)
+          nil
+        end
+
+        # The event went onto the worker's own delivery queue, not the queue the
+        # drain reads - and the worker serviced it inside the turn, so nothing
+        # is left over and the console never saw the control envelope.
+        expect(loop_.worker.await_work).to be_empty
+        expect(loop_.ui.stdout.string).not_to include('__request__')
+      end
+
+      it 'services the requested work on the worker thread inside the live turn' do
+        harness = request_harness
+        manager = Object.new
+        manager.instance_variable_set(:@ran_on, nil)
+        manager.define_singleton_method(:ran_on) { @ran_on }
+        manager.define_singleton_method(:compact_session) do
+          @ran_on = Thread.current.name
+          { summary: 'S', before: 9, after: 3, retained: 0 }
+        end
+        harness.define_singleton_method(:session_manager) { manager }
+        loop_ = turn_loop(harness:)
+        reported = []
+        loop_.commands.define_singleton_method(:report_turn_error) do |job, error|
+          reported << [job.id, error]
+        end
+
+        loop_.run_turn { loop_.request_event(kind: RequestEvent::KIND); :turn_value }
+
+        expect(harness.session_manager.ran_on).to eq('job-0')
+        # The mini-turn pushes no :done of its own: the turn's :done is what
+        # finishes the job, so the job's result is the TURN's value.
+        expect(loop_.shown_job.result).to eq(:turn_value)
+        expect(reported).to eq([[0, nil]])
+      end
+
+      it 'keeps live-ness on the JOB, not on the loop' do
+        loop_ = turn_loop
+        job = loop_.shown_job
+        live = nil
+        loop_.run_turn { live = job.running? }
+
+        expect(live).to be true
+        expect(job.running?).to be false
+      end
+    end
   end
 
   # Ctrl+C semantics (the increment-3 regression the owner hit): an interrupt

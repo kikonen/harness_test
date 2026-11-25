@@ -160,6 +160,18 @@ must not have two mains. Order:
    (it builds an agent).
 5. Interrupt and shutdown semantics for a parked worker.
 
+4a. SHIPPED (the request event, `/compact` half). A mid-turn command that wants
+   work on the live turn sends a `RequestEvent` (`lib/request_event.rb`): the
+   loop pushes it straight onto the worker's own `@await_work` (the channel WORK
+   and STOP already use - the Thread::Queue is the synchronization; no mailbox
+   flag, no mutex) and the worker services it as a mini-turn INSIDE the live
+   turn, before that turn's `:done`. A mini-turn pushes NO `:done` of its own:
+   the `:done` finishes the JOB (`Job#finish` is once-only), so a mini-turn
+   `:done` would finish the job mid-turn and drop the real turn result. Live-
+   ness lives on the JOB: `Task#service_turn` marks the job running, and
+   `Command#turn_live?` reads `main_loop.shown_job.running?` - the loop holds no
+   live-ness flag. `/retry` is NOT yet converted; `/jobs add` last.
+
 Do NOT park a worker before the loop owns the queue: a parked loop and a
 per-turn loop reading the same queue steal each other's events (measured - the suite
 hangs). Increment 3 removed the per-turn loop, so one reader remains.
