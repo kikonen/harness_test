@@ -58,8 +58,12 @@ caller never touches the thread.
 
 Increment 3 deleted the per-turn `Task.run` form: the run's ONE `MainLoop` drains
 the queue (`MainLoop#run_turn`), and the worker stays parked between turns. The CLI
-builds it once via `JobRegistry#worker_for`; a second `#start` would spawn a second
-worker and run the block twice.
+no longer builds a worker at all: the loop acts on `shown_job.worker` and builds
+it lazily on first use. A worker belongs to its JOB - `#start` sets `job.worker`,
+and a `#stop` KEEPS the (stopped) Task on the job so the loop can REVIVE the same
+Task by re-`start`ing it on its own queue (a STOP left in the queue belongs to
+the thread that died for it, so a revived worker skips it and keeps parking).
+A second `#start` on a LIVE worker would spawn a second thread and is refused.
 
 ## Request events: a mini-turn inside the live turn
 
@@ -166,9 +170,10 @@ I/O call.
 While `MainLoop#run` runs, SIGINT is trapped so an interrupt targets the loop,
 not a random thread. Ctrl+C during a LIVE turn is a TURN abort: the worker is
 force-stopped (no background work survives the turn), the loop prints
-`[interrupted]`, and a fresh parked worker is built for the shown job so the
-run re-prompts instead of exiting. Ctrl+C AT the idle read (no live turn) is
-the quit gesture: it re-raises for the CLI's cleanup path, like Ctrl-D.
+`[interrupted]`, and the shown job's SAME Task is revived (re-`start`ed on its
+own queue) so the run re-prompts instead of exiting. Ctrl+C AT the idle read
+(no live turn) is the quit gesture: it re-raises for the CLI's cleanup path,
+like Ctrl-D.
 
 `Task#stop` answers what the turn OWES before stopping it. STOP is not an answer,
 so a blocked requester that got STOP instead of a value raises "task was stopped

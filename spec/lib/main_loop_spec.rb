@@ -15,24 +15,27 @@ require 'stringio'
 # MainLoop built around a parked worker, the posture-badge helper as a class
 # method.
 RSpec.describe MainLoop do
-  # A worker always runs on a registry + job (#286): these specs build the
-  # smallest real one (a single main job) so every worker is a genuine
-  # registry task. The commands double answers what the loop dispatches.
-  def spec_loop(input_path: nil, worker: nil, **kwargs)
+  # The loop holds no worker (#286): it acts on the shown job's own worker, so
+  # these specs build the smallest real registry (a single main job) and the
+  # loop builds the worker lazily. The commands double answers what the loop
+  # dispatches.
+  def spec_loop(input_path: nil, ui: nil, **kwargs)
     registry = JobRegistry.new
-    job = registry.add_job(kind: :main)
-    worker ||= Task.new(registry:, job:, input_path:)
-    worker.ui = UI::Console.new(stdout: StringIO.new) if worker.ui.nil?
+    registry.add_job(kind: :main)
+    ui ||= UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
     commands = kwargs.delete(:commands) { Object.new }
-    described_class.new(registry:, ui: worker.ui, commands:,
-                        input_path: input_path || InputPath.new(ui: worker.ui),
-                        worker:, **kwargs)
+    described_class.new(registry:, ui:, commands:,
+                        input_path: input_path || InputPath.new(ui:), **kwargs)
   end
 
-  # A worker on its own registry, for loops built explicitly.
-  def spec_worker(_ui)
-    registry = JobRegistry.new
-    Task.new(registry:, job: registry.add_job(kind: :main))
+  # A loop over a registry whose foreground job ALREADY has a live parked worker
+  # (the CLI's shape): the loop acts on that worker instead of building one.
+  def worker_loop(ui:, registry: nil, job: nil, input_path: nil, commands: Object.new)
+    registry ||= JobRegistry.new
+    job ||= registry.add_job(kind: :main)
+    worker = registry.worker_for(job, ui:)
+    [described_class.new(registry:, ui:, commands:,
+                         input_path: input_path || InputPath.new(ui:)), worker]
   end
 
   describe 'spinner head memory (issue #286)' do
@@ -103,12 +106,12 @@ RSpec.describe MainLoop do
     describe 'the job half of the badge (issue #548)' do
       def job_loop(kind, harness: nil)
         registry = JobRegistry.new
-        job      = registry.add_job(kind: kind)
-        worker   = Task.new(registry:, job:) { nil }
-        worker.ui = UI::Console.new(stdout: StringIO.new)
-        worker.harness = harness
-        described_class.new(registry:, ui: worker.ui, commands: Object.new,
-                            input_path: InputPath.new(ui: worker.ui), worker:)
+        registry.add_job(kind: kind)
+        ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
+        loop_ = described_class.new(registry:, ui:, commands: Object.new,
+                                    input_path: InputPath.new(ui:))
+        loop_.worker.harness = harness
+        loop_
       end
 
       it 'names a non-main job the turn belongs to' do
@@ -256,7 +259,9 @@ RSpec.describe MainLoop do
       end
 
       ui = UI::Console.new(stdout: StringIO.new, stdin: fake_in)
-      loop_ = spec_loop(input_path: InputPath.new(ui:), worker: spec_worker(ui))
+      # The job has no harness, so the loop's lazy worker has none either:
+      # poll_for_note must not touch stdin.
+      loop_ = spec_loop(input_path: InputPath.new(ui:), ui:)
 
       expect { loop_.poll_for_note }.not_to raise_error
     end
@@ -307,11 +312,9 @@ RSpec.describe MainLoop do
       end
       ui   = UI::Console.new(stdout: StringIO.new, stdin: stdin)
       path = InputPath.new(ui: ui, editor: editor)
-      worker = spec_worker(ui)
-      worker.note_draft = nil
+      loop_, worker = worker_loop(ui:, input_path: path, commands:)
       worker.harness = note_harness
-      described_class.new(registry: worker.registry, ui: ui, commands:,
-                          input_path: path, worker:)
+      loop_
     end
 
     it "sends a '/command' submit to the handler, not the note path" do
@@ -391,11 +394,9 @@ RSpec.describe MainLoop do
         .and_return(UI::Editor::EDITOR_RESULT.new(result[:text], result[:status],
                                                   result[:note]))
       ui = UI::Console.new(stdout: StringIO.new, stdin: stubbed_pending_stdin)
-      worker = spec_worker(ui)
-      worker.harness = note_harness
       path = InputPath.new(ui: ui, editor: editor)
-      loop_ = described_class.new(registry: worker.registry, ui: ui,
-                                  commands: Object.new, input_path: path, worker:)
+      loop_, worker = worker_loop(ui:, input_path: path)
+      worker.harness = note_harness
       [loop_, editor]
     end
 
@@ -454,7 +455,7 @@ RSpec.describe MainLoop do
   describe 'MainLoop#hold_raw_stdin (issue #473 raw-mode guard)' do
     def loop_with_stdin(stdin)
       ui = UI::Console.new(stdout: StringIO.new, stdin: stdin)
-      spec_loop(ui: ui, worker: spec_worker(ui))
+      spec_loop(ui: ui)
     end
 
     # The host gate decides whether the hold is even attempted; specs run on a
@@ -544,12 +545,9 @@ RSpec.describe MainLoop do
       [registry, main, registry.add_job(kind: :command, requested_by: main)]
     end
 
-    def loop_for(registry, job, commands: Object.new)
+    def loop_for(registry, _job, commands: Object.new)
       ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
-      worker = Task.new(registry:, job:)
-      worker.ui = ui
-      described_class.new(registry:, ui: ui, commands:,
-                          input_path: InputPath.new(ui:), worker:)
+      described_class.new(registry:, ui:, commands:, input_path: InputPath.new(ui:))
     end
 
     # run_turn always hands the turn's error (nil when there was none) to the
@@ -587,17 +585,35 @@ RSpec.describe MainLoop do
     # not end the loop: the shown job's turn is still running.
     it 'a foreign :done is recorded and does not end the drain' do
       registry, main, other = two_jobs
-      worker = Task.new(registry:, job: main) { nil }
-      worker.start
       loop_ = loop_for(registry, main, commands: turn_commands)
       other.push_event(type: :done, result: 'child answer')
-      worker.submit_work { nil }
+      main.deliver({ type: Task::WORK, block: -> { nil } })
 
       loop_.run_turn { nil }
 
       expect(other.finished?).to be true
       expect(other.result).to eq('child answer')
       expect(loop_.ui.stdout.string).not_to include('child answer')
+    end
+
+    # The worker belongs to its JOB: a foreground switch repoints which job the
+    # loop shows and NEVER stops a worker - each job keeps its own parked Task
+    # alive across the switch.
+    it "a foreground switch never stops a job's worker" do
+      registry, main, other = two_jobs
+      ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
+      main_worker = registry.worker_for(main, ui:)
+      other_worker = registry.worker_for(other, ui:)
+      loop_ = described_class.new(registry:, ui:, commands: Object.new,
+                                  input_path: InputPath.new(ui:))
+
+      registry.foreground = other.id
+
+      expect(loop_.shown_job).to equal(other)
+      expect(loop_.worker).to equal(other_worker)
+      expect(main_worker.alive?).to be true
+      expect(other_worker.alive?).to be true
+      loop_.registry.jobs.each { |j| j.worker&.stop }
     end
   end
 
@@ -609,12 +625,11 @@ RSpec.describe MainLoop do
       main = registry.add_job(kind: :main)
       background = registry.add_job(kind: :command, requested_by: main)
       ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
-      # The request arrives on the background job's own worker, so the denial
-      # answer lands on ITS inbox - which is the worker's job's inbox.
-      worker = Task.new(registry:, job: background)
-      worker.ui = ui
-      loop_ = described_class.new(registry:, ui: ui, commands: Object.new,
-                                  input_path: InputPath.new(ui:), worker:)
+      # The shown job is the MAIN job (the loop shows the foreground), and the
+      # request names the background job: the denial answer lands on the
+      # background job's inbox.
+      loop_ = described_class.new(registry:, ui:, commands: Object.new,
+                                  input_path: InputPath.new(ui:))
       [loop_, background]
     end
 
@@ -637,16 +652,11 @@ RSpec.describe MainLoop do
   describe 'MainLoop#run_turn (issue #286 increment 3)' do
     def turn_loop(harness: nil)
       registry = JobRegistry.new
-      job = registry.add_job(kind: :main, harness:)
+      registry.add_job(kind: :main, harness:)
       ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
-      worker = Task.new(registry:, job:)
-      worker.ui = ui
-      worker.prepare(harness:, ui:)
-      worker.start
       commands = Object.new
       def commands.report_turn_error(_job, _error); end
-      described_class.new(registry:, ui: ui, commands:,
-                          input_path: InputPath.new(ui:), worker:)
+      described_class.new(registry:, ui:, commands:, input_path: InputPath.new(ui:))
     end
 
     it 'runs the block on the worker and drains its events to :done' do
@@ -666,18 +676,13 @@ RSpec.describe MainLoop do
     it 'reports a worker error through the handler and keeps the loop alive' do
       reported = nil
       registry = JobRegistry.new
-      job = registry.add_job(kind: :main)
+      registry.add_job(kind: :main)
       ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
-      worker = Task.new(registry:, job:)
-      worker.ui = ui
-      worker.prepare(harness: nil, ui:)
-      worker.start
       commands = Object.new
       commands.define_singleton_method(:report_turn_error) do |job_, error|
         reported = [job_.id, error]
       end
-      loop_ = described_class.new(registry:, ui: ui, commands:,
-                                  input_path: InputPath.new(ui:), worker:)
+      loop_ = described_class.new(registry:, ui:, commands:, input_path: InputPath.new(ui:))
 
       loop_.run_turn { raise 'boom' }
 
@@ -776,12 +781,8 @@ RSpec.describe MainLoop do
   describe 'MainLoop#run interrupt semantics (turn abort vs run exit)' do
     def interrupt_loop(mode)
       registry = JobRegistry.new
-      job = registry.add_job(kind: :main)
+      registry.add_job(kind: :main)
       ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
-      worker = Task.new(registry:, job:)
-      worker.ui = ui
-      worker.prepare(harness: nil, ui:)
-      worker.start
       commands = Object.new
       def commands.exiting? = false
       def commands.report_turn_error(_job, _error); end
@@ -799,35 +800,36 @@ RSpec.describe MainLoop do
 
         UI::Editor::EDITOR_RESULT.new('go', :submitted)
       end
-      loop_ = described_class.new(registry:, ui:, commands:, input_path:,
-                                  worker:, modeline: nil)
+      loop_ = described_class.new(registry:, ui:, commands:, input_path:, modeline: nil)
       allow(loop_).to receive(:run_turn) { raise Interrupt }
-      [loop_, worker, registry, input_path]
+      # run_turn is stubbed (it only raises), so nothing else builds the shown
+      # job's worker: the loop builds it lazily exactly as a real turn would.
+      loop_.worker
+      [loop_, registry, input_path]
     end
 
     it 'Ctrl+C during a live turn aborts the turn and keeps the run looping' do
-      loop_, worker, _registry, input_path = interrupt_loop(:during_turn)
+      loop_, registry, input_path = interrupt_loop(:during_turn)
 
       expect { loop_.run }.not_to raise_error
 
-      # The replacement worker's own thread ends on the run's shutdown STOP;
-      # alive? is false once #run's ensure has joined it. What the loop must
-      # guarantee mid-run is that the NEXT turn gets a live worker, which the
-      # two aborted turns (read #1, read #2) prove.
-      expect(worker.alive?).to be false # the interrupted worker was stopped
-      expect(loop_.worker).not_to be_nil
-      expect(loop_.worker).not_to equal(worker)
+      # The loop holds no worker and builds none up front: the shown job's own
+      # Task was created by the first turn and REVIVED in place after each
+      # interrupt (the same Task object, not a replacement). The run's ensure
+      # stopped it, so it is dead by the time the run returns.
+      job = registry.foreground_job
+      expect(job.worker).not_to be_nil
+      expect(job.worker.alive?).to be false
       expect(loop_.ui.stdout.string).to include('[interrupted]')
       # read #1 -> turn #1 aborted -> read #2 -> turn #2 aborted -> read #3 Ctrl-D quits.
       expect(input_path).to have_received(:read).exactly(3).times
-      loop_.worker.stop
     end
 
     it 'Ctrl+C at the idle read is a quit: it re-raises for the CLI cleanup' do
-      loop_, worker, _registry, _input_path = interrupt_loop(:at_read)
+      loop_, registry, _input_path = interrupt_loop(:at_read)
 
       expect { loop_.run }.to raise_error(Interrupt)
-      expect(worker.alive?).to be false
+      expect(registry.foreground_job.worker&.alive?).to be false
     end
   end
 end

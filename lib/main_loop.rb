@@ -3,9 +3,10 @@
 # MainLoop: the run's ONE main loop on the MAIN thread (issue #286 increment 3).
 # It replaces CLI#run's idle loop and the per-turn drain loop: the idle prompt
 # read and a turn's event drain are two modes of the SAME loop. It owns stdin,
-# the spinner, the ONE event queue and the foreground job's parked worker. A
-# prompt submits a WORK item to that worker and drains its events; a submit while
-# a turn is live is a note or a mid-turn command. There is no second reader of
+# the spinner and the ONE event queue. It holds NO worker: a worker belongs to
+# its JOB, and the loop shows the FOREGROUND job, so it acts on shown_job.worker.
+# A prompt submits a WORK item to that worker and drains its events; a submit
+# while a turn is live is a note or a mid-turn command. There is no second reader of
 # the queue and no second main. Design: doc/unified_loop_design.md, doc/task_design.md.
 
 require "io/console"
@@ -23,29 +24,42 @@ class MainLoop
   IDLE_PROMPT = "  "
 
   # The run-level collaborators: the registry (the ONE queue), the single console
-  # sink, the command dispatcher, the shared input path, and the foreground job's
-  # parked worker. The modeline is a callable (the idle prompt's own renderer) so
-  # the loop does not know what an idle line looks like.
-  def initialize(registry:, ui:, commands:, input_path:, worker:,
+  # sink, the command dispatcher, and the shared input path. The loop holds NO
+  # worker: a worker belongs to its JOB (job.worker), and the loop shows the
+  # FOREGROUND job, so the worker it acts on is always shown_job.worker. The
+  # modeline is a callable (the idle prompt's own renderer) so the loop does not
+  # know what an idle line looks like.
+  def initialize(registry:, ui:, commands:, input_path:,
                  modeline: nil, logger: nil)
     @registry    = registry
     @ui          = ui
     @commands    = commands
     @input_path  = input_path
-    @worker      = worker
     @modeline    = modeline
     @logger      = logger
     @spinner     = nil
     @draft       = nil
   end
 
-  attr_reader :registry, :ui, :commands, :input_path, :worker, :modeline, :logger
+  attr_reader :registry, :ui, :commands, :input_path, :modeline, :logger
 
-  # The job whose events this loop renders: the worker's job, which is the
-  # foreground job. A /jobs switch repoints the worker (repoint_worker), so the
-  # shown job follows it.
+  # The job whose events this loop renders: the registry's foreground job. A
+  # /jobs switch changes only that - the shown job's parked worker follows it,
+  # and no worker is ever stopped by a switch.
   def shown_job
-    worker.job
+    registry.foreground_job
+  end
+
+  # The worker the loop acts on: the shown JOB's own parked worker. It is
+  # built on first use so a registry whose foreground job has no worker yet
+  # (a restored job, a /jobs switch to one) gets one lazily, and an interrupt
+  # revives the SAME Task rather than replacing it.
+  def worker
+    job = shown_job
+    return nil if job.nil?
+    return job.worker if job.worker&.alive?
+
+    job.worker&.start || registry.worker_for(job, ui:, input_path:)
   end
 
   def shown_event?(event)
@@ -71,13 +85,12 @@ class MainLoop
     worker
   end
 
-  # Repoint the loop at another job's parked worker (a /jobs foreground switch).
-  # The old worker is stopped; the new one is built if none lives yet.
-  def repoint_worker(job)
-    return if worker&.job.equal?(job)
-
-    worker.stop if worker
-    @worker = registry.worker_for(job, ui:, input_path:)
+  # Stop every job's parked worker for the run's shutdown. A foreground switch
+  # NEVER stops a worker - each job keeps its own - so the only sweep is the
+  # run ending (and an interrupt's revival of the shown job's worker, which
+  # revives rather than replaces).
+  def stop_all_workers
+    registry.jobs.each { |job| job.worker&.stop }
   end
 
   # The next event this loop shows: pull from the ONE queue, record what belongs
@@ -97,8 +110,8 @@ class MainLoop
   # The run loop (main thread). Traps SIGINT for the whole run so an interrupt
   # targets the loop. Ctrl+C during a LIVE turn is a TURN abort, not a run exit
   # (the master shape: the drain loop stopped the worker and the idle loop
-  # survived): the worker is stopped and the run re-prompts, replacing the
-  # stopped worker because the next turn needs a parked one. Ctrl+C AT the idle
+  # survived): the shown job's worker is stopped and the run re-prompts - the
+  # next #worker call REVIVES that same Task on the job. Ctrl+C AT the idle
   # read (no live turn) exits the run and re-raises for the CLI's cleanup.
   # Returns when the user quits (Ctrl-D at the idle prompt) or a command ends
   # the run.
@@ -120,12 +133,11 @@ class MainLoop
             commands.handle(text)
           end
         rescue Interrupt
-          worker.stop
+          shown_job.worker&.stop
           ui.puts "\n  [interrupted]"
           logger&.info("turn interrupted (Ctrl+C)")
-          # NOT repoint_worker: it early-returns for the same job and keeps the
-          # stopped worker. The next turn needs a live parked one.
-          @worker = registry.worker_for(shown_job, ui:, input_path:)
+          # The next turn needs a parked worker: #worker revives the SAME Task
+          # the interrupt stopped (job.worker survives a stop).
         end
         break if commands.exiting?
 
@@ -136,10 +148,10 @@ class MainLoop
     rescue Interrupt
       # Ctrl+C AT the idle read: treat as a normal exit so history and the
       # session save.
-      worker&.stop
+      stop_all_workers
       raise
     ensure
-      worker&.stop
+      stop_all_workers
       clear_spinner
       trap("INT", old_trap)
       raw_stdin&.cooked!
@@ -370,20 +382,24 @@ class MainLoop
   end
 
   def handle_request(msg)
-    task = worker
-    return task.respond(nil) unless msg[:kind] == :dialog
+    # The answer routes to the job the request NAMED (a background job's request
+    # is answered into ITS inbox), never to the shown job's worker.
+    target = registry.job(msg[:job])
+    return unless target
+
+    return target.respond(nil) unless msg[:kind] == :dialog
 
     dialog = msg[:dialog]
-    target = registry.job(msg[:job])
     if registry.denied?(target, dialog)
-      task.respond(Job::DENIED_ANSWER)
+      target.respond(Job::DENIED_ANSWER)
       return
     end
 
+    task = worker
     task.instance_variable_set(:@dialog_open, true)
     begin
       answer = dialog.perform_direct(ui:)
-      task.respond(answer)
+      target.respond(answer)
     ensure
       task.instance_variable_set(:@dialog_open, false)
     end

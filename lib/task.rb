@@ -133,6 +133,10 @@ class Task
         # is the reader of the job inbox during a turn (steering notes stay there
         # for it), and Job#deliver routes the answer to the live worker.
         item = await_work.pop
+        # A STOP left in the queue is the sentinel the PREVIOUS worker thread died
+        # for: consume it and keep parking. Only the worker that is parked NOW may
+        # end on a STOP, so reviving a stopped worker never self-kills it.
+        next if item.equal?(STOP) && @thread != Thread.current
         break if item.equal?(STOP)
         # A command-side request event (:compact, ...): it becomes this worker's
         # next turn, so the requested work runs on the JOB's thread.
@@ -146,9 +150,6 @@ class Task
         @block = item[:block]
         service_turn
       end
-      # A worker that exits on its own (a STOP, or a killed turn) leaves no reader
-      # of this job's deliveries: clear the slot so alive? is false and Job#deliver
-      # goes back to the inbox.
       @thread = nil
     end
     self
@@ -296,7 +297,9 @@ class Task
     @thread&.join(timeout)
     @thread&.kill if @thread&.alive?
     @thread = nil
-    @job.worker = nil if @job.worker.equal?(self)
+    # The job keeps its (stopped) Task: alive? is false, so Job#deliver falls
+    # back to the inbox and MainLoop#worker REVIVES this same Task on its own
+    # queue. Only a worker that exits on its own (its loop ended) clears the slot.
   end
 
   # -- Task-thread side (called from inside the block) -----------------------

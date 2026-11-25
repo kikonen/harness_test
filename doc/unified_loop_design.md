@@ -172,6 +172,16 @@ must not have two mains. Order:
    `Command#turn_live?` reads `main_loop.shown_job.running?` - the loop holds no
    live-ness flag. `/retry` is NOT yet converted; `/jobs add` last.
 
+4b. SHIPPED (the loop holds no worker). `MainLoop` had a `@worker` ivar -
+   duplicate state: a worker belongs to its JOB (`job.worker`), and the loop
+   shows the FOREGROUND job, so the worker it acts on is always
+   `shown_job.worker` (built lazily on first use; `CLI#run` builds none). A
+   `/jobs` foreground switch repoints only `registry.foreground` - it NEVER
+   stops a worker; every job keeps its own parked Task alive (`repoint_worker`
+   deleted). An interrupt stops the shown job's worker and the next `#worker`
+   call REVIVES the same Task (a `#stop` keeps the stopped Task on the job; a
+   STOP left in the queue belongs to the thread that died for it).
+
 Do NOT park a worker before the loop owns the queue: a parked loop and a
 per-turn loop reading the same queue steal each other's events (measured - the suite
 hangs). Increment 3 removed the per-turn loop, so one reader remains.

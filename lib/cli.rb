@@ -208,16 +208,15 @@ class CLI
     begin
       # ONE loop for the whole run (issue #286 increment 3): the idle prompt read
       # and a turn's event drain are two modes of the same MainLoop. The foreground
-      # job gets its parked worker here; the loop submits a prompt as a WORK item
-      # and drains its events, so there is no per-turn nested drain loop.
+      # job gets its parked worker lazily (the loop acts on shown_job.worker);
+      # the loop submits a prompt as a WORK item and drains its events, so there
+      # is no per-turn nested drain loop.
       input_path = InputPath.new(ui: @ui, prompt: MainLoop::IDLE_PROMPT)
       input_path.target   = -> { @registry.foreground_job }
       input_path.registry = -> { @registry }
-      worker = @registry.worker_for(
-        @registry.foreground_job, ui: @ui, input_path:)
       @commands.main_loop = MainLoop.new(
         registry: @registry, ui: @ui, commands: @commands,
-        input_path:, worker:,
+        input_path:,
         modeline: -> { render_modeline },
         logger: @harness_factory.logger)
       @main_loop = @commands.main_loop
