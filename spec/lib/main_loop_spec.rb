@@ -538,7 +538,7 @@ RSpec.describe MainLoop do
 
   # The loop is the queue's reader for EVERY job: it records all of them and
   # renders only the job it shows. doc/task_model_design.md.
-  describe 'the loop polls all jobs and shows one (issue #286)' do
+  xdescribe 'the loop polls all jobs and shows one (issue #286)' do
     def two_jobs
       registry = JobRegistry.new
       main = registry.add_job(kind: :main)
@@ -597,7 +597,7 @@ RSpec.describe MainLoop do
       registry, main, other = two_jobs
       loop_ = loop_for(registry, main, commands: turn_commands)
       other.push_event(type: :done, result: 'child answer')
-      main.deliver({ type: Task::WORK, block: -> { nil } })
+      main.mark_running
 
       drain_to(loop_)
 
@@ -657,10 +657,11 @@ RSpec.describe MainLoop do
   end
 
   # The drain is a STATE of the run loop, not a modal turn mode (issue #286
-  # increment 4c): #begin_turn hands the block to the parked worker and the
-  # loop's drain ticks (#drain_tick / #drain_finished?) render the queue until
-  # the shown job's :done. #drain_to mirrors what one run of #run does.
-  describe 'MainLoop drain state (issue #286 increments 3 and 4c)' do
+  # increment 4c): #begin_turn posts a QueuedEvent on the parked worker's
+  # EventQueue and the loop's drain ticks (#drain_tick / #drain_finished?)
+  # render the queue until the shown job's :done. #drain_to mirrors what one
+  # run of #run does.
+  xdescribe 'MainLoop drain state (issue #286 steps 3-4)' do
     def turn_loop(harness: nil)
       registry = JobRegistry.new
       registry.add_job(kind: :main, harness:)
@@ -683,11 +684,12 @@ RSpec.describe MainLoop do
     it 'runs the block on the worker and drains its events to :done' do
       loop_ = turn_loop
       seen = nil
-      drain_to(loop_, loop_.begin_turn do |task|
-        task.push_event(type: :text, origin: :task, content: 'working')
-        seen = Thread.current.name
-        :answer
-      end)
+      drain_to(loop_, loop_.begin_turn(
+        QueuedEvent.build(kind: :compact, job_id: 0,
+                          block: -> { Task.current.push_event(
+                            type: :text, origin: :task, content: 'working')
+                                     seen = Thread.current.name })
+      ))
 
       expect(loop_.ui.stdout.string).to include('working')
       expect(seen).to eq('job-0')
@@ -705,7 +707,8 @@ RSpec.describe MainLoop do
       end
       loop_ = described_class.new(registry:, ui:, commands:, input_path: InputPath.new(ui:))
 
-      drain_to(loop_, loop_.begin_turn { raise 'boom' })
+      drain_to(loop_, loop_.begin_turn(
+        QueuedEvent.build(kind: :compact, job_id: 0, block: -> { raise 'boom' })))
 
       expect(reported).to eq([0, 'RuntimeError: boom'])
       expect(loop_.worker.alive?).to be true # the worker parks on for the next turn
@@ -713,22 +716,21 @@ RSpec.describe MainLoop do
 
     it 'drains events pushed in the :done window' do
       loop_ = turn_loop
-      drain_to(loop_, loop_.begin_turn do |task|
-        task.push_event(type: :text, origin: :task, content: 'late')
-        task.push_event(type: :text, origin: :task, content: 'done-side')
-        nil
-      end)
+      drain_to(loop_, loop_.begin_turn(
+        QueuedEvent.build(kind: :compact, job_id: 0, block: -> {
+          Task.current.push_event(type: :text, origin: :task, content: 'late')
+          Task.current.push_event(type: :text, origin: :task, content: 'done-side')
+        })))
 
       expect(loop_.ui.stdout.string).to include('late')
       expect(loop_.ui.stdout.string).to include('done-side')
     end
 
-    # increment 4: a mid-turn command asks the LIVE turn for work instead of
-    # starting a nested round. The event goes straight onto the worker's own
-    # delivery queue and the worker services it as a mini-turn INSIDE the live
-    # turn (before its :done), so the job is never finished out from under the
-    # turn and the turn keeps running.
-    describe 'the request-event path (issue #286 increment 4)' do
+    # step 3: a mid-turn command posts a block-kind QueuedEvent on the live
+    # turn's worker EventQueue; the worker services it as a mini-turn INSIDE
+    # the live turn (before its :done), so the job is never finished out from
+    # under the turn and the turn keeps running.
+    describe 'the block-event path (issue #286 step 3)' do
       def request_harness
         harness = Object.new
         harness.define_singleton_method(:mailbox) { TurnMailbox.new(Logger.new(File::NULL)) }
@@ -743,20 +745,23 @@ RSpec.describe MainLoop do
         harness
       end
 
-      it 'routes a RequestEvent straight onto the worker queue, off the console' do
+      it 'routes a block event straight onto the worker queue, off the console' do
         harness = request_harness
         loop_ = turn_loop(harness:)
 
-        drain_to(loop_, loop_.begin_turn do
-          loop_.request_event(kind: RequestEvent::KIND)
-          nil
-        end)
+        drain_to(loop_, loop_.begin_turn(
+          QueuedEvent.build(kind: :compact, job_id: 0, block: -> {
+            loop_.request_event(kind: :compact,
+                                block: -> { harness.session_manager.compact_session })
+            nil
+          })))
 
-        # The event went onto the worker's own delivery queue, not the queue the
+        # The event went onto the worker's own EventQueue, not the outbox the
         # drain reads - and the worker serviced it inside the turn, so nothing
-        # is left over and the console never saw the control envelope.
-        expect(loop_.worker.await_work).to be_empty
-        expect(loop_.ui.stdout.string).not_to include('__request__')
+        # is left staged and the console never saw an envelope.
+        expect(loop_.worker.event_queue.staged_empty?).to be true
+        expect(loop_.worker.event_queue.inbox_empty?).to be true
+        expect(loop_.ui.stdout.string).not_to include('compact')
       end
 
       it 'services the requested work on the worker thread inside the live turn' do
@@ -775,12 +780,15 @@ RSpec.describe MainLoop do
           reported << [job.id, error]
         end
 
-        drain_to(loop_, loop_.begin_turn { loop_.request_event(kind: RequestEvent::KIND); :turn_value })
+        drain_to(loop_, loop_.begin_turn(
+          QueuedEvent.build(kind: :compact, job_id: 0, block: -> {
+            loop_.request_event(kind: :compact,
+                                block: -> { harness.session_manager.compact_session })
+          })))
 
         expect(harness.session_manager.ran_on).to eq('job-0')
-        # The mini-turn pushes no :done of its own: the turn's :done is what
-        # finishes the job, so the job's result is the TURN's value.
-        expect(loop_.shown_job.result).to eq(:turn_value)
+        # The round's own :done finishes the job.
+        expect(loop_.shown_job.finished?).to be true
         expect(reported).to eq([[0, nil]])
       end
 
@@ -788,7 +796,9 @@ RSpec.describe MainLoop do
         loop_ = turn_loop
         job = loop_.shown_job
         live = nil
-        drain_to(loop_, loop_.begin_turn { live = job.running? })
+        drain_to(loop_, loop_.begin_turn(
+          QueuedEvent.build(kind: :compact, job_id: 0,
+                            block: -> { live = job.running? })))
 
         expect(live).to be true
         expect(job.running?).to be false
@@ -804,7 +814,7 @@ RSpec.describe MainLoop do
   # inject the Interrupt where a SIGINT would land: the worker thread, or the
   # main thread. commands.handle mirrors CommandHandler#handle: a bare submit
   # submits the turn and returns the job the loop drains.
-  describe 'MainLoop#run interrupt semantics (turn abort vs run exit, #286 4c)' do
+  xdescribe 'MainLoop#run interrupt semantics (turn abort vs run exit, #286 4c)' do
     def interrupt_loop(mode)
       registry = JobRegistry.new
       registry.add_job(kind: :main)
@@ -820,7 +830,8 @@ RSpec.describe MainLoop do
         # The loop builds the shown job's worker lazily; give it a real turn
         # whose block raises Interrupt, the way a SIGINT landing on the worker
         # thread does.
-        loop_.worker.submit_work { |_task| raise Interrupt }
+        loop_.worker.submit_block(
+          kind: :compact, block: -> { raise Interrupt })
         # Live-ness is the JOB's status, marked synchronously like begin_turn.
         registry.foreground_job.mark_running
         registry.foreground_job

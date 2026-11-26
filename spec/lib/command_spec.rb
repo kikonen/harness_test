@@ -131,19 +131,20 @@ RSpec.describe Command do
       expect(cmd).to respond_to(:submit_turn, :emit_line)
     end
 
-    # #286 increment 4c: the round goes to the loop's worker and the JOB comes
-    # back for the loop to drain - submit_turn never waits on the turn itself.
-    it 'submits its block to the main_loop and returns the job to drain' do
+    # #286 step 3: the round goes to the loop as a QueuedEvent and the JOB
+    # comes back for the loop to drain - submit_turn never waits on the turn.
+    it 'submits a QueuedEvent to the main_loop and returns the job to drain' do
       seen = []
       loop_ = Object.new
-      loop_.define_singleton_method(:begin_turn) { |&blk| seen << blk.call(:task); :job }
+      loop_.define_singleton_method(:begin_turn) { |event| seen << event; :job }
       cmd = build(described_class, main_loop: loop_)
-      returned = nil
 
-      expect(cmd.submit_turn { |task| returned = task }).to eq(:job)
+      event = QueuedEvent.build(kind: :retry, job_id: 0, block: -> { :ran })
+      expect(cmd.submit_turn(kind: :retry, job_id: 0, block: event.block)).to eq(:job)
 
-      expect(seen).to eq([:task])
-      expect(returned).to eq(:task)
+      expect(seen.size).to eq(1)
+      expect(seen.first.kind).to eq(:retry)
+      expect(seen.first.block.call).to eq(:ran)
     end
   end
 end

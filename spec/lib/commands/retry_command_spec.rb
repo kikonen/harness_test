@@ -20,36 +20,30 @@ RSpec.describe Commands::RetryCommand do
   let(:io) { StringIO.new }
   let(:ui) { UI::Console.new(stdout: io) }
 
-  # Stub the run loop's drain state: begin_turn captures the block and runs it
-  # synchronously, await_turn ends at once. The spec does not need a real task
-  # thread - only the protocol contract: the block must perform the re-send.
-  def loop_double(error = nil)
+  # Stub the run loop's drain state: begin_turn takes the QueuedEvent and runs
+  # its block synchronously. The spec does not need a real task thread - only
+  # the protocol contract: the block must perform the re-send.
+  def loop_double
     double('main_loop').tap do |d|
-      allow(d).to receive(:begin_turn) do |&blk|
-        # The real loop runs the block on the worker, where service_turn
-        # catches a raise into an :error_ctrl - the double absorbs it too.
-        blk.call(nil)
+      allow(d).to receive(:begin_turn) do |event|
+        # The real loop runs the block on the worker, where the mini-turn
+        # absorbs a raise - the double absorbs it too.
+        event.block.call
       rescue StandardError
-        # absorbed, as service_turn does
-        error
+        # absorbed, as the mini-turn does
       end
-      allow(d).to receive(:await_turn) { |_job| nil }
       allow(d).to receive(:shown_job) { nil }
     end
   end
 
   def loop_double_with_capture(capture)
     double('main_loop').tap do |d|
-      allow(d).to receive(:begin_turn) do |&blk|
-        capture.call(blk)
-        # The real loop runs the block on the worker, where service_turn
-        # catches a raise into an :error_ctrl - the double absorbs it too.
-        blk.call(nil)
+      allow(d).to receive(:begin_turn) do |event|
+        capture.call(event.block)
+        event.block.call
       rescue StandardError
-        # absorbed, as service_turn does
-        error
+        # absorbed, as the mini-turn does
       end
-      allow(d).to receive(:await_turn) { |_job| nil }
       allow(d).to receive(:shown_job) { nil }
     end
   end
@@ -76,13 +70,11 @@ RSpec.describe Commands::RetryCommand do
 
   # The [task error] line is the LOOP's report (its drain state hands the error
   # to CommandHandler#report_turn_error, pinned in main_loop_spec); this spec
-  # only pins that a raising round reaches the loop as an error:
-  # the real loop catches it in service_turn (an :error_ctrl event), so the
-  # double must absorb it the same way.
+  # only pins that a raising round reaches the loop as an error: the real loop
+  # runs the block in a mini-turn that absorbs it, so the double must too.
   it 'hands a raising round to the loop as the turn error' do
     allow(session_manager).to receive(:retry).and_raise('boom')
-    loop_ = loop_double('boom')
 
-    expect { command(loop_).handle('') }.not_to raise_error
+    expect { command.handle('') }.not_to raise_error
   end
 end

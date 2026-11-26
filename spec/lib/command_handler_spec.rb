@@ -144,7 +144,7 @@ RSpec.describe CommandHandler do
         stdout = StringIO.new
         handler = make_handler(dir, UI::Console.new(stdout: stdout))
         handler.main_loop = Object.new.tap do |loop_|
-          loop_.define_singleton_method(:begin_turn) { |&| :job }
+          loop_.define_singleton_method(:begin_turn) { |_event| :job }
         end
 
         allow(handler).to receive(:run_bang_command) { |_c| :shelled }

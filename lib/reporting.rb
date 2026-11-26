@@ -50,6 +50,23 @@ module Reporting
     status_event(role, content, origin)
   end
 
+  # The before/after report a /compact round produces (issue #70 / #93: message
+  # AND context size before/after - message count alone is misleading). Shared
+  # by CompactCommand and the worker's :compact mini-turn (issue #286 step 3)
+  # so both emit the same lines from inside a task.
+  def emit_compaction(result)
+    emit_line(
+      "Session compacted: #{result[:before]} messages -> " \
+        "#{result[:after]} messages (#{result[:retained]} recent retained).")
+    if result[:context_before] && result[:context_line]
+      emit_line "  #{result[:context_before]} -> #{result[:context_line]}"
+    end
+    emit_line ""
+    emit_line "Summary:"
+    emit_line result[:summary]
+    emit_line ""
+  end
+
   # Emit a structured list/table report (issue #474). The emitter states the
   # DATA - title, kind, columns and per-item field values - never a fused row
   # string, so the durable record and a future remote sink carry the fields

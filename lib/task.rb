@@ -12,21 +12,18 @@ require_relative "ui/editor"
 require_relative "ui/spinner"
 require_relative "error_text"
 require_relative "harness_error"
-require_relative "request_event"
+require_relative "event_queue"
+require_relative "queued_event"
 
 class Task
   # Default spinner message; a :spinner_detail event may override it (and its
   # suffix) for the rest of the wait.
   DEFAULT_SPINNER_MESSAGE = "Working"
 
-  # Sentinel pushed to inbox when #stop is called, to unblock a pending
-  # #request so the task thread can exit cleanly.
-  STOP = Object.new.freeze
-
-  # Inbox item naming one turn's work: a parked worker takes it, runs the block as
-  # a turn, and parks again. A turn is a VALUE the registry hands the job, not a
-  # thread a caller spawns.
-  WORK = :__work__
+  # Raised INTO the worker thread to unwind a live turn (the :stop rule);
+  # service_turn rescues it like an Interrupt. A parked worker whose pending
+  # pop takes it ends its loop (see #start).
+  StopSignal = Class.new(Interrupt)
 
   DEFAULT_POLL_TIMEOUT = 0.1
 
@@ -41,8 +38,8 @@ class Task
   CONTROL_EVENTS = %i[error_ctrl __request__].freeze
 
   attr_reader :thread, :buffer, :ui, :renderer, :job, :registry, :input_path
-  # The worker's private queue (WORK items and STOP only); see #start.
-  attr_reader :await_work
+  # The job's event queue (QueuedEvent items); see #start.
+  attr_reader :event_queue
 
   # Set by #run from the harness's configured palette; the constructor's own
   # renderer colors nothing, which is what a Task without a harness needs.
@@ -51,13 +48,13 @@ class Task
   attr_accessor :note_editor
   attr_accessor :harness
 
-  # A worker built with no block parks until #submit_work hands it one; a worker
-  # built WITH a block runs that turn first and then parks (the per-turn form
-  # Task.run uses).
+  # A worker built with no block parks until a :prompt event hands it one; a
+  # worker built WITH a block runs that turn first and then parks (the
+  # per-turn form Task.run uses).
   attr_accessor :block
 
-  # A task built for a job reads the registry's ONE queue. The job's inbox is the
-  # drain loop's reader-side queue; the worker's deliveries arrive on @await_work.
+  # A task built for a job reads the registry's ONE outbox queue; its own
+  # EventQueue is the worker's inbox (see #start).
   def initialize(registry:, job:, input_path: nil, &block)
     @block   = block
     # #request answers come back on the SEPARATE @pending_reply, so a steering
@@ -80,10 +77,8 @@ class Task
     @input_path   = input_path
     @started_at   = nil            # turn clock, set by #start
     @harness      = nil
-    # The worker's own queue (WORK items and STOP only). #start parks the worker
-    # on it; Job#deliver routes to it while a worker is live. It is separate from
-    # the job inbox so a steering note can never be mistaken for work.
-    @await_work   = Thread::Queue.new
+    # The job's event queue: the worker loop admits QueuedEvents from it.
+    @event_queue  = EventQueue.new
   end
 
   attr_writer :ui
@@ -103,15 +98,17 @@ class Task
 
   # -- Lifecycle ---------------------------------------------------------------
 
-  # Spawn this job's worker thread. The task reference is published on
-  # Thread.current so nested code finds it via `Task.current`. No buffer reference
-  # is exposed to task code - the buffer is runner-side only.
+  # Spawn this job's worker thread (the worker EVENT LOOP, issue #286 step 3).
+  # The task reference is published on Thread.current so nested code finds it
+  # via `Task.current`. No buffer reference is exposed to task code - the buffer
+  # is runner-side only.
   #
-  # The worker is PARKED, not per-turn: it takes a WORK item from its own
-  # @await_work, runs that turn, and waits for the next. A turn ends with a :done
-  # event (the turn's end); the THREAD ends only on a STOP - what an interrupt or
-  # the run's shutdown sends. A worker built with a block runs that turn first, so
-  # the per-turn form (Task.run) is the same body with one item already in hand.
+  # The loop admits QueuedEvents from the job's EventQueue and dispatches them
+  # by kind: :prompt runs a turn (parked window), :note fills the mailbox (the
+  # live turn folds it at its request boundary), :compact/:retry run as
+  # mini-turns inside a live turn, :stop unwinds the live turn and PARKS the
+  # worker (thread alive), :shutdown ends the loop. A turn ends with a :done
+  # event; the thread ends only on :shutdown.
   def start
     raise HarnessError, "task for job #{@job.id} already has a worker" if @thread&.alive?
 
@@ -121,54 +118,113 @@ class Task
     # service_turn, per turn.
     @started_at = Time.now if @block
     @job.worker = self
+    # A revived Task (MainLoop#worker calls #start on the SAME object) must not
+    # inherit the previous thread: its stale @thread would make the loop's
+    # "@thread != Thread.current" revive guard read as a foreign :stop, and the
+    # new worker would discard its own staged events and park forever.
+    # The slot must be nil BEFORE Thread.new: the new thread reaches the loop
+    # (and any :stop guard) before the main thread's assignment lands.
+    @thread = nil
     @thread = Thread.new do
       Thread.current[:harness_task] = self
       Thread.current.name = "job-#{@job.id}"
-      # A worker built WITH a block runs that turn first: the block is the caller's
-      # own, so it is never routed through the inbox (which also carries answers and
-      # notes that must not be mistaken for work).
+      # A worker killed or StopSignal-raised out of its loop is the designed
+      # end of a force-stop, not a bug to print.
+      Thread.current.report_on_exception = false
       service_turn if @block
       loop do
-        # #await_work is the worker's own queue, not the job inbox: the drain loop
-        # is the reader of the job inbox during a turn (steering notes stay there
-        # for it), and Job#deliver routes the answer to the live worker.
-        item = await_work.pop
-        # A STOP left in the queue is the sentinel the PREVIOUS worker thread died
-        # for: consume it and keep parking. Only the worker that is parked NOW may
-        # end on a STOP, so reviving a stopped worker never self-kills it.
-        next if item.equal?(STOP) && @thread != Thread.current
-        break if item.equal?(STOP)
-        # A command-side request event (:compact, ...): it becomes this worker's
-        # next turn, so the requested work runs on the JOB's thread.
-        if RequestEvent.deliver?(item)
-          service_request(item)
-          next
+        begin
+          event = event_queue.admit_next
+        rescue StopSignal
+          break
         end
-        # A non-WORK item is a stray answer or note: the loop drains those, not the worker.
-        next unless work_item?(item)
-
-        @block = item[:block]
-        service_turn
+        # A :stop left staged by the PREVIOUS thread dies with that thread: only
+        # the worker parked NOW acts on it, so reviving never self-kills.
+        if event&.kind == :stop && @thread != Thread.current
+          event_queue.discard_up_to(:stop)
+        end
+        break if dispatch(event) == :shutdown
       end
       @thread = nil
     end
     self
   end
 
-  # Hand this job's worker the next turn's block (main thread only). The worker
-  # picks it up from its own queue (Job#deliver routes it there), so a caller never
-  # touches the thread - and a job can be handed work whenever it is idle.
-  def submit_work(&block)
-    @job.deliver({ type: WORK, block: })
+  # Post the next turn's prompt as a :prompt event (main thread only; the
+  # text is data the queue can reason about - the worker builds the block).
+  def submit_prompt(text)
+    event_queue.post(QueuedEvent.build(kind: :prompt, job_id: @job.id, payload: text))
     self
   end
 
+  # Post a sender-owned behaviour block (:compact / :retry): the queue can
+  # order and discard it; the worker decides WHEN it runs.
+  def submit_block(kind:, block:)
+    event_queue.post(QueuedEvent.build(kind:, job_id: @job.id, block:))
+    self
+  end
+
+  # One admitted event, this worker's thread. Returns :shutdown when the worker
+  # loop must end; anything else keeps the loop. A live turn's own boundary
+  # drains :compact/:retry (service_pending_requests); a parked worker runs them
+  # as its round: the EVENT'S block is the turn block (a command-built block
+  # closes over the command's own harness, so it never reads this task's).
+  def dispatch(event)
+    return :park if event.nil?
+
+    case event.kind
+    when :shutdown
+      :shutdown
+    when :stop
+      # Parked here: the staged work before it was already discarded by the
+      # loop; nothing to unwind.
+      :park
+    when :prompt
+      # The live turn owns the worker: a second :prompt stays staged until the
+      # running turn's :done (the drain is following that turn's job).
+      return :park if @job.running?
+
+      @block = ->(_task) { harness.session_manager.run_prompt(event.payload) }
+      service_turn
+      :park
+    when :note
+      harness.user_note_text = event.payload
+      :park
+    when :compact, :retry
+      # The EVENT'S block is the round (a command-built block closes over the
+      # command's own harness, so it never reads this task's). A live turn runs
+      # it as a mini-turn at its next boundary instead: the event stays staged
+      # and service_pending_requests dispatches it from the live turn's thread.
+      return :park if @job.running?
+
+      @block = ->(_task) { event.block.call }
+      service_turn
+      :park
+    end
+  end
+
+  # The live turn's request boundary drains the sender-owned block kinds staged
+  # on the queue (the mini-turn-inside-the-live-turn rule from increment 4): the
+  # event's own block runs, wrapped so a raise lands as :error_ctrl like a turn
+  # error does. No :done of its own - the enclosing turn's :done ends the drain.
+  def service_pending_requests
+    event_queue.admit_arrived
+    while (event = event_queue.peek_processable(accepted_kinds: QueuedEvent::BLOCK_KINDS))
+      event_queue.dispatch(event)
+      begin
+        event.block.call
+      rescue StandardError, Interrupt => e
+        push_event(type: :error_ctrl, content: ErrorText.label(e))
+        record_task_error(e)
+      end
+    end
+  end
+
   # One turn: run the block, report an error, announce the turn's end. Called once
-  # per WORK item by the worker, and directly by a caller that wants exactly one
-  # turn with @block already set. A request event that arrives while the block
-  # runs is serviced BEFORE the turn's :done: the :done finishes the JOB, so a
-  # mini-turn pushed after it would land on a finished job (and a second :done
-  # would be dropped by Job#finish's once-only guard).
+  # per :prompt event by the worker, and directly by a caller that wants exactly
+  # one turn with @block already set. A block-kind event that arrives while the
+  # block runs is serviced BEFORE the turn's :done: the :done finishes the JOB,
+  # so a mini-turn pushed after it would land on a finished job.
   def service_turn
     # Live-ness is the JOB's status: the worker services a turn only while this
     # job has one, and the registry's :done record finishes the job again.
@@ -193,41 +249,6 @@ class Task
       push_event(type: :done, result: value)
     end
     self
-  end
-
-  # Drain the request events already on the worker's queue (non-blocking pop):
-  # each becomes a mini-turn on this job, inside the live turn.
-  def service_pending_requests
-    loop do
-      item = await_work.pop(true) rescue nil
-      break unless item
-      if RequestEvent.deliver?(item)
-        service_request(item)
-      elsif work_item?(item)
-        @block = item[:block]
-        service_turn
-      end
-    end
-  end
-
-  # One request event the loop handed to this worker: run the requested work on
-  # the JOB's thread. A mini-turn pushes NO :done: the enclosing turn's :done is
-  # what ends the turn and carries the turn's result, and a :done here would
-  # finish the job mid-turn (Job#finish is once-only, so the real result would
-  # be dropped). A raising mini-turn reports like a turn does.
-  def service_request(item)
-    @started_at = Time.now
-    begin
-      harness.session_manager.compact_session if RequestEvent.request?(item)
-    rescue => e
-      push_event(type: :error_ctrl, content: ErrorText.label(e))
-      record_task_error(e)
-    end
-    self
-  end
-
-  def work_item?(item)
-    item.is_a?(Hash) && item[:type] == WORK
   end
 
   # The turn clock for the spinner's elapsed segment: whole seconds under a
@@ -277,31 +298,46 @@ class Task
   # Force-stop: answer what the turn owes, signal the inbox, and join with a
   # short grace. Kills the thread if it is still alive after the timeout.
   def stop(timeout = DEFAULT_STOP_JOIN_TIMEOUT)
-    # An interrupted turn answers every request it still owes (STOP is not an
-    # answer, so a blocked requester would raise on it). STOP then only breaks
-    # this thread's own pending pop when no answer already hit that inbox.
+    # An interrupted turn answers every request it still owes (a stop signal is
+    # not an answer, so a blocked requester would raise on it).
     owed = @registry.jobs.select(&:awaiting?)
     had_live = !@pending_reply.nil?
     if had_live
-      # A live request on THIS task blocks on the reply channel, not the inbox.
-      # Answer it (not STOP) so #request returns normally and the thread runs
-      # its ensure/exit. The owning job was already counted in `owed`; drop it
-      # so it is not ALSO answered into its inbox.
+      # A live request on THIS task blocks on the reply channel, not the queue.
+      # Answer it so #request returns normally and the thread runs its
+      # ensure/exit. The owning job was already counted in `owed`; drop it so
+      # it is not ALSO answered into its queue.
       @pending_reply << Job::INTERRUPTED_ANSWER
       @pending_reply = nil
       @job.mark_awaiting(false)
       owed = owed.reject { |job| job.equal?(@job) }
     end
     owed.each { |job| job.respond(Job::INTERRUPTED_ANSWER) }
-    # The parked worker pops await_work, not the inbox, so the wake-up goes
-    # there: STOP unblocks a pending pop and ends the worker loop.
-    @await_work << STOP
-    @thread&.join(timeout)
-    @thread&.kill if @thread&.alive?
+    event_queue.post(QueuedEvent.build(kind: :shutdown, job_id: @job.id))
+    # A live turn is unwound by the signal into its own thread; a parked worker
+    # is woken by the :shutdown posted above. Thread#raise ALSO re-raises into
+    # the calling thread (measured), so the signal is absorbed here - the join
+    # is what waits for the worker.
+    thread = @thread
+    if thread&.alive?
+      begin
+        thread.raise(StopSignal)
+      rescue StopSignal
+        # Thread#raise re-raises into THIS thread too (measured); the worker
+        # got the signal either way.
+      end
+      # join re-raises the pending exception into the joiner EVERY call (no
+      # once-per-thread flag), so the grace is a poll on alive? - a raised-out
+      # worker is dead by the time the signal unwinds its turn.
+      deadline = Time.now + timeout
+      while thread.alive? && Time.now < deadline
+        sleep(0.01)
+      end
+    end
+    thread&.kill if thread&.alive?
     @thread = nil
-    # The job keeps its (stopped) Task: alive? is false, so Job#deliver falls
-    # back to the inbox and MainLoop#worker REVIVES this same Task on its own
-    # queue. Only a worker that exits on its own (its loop ended) clears the slot.
+    # The job keeps its (stopped) Task: alive? is false, so MainLoop#worker
+    # REVIVES this same Task (its EventQueue survives) for the next turn.
   end
 
   # -- Task-thread side (called from inside the block) -----------------------
@@ -330,14 +366,14 @@ class Task
   def request(type, **payload)
     # While a request is unanswered, an input event must queue BEHIND the answer
     # it gets, so the job is marked awaiting (FIFO rule). The answer comes back
-    # on a channel SEPARATE from @inbox: a steering note already resident in the
-    # job inbox can no longer be mistaken for the answer.
+    # on a channel SEPARATE from the event queue: a steering note already
+    # staged there can never be mistaken for the answer.
     @pending_reply = Thread::Queue.new
     @job.mark_awaiting(true)
     push_event(type: :__request__, kind: type, **payload)
     reply = @pending_reply.pop
     @pending_reply = nil
-    if reply.equal?(STOP)
+    if reply.equal?(Job::INTERRUPTED_ANSWER)
       raise "task was stopped while waiting for response to '#{type}'"
     end
     reply
@@ -401,11 +437,14 @@ class Task
   # markdown posture from the run's settings (so a mid-run /markdown toggle lands on
   # the NEXT turn) and the note editor for the mid-turn read. A nil harness (a
   # unit-test run) colors nothing, so the plain renderer stays.
-  def prepare(harness:, ui:)
+  # Re-prepare (MainLoop#worker revives a stopped Task) refreshes the harness
+  # reference too, so a job whose harness arrived after its first start is not
+  # left with the nil from the first call.
+  def prepare(harness: nil, ui:)
     # The input path is the ONE reader the main thread's loop shares with the idle
     # prompt: it only PEEKS stdin until typing starts, so nothing races for the
     # keyboard. Input needs a harness to land on (nil = unit test).
-    @harness = harness
+    @harness = harness if harness
     @ui      = ui
     settings = harness&.settings
     @renderer = UI::Renderer.new(
@@ -416,8 +455,6 @@ class Task
     self
   end
 
-  # A worker parked on this task's inbox, ready for a turn it has not been given
-  # yet: the block is delivered later by #submit_work.
   def start_parked
     @block = nil
     start

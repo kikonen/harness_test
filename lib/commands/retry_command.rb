@@ -21,14 +21,16 @@ module Commands
       see_also: %w[conversation session saving])
 
     # Drives an LLM round: #submit_turn is only legal from the idle state.
-    # While a turn is live it is refused until it becomes a RequestEvent to
-    # the live task (issue #286 increment 4).
+    # While a turn is live it is refused until it becomes a :retry block
+    # event to the live task (issue #286 increment 4).
     def self.mid_turn_safe? = false
 
     def handle(_args)
-      submit_turn do |_t|
-        foreground_harness.session_manager.retry
-      end
+      harness = foreground_harness
+      submit_turn(
+        kind: :retry,
+        job_id: registry.foreground_job.id,
+        block: -> { harness.session_manager.retry })
     end
   end
 end

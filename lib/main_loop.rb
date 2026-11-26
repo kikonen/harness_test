@@ -12,8 +12,8 @@
 require "io/console"
 require_relative "input_path"
 require_relative "task"
+require_relative "queued_event"
 require_relative "ui/spinner"
-require_relative "request_event"
 
 class MainLoop
   # What the mid-turn read shows. See #poll_for_note.
@@ -66,24 +66,16 @@ class MainLoop
     event[:job] == shown_job.id
   end
 
-  # A command's ask to the live turn, mid-drain: the event goes straight onto
-  # the worker's own delivery queue (the route the drain's :__request__ branch
-  # takes) and the worker services it on its next loop pass. Nothing waits for
-  # an answer - fire-and-forget. A command calls this while the loop is
-  # draining; an idle command starts its own turn with #begin_turn (through
-  # Command#submit_turn) instead.
-  def request_event(kind:)
-    worker.await_work << { type: :__request__, kind:, job: shown_job.id }
-    # Return the loop, not the push's value: a turn block's last expression is
-    # often this call, and a Queue would leak into the turn's :done result.
+  # A command's ask to the live turn, mid-drain: a block-kind QueuedEvent
+  # (:compact / :retry) posted onto the shown job's worker EventQueue. The
+  # live turn services it as a mini-turn at its next request boundary; a
+  # parked worker runs it when it is admitted. Nothing waits for an answer -
+  # fire-and-forget. A command calls this while the loop is draining; an idle
+  # command starts its own turn with #begin_turn (through Command#submit_turn)
+  # instead.
+  def request_event(kind:, block:)
+    worker.event_queue.post(QueuedEvent.build(kind:, job_id: shown_job.id, block:))
     self
-  end
-
-  # The drain's :__request__ branch for a command-side kind: hand the event to
-  # the worker's queue. A dialog request is answered by #handle_request instead.
-  def route_request_event(msg)
-    worker.await_work << msg
-    worker
   end
 
   # Stop every job's parked worker for the run's shutdown. A foreground switch
@@ -122,7 +114,7 @@ class MainLoop
   # the Interrupt is then raised by whatever the caller injects.
   #
   # ONE loop, two states (issue #286 increment 4c): a submit that starts a turn
-  # SUBMITS the WORK item and the SAME loop drains the queue until that turn's
+  # posts a :prompt event and the SAME loop drains the queue until that turn's
   # :done. There is no nested per-turn loop and no modal turn mode - the drain
   # is a state of the run loop, so anything the loop can do between ticks (the
   # mid-turn note read, a request event) belongs to the loop, not to a helper.
@@ -140,7 +132,7 @@ class MainLoop
           break if commands.exiting?
 
           # A submit that starts a turn (bare text, or a command that needs an
-          # LLM round) hands the WORK item to the worker; the rest of the
+          # LLM round) posts a :prompt event to the worker; the rest of the
           # commands return nil and ran inline on the main thread.
           job = commands.handle(text)
           next if job
@@ -211,15 +203,27 @@ class MainLoop
   # it. There is no re-entrant turn mode and nothing blocks the main thread, so
   # a submit while a turn is live can only be a note or a request event.
 
-  # Hand a turn's block to the shown job's worker and return the job the drain
-  # follows. The job is marked running HERE, synchronously: live-ness is the
-  # JOB's status and the drain tests it, so a submit whose worker has not yet
-  # reached service_turn must not read as a finished turn. The CALLER (the run
-  # loop, via CommandHandler#handle) drains it - this never waits, so the main
-  # thread is never blocked on a turn.
-  def begin_turn(&)
+  # Post one QueuedEvent on the shown job's worker EventQueue and return the
+  # job the drain follows. The job is marked running HERE, synchronously:
+  # live-ness is the JOB's status and the drain tests it, so a submit whose
+  # worker has not yet reached service_turn must not read as a finished turn.
+  # A block-kind event given a block runs it as the round itself (the idle
+  # /compact and /retry route); a bare prompt carries only its payload text.
+  # The CALLER (the run loop, via CommandHandler#handle) drains it - this
+  # never waits, so the main thread is never blocked on a turn.
+  # A block-kind event given a block runs it as the round itself (the idle
+  # /compact and /retry route); a :prompt event given a block overrides its
+  # turn block (a spec driving the live-turn shape without a harness).
+  def begin_turn(event, &block)
+    if block
+      event = QueuedEvent.build(
+        kind: event.kind,
+        job_id: event.job_id,
+        payload: event.payload,
+        block:)
+    end
     shown_job&.mark_running
-    worker.submit_work(&)
+    worker.event_queue.post(event)
     shown_job
   end
 
@@ -257,7 +261,7 @@ class MainLoop
         when :error_ctrl
           error[0] = msg[:content] if shown_event?(msg)
         when :__request__
-          RequestEvent.request?(msg) ? route_request_event(msg) : handle_request(msg)
+          handle_request(msg)
         when :spinner_detail
           # Re-points the spinner (keeps it alive for the next tick).
         end
@@ -268,9 +272,10 @@ class MainLoop
     end
   end
 
-  # Ctrl+C during a live turn: stop the shown job's worker (its parked thread
-  # ends on STOP; the next #worker call REVIVES the same Task on the job) and
-  # tell the user the turn was interrupted.
+  # Ctrl+C during a live turn: stop the shown job's worker (StopSignal unwinds
+  # the live turn, :shutdown ends the parked loop; the next #worker call
+  # REVIVES the same Task on the job) and tell the user the turn was
+  # interrupted.
   def abort_turn(job)
     job&.worker&.stop
     ui.puts "[interrupted]"

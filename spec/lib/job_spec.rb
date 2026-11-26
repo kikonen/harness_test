@@ -306,14 +306,14 @@ RSpec.describe Job do
       expect(job.poll(0)).to eq(:cancel)
     end
 
-    # A reply equal to STOP is not an answer: a job must stop rather than treat
-    # it as a dialog result.
-    it 'the stop sentinel is distinct from an answer value' do
+    # The interrupted answer is a VALUE, distinct from a cancel token: a
+    # requester reads it as the reply its tool must return.
+    it 'the interrupted answer is distinct from a cancel value' do
       job = add(:main)
-      job.deliver(described_class::STOP)
+      job.deliver(described_class::INTERRUPTED_ANSWER)
 
       answer = job.poll(0)
-      expect(answer).to equal(described_class::STOP)
+      expect(answer).to eq(described_class::INTERRUPTED_ANSWER)
       expect(answer).not_to eq(:cancel)
     end
 

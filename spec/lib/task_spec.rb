@@ -194,12 +194,12 @@ RSpec.describe Task do
       expect(described_class::DEFAULT_STOP_JOIN_TIMEOUT).to be <= 1.0
     end
 
-    # A force-stopped turn answers every request it still owes with a VALUE, not
-    # STOP: STOP is not an answer, so a requester blocked on that request would
-    # raise on it. Here the owed request belongs to another job (a background
-    # round), so it is answered and the stopping worker still gets its own STOP
-    # on its await queue (the job inbox is the drain loop's reader-side queue).
-    it 'answers another job owed request and still stops its own thread' do
+    # A force-stopped turn answers every request it still owes with a VALUE,
+    # not a stop signal: a requester blocked on that request would raise on a
+    # signal. Here the owed request belongs to another job (a background
+    # round), so it is answered and the stopping worker still gets its own
+    # :shutdown on its EventQueue.
+    it 'answers another job owed request and posts :shutdown on its own queue' do
       registry = JobRegistry.new
       main = registry.add_job(kind: :main)
       background = registry.add_job(kind: :command, requested_by: main)
@@ -209,12 +209,14 @@ RSpec.describe Task do
       task.stop(0.1)
 
       expect(background.inbox.pop(true)).to eq(Job::INTERRUPTED_ANSWER)
-      expect(task.await_work.pop(true)).to equal(Task::STOP)
+      kinds = []
+      kinds << task.event_queue.admit_next(timeout: 0).kind until task.event_queue.inbox_empty?
+      expect(kinds).to eq([:shutdown])
     end
 
-    # When the owed request is the stopping thread's OWN inbox, the interrupted
-    # answer already lands there, so no STOP is pushed on top of it.
-    it 'does not push STOP over the answer it just delivered to its own inbox' do
+    # When the owed request is the stopping job's OWN inbox, the interrupted
+    # answer already lands there once (no second delivery on top of it).
+    it 'delivers the interrupted answer to its own inbox once' do
       registry = JobRegistry.new
       main = registry.add_job(kind: :main)
       task = described_class.new(registry:, job: main) { }
@@ -224,7 +226,6 @@ RSpec.describe Task do
 
       answer = main.inbox.pop(true)
       expect(answer).to eq(Job::INTERRUPTED_ANSWER)
-      expect(answer).not_to equal(Job::STOP)
       expect(main.awaiting?).to be false
       expect(main.inbox).to be_empty
     end
