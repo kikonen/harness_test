@@ -57,8 +57,8 @@ The three targets:
   The Harness itself is now the JOB's, not a CLI- or command-held global: a
   Harness is ONE LLM tool-loop, so it belongs to a Job. `Job` owns a `#harness`
   reference (nil until it is driven); `JobRegistry#add_job` takes a `harness:`
-  and its `#run` reads it off the job (`Task.run(harness: job.harness)`) rather
-  than from the caller. The CLI builds the Harness, attaches it to the main job
+  and `JobRegistry#worker_for` reads it off the job (`Task#prepare(harness: job.harness)`)
+  rather than from the caller. The CLI builds the Harness, attaches it to the main job
   through `HarnessFactory#add_harness_job(kind: :main, base_file_list:)` and keeps
   no `@harness` ivar; it reaches it through `CLI#foreground_harness` =
   `@registry&.foreground_job&.harness`.

@@ -2,6 +2,8 @@
 
 # A graph node with its own buffer and inbox, and NO outbox: its events go to the
 # registry's ONE queue tagged with its id. Design: doc/task_model_design.md.
+
+require_relative "queued_event"
 class Job
   # A timed job's dependency is a clock predicate, not a job, so a plain
   # job-to-job DAG is not enough.
@@ -18,13 +20,10 @@ class Job
   # denying one would stop the job from working at all.
   DENIED_ANSWER = "error: dialog denied (background job)"
 
-  # What an interrupted turn delivers to a request it still owes: STOP is not an
-  # answer, so a blocked requester needs a value a tool can hand back.
+  # What an interrupted turn delivers to a request it still owes: a stop
+  # signal is not an answer, so a blocked requester needs a value a tool can
+  # hand back.
   INTERRUPTED_ANSWER = "cancelled: the turn was interrupted"
-
-  # A reply equal to STOP is not an answer, so a job must stop rather than read
-  # it as a dialog result.
-  STOP = Object.new.freeze
 
   # Same timeout as the drain loop, so a poll costs the same everywhere.
   DEFAULT_POLL_TIMEOUT = 0.1
@@ -34,6 +33,11 @@ class Job
   # never drives (a bare registry in a spec, a not-yet-serviced job) carries nil.
   attr_reader :id, :kind, :status, :result, :registry, :buffer, :inbox
   attr_reader :dependencies, :requested_by, :harness
+
+  # The Task whose worker event loop is parked on this job's EventQueue (#286).
+  # A parked worker reads QueuedEvents from its OWN queue, so a steering note
+  # resident in the inbox stays the drain loop's to read.
+  attr_accessor :worker
 
   # The buffer comes from the registry: its limits belong to the buffer, and the
   # fan-in queue is shared by all jobs.
@@ -163,6 +167,14 @@ class Job
   # Latest line wins ONLY while the pending event is itself a note; a note after
   # another kind queues behind it.
   def deliver(value)
+    # A live parked worker takes a NOTE as a :note QueuedEvent on its own
+    # EventQueue; anything else (a result for no reader) and what no worker
+    # lives for stay in the inbox.
+    if @worker&.alive? && note?(value)
+      @worker.event_queue.post(
+        QueuedEvent.build(kind: :note, job_id: id, payload: value[:content]))
+      return value
+    end
     pending = @inbox.size == 1 ? @inbox.pop(true) : nil
     if pending && !(note?(value) && note?(pending))
       @inbox << pending

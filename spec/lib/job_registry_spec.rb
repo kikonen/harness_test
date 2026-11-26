@@ -138,21 +138,20 @@ RSpec.describe JobRegistry do
     end
   end
 
-  describe 'the executor (a turn is awaited, not run in place)' do
-    # The drain loop is still the single writer of the job's buffer, so a run
-    # through the registry lands the block's value as the awaited result.
-    it 'runs a job and reads its result back' do
+  # Increment 3 dissolved the registry executor (registry.run / await_turn):
+  # the drain is MainLoop#run_turn. What the registry still owns is handing a
+  # job its parked worker - the queue's single reader stays the loop.
+  describe '#worker_for (the parked worker, issue #286)' do
+    it 'gives the job a live worker ready for a turn' do
       job = registry.add_job(kind: :main, harness: spec_harness)
-      io = StringIO.new
+      ui  = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
+      worker = registry.worker_for(job, ui:)
 
-      error, _task, result = registry.run(job:,
-                                          ui: UI::Console.new(stdout: io, stdin: StringIO.new)) do
-        :turn_value
-      end
-
-      expect(error).to be_nil
-      expect(result).to eq(:turn_value)
-      expect(job.result).to eq(:turn_value)
+      expect(worker.job).to equal(job)
+      expect(worker.alive?).to be true
+      expect(job.worker).to equal(worker)
+      worker.stop
+      expect(worker.alive?).to be false
     end
   end
 

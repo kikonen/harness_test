@@ -70,7 +70,7 @@ opted-in run renders, so a markdown-off run is byte-for-byte the old output.
 Like `/palette`, markdown is an OUTPUT posture: it changes how a line is drawn,
 not what the model is asked or allowed to do, so it carries no spinner badge and
 never touches the conversation chain. A mid-run toggle lands on the NEXT turn
-(a Task builds its renderer once at `Task#run`), exactly as a palette switch does.
+(a Task builds its renderer once at `Task#prepare`), exactly as a palette switch does.
 
 ## What renders, and what stays byte-exact
 

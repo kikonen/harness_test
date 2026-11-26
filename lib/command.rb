@@ -2,7 +2,8 @@
 
 require_relative "ui"
 require_relative "command_help"
-require_relative "task_runner"
+require_relative "queued_event"
+require_relative "reporting"
 require_relative "ui/help_renderer"
 
 # Shared base for the slash-command classes in lib/commands/.
@@ -11,12 +12,12 @@ require_relative "ui/help_renderer"
 # code references $stdout/$stdin directly. A TUI can later swap the
 # underlying stream for a panel/draw sink without touching any command.
 #
-# Includes TaskRunner (issue #235): a command that drives an LLM round
-# (/retry issue #235, /compact issue #253) runs it on a Task thread via
-# #run_on_task, the same shared wrapper a direct prompt uses, and prints
-# through #emit_line so its lines stay on the event queue.
+# Includes Reporting (issue #235): a command that drives an LLM round
+# (/retry issue #235, /compact issue #253) hands it to the run loop's worker via
+# #submit_turn, the same route a bare prompt takes, and prints through
+# #emit_line so its lines stay on the event queue.
 class Command
-  include TaskRunner
+  include Reporting
 
   attr_reader :settings, :file_list, :ui, :help_renderer
 
@@ -33,10 +34,10 @@ class Command
   # Whether this command may run WHILE a turn is running (a mid-turn submit
   # dispatched on the main thread). Default true: edit mode allows all commands
   # (doc/unified_loop_design.md). A command opts OUT when it cannot run safely
-  # while a turn is live: one that drives an LLM round (#run_on_task) would start
-  # a nested drain loop over the single queue (double render, lost events) -
-  # refused until it becomes an event to the live task - and one that rebuilds or
-  # ends the whole run (exit) has no live loop to act in.
+  # while a turn is live: one that drives an LLM round (#submit_turn) would hand
+  # a second turn to the same worker the live turn owns - refused until it
+  # becomes a block-kind event to the live task - and one that rebuilds or ends
+  # the whole run (exit) has no live loop to act in.
   def self.mid_turn_safe?
     true
   end
@@ -49,6 +50,7 @@ class Command
     registry: nil,
     system_saver: nil,
     harness_factory: nil,
+    main_loop: nil,
     locator: nil
   )
     @file_list  = file_list
@@ -59,16 +61,45 @@ class Command
     # resolved config through settings' named accessors (or []), never a raw
     # options bag. A posture command reads and writes it directly here.
     @settings = settings
-    # The JobRegistry the run owns (#286): TaskRunner#run_on_task awaits its
-    # job and TaskRunner records main-thread reports into it.
+    # The JobRegistry the run owns (#286): Reporting records main-thread reports
+    # into it.
     self.registry = registry
     self.system_saver = system_saver
+    # The run's single MainLoop (#286): #submit_turn posts a :prompt event to
+    # the loop's worker. A command that never runs a turn ignores it.
+    @main_loop = main_loop
     # The run's HarnessFactory and SessionLocator (#548): a command that adds
     # an agent builds through the factory; a command that names where a session
     # lives reads the locator. Commands that need neither ignore them, so they
     # stay optional keyword args.
     @harness_factory = harness_factory
     @locator         = locator
+  end
+
+  # issue #286 increment 4c: post this command's LLM round to the run loop's
+  # worker as a QueuedEvent and return the JOB whose :done the loop drains.
+  # A bare prompt is a :prompt payload event; a command's own round is a
+  # block-kind event the worker runs as a mini-turn. Non-blocking: a command
+  # never waits on a turn - MainLoop#run's drain state renders it. Legal only
+  # from the idle state; a command that runs mid-turn is refused
+  # (mid_turn_safe?) or sends a block-kind event instead.
+  def submit_turn(kind:, job_id:, payload: nil, block: nil)
+    @main_loop&.begin_turn(
+      QueuedEvent.build(kind:, job_id:, payload:, block:))
+  end
+
+  # True while the run loop is draining a live turn on the worker.
+  def turn_live?
+    job = @main_loop&.shown_job
+    !job.nil? && job.running?
+  end
+
+  # Send a block-kind event (:compact / :retry) to the live turn this command
+  # is being dispatched in (#286 increment 4): fire-and-forget, the turn keeps
+  # running and the job's own thread runs the block as a mini-turn at its next
+  # request boundary.
+  def send_block_event(kind:, block:)
+    @main_loop&.request_event(kind:, block:)
   end
 
   # A command reaches the Harness through the FOREGROUND job it acts on (#286),

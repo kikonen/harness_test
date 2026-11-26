@@ -20,23 +20,43 @@ RSpec.describe Commands::RetryCommand do
   let(:io) { StringIO.new }
   let(:ui) { UI::Console.new(stdout: io) }
 
-  def command
-    registry = JobRegistry.new
-    registry.add_job(kind: :main, harness:)
-    described_class.new(registry:, file_list: nil, ui:)
+  # Stub the run loop's drain state: begin_turn takes the QueuedEvent and runs
+  # its block synchronously. The spec does not need a real task thread - only
+  # the protocol contract: the block must perform the re-send.
+  def loop_double
+    double('main_loop').tap do |d|
+      allow(d).to receive(:begin_turn) do |event|
+        # The real loop runs the block on the worker, where the mini-turn
+        # absorbs a raise - the double absorbs it too.
+        event.block.call
+      rescue StandardError
+        # absorbed, as the mini-turn does
+      end
+      allow(d).to receive(:shown_job) { nil }
+    end
   end
 
-  # Stub the registry executor to capture the block it is handed and execute
-  # it synchronously. The spec does not need a real task thread - only the
-  # protocol contract: the block must perform the re-send.
-  def run_with_captured_block
-    cmd = command
-    block = nil
-    allow(cmd.registry).to receive(:run) do |job:, ui:, &blk|
-      block = blk
-      blk.call(nil)
-      [nil, nil, nil]
+  def loop_double_with_capture(capture)
+    double('main_loop').tap do |d|
+      allow(d).to receive(:begin_turn) do |event|
+        capture.call(event.block)
+        event.block.call
+      rescue StandardError
+        # absorbed, as the mini-turn does
+      end
+      allow(d).to receive(:shown_job) { nil }
     end
+  end
+
+  def command(main_loop = loop_double)
+    registry = JobRegistry.new
+    registry.add_job(kind: :main, harness:)
+    described_class.new(registry:, file_list: nil, ui:, main_loop:)
+  end
+
+  def run_with_captured_block
+    block = nil
+    cmd = command(loop_double_with_capture(block = ->(blk) { block = blk }))
     cmd.handle('')
     block
   end
@@ -48,12 +68,13 @@ RSpec.describe Commands::RetryCommand do
     expect(session_manager).to have_received(:retry)
   end
 
-  it 'reports a task error as a [task error] line' do
-    cmd = command
-    allow(cmd.registry).to receive(:run) { |job:, ui:, &blk| ['boom', nil, nil] }
+  # The [task error] line is the LOOP's report (its drain state hands the error
+  # to CommandHandler#report_turn_error, pinned in main_loop_spec); this spec
+  # only pins that a raising round reaches the loop as an error: the real loop
+  # runs the block in a mini-turn that absorbs it, so the double must too.
+  it 'hands a raising round to the loop as the turn error' do
+    allow(session_manager).to receive(:retry).and_raise('boom')
 
-    cmd.handle('')
-
-    expect(io.string).to include('[task error] boom')
+    expect { command.handle('') }.not_to raise_error
   end
 end

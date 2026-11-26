@@ -92,19 +92,19 @@ tool's own name); `Tool.push_status(label:, verdict:, message:)` is the same
 thing for the emitters that are NOT tools - the shell runner (`run.command` /
 bang `shell`), the grant reports (`access`), the safety pre-check (`safety`)
 and the harness's own note ack. A slash command states a verdict through
-`TaskRunner#emit_status(label:, verdict:, message:)`, which is the same event on
+`Reporting#emit_status(label:, verdict:, message:)`, which is the same event on
 a live task and the same rendered line on the main thread; the store commands
 (`memory`, `plans`, `skills`) name the store as the origin for a refused name or
 a missing entry. `:info` deliberately has no glyph: a count or
 a progress line is not a verdict about an operation.
 
-`TaskRunner#emit_line` (a console line from inside a task block) states the `:text`
+`Reporting#emit_line` (a console line from inside a task block) states the `:text`
 role and hands it to the SAME router, so one place asks for the active Task - it no
 longer writes to the stream itself on the main thread. The task-error line went the
 same way: the emitter states the `:kind` role with origin `task error` (increment 22)
 and the renderer draws the bracket.
 
-`TaskRunner#run_on_task` states the two blank lines that frame a turn as the `:gap`
+`Command#run_on_worker` states the two blank lines that frame a turn as the `:gap`
 role (increment 23) instead of writing them to the sink. A blank line is the shape of
 the spacing around a report, so it belongs with the other shapes the renderer owns: a
 `ui.puts` call was never in the record at all, so a replay or a sink that spaces
@@ -161,7 +161,7 @@ A word wider than the wrap gets its own line rather than being split mid-word (a
 command name or URL is one token).
 
 **A whole report body is ONE note call.** `emit_role(:note, ...)` accepts an ARRAY
-of paragraphs; `TaskRunner#status_event` newline-joins them into ONE event, and
+of paragraphs; `Reporting#status_event` newline-joins them into ONE event, and
 `#note_line` lays out every paragraph of it. So a contiguous run of a report's
 prose (what / why / how, an imperative pointer, and a standalone labeled sentence
 like `Current model: ...`, `Table width basis: ...`, or the `Saved with the session
@@ -387,7 +387,7 @@ key, `/palette`, resume) goes through the same check, and `options` keeps the
 name so a mid-run Harness rebuild reproduces it.
 
 The switch takes effect FROM THE NEXT TURN: a Task builds its `UI::Renderer`
-once at `Task#run`, so a turn already draining keeps the palette it started
+once at `Task#prepare`, so a turn already draining keeps the palette it started
 with. The command prints a sample line through the same renderer to make the
 change visible at once.
 

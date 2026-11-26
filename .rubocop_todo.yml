@@ -255,7 +255,7 @@ Layout/LineLength:
     - 'lib/harness.rb'
     - 'lib/harness_config.rb'
     - 'lib/llm/base_backend.rb'
-    - 'lib/poller.rb'
+    - 'lib/main_loop.rb'
     - 'lib/session.rb'
     - 'lib/session_manager.rb'
     - 'lib/shell_tokenizer.rb'

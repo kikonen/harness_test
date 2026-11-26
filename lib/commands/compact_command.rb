@@ -10,7 +10,7 @@ module Commands
   # synchronously on the main thread broke the single-thread I/O rule
   # (issue #40): the compaction spinner was never driven and any dialog
   # blocked the console - the log moved while the console looked stuck.
-  # Output lines go through TaskRunner#emit_line (the event queue), never
+  # Output lines go through Reporting#emit_line (the event queue), never
   # straight to the stream.
   class CompactCommand < Command
     HELP = CommandHelp.new(
@@ -20,28 +20,25 @@ module Commands
       group: :session,
       see_also: %w[ctx session conversation])
 
-    # Drives an LLM round (#run_on_task): a mid-turn submit would start a
-    # second drain loop over the single queue. Refused until it becomes an
-    # event to the live task (doc/unified_loop_design.md).
-    def self.mid_turn_safe? = false
+    # Mid-turn it posts a :compact block event to the live turn instead of
+    # starting a nested round; the job's own thread compacts at its next
+    # request boundary (Task#service_pending_requests).
+    def self.mid_turn_safe? = true
 
     def handle(_args)
-      run_on_task do |_t|
-        result = foreground_harness.session_manager.compact_session
-        retained = result[:retained]
-        emit_line "Session compacted: #{result[:before]} messages -> " \
-                  "#{result[:after]} messages (#{retained} recent retained)."
-        # issue #70 / #93: report the context size before and after so the
-        # user can see how much space was freed (message count alone is
-        # misleading - tool calls and long outputs inflate token usage).
-        if result[:context_before] && result[:context_line]
-          emit_line "  #{result[:context_before]} -> #{result[:context_line]}"
-        end
-        emit_line ""
-        emit_line "Summary:"
-        emit_line result[:summary]
-        emit_line ""
+      if turn_live?
+        send_block_event(
+          kind: :compact,
+          block: -> { foreground_harness.session_manager.compact_session })
+        emit_line "  [compaction requested - applied at the model's next request]"
+        return
       end
+
+      harness = foreground_harness
+      submit_turn(
+        kind: :compact,
+        job_id: registry.foreground_job.id,
+        block: -> { emit_compaction(harness.session_manager.compact_session) })
     end
   end
 end

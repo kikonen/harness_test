@@ -88,14 +88,12 @@ class JobRegistry
     @queue.empty?
   end
 
-  # The executor: the CLI asks the registry to run a job and awaits its result.
-  # The drain loop stays the single main-thread writer of the job's buffer.
-  def run(job:, ui:, input_path: nil, &block)
-    # The Harness is the job's: a Harness lives INSIDE the job it drives, so the
-    # executor reads it off the job rather than taking it from the caller.
-    error, task = Task.run(
-      harness: job.harness, ui:, registry: self, job:, input_path:, &block)
-    [error, task, job.result]
+  # Give a job its parked worker (issue #286). The worker has NO block: it waits
+  # for a WORK item, so a job is ready for a turn without one being started.
+  def worker_for(job, ui:, input_path: nil)
+    task = Task.new(registry: self, job:, input_path:)
+    task.prepare(harness: job.harness, ui:)
+    task.start
   end
 
   # -- Input events -----------------------------------------------------------

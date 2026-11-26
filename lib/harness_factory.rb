@@ -18,7 +18,7 @@ class HarnessFactory
     @logger       = logger
   end
 
-  attr_reader :registry, :locator, :settings, :file_list, :system_saver
+  attr_reader :registry, :locator, :settings, :file_list, :system_saver, :logger
 
   def add_harness_job(
     kind:,

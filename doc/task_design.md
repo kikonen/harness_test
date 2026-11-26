@@ -1,7 +1,8 @@
 # Task: async turn design
 
-Design notes for `lib/task.rb`: how a turn runs on a background thread while
-all console I/O stays on the main thread.
+Design notes for `lib/task.rb` (a job's runner) and `lib/main_loop.rb` (the run's
+main loop): how a turn runs on a background thread while all console I/O stays on
+the main thread.
 
 ---
 
@@ -27,6 +28,11 @@ belongs to the registry, not to one task: every job pushes onto that ONE queue a
 event carries the job id. Fan-in keeps this guarantee across jobs - one queue per job
 would leave cross-job order undefined.
 
+The loop that reads it is `MainLoop` (renamed from `Poller`: polling is one step of
+the loop, not its identity). The loop owns the registry it polls and records EVERY
+job's event; it renders only the job it shows. A Task hands the loop nothing but its
+own runner state - `Task#poll` is the unfiltered queue read.
+
 Protocol:
 
 ```
@@ -36,12 +42,44 @@ Main thread -> Task thread: task.respond(value)                  [reply channel]
 Main thread (drain loop):   poll outbox, dispatch by type
 ```
 
+## The parked worker (issue #286 increment 2)
+
+A worker is PARKED, not per-turn: `#start` spawns ONE thread per job that takes a
+`WORK` item, runs it as a turn (`service_turn`), and waits for the next. A turn ends
+with a `:done` event; the THREAD ends only on a `STOP`. `JobRegistry#await_turn`
+submits a turn's block and awaits its `:done` while the caller's own loop drains the
+queue - this is what removes `TaskRunner#run_on_task`'s nested drain loop.
+
+Two queues, one reader each: the job **inbox** is the drain loop's (steering notes
+land there and stay there), and the worker's own **`@await_work`** is the worker's.
+`Job#deliver` routes to `@await_work` while a parked worker lives (`job.worker` names
+it), else to the inbox. `submit_work` delivers a `WORK` item through the job, so a
+caller never touches the thread.
+
+Increment 3 deleted the per-turn `Task.run` form: the run's ONE `MainLoop` drains
+the queue (`MainLoop#run_turn`), and the worker stays parked between turns. The CLI
+no longer builds a worker at all: the loop acts on `shown_job.worker` and builds
+it lazily on first use. A worker belongs to its JOB - `#start` sets `job.worker`,
+and a `#stop` KEEPS the (stopped) Task on the job so the loop can REVIVE the same
+Task by re-`start`ing it on its own queue (a STOP left in the queue belongs to
+the thread that died for it, so a revived worker skips it and keeps parking).
+A second `#start` on a LIVE worker would spawn a second thread and is refused.
+
+## Request events: a mini-turn inside the live turn
+
+A `RequestEvent` (issue #286 increment 4, `lib/request_event.rb`) is a command's
+ask delivered on `@await_work` while a turn is live. `service_turn` drains the
+request items already queued and runs each as a mini-turn (`service_request`)
+BEFORE pushing the turn's `:done`: the `:done` finishes the JOB, so servicing
+after it - or pushing a `:done` from the mini-turn - would finish the job
+mid-turn and drop the turn's result.
+
 ## A task error: one line out, the frames into harness.log
 
 A task thread owns no console (single-thread I/O rule), so an exception raised
 inside the turn block cannot be printed where it happened. It travels as one
-`:error_ctrl` event carrying `"Class: message"`; `Task.run` returns that string
-and `TaskRunner#run_on_task` states it as the `:kind` role with origin `task error`
+`:error_ctrl` event carrying `"Class: message"`; `MainLoop#run_turn` collects it
+and `CommandHandler#report_turn_error` states it as the `:kind` role with origin `task error`
 (issue #474, increment 22), so `UI::Renderer` draws the bracket - the emitter holds
 the message alone, which is what lets a replay redraw the line from the record rather
 than inherit this emitter's prefix.
@@ -60,7 +98,7 @@ never load-bearing on the error path.
 
 ## Structured log
 
-There is ONE OutputBuffer per run (issue #286). `Task.run` hands the task the
+There is ONE OutputBuffer per run (issue #286). `Task#prepare` hands the task the
 harness' single buffer, so every put the drain loop makes lands in the same record
 a save reads - no harvest step, no second store. At the registry layer (issue #286)
 each job gets its OWN buffer, so this becomes the buffer of the foreground job.
@@ -115,14 +153,13 @@ The spinner's own segments (elapsed turn time, posture badge) come from
 the runner too, always as callables: the drain loop rebuilds the spinner
 whenever the outbox empties again, so anything the spinner computed itself
 would restart on every rebuild. Only the runner knows how long the turn has
-been running (issue #277). The badge is `Task.mode_badge` - one bracket per
-NON-default posture - and it is the SAME builder the idle prompt line uses
-(`PromptReader`), so a posture cannot read differently in the spinner and
-the prompt (issue #387).
+been running (issue #277). The badge is `MainLoop.mode_badge` - one bracket per
+NON-default posture - and it is the SAME builder the idle prompt line uses, so a
+posture cannot read differently in the spinner and the prompt (issue #387).
 
 ## Console injection
 
-`Task.run` REQUIRES a `ui:` (a `UI::Console` wrapping an explicit stdout/stdin
+`Task#prepare` takes a `ui:` (a `UI::Console` wrapping an explicit stdout/stdin
 pair). The same console is used for spinner frames, text output, and dialog
 prompts so tests can capture everything through a single StringIO-backed
 console. It is published on the task instance and passed explicitly to every
@@ -130,10 +167,13 @@ I/O call.
 
 ## Ctrl+C
 
-While `Task.run` is draining, SIGINT is trapped so an interrupt targets the
-drain loop, not a random thread. The task thread is force-stopped (no
-background work survives the turn) and the Interrupt is re-raised for the CLI's
-cleanup path.
+While `MainLoop#run` runs, SIGINT is trapped so an interrupt targets the loop,
+not a random thread. Ctrl+C during a LIVE turn is a TURN abort: the worker is
+force-stopped (no background work survives the turn), the loop prints
+`[interrupted]`, and the shown job's SAME Task is revived (re-`start`ed on its
+own queue) so the run re-prompts instead of exiting. Ctrl+C AT the idle read
+(no live turn) is the quit gesture: it re-raises for the CLI's cleanup path,
+like Ctrl-D.
 
 `Task#stop` answers what the turn OWES before stopping it. STOP is not an answer,
 so a blocked requester that got STOP instead of a value raises "task was stopped
@@ -146,9 +186,10 @@ while waiting for response". An interrupted turn therefore delivers
   job from the owed set so the same answer is not also queued into its inbox.
 - A request owned by ANOTHER awaiting job blocks on that job's inbox; `stop`
   delivers the interrupted answer via `Job#respond` (the single answer primitive).
-- STOP itself only lands in `@inbox` when neither already answered: this task had
-  no live reply channel AND no owed answer already hit that inbox (`@inbox` IS
-  the foreground job's inbox).
+- STOP lands on the worker's own queue (`@await_work`), never the job inbox: the
+  parked worker pops `@await_work`, and `@await_work << STOP` unblocks a pending
+  pop and ends the worker loop. The job inbox stays the drain loop's reader-side
+  queue, so a steering note resident there is never mistaken for a wake-up.
 
 The join grace is short (`DEFAULT_STOP_JOIN_TIMEOUT`, 0.5s): a task thread blocked
 in a long call (the LLM read) never reads the STOP, so the old 5s join was why
@@ -167,8 +208,9 @@ the real answer leaks to the next request.
 The fix: a task issues at most one request at a time (it is single-threaded), so
 `#request` opens a private `@pending_reply` queue and blocks on THAT. Only
 `#respond` and `#stop` ever write it, so a note (which stays in `@inbox`) can
-never be mistaken for the answer. `@inbox` keeps carrying steering notes and the
-STOP-for-a-task-with-no-live-request. Multiple tasks asking the user a question
+never be mistaken for the answer. `@inbox` keeps carrying steering notes (the
+drain loop reads them); a parked worker's deliveries arrive on its own
+`@await_work` via `Job#deliver`. Multiple tasks asking the user a question
 do not conflict: each has its own reply channel. (Async answers from sub-agent
 jobs are a separate future concern; on master `requested_by` is never set, so no
 inbox value is legitimately delivered to a live `#request`.)
@@ -184,7 +226,7 @@ into the chain before the next LLM call.
 `input_pending?` is a core `io/console` peek that only reports a keypress once
 the tty hands bytes over one at a time. A cooked tty (measured on Linux/KDE;
 issue #473) buffers a whole line, so a lone keypress never fired the peek and no
-editor opened. `Task.run` therefore holds a real-tty stdin in raw mode for the
+editor opened. `MainLoop#run` therefore holds a real-tty stdin in raw mode for the
 wait (`raw!(intr: true)`, restored by `cooked!` in its `ensure`); the hold is
 guarded to a stream answering `#raw`, a true `#tty?`, AND `#input_pending?`, on a
 host that supports the hold (see the host gate below).
@@ -197,7 +239,7 @@ opens the editor there. On a Windows console `raw!(intr:true)` cannot make
 Ctrl+C a signal at all (Windows has no POSIX ISIG), so the held `0x03` byte is
 read by the peek as a keystroke - the note editor opens and the turn never
 aborts. The hold is therefore a POSIX-tty tool, not a capability: the guard is
-a host gate (`Task.raw_hold_host_supported?`), so on a Windows host the stdin
+a host gate (`MainLoop.raw_hold_host_supported?`), so on a Windows host the stdin
 stays cooked and Ctrl+C aborts as it did before #473, while the Linux/KDE raw
 hold stays where it helps. A redirected stdin and every spec stdin (StringIO,
 pipe, plain Object) still fail the `#raw`/`#tty?` guards.

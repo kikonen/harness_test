@@ -86,7 +86,7 @@ never an accumulation) and is never windowed.
 ## Ownership
 
 There is ONE buffer per run. It is held by the Harness as a TEMPORARY home (the
-registry owns it per job); `Task.run` hands the task that buffer, so a
+registry owns it per job); `Task#prepare` hands the task that buffer, so a
 task does not own a separate store any more. The DRAIN LOOP is the single writer
 (one put per output event it reads from the outbox); task-thread code NEVER
 touches the buffer directly. A future TUI can read the buffer as a durable,
@@ -120,7 +120,7 @@ Ownership at the run level (issue #286): the run record is the FOREGROUND job's
 `OutputBuffer`, held by the `JobRegistry` - not by the Harness, which is a
 single-LLM turn engine and "cannot be both". The CLI owns the registry, builds
 it from the resolved buffer limits and registers the main turn as job #0.
-`Task.run` is handed the buffer (or a job's own buffer under the registry), so
+`Task#prepare` is handed the buffer (or a job's own buffer under the registry), so
 the drain loop's output already lands in the record a save reads - there is NO
 harvest step (`#absorb_turn` is gone, it existed only to copy between two
 stores). The single main-thread writer records each user prompt directly

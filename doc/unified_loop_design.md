@@ -1,7 +1,7 @@
 # Unified loop: the poll loop as the harness main loop
 
 Target design for the task/job/registry division of work (issue #286). Verified
-against the Poller-extraction baseline `3739f17` (2026-11). Cross-refs:
+against the Poller (now MainLoop) extraction baseline `3739f17` (2026-11). Cross-refs:
 #286, #36/#198 (steering notes), #221 (the /yolo gesture hack), #267 (its tech
 debt, #424. Read `doc/task_model_design.md` and `doc/task_design.md` first.
 
@@ -23,15 +23,14 @@ note/prompt event to the foreground job." One loop, two *modes* of that loop:
 So "prompt" and "steering note" are the SAME submit reaching the foreground
 job; the only difference is whether a worker thread happened to be alive
 (prompt starts one, note lands beside one). The `InputPath` is already this one
-shared read (`cli.rb` wires one `PromptReader` whose `input_path` the poll loop
-also uses; `PromptReader#edit_state?` already exists). The unification is to
-stop routing a mid-turn submit through the special-cased note plumbing and
-route it through the one command handler instead.
+shared read (`cli.rb` wires one `InputPath` both the idle read and a note read
+use). The unification is to stop routing a mid-turn submit through the
+special-cased note plumbing and route it through the one command handler instead.
 
 ## Why (the hack this removed)
 
 Before the mid-turn dispatch landed, a mid-turn submit was a "note," and the
-ONLY command it could honour was a hardcoded `Poller#commit_note` gesture:
+ONLY command it could honour was a hardcoded `MainLoop#commit_note` gesture:
 
 ```ruby
 if (toggle = self.class.yolo_note_action(note))   # ugly, not scalable (#221/#267)
@@ -45,7 +44,7 @@ unnecessary: a bare word is a note-event, a `/x` is a command, both in one path.
 ## Shipped: mid-turn dispatch (state-only inline)
 
 The first routing step is in. A submitted block in the poll loop
-(`Poller#commit_read`) classifies itself:
+(`MainLoop#commit_read`) classifies itself:
 
 - a `"/"`-prefixed submit (edit mode) goes to the run's `CommandHandler` through
   the shared `InputPath#command_handler` (a callable wired by the CLI like
@@ -65,7 +64,7 @@ thread (the poll loop IS the main thread), gated by `Command.mid_turn_safe?`:
   posture toggles (`/yolo`, `/stream`, `/plan`) are pure
   Harness state writes and stay safe.
 
-This is what deleted `Poller#yolo_note_action` and the `commit_note` gesture
+This is what deleted `MainLoop#yolo_note_action` and the `commit_note` gesture
 branch: `/yolo` mid-turn is now just `CommandHandler#run_mid_turn('/yolo')`.
 
 ## Command routing in the unified loop
@@ -107,12 +106,23 @@ acceptable; pick when the first slice needs an answer:
 ## What already exists (so this is unification, not a new subsystem)
 
 - One `InputPath` shared by idle prompt and mid-turn note (`lib/input_path.rb`).
-- `PromptReader#edit_state?` - "idle and mid-turn share the edit state because
-  they share this one reader" (`doc/reline_cursor_and_enter_handling.md`).
-- `CommandHandler` already receives `input_path.target` / `input_path.registry`
-  (`cli.rb`), i.e. it already reaches into the loop's foreground-job notion.
-- `Poller` owns the drain loop + spinner + note path (this commit), so the
+- `MainLoop` owns the drain loop + spinner + note path (this commit), so the
   loop's mid-turn logic is already in one class to edit.
+
+## SHIPPED: the loop reads the queue for every job (increment 1)
+
+`MainLoop` (renamed from `Poller` - polling is one step of the loop, not its
+identity) now owns the registry it polls and reads the ONE queue for EVERY job:
+`#next_shown_event` records each event into its own job's buffer and keeps pulling
+until an event for the SHOWN job arrives. Only the shown job's events are rendered;
+a background job's output is read through `/jobs` rather than interleaved with a live
+turn (owner decision). A foreign `:done` is recorded and its result delivered but does
+not end the loop. `Task#poll` lost its job-id filter: a Task is a job's runner, not the
+queue's reader.
+
+This is the prerequisite for the rest of the plan: a loop that filters the queue by one
+job id can never BE the run loop, and a parked worker alone buys nothing while a
+per-turn loop is still built for each turn.
 
 ## Suggested increments (small, each shippable)
 
@@ -122,9 +132,106 @@ acceptable; pick when the first slice needs an answer:
    `CommandHandler` via `CommandHandler#run_mid_turn` + `Command.mid_turn_safe?`.
    State-only commands run inline; a model/rebuild command is refused (see
    "Shipped" above).
-3. SHIPPED. Deleted `Poller#yolo_note_action` + the `commit_note` gesture
+3. SHIPPED. Deleted `MainLoop#yolo_note_action` + the `commit_note` gesture
    branch; `/yolo` is an ordinary command through the handler.
-4. Make `/model` and `/compact` event-to-task instead of shared-state writes /
-   refusals (the next step: replace the mid-turn refusal with a live-task event).
-5. Decide the task-thread lifecycle (on-demand vs always-running) once the
-   event path is stable.
+
+## Remaining increments (owner order, 2026-11-24)
+
+The lifecycle question is ANSWERED: an ALWAYS-RUNNING worker parked on its job
+inbox, not a thread started per turn. `MainLoop` is to REPLACE `CLI#run` - a run
+must not have two mains. Order:
+
+2. SHIPPED (mechanism). A worker parks on its own `@await_work` queue (NOT the job
+   inbox - the drain loop is the inbox's reader, so a steering note stays there);
+   `Job#deliver` routes a delivery to the live worker's `@await_work` (via
+   `job.worker`), else to the inbox. `JobRegistry#await_turn` delivers a WORK item
+   and awaits its `:done`; `worker_for` parks a worker.
+3. SHIPPED (the run loop). ONE `MainLoop` for the whole run: `CLI#run` builds the
+   shared `InputPath` + the foreground job's parked worker and runs the loop; the
+   idle prompt read (`read_prompt`, modeline from CLI) and a turn's drain
+   (`run_turn`: submit WORK, drain to the shown job's `:done`) are two modes of it.
+   Deleted: `Task.run`, `JobRegistry#run`/`#await_turn`, `PromptReader` (folded
+   into `read_prompt` + `CLI#render_modeline`), `TaskRunner` (the mixin survives as
+   `Reporting` - console roles only; `Command#run_on_worker` is the wrapper and
+   `MainLoop#run_turn` reports a worker error via `CommandHandler#report_turn_error`).
+   Spinner storage moved onto the loop.
+4. Live `/compact` and `/retry` as control events drained beside the note in
+   `TurnRunner`; their `mid_turn_safe? = false` refusals deleted. `/jobs add` last
+   (it builds an agent).
+5. Interrupt and shutdown semantics for a parked worker.
+
+4a. SHIPPED (the request event, `/compact` half). A mid-turn command that wants
+   work on the live turn sends a `RequestEvent` (`lib/request_event.rb`): the
+   loop pushes it straight onto the worker's own `@await_work` (the channel WORK
+   and STOP already use - the Thread::Queue is the synchronization; no mailbox
+   flag, no mutex) and the worker services it as a mini-turn INSIDE the live
+   turn, before that turn's `:done`. A mini-turn pushes NO `:done` of its own:
+   the `:done` finishes the JOB (`Job#finish` is once-only), so a mini-turn
+   `:done` would finish the job mid-turn and drop the real turn result. Live-
+   ness lives on the JOB: `Task#service_turn` marks the job running, and
+   `Command#turn_live?` reads `main_loop.shown_job.running?` - the loop holds no
+   live-ness flag. `/retry` is NOT yet converted; `/jobs add` last.
+
+4b. SHIPPED (the loop holds no worker). `MainLoop` had a `@worker` ivar -
+   duplicate state: a worker belongs to its JOB (`job.worker`), and the loop
+   shows the FOREGROUND job, so the worker it acts on is always
+   `shown_job.worker` (built lazily on first use; `CLI#run` builds none). A
+   `/jobs` foreground switch repoints only `registry.foreground` - it NEVER
+   stops a worker; every job keeps its own parked Task alive (`repoint_worker`
+   deleted). An interrupt stops the shown job's worker and the next `#worker`
+   call REVIVES the same Task (a `#stop` keeps the stopped Task on the job; a
+   STOP left in the queue belongs to the thread that died for it).
+
+## 4d. Open decision (owner, 2026-11-25): what crosses the thread boundary
+
+GOAL restated: async execution of jobs; NO modal blocking call from main; main
+is constantly running an event loop. Two candidate models:
+
+- **A - events only.** Each job's worker dispatches incoming EVENTS itself (a
+  kind -> action table: prompt / compact / retry / note / stop) and answers
+  with events. No block of executable code ever crosses the boundary. Inside
+  the worker, the LLM loop checks incoming events between calls; reactivity
+  INSIDE one long call would need a dedicated thread per LLM call (later).
+- **B - task queue.** Each job's worker pops WORK items (blocks) from its own
+  queue. Posting is 100% async to the caller - the caller never waits. A task
+  that must not interleave (idle /compact, /retry) is posted only when the
+  queue is idle. Steering notes reach a long LLM iteration at the request
+  boundary (the mailbox drain), not by preempting a call.
+
+Where the code already stands (measured against `refactor/286-unified-loop`):
+
+- The worker IS a per-job parked thread popping its own `@await_work` queue -
+  B's mechanism already ships (increment 2/2a).
+- Steering notes are already event-only: `route_input` -> job inbox -> drained
+  at the request boundary; a worker never receives a note "block".
+- `/compact` mid-turn is already A: a `RequestEvent` envelope the worker
+  dispatches itself (4a). `/retry` is still refused mid-turn.
+- The ONLY block crossing the boundary today is `Task::WORK`
+  (`submit_work { commands.run_prompt(t, text) }`): a closure capturing main-
+  thread state (the text, the handler). This is what an A-model must replace -
+  with what? The text is data, but "run the prompt pipeline" is behaviour the
+  worker would need its own table for (it already has one for `:compact`).
+- Increment 4c removed the modal `run_turn`/`run_on_worker`: a submit posts the
+  item and the SAME loop drains to `:done`. The remaining block on main is the
+  drain's own poll timeout (bounded, not a wait-on-task).
+
+DECIDED (owner, 2026-11-25): **B is the baseline**, and a queue item is
+**metadata + task block** - `{ kind:, job:, block: }`. Nothing can be reasoned
+about a bare Ruby block, so the KIND is what makes the queue controllable
+(ordering, idle-only posting, refusal). The per-case shoveling that exists
+today is a failure, not the design: the bespoke `RequestEvent` envelope for
+`/compact` becomes a normal queued item `{ kind: :compact, block: }` on the
+same queue, and the worker dispatches by kind instead of special-casing
+`RequestEvent.deliver?`. Steering notes are NOT an "event approach" either -
+a private channel per case is asynchronous spaghetti; the note path is to be
+re-expressed as `{ kind: :note }` through the same queue (fold-at-request-
+boundary semantics unchanged, increment 4e). The dialog request/reply axis
+(stdin answers) is a different axis and stays as-is for now.
+
+So 4d = item metadata + kind dispatch + the compact conversion + the
+Interrupt-in-turn fix (a raise must always end with `:error_ctrl` + `:done`
+so JOB status remains the single liveness source and a drain can never hang).
+
+Do NOT park a worker before the loop owns the queue: a parked loop and a
+per-turn loop reading the same queue steal each other's events (measured - the
+suite hangs). Increment 3 removed the per-turn loop, so one reader remains.

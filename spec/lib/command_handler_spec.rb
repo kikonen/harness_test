@@ -136,16 +136,20 @@ RSpec.describe CommandHandler do
       end
     end
 
-    it 'routes plain text to a prompt, and "!" lines to the shell' do
+    # #286 increment 4c: a bare prompt is no longer rejected here - the run
+    # loop hands EVERY idle submit to #handle, which records the line and
+    # submits the round through the loop, returning the job to drain.
+    it 'submits a plain-text prompt as a turn, and "!" lines run the shell' do
       Dir.mktmpdir do |dir|
         stdout = StringIO.new
         handler = make_handler(dir, UI::Console.new(stdout: stdout))
+        handler.main_loop = Object.new.tap do |loop_|
+          loop_.define_singleton_method(:begin_turn) { |_event| :job }
+        end
 
-        allow(handler).to receive(:run_direct_prompt) { |_t| :prompted }
         allow(handler).to receive(:run_bang_command) { |_c| :shelled }
 
-        handler.handle('hello there')
-        expect(handler).to have_received(:run_direct_prompt).with('hello there')
+        expect(handler.handle('hello there')).to eq(:job)
 
         handler.handle('! ls -la')
         expect(handler).to have_received(:run_bang_command).with('ls -la')

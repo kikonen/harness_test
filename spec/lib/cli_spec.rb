@@ -16,7 +16,10 @@ require 'cli'
 
 RSpec.describe CLI do
   let(:workdir) { Dir.mktmpdir }
-  let(:ui) { instance_double(UI::Console) }
+  # #stdin is read by the worker build (Task#prepare) and the loop's raw-stdin
+  # hold; nil keeps both paths out of the way, as a real console with no stdin is.
+  # #flush is called by the idle modeline render.
+  let(:ui) { instance_double(UI::Console, stdin: nil, flush: nil) }
   let(:options) do
     {
       workdir:   workdir,
@@ -31,14 +34,13 @@ RSpec.describe CLI do
     described_class.new(options, ui)
   end
 
-  # run reads the idle prompt through PromptReader; a #run spec that only
-  # checks the banner stubs it so the loop exits at once (read => nil).
+  # run reads the idle prompt through MainLoop#read_prompt -> InputPath#read;
+  # a #run spec that only checks the banner stubs the read so the loop exits
+  # at once (status :eof).
   def stub_prompt_reader
-    # issue #286: run hands the reader's ONE input path to the command handler,
-    # so the double answers it with a real InputPath run can assign on.
-    path = InputPath.new(ui: ui)
-    reader = instance_double(PromptReader, read: nil, input_path: path)
-    allow(PromptReader).to receive(:new).and_return(reader)
+    allow_any_instance_of(InputPath).to receive(:read).and_return(
+      UI::Editor::EDITOR_RESULT.new(nil, :eof)
+    )
   end
 
   # Seed a saved session in the issue #207 layout (issue #276) so a resume has

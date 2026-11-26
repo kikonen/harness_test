@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
+require_relative "queued_event"
 require_relative "harness"
 require_relative "file_list"
 require_relative "task"
-require_relative "task_runner"
+require_relative "reporting"
 require_relative "command_runner"
 require_relative "command"
 
@@ -42,7 +43,7 @@ require_relative "help_topics"
 # Thin dispatcher: checks if input starts with "/", extracts the first word,
 # looks up the command class in a registry map, and delegates.
 class CommandHandler
-  include TaskRunner
+  include Reporting
 
   attr_reader :file_list,
     :ui,
@@ -101,7 +102,7 @@ class CommandHandler
       ui:,
       settings: @settings)
     HelpTopics.validate!(COMMANDS.keys)
-    # The JobRegistry the run owns (#286), exposed through TaskRunner#registry;
+    # The JobRegistry the run owns (#286), exposed through Reporting#registry;
     # it is passed to every command built here (build_command).
     self.registry = registry
     # The run's single SystemSaver (#548), passed to every command built here.
@@ -112,19 +113,30 @@ class CommandHandler
     @locator         = locator
   end
 
+  # The run's single MainLoop (issue #286 increment 3). The loop builds itself and
+  # hands the handler a reference so a command that drives an LLM round (a direct
+  # prompt, /retry, /compact) submits to the loop's worker instead of starting a
+  # drain loop of its own. Set by the CLI right after the loop is built.
+  attr_accessor :main_loop
+
   def exiting?
     @exiting
   end
 
   # The dispatcher reaches the Harness through the foreground job the run's
-  # registry marks (its #run_direct_prompt), never a global (#286).
+  # registry marks (its #run_prompt), never a global (#286).
   def foreground_harness
     registry.foreground_job&.harness
   end
 
-  # Dispatch a single line of input. Slash-commands go through the registry;
-  # lines starting with "!" run a shell command locally (issue #129);
-  # anything else is sent as a direct prompt to the model.
+  # Dispatch one submitted line (issue #286 increment 4c): the run loop hands
+  # EVERY idle submit here. A bare prompt is recorded and submitted to the
+  # worker as a :prompt event; a slash-command goes through the registry, and
+  # one that needs an LLM round posts its own :prompt event (#submit_turn);
+  # "!" runs
+  # a shell command locally (issue #129). The return value is the JOB whose
+  # :done the loop must drain - nil when the line ran inline and nothing is
+  # live. No command blocks the main thread on a turn.
   def handle(input)
     input = input.strip
     return if input.empty?
@@ -132,10 +144,12 @@ class CommandHandler
     unless input.start_with?("/")
       if input.start_with?("!")
         run_bang_command(input[1..].to_s.strip)
-        return
+        return nil
       end
-      run_direct_prompt(input)
-      return
+      # A bare prompt is a turn: record the user's line, then submit the round.
+      registry.record_user_prompt(input)
+      return submit_turn(
+        kind: :prompt, job_id: registry.foreground_job.id, payload: input)
     end
 
     # Flatten multiline slash commands into one line.
@@ -147,11 +161,21 @@ class CommandHandler
     cmd_class = COMMANDS[name]
     if cmd_class
       cmd = build_command(cmd_class)
-      cmd.handle(args)
+      cmd.handle(args) # a turn-starting command returns its job (Command#submit_turn)
       @exiting = true if cmd.respond_to?(:exited?) && cmd.exited?
     else
       unknown_command(name)
     end
+    nil
+  end
+
+  # Post one QueuedEvent to the run loop's worker EventQueue and return the
+  # job the loop must drain. The non-blocking shape the event model demands:
+  # the handler never waits for the turn - MainLoop#run's drain state renders
+  # it.
+  def submit_turn(kind:, job_id:, payload: nil, block: nil)
+    @main_loop&.begin_turn(
+      QueuedEvent.build(kind:, job_id:, payload:, block:))
   end
 
   # Mid-turn dispatch (issue #286, doc/unified_loop_design.md): the poll loop
@@ -196,6 +220,7 @@ class CommandHandler
       registry:,
       system_saver:,
       harness_factory: @harness_factory,
+      main_loop: @main_loop,
       locator: @locator)
   end
 
@@ -248,23 +273,16 @@ class CommandHandler
     end
   end
 
-  private
-
-  # issue #40: direct prompts run on a Task thread. All console I/O is
-  # serialized through the main thread via the drain loop (single-thread
-  # I/O rule): the task thread emits typed entries to its OutputBuffer via
-  # Task.emit (or posts blocking requests for dialogs), and the drain loop
-  # renders everything on the main thread - including spinner frames.
-  # The shared wrapper lives in TaskRunner (issue #235: /retry reuses it).
-  def run_direct_prompt(text)
-    # The user's own line is one side of the exchange the resume replay
-    # redraws; the run's JobRegistry records it in the foreground buffer
-    # (issue #458, #286: the run record is not the single-turn-engine's).
-    registry.record_user_prompt(text)
-    run_on_task do |_t|
-      foreground_harness.session_manager.run_prompt(text)
-    end
+  # A turn ended with a task error: report it the way the old run_on_task did -
+  # a :kind role line plus the aborted-turn summary (printed, not emitted: the
+  # turn is over, an event would be read by the next one, #567).
+  def report_turn_error(job, error)
+    emit_role(:kind, error, origin: "task error") if error
+    summary = job&.harness&.aborted_turn_stats_line(job.id)
+    ui.puts(summary) unless summary.nil?
   end
+
+  private
 
   # A wrong command name is usually a typo, so name the closest registered
   # names - all of them derived from the SAME registry the dispatch just

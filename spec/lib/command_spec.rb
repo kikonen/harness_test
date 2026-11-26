@@ -67,8 +67,13 @@ RSpec.describe Command do
     # one that rebuilds/ends the run has no live loop to act in: both opt out.
     it 'is false for commands that drive an LLM round or rebuild the run' do
       expect(Commands::RetryCommand.mid_turn_safe?).to be false
-      expect(Commands::CompactCommand.mid_turn_safe?).to be false
       expect(Commands::ExitCommand.mid_turn_safe?).to be false
+    end
+
+    # /compact no longer opts out: mid-turn it sends a RequestEvent to the live
+    # turn instead of starting a nested round (#286 increment 4).
+    it 'is true for /compact (it reaches the live turn as a request event)' do
+      expect(Commands::CompactCommand.mid_turn_safe?).to be true
     end
   end
 
@@ -113,17 +118,33 @@ RSpec.describe Command do
     end
   end
 
-  describe 'TaskRunner inclusion' do
-    # Commands that drive an LLM round (/retry, /compact) go through the shared
-    # task wrapper; a thin command like /ctx must not have to implement it.
-    it 'is included so a command can run a round on a task thread' do
-      expect(described_class.include?(TaskRunner)).to be true
+  describe 'Reporting inclusion and #submit_turn' do
+    # Commands that drive an LLM round (/retry, /compact) share the console
+    # reporting mixin; a thin command like /ctx inherits it without using it.
+    it 'is included so a command can report a round on a task thread' do
+      expect(described_class.include?(Reporting)).to be true
     end
 
-    it 'responds to #run_on_task and #emit_line' do
+    it 'responds to #submit_turn and #emit_line' do
       cmd = build(described_class)
 
-      expect(cmd).to respond_to(:run_on_task, :emit_line)
+      expect(cmd).to respond_to(:submit_turn, :emit_line)
+    end
+
+    # #286 step 3: the round goes to the loop as a QueuedEvent and the JOB
+    # comes back for the loop to drain - submit_turn never waits on the turn.
+    it 'submits a QueuedEvent to the main_loop and returns the job to drain' do
+      seen = []
+      loop_ = Object.new
+      loop_.define_singleton_method(:begin_turn) { |event| seen << event; :job }
+      cmd = build(described_class, main_loop: loop_)
+
+      event = QueuedEvent.build(kind: :retry, job_id: 0, block: -> { :ran })
+      expect(cmd.submit_turn(kind: :retry, job_id: 0, block: event.block)).to eq(:job)
+
+      expect(seen.size).to eq(1)
+      expect(seen.first.kind).to eq(:retry)
+      expect(seen.first.block.call).to eq(:ran)
     end
   end
 end
