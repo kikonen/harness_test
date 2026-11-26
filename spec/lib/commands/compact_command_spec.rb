@@ -14,9 +14,9 @@ require 'commands/compact_command'
 # the task event queue (Reporting#emit_line), not written to a stream from
 # the task thread. The command reaches the Harness through the foreground
 # job's harness (#286), so the spec carries the harness on a real registry's
-# main job; increment 3 runs the round for real: a parked worker on the
-# registry and a MainLoop double whose run_turn drains the queue the way the
-# loop does (record + render to :done).
+# main job; increment 4c runs the round for real: a parked worker on the
+# registry and a MainLoop double whose begin_turn/await_turn drain the queue
+# the way the loop's drain state does (record + render to :done).
 RSpec.describe Commands::CompactCommand do
   let(:session) { Session.new('system prompt', file_cache: SessionFileCache.new) }
   let(:result) do
@@ -65,14 +65,16 @@ RSpec.describe Commands::CompactCommand do
     JobRegistry.new.tap { |r| r.add_job(kind: :main, harness:) }
   end
 
-  # A MainLoop stand-in: run_turn submits the block to the parked worker and
-  # drains the registry queue the way the loop does (record + render until the
-  # shown job's :done), so the command's lines arrive as events.
+  # A MainLoop stand-in for the drain state (#286 increment 4c): begin_turn
+  # submits the block to the parked worker, drains the queue the way the loop
+  # ticks it (record + render until that job's :done), and returns the JOB.
+  # The command spec drives no run loop, so the double drains inline.
   def loop_double(registry, worker, console: ui)
     loop_ = Object.new
-    loop_.define_singleton_method(:run_turn) do |&blk|
+    loop_.define_singleton_method(:begin_turn) do |&blk|
       worker.job.mark_running
       worker.submit_work(&blk)
+      job = worker.job
       # The worker pushes :done in its ensure, so the drain ends there - the
       # worker thread may still be inside its ensure when :done is polled.
       finished = false
@@ -81,12 +83,13 @@ RSpec.describe Commands::CompactCommand do
         next if event.nil?
 
         registry.record(event)
-        finished = event[:type] == :done
+        finished = event[:type] == :done && event[:job] == job.id
 
         line = worker.renderer.line(type: event[:type],
                                     content: event[:content], origin: event[:origin])
         console.puts(line)
       end
+      job
     end
     # Command#turn_live? reads live-ness off the loop's shown job.
     loop_.define_singleton_method(:shown_job) { worker.job }
@@ -134,9 +137,9 @@ RSpec.describe Commands::CompactCommand do
     result[:context_line]   = '🧠 ctx ~523/65536 (1%)'
   end
 
-  # The [task error] line is the LOOP's report (MainLoop#run_turn hands the
-  # error to CommandHandler#report_turn_error), so a command spec no longer
-  # asserts it - it asserts the worker SURVIVES a raising round.
+  # The [task error] line is the LOOP's report (its drain state hands the error
+  # to CommandHandler#report_turn_error), so a command spec no longer asserts
+  # it - it asserts the worker SURVIVES a raising round.
   it 'keeps the worker parked after a raising round' do
     registry = registry_with_harness
     worker   = registry.worker_for(registry.foreground_job, ui:)

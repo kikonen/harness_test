@@ -118,29 +118,29 @@ RSpec.describe Command do
     end
   end
 
-  describe 'Reporting inclusion and #run_on_worker' do
+  describe 'Reporting inclusion and #submit_turn' do
     # Commands that drive an LLM round (/retry, /compact) share the console
     # reporting mixin; a thin command like /ctx inherits it without using it.
     it 'is included so a command can report a round on a task thread' do
       expect(described_class.include?(Reporting)).to be true
     end
 
-    it 'responds to #run_on_worker and #emit_line' do
+    it 'responds to #submit_turn and #emit_line' do
       cmd = build(described_class)
 
-      expect(cmd).to respond_to(:run_on_worker, :emit_line)
+      expect(cmd).to respond_to(:submit_turn, :emit_line)
     end
 
-    # #286 increment 3: the round is submitted to the run loop's parked worker;
-    # the loop drains the turn and reports a worker error itself.
-    it 'submits its block to the main_loop it was built with' do
+    # #286 increment 4c: the round goes to the loop's worker and the JOB comes
+    # back for the loop to drain - submit_turn never waits on the turn itself.
+    it 'submits its block to the main_loop and returns the job to drain' do
       seen = []
       loop_ = Object.new
-      loop_.define_singleton_method(:run_turn) { |&blk| seen << blk.call(:task) }
+      loop_.define_singleton_method(:begin_turn) { |&blk| seen << blk.call(:task); :job }
       cmd = build(described_class, main_loop: loop_)
       returned = nil
 
-      cmd.run_on_worker { |task| returned = task }
+      expect(cmd.submit_turn { |task| returned = task }).to eq(:job)
 
       expect(seen).to eq([:task])
       expect(returned).to eq(:task)

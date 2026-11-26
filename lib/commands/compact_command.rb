@@ -31,7 +31,7 @@ module Commands
         return
       end
 
-      run_on_worker do |_t|
+      submit_turn do |_t|
         emit_compaction(foreground_harness.session_manager.compact_session)
       end
     end

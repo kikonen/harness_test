@@ -128,9 +128,13 @@ class CommandHandler
     registry.foreground_job&.harness
   end
 
-  # Dispatch a COMMAND line (issue #286 increment 3): slash-commands go through
-  # the registry, "!" runs a shell command locally (issue #129). A bare prompt is
-  # NOT dispatched here - the run loop submits it to the worker (MainLoop#run_turn).
+  # Dispatch one submitted line (issue #286 increment 4c): the run loop hands
+  # EVERY idle submit here. A bare prompt is recorded and submitted to the
+  # worker as a WORK item; a slash-command goes through the registry, and one
+  # that needs an LLM round submits its own WORK item (#submit_turn); "!" runs
+  # a shell command locally (issue #129). The return value is the JOB whose
+  # :done the loop must drain - nil when the line ran inline and nothing is
+  # live. No command blocks the main thread on a turn.
   def handle(input)
     input = input.strip
     return if input.empty?
@@ -138,11 +142,13 @@ class CommandHandler
     unless input.start_with?("/")
       if input.start_with?("!")
         run_bang_command(input[1..].to_s.strip)
-        return
+        return nil
       end
-      # A bare prompt is dispatched by the loop itself (MainLoop#run); it must
-      # not reach the command dispatcher.
-      raise HarnessError, "a bare prompt goes through MainLoop#run, not #handle"
+      # A bare prompt is a turn: record the user's line, then submit the round.
+      registry.record_user_prompt(input)
+      return submit_turn do |task|
+        run_prompt(task, input)
+      end
     end
 
     # Flatten multiline slash commands into one line.
@@ -154,11 +160,19 @@ class CommandHandler
     cmd_class = COMMANDS[name]
     if cmd_class
       cmd = build_command(cmd_class)
-      cmd.handle(args)
+      cmd.handle(args) # a turn-starting command returns its job (Command#submit_turn)
       @exiting = true if cmd.respond_to?(:exited?) && cmd.exited?
     else
       unknown_command(name)
     end
+    nil
+  end
+
+  # Submit a turn's block to the run loop's worker and return the job the loop
+  # must drain. The non-blocking shape the event model demands: the handler
+  # never waits for the turn - MainLoop#run's drain state renders it.
+  def submit_turn(&)
+    @main_loop&.begin_turn(&)
   end
 
   # Mid-turn dispatch (issue #286, doc/unified_loop_design.md): the poll loop
@@ -256,14 +270,12 @@ class CommandHandler
     end
   end
 
-  # issue #286 increment 3: a direct prompt is ONE submit to the run loop's
-  # parked worker - the loop drains its events, so there is no per-turn drain
-  # loop here. Both this and #report_turn_error below are called BY THE LOOP
-  # (MainLoop#run / #run_turn), so they stay public.
-  # loop here. The user's own line is one side of the exchange the resume replay
-  # redraws; the registry records it in the foreground buffer (issue #458).
-  # The turn block runs on the worker thread (single-thread I/O rule): the model
-  # layer is reached through the job's own Harness.
+  # The turn block for a bare prompt (issue #286 increment 4c): the user's own
+  # line is one side of the exchange the resume replay redraws; the registry
+  # records it in the foreground buffer (issue #458). The block runs on the
+  # worker thread (single-thread I/O rule): the model layer is reached through
+  # the job's own Harness. #report_turn_error below is called by the loop's
+  # drain state, so both stay public.
   def run_prompt(_task, text)
     foreground_harness.session_manager.run_prompt(text)
   end

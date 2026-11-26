@@ -6,9 +6,10 @@ require_relative "tool"
 # Shared console-reporting mixin for the run's LLM-round hosts (issue #235):
 # CommandHandler (direct prompts) and the Command subclasses that drive a round
 # (/retry issue #235, /compact issue #253). The includer must expose #ui and
-# #settings; each host runs its own #run_on_worker against the run loop's
-# parked worker. Without this, Task.emit events (spinner, response lines) are
-# silently dropped and any dialog blocks the console - the log moves but the
+# #settings; a host that starts a round submits it to the run loop's worker
+# (Command#submit_turn / CommandHandler#submit_turn). Without this, Task.emit
+# events (spinner, response lines) are silently dropped and any dialog blocks
+# the console - the log moves but the
 # console looks stuck. A task error is the :kind role, so the bracket shape
 # belongs to UI::Renderer and not to this emitter (#474, increment 22).
 module Reporting

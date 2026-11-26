@@ -7,8 +7,8 @@ require 'job_registry'
 require 'input_path'
 
 # The console-reporting mixin (issue #235): without it, Task.emit events are
-# dropped and dialogs block the console. The run wrapper (run_on_worker) moved
-# to MainLoop/Command in increment 3, so these specs drive the roles directly.
+# dropped and dialogs block the console. The turn route (submit_turn) lives on
+# MainLoop/Command/CommandHandler, so these specs drive the roles directly.
 RSpec.describe Reporting do
   let(:io) { StringIO.new }
   let(:ui) { UI::Console.new(stdout: io) }

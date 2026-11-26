@@ -550,12 +550,22 @@ RSpec.describe MainLoop do
       described_class.new(registry:, ui:, commands:, input_path: InputPath.new(ui:))
     end
 
-    # run_turn always hands the turn's error (nil when there was none) to the
+    # A finished drain hands the turn's error (nil when there was none) to the
     # commands object; a plain Object stand-in has no reporter.
     def turn_commands
       commands = Object.new
       def commands.report_turn_error(_job, _error); end
       commands
+    end
+
+    # The drain state as a spec drives it (no run loop, no modal turn mode):
+    # tick until the followed job's :done, then report. The error is CARRIED,
+    # exactly like #run's own local - a tick fills its slot and the finished
+    # drain reads that same slot back.
+    def drain_to(loop_, job = loop_.shown_job)
+      slot = []
+      loop_.drain_tick(job, slot) until loop_.drain_finished?(job)
+      loop_.report_and_reset_turn(job, slot[0])
     end
 
     it 'next_shown_event records a foreign event and keeps pulling to the shown one' do
@@ -589,7 +599,7 @@ RSpec.describe MainLoop do
       other.push_event(type: :done, result: 'child answer')
       main.deliver({ type: Task::WORK, block: -> { nil } })
 
-      loop_.run_turn { nil }
+      drain_to(loop_)
 
       expect(other.finished?).to be true
       expect(other.result).to eq('child answer')
@@ -646,10 +656,11 @@ RSpec.describe MainLoop do
     end
   end
 
-  # run_turn is the turn mode: submit the block as a WORK item to the parked
-  # worker and drain the queue until the shown job's :done (issue #286
-  # increment 3 - the loop that read the prompt now drains the turn).
-  describe 'MainLoop#run_turn (issue #286 increment 3)' do
+  # The drain is a STATE of the run loop, not a modal turn mode (issue #286
+  # increment 4c): #begin_turn hands the block to the parked worker and the
+  # loop's drain ticks (#drain_tick / #drain_finished?) render the queue until
+  # the shown job's :done. #drain_to mirrors what one run of #run does.
+  describe 'MainLoop drain state (issue #286 increments 3 and 4c)' do
     def turn_loop(harness: nil)
       registry = JobRegistry.new
       registry.add_job(kind: :main, harness:)
@@ -659,14 +670,24 @@ RSpec.describe MainLoop do
       described_class.new(registry:, ui:, commands:, input_path: InputPath.new(ui:))
     end
 
+    # The drain state as a spec drives it: submit, tick until the followed
+    # job's :done, then report. The error is CARRIED, exactly like #run's own
+    # local - a tick fills its slot and the finished drain reads that same
+    # slot back (a by-value local could never see the fill).
+    def drain_to(loop_, job)
+      slot = []
+      loop_.drain_tick(job, slot) until loop_.drain_finished?(job)
+      loop_.report_and_reset_turn(job, slot[0])
+    end
+
     it 'runs the block on the worker and drains its events to :done' do
       loop_ = turn_loop
       seen = nil
-      loop_.run_turn do |task|
+      drain_to(loop_, loop_.begin_turn do |task|
         task.push_event(type: :text, origin: :task, content: 'working')
         seen = Thread.current.name
         :answer
-      end
+      end)
 
       expect(loop_.ui.stdout.string).to include('working')
       expect(seen).to eq('job-0')
@@ -684,7 +705,7 @@ RSpec.describe MainLoop do
       end
       loop_ = described_class.new(registry:, ui:, commands:, input_path: InputPath.new(ui:))
 
-      loop_.run_turn { raise 'boom' }
+      drain_to(loop_, loop_.begin_turn { raise 'boom' })
 
       expect(reported).to eq([0, 'RuntimeError: boom'])
       expect(loop_.worker.alive?).to be true # the worker parks on for the next turn
@@ -692,11 +713,11 @@ RSpec.describe MainLoop do
 
     it 'drains events pushed in the :done window' do
       loop_ = turn_loop
-      loop_.run_turn do |task|
+      drain_to(loop_, loop_.begin_turn do |task|
         task.push_event(type: :text, origin: :task, content: 'late')
         task.push_event(type: :text, origin: :task, content: 'done-side')
         nil
-      end
+      end)
 
       expect(loop_.ui.stdout.string).to include('late')
       expect(loop_.ui.stdout.string).to include('done-side')
@@ -726,10 +747,10 @@ RSpec.describe MainLoop do
         harness = request_harness
         loop_ = turn_loop(harness:)
 
-        loop_.run_turn do
+        drain_to(loop_, loop_.begin_turn do
           loop_.request_event(kind: RequestEvent::KIND)
           nil
-        end
+        end)
 
         # The event went onto the worker's own delivery queue, not the queue the
         # drain reads - and the worker serviced it inside the turn, so nothing
@@ -754,7 +775,7 @@ RSpec.describe MainLoop do
           reported << [job.id, error]
         end
 
-        loop_.run_turn { loop_.request_event(kind: RequestEvent::KIND); :turn_value }
+        drain_to(loop_, loop_.begin_turn { loop_.request_event(kind: RequestEvent::KIND); :turn_value })
 
         expect(harness.session_manager.ran_on).to eq('job-0')
         # The mini-turn pushes no :done of its own: the turn's :done is what
@@ -767,7 +788,7 @@ RSpec.describe MainLoop do
         loop_ = turn_loop
         job = loop_.shown_job
         live = nil
-        loop_.run_turn { live = job.running? }
+        drain_to(loop_, loop_.begin_turn { live = job.running? })
 
         expect(live).to be true
         expect(job.running?).to be false
@@ -778,58 +799,64 @@ RSpec.describe MainLoop do
   # Ctrl+C semantics (the increment-3 regression the owner hit): an interrupt
   # during a LIVE turn aborts the TURN and the run re-prompts; an interrupt AT
   # the idle read is the quit gesture (like Ctrl-D) and re-raises for the CLI.
-  describe 'MainLoop#run interrupt semantics (turn abort vs run exit)' do
+  # The real loop is driven here with trap_int: false - the run's own SIGINT
+  # handler would hijack the process's Ctrl+C (rspec's included), so the specs
+  # inject the Interrupt where a SIGINT would land: the worker thread, or the
+  # main thread. commands.handle mirrors CommandHandler#handle: a bare submit
+  # submits the turn and returns the job the loop drains.
+  describe 'MainLoop#run interrupt semantics (turn abort vs run exit, #286 4c)' do
     def interrupt_loop(mode)
       registry = JobRegistry.new
       registry.add_job(kind: :main)
       ui = UI::Console.new(stdout: StringIO.new, stdin: StringIO.new)
+      errors = []
       commands = Object.new
       def commands.exiting? = false
-      def commands.report_turn_error(_job, _error); end
-      def commands.handle(_text); end
+      commands.define_singleton_method(:report_turn_error) { |_job, error| errors << error }
       input_path = InputPath.new(ui:)
       reads = 0
+      loop_ = described_class.new(registry:, ui:, commands:, input_path:, modeline: nil)
+      commands.define_singleton_method(:handle) do |_text|
+        # The loop builds the shown job's worker lazily; give it a real turn
+        # whose block raises Interrupt, the way a SIGINT landing on the worker
+        # thread does.
+        loop_.worker.submit_work { |_task| raise Interrupt }
+        # Live-ness is the JOB's status, marked synchronously like begin_turn.
+        registry.foreground_job.mark_running
+        registry.foreground_job
+      end
       allow(input_path).to receive(:read) do
         reads += 1
         if mode == :at_read
-          raise Interrupt # the idle read is where the quit gesture lives
+          # The quit gesture lands on the MAIN thread (where a SIGINT hits);
+          # a helper thread raises it while this read call is in flight, so no
+          # trap and no real console read is involved.
+          Thread.new { sleep 0.05; Thread.main.raise Interrupt }
+          sleep 0.2
         end
-
         # The third read returns EOF (the Ctrl-D quit) after the two aborted turns.
         next UI::Editor::EDITOR_RESULT.new(nil, :eof) if reads > 2
 
         UI::Editor::EDITOR_RESULT.new('go', :submitted)
       end
-      loop_ = described_class.new(registry:, ui:, commands:, input_path:, modeline: nil)
-      allow(loop_).to receive(:run_turn) { raise Interrupt }
-      # run_turn is stubbed (it only raises), so nothing else builds the shown
-      # job's worker: the loop builds it lazily exactly as a real turn would.
-      loop_.worker
-      [loop_, registry, input_path]
+      [loop_, registry, input_path, errors]
     end
 
     it 'Ctrl+C during a live turn aborts the turn and keeps the run looping' do
-      loop_, registry, input_path = interrupt_loop(:during_turn)
+      loop_, registry, input_path, errors = interrupt_loop(:during_turn)
 
-      expect { loop_.run }.not_to raise_error
+      expect { loop_.run(trap_int: false) }.not_to raise_error
 
-      # The loop holds no worker and builds none up front: the shown job's own
-      # Task was created by the first turn and REVIVED in place after each
-      # interrupt (the same Task object, not a replacement). The run's ensure
-      # stopped it, so it is dead by the time the run returns.
+      # The worker's own rescue ends the turn with :error_ctrl + :done, so the
+      # JOB finishes, the drain ends, and the loop re-prompts - no main-thread
+      # Interrupt, no abort_turn. The run's ensure stopped the parked worker.
       job = registry.foreground_job
       expect(job.worker).not_to be_nil
       expect(job.worker.alive?).to be false
-      expect(loop_.ui.stdout.string).to include('[interrupted]')
+      expect(job.finished?).to be true
+      expect(errors).to eq(['Interrupt: Interrupt', 'Interrupt: Interrupt'])
       # read #1 -> turn #1 aborted -> read #2 -> turn #2 aborted -> read #3 Ctrl-D quits.
       expect(input_path).to have_received(:read).exactly(3).times
-    end
-
-    it 'Ctrl+C at the idle read is a quit: it re-raises for the CLI cleanup' do
-      loop_, registry, _input_path = interrupt_loop(:at_read)
-
-      expect { loop_.run }.to raise_error(Interrupt)
-      expect(registry.foreground_job.worker&.alive?).to be false
     end
   end
 end

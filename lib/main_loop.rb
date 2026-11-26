@@ -69,8 +69,9 @@ class MainLoop
   # A command's ask to the live turn, mid-drain: the event goes straight onto
   # the worker's own delivery queue (the route the drain's :__request__ branch
   # takes) and the worker services it on its next loop pass. Nothing waits for
-  # an answer - fire-and-forget. A command calls this while the drain is live;
-  # an idle command starts its own turn with #run_turn instead.
+  # an answer - fire-and-forget. A command calls this while the loop is
+  # draining; an idle command starts its own turn with #begin_turn (through
+  # Command#submit_turn) instead.
   def request_event(kind:)
     worker.await_work << { type: :__request__, kind:, job: shown_job.id }
     # Return the loop, not the push's value: a turn block's last expression is
@@ -115,35 +116,56 @@ class MainLoop
   # read (no live turn) exits the run and re-raises for the CLI's cleanup.
   # Returns when the user quits (Ctrl-D at the idle prompt) or a command ends
   # the run.
-  def run
-    old_trap  = trap("INT") { raise Interrupt }
+  #
+  # +trap_int+ installs the SIGINT handler for the run; false skips it so a
+  # caller (a spec) drives the loop without hijacking the process's Ctrl+C -
+  # the Interrupt is then raised by whatever the caller injects.
+  #
+  # ONE loop, two states (issue #286 increment 4c): a submit that starts a turn
+  # SUBMITS the WORK item and the SAME loop drains the queue until that turn's
+  # :done. There is no nested per-turn loop and no modal turn mode - the drain
+  # is a state of the run loop, so anything the loop can do between ticks (the
+  # mid-turn note read, a request event) belongs to the loop, not to a helper.
+  def run(trap_int: true)
+    old_trap  = trap_int ? trap("INT") { raise Interrupt } : nil
     raw_stdin = hold_raw_stdin
+    job       = nil     # the job whose :done ends the current drain (nil = idle)
+    error     = []      # the drain's error slot (see #drain_tick)
 
     begin
       loop do
-        text = read_prompt
-        break if text.nil?
-        break if commands.exiting?
+        if job.nil?
+          text = read_prompt
+          break if text.nil?
+          break if commands.exiting?
 
-        begin
-          if prompt_submit?(text)
-            registry.record_user_prompt(text)
-            run_turn { |t| commands.run_prompt(t, text) }
-          else
-            commands.handle(text)
-          end
-        rescue Interrupt
-          shown_job.worker&.stop
-          ui.puts "\n  [interrupted]"
-          logger&.info("turn interrupted (Ctrl+C)")
-          # The next turn needs a parked worker: #worker revives the SAME Task
-          # the interrupt stopped (job.worker survives a stop).
+          # A submit that starts a turn (bare text, or a command that needs an
+          # LLM round) hands the WORK item to the worker; the rest of the
+          # commands return nil and ran inline on the main thread.
+          job = commands.handle(text)
+          next if job
+
+          ui.puts
+          ui.puts "-" * 40
+          ui.puts
+          next
         end
-        break if commands.exiting?
 
+        drain_tick(job, error)
+        next unless drain_finished?(job)
+
+        drain_remaining
+        report_and_reset_turn(job, error[0])
+        job    = nil
+        error  = []
         ui.puts
         ui.puts "-" * 40
         ui.puts
+      rescue Interrupt
+        # Ctrl+C while a turn is live (or between ticks): a TURN abort.
+        abort_turn(job)
+        job   = nil
+        error = []
       end
     rescue Interrupt
       # Ctrl+C AT the idle read: treat as a normal exit so history and the
@@ -153,16 +175,9 @@ class MainLoop
     ensure
       stop_all_workers
       clear_spinner
-      trap("INT", old_trap)
+      trap("INT", old_trap) if trap_int
       raw_stdin&.cooked!
     end
-  end
-
-  # A submit that starts a turn: bare text (not a slash command, not a bang).
-  # The loop records it as a user prompt and submits it to the worker; everything
-  # else is a command the dispatcher runs inline.
-  def prompt_submit?(text)
-    !text.start_with?("/") && !text.start_with?("!")
   end
 
   # The idle mode: render the modeline, then the blocking read. Returns the
@@ -188,55 +203,83 @@ class MainLoop
     end
   end
 
-  # One turn: submit the block as a WORK item to the foreground worker and drain
-  # the queue until the shown job's :done. This replaces the per-turn nested
-  # drain loop - the same loop that read the prompt now drains the turn. A Ctrl-D
-  # inside a mid-turn read aborts the turn (like Ctrl+C) and returns to idle.
-  def run_turn(&)
-    task = worker
-    job  = task.job
-    error = nil
-    finished = false
+  # -- Drain state ------------------------------------------------------------
+  # The drain is a STATE of the run loop, not a nested loop or a modal helper:
+  # each iteration of #run renders one tick of the live turn. A command that
+  # needs its own LLM round (an idle /compact, /retry) submits the WORK item
+  # and returns the job it belongs to (#submit_turn); the SAME loop then drains
+  # it. There is no re-entrant turn mode and nothing blocks the main thread, so
+  # a submit while a turn is live can only be a note or a request event.
 
-    task.submit_work(&)
+  # Hand a turn's block to the shown job's worker and return the job the drain
+  # follows. The job is marked running HERE, synchronously: live-ness is the
+  # JOB's status and the drain tests it, so a submit whose worker has not yet
+  # reached service_turn must not read as a finished turn. The CALLER (the run
+  # loop, via CommandHandler#handle) drains it - this never waits, so the main
+  # thread is never blocked on a turn.
+  def begin_turn(&)
+    shown_job&.mark_running
+    worker.submit_work(&)
+    shown_job
+  end
 
+  # Drain finished when the job the drain follows is no longer RUNNING: its
+  # :done was recorded (Job#finish flips the status). A dead worker alone does
+  # NOT end the drain - the queue is the drain's clock (a tick blocks on the
+  # poll), and a turn that is still working must not be abandoned because its
+  # thread is momentarily parked.
+  def drain_finished?(job)
+    return true if job.nil?
+
+    !job.running?
+  end
+
+  # One drain tick: peek the input path for a note, then render the events that
+  # have arrived. An empty queue is a spinner frame, not a missed tick.
+  # +error+ is the drain's ERROR SLOT (a 1-element array; #run's own local is
+  # its slot): a tick's :error_ctrl branch fills it so the caller's finished
+  # drain can read it back.
+  def drain_tick(_job, error = [])
     catch(:turn_aborted) do
       poll_for_note
-      loop do
-        poll_for_note
 
-        msg = next_shown_event
-        if msg.nil?
-          show_spinner_if_waiting
-          next
+      msg = next_shown_event
+      if msg.nil?
+        show_spinner_if_waiting
+        return
+      end
+
+      clear_spinner if visible_spinner
+      while msg
+        case msg[:type]
+        when :done
+          registry.record(msg)
+        when :error_ctrl
+          error[0] = msg[:content] if shown_event?(msg)
+        when :__request__
+          RequestEvent.request?(msg) ? route_request_event(msg) : handle_request(msg)
+        when :spinner_detail
+          # Re-points the spinner (keeps it alive for the next tick).
         end
 
-        clear_spinner if visible_spinner
-
-        loop do
-          case msg[:type]
-          when :done
-            finished = shown_event?(msg)
-            registry.record(msg)
-            break
-          when :error_ctrl
-            error = msg[:content] if shown_event?(msg)
-          when :__request__
-            RequestEvent.request?(msg) ? route_request_event(msg) : handle_request(msg)
-          when :spinner_detail
-            # Re-points the spinner (keeps it alive for the next tick).
-          end
-
-          store_and_render(msg) unless Task::CONTROL_EVENTS.include?(msg[:type])
-
-          msg = next_shown_event(0)
-          break unless msg
-        end
-
-        break if finished
+        store_and_render(msg) unless Task::CONTROL_EVENTS.include?(msg[:type])
+        msg = next_shown_event(0)
       end
     end
+  end
 
+  # Ctrl+C during a live turn: stop the shown job's worker (its parked thread
+  # ends on STOP; the next #worker call REVIVES the same Task on the job) and
+  # tell the user the turn was interrupted.
+  def abort_turn(job)
+    job&.worker&.stop
+    ui.puts "[interrupted]"
+    logger&.info("Turn interrupted (job #{job&.id})") if logger
+  end
+
+  # A finished drain: nothing may remain in the queue, then the command side
+  # reports the turn's error (nil when there was none).
+  def report_and_reset_turn(job, error)
     drain_remaining
     commands.report_turn_error(job, error)
   end

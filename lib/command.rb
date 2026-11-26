@@ -13,9 +13,9 @@ require_relative "ui/help_renderer"
 # underlying stream for a panel/draw sink without touching any command.
 #
 # Includes Reporting (issue #235): a command that drives an LLM round
-# (/retry issue #235, /compact issue #253) runs it on the run loop's worker via
-# #run_on_worker, the same wrapper a direct prompt uses, and prints
-# through #emit_line so its lines stay on the event queue.
+# (/retry issue #235, /compact issue #253) hands it to the run loop's worker via
+# #submit_turn, the same route a bare prompt takes, and prints through
+# #emit_line so its lines stay on the event queue.
 class Command
   include Reporting
 
@@ -34,10 +34,10 @@ class Command
   # Whether this command may run WHILE a turn is running (a mid-turn submit
   # dispatched on the main thread). Default true: edit mode allows all commands
   # (doc/unified_loop_design.md). A command opts OUT when it cannot run safely
-  # while a turn is live: one that drives an LLM round (#run_on_worker) would start
-  # a nested drain loop over the single queue (double render, lost events) -
-  # refused until it becomes an event to the live task - and one that rebuilds or
-  # ends the whole run (exit) has no live loop to act in.
+  # while a turn is live: one that drives an LLM round (#submit_turn) would hand
+  # a second turn to the same worker the live turn owns - refused until it
+  # becomes a RequestEvent to the live task - and one that rebuilds or ends the
+  # whole run (exit) has no live loop to act in.
   def self.mid_turn_safe?
     true
   end
@@ -65,8 +65,8 @@ class Command
     # into it.
     self.registry = registry
     self.system_saver = system_saver
-    # The run's single MainLoop (#286 increment 3): #run_on_worker submits to the
-    # loop's parked worker. A command that never runs a turn ignores it.
+    # The run's single MainLoop (#286): #submit_turn hands a turn's WORK item to
+    # the loop's worker. A command that never runs a turn ignores it.
     @main_loop = main_loop
     # The run's HarnessFactory and SessionLocator (#548): a command that adds
     # an agent builds through the factory; a command that names where a session
@@ -76,14 +76,13 @@ class Command
     @locator         = locator
   end
 
-  # issue #286 increment 3: submit this command's LLM round to the run loop's
-  # parked worker; the loop drains the turn (no nested drain loop) and reports a
-  # worker error itself (MainLoop#run_turn -> CommandHandler#report_turn_error).
-  # Returns the turn's result.
-  def run_on_worker
-    emit_role(:gap, "")
-    @main_loop.run_turn { |task| yield task }
-    emit_role(:gap, "")
+  # issue #286 increment 4c: hand this command's LLM round to the run loop's
+  # worker as a WORK item and return the JOB whose :done the loop drains.
+  # Non-blocking: a command never waits on a turn - MainLoop#run's drain state
+  # renders it. Legal only from the idle state; a command that runs mid-turn is
+  # refused (mid_turn_safe?) or sends a RequestEvent instead.
+  def submit_turn(&)
+    @main_loop&.begin_turn(&)
   end
 
   # True while the run loop is draining a live turn on the worker.

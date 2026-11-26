@@ -179,9 +179,11 @@ class Task
     begin
       value = @block.call(self)
       service_pending_requests
-    rescue => e
+    rescue StandardError, Interrupt => e
       # The event goes FIRST: a logger that cannot write must not swallow the
-      # error the user is owed.
+      # error the user is owed. Interrupt is caught here too: a Ctrl+C landing
+      # on this thread must not end the worker WITHOUT the ensure pushing
+      # :done, or the job stays :running and the drain waits forever.
       push_event(type: :error_ctrl, content: ErrorText.label(e))
       record_task_error(e)
     ensure

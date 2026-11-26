@@ -182,6 +182,56 @@ must not have two mains. Order:
    call REVIVES the same Task (a `#stop` keeps the stopped Task on the job; a
    STOP left in the queue belongs to the thread that died for it).
 
+## 4d. Open decision (owner, 2026-11-25): what crosses the thread boundary
+
+GOAL restated: async execution of jobs; NO modal blocking call from main; main
+is constantly running an event loop. Two candidate models:
+
+- **A - events only.** Each job's worker dispatches incoming EVENTS itself (a
+  kind -> action table: prompt / compact / retry / note / stop) and answers
+  with events. No block of executable code ever crosses the boundary. Inside
+  the worker, the LLM loop checks incoming events between calls; reactivity
+  INSIDE one long call would need a dedicated thread per LLM call (later).
+- **B - task queue.** Each job's worker pops WORK items (blocks) from its own
+  queue. Posting is 100% async to the caller - the caller never waits. A task
+  that must not interleave (idle /compact, /retry) is posted only when the
+  queue is idle. Steering notes reach a long LLM iteration at the request
+  boundary (the mailbox drain), not by preempting a call.
+
+Where the code already stands (measured against `refactor/286-unified-loop`):
+
+- The worker IS a per-job parked thread popping its own `@await_work` queue -
+  B's mechanism already ships (increment 2/2a).
+- Steering notes are already event-only: `route_input` -> job inbox -> drained
+  at the request boundary; a worker never receives a note "block".
+- `/compact` mid-turn is already A: a `RequestEvent` envelope the worker
+  dispatches itself (4a). `/retry` is still refused mid-turn.
+- The ONLY block crossing the boundary today is `Task::WORK`
+  (`submit_work { commands.run_prompt(t, text) }`): a closure capturing main-
+  thread state (the text, the handler). This is what an A-model must replace -
+  with what? The text is data, but "run the prompt pipeline" is behaviour the
+  worker would need its own table for (it already has one for `:compact`).
+- Increment 4c removed the modal `run_turn`/`run_on_worker`: a submit posts the
+  item and the SAME loop drains to `:done`. The remaining block on main is the
+  drain's own poll timeout (bounded, not a wait-on-task).
+
+DECIDED (owner, 2026-11-25): **B is the baseline**, and a queue item is
+**metadata + task block** - `{ kind:, job:, block: }`. Nothing can be reasoned
+about a bare Ruby block, so the KIND is what makes the queue controllable
+(ordering, idle-only posting, refusal). The per-case shoveling that exists
+today is a failure, not the design: the bespoke `RequestEvent` envelope for
+`/compact` becomes a normal queued item `{ kind: :compact, block: }` on the
+same queue, and the worker dispatches by kind instead of special-casing
+`RequestEvent.deliver?`. Steering notes are NOT an "event approach" either -
+a private channel per case is asynchronous spaghetti; the note path is to be
+re-expressed as `{ kind: :note }` through the same queue (fold-at-request-
+boundary semantics unchanged, increment 4e). The dialog request/reply axis
+(stdin answers) is a different axis and stays as-is for now.
+
+So 4d = item metadata + kind dispatch + the compact conversion + the
+Interrupt-in-turn fix (a raise must always end with `:error_ctrl` + `:done`
+so JOB status remains the single liveness source and a drain can never hang).
+
 Do NOT park a worker before the loop owns the queue: a parked loop and a
-per-turn loop reading the same queue steal each other's events (measured - the suite
-hangs). Increment 3 removed the per-turn loop, so one reader remains.
+per-turn loop reading the same queue steal each other's events (measured - the
+suite hangs). Increment 3 removed the per-turn loop, so one reader remains.
